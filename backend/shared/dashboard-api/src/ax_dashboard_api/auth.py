@@ -49,6 +49,8 @@ MACHINE_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("POST", "/api/dashboard/handoffs"),  # 에이전트 토큰 (handoffs.intake)
         ("POST", "/api/dashboard/events"),  # 회사 키 (shop_events)
+        # MCP 서버 에이전트 토큰 (personal_mcp.check_router)
+        ("POST", "/api/dashboard/me/ai-connection/mcp/check"),
     }
 )
 MACHINE_PREFIXES = ("/site-adapter",)  # 회사 연결 토큰 (site_adapter.router)

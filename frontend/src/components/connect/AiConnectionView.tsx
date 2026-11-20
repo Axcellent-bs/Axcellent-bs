@@ -5,10 +5,11 @@ import {
   type AiStatus, type AiUsage, type Slice,
 } from '@/lib/companyAi'
 import { errText, getAiStatus, getAiUsage } from '@/lib/companyAiApi'
+import DevCodingSummary from './DevCodingSummary'
 
 // 시스템 관리 › 도구 연결 › AI 연결 (회원 모두, 보기만. 회사 AI 연결 설계 1·7장).
 // 회사 AI 상태·이번 달 사용 %·AI 직원별 사용량·바뀐 알림. 값은 dashboard-api `/ai-connection/status`·`/usage`만.
-// 키를 바꾸는 곳은 회사 연결(관리자)이라 여기서는 안내만 한다. 원그래프는 차트 라이브러리 없이 SVG로 그린다.
+// 키를 바꾸는 곳은 회사 연결(관리자)이라 여기서는 안내만 한다. 개발 AI 코딩 설정(예전 내 연결)도 보기로 여기 둔다. 원그래프는 차트 라이브러리 없이 SVG로 그린다.
 
 const isDark = () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
 
@@ -42,7 +43,7 @@ function UsageSection({ usage, error }: { usage: AiUsage | null; error: string |
   const slices = pieSlices(usage.departments, isDark())
   return (
     <section className="card space-y-4 p-6">
-      <SectionHead as="h3" title={`${usage.month ?? '이번 달'} AI 직원별 사용량`} desc="회사 AI 토큰을 어느 AI 직원이 얼마나 썼는지예요. 비용(원)은 보이지 않아요."
+      <SectionHead as="h3" title={`${usage.month ?? '이번 달'} AI 직원별 사용량`} desc="회사 AI 토큰을 어느 AI 직원이 얼마나 썼는지예요. 비용(원)은 보이지 않아요. 회원이 자기 키(내 연결)로 부른 호출은 회사 사용량·예산에 세지 않아요."
         right={slices.length > 0 && <button type="button" className="btn-ghost" aria-pressed={table} onClick={() => setTable((v) => !v)}>{table ? '그래프로 보기' : '표로 보기'}</button>} />
       {!usage.recording ? (
         <Notice tone="wait">사용량 기록이 꺼져 있어 보여 줄 수 없어요 (서버 설정 AX_LLM_USAGE_DB 필요).</Notice>
@@ -129,6 +130,7 @@ export default function AiConnectionView() {
         : statusError ? <Notice tone="bad">회사 AI 상태를 받지 못했어요: {statusError}</Notice>
         : <p className="text-sm text-ink-500">불러오는 중…</p>}
       <UsageSection usage={usage} error={usageError} />
+      <DevCodingSummary />
       {status && (
         <section className="card p-6">
           <SectionHead as="h3" title="알림" desc="회사 AI 키·설정이 바뀌면 여기에 남아요. 키는 끝 4자리만 보여요." />

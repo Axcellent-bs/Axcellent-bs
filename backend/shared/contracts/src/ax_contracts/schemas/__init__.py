@@ -398,6 +398,14 @@ from ax_contracts.schemas.message import (
     RequestMeta,
     TaskStatus,
 )
+from ax_contracts.schemas.personal_mcp import (
+    PERSONAL_MCP_AGENTS,
+    PERSONAL_MCP_TOKEN_PREFIX,
+    PersonalMcpAgent,
+    PersonalMcpCheckCode,
+    PersonalMcpCheckInput,
+    PersonalMcpCheckOutput,
+)
 from ax_contracts.schemas.planning import (
     AnswerPlanningQuestionInput,
     AnswerPlanningQuestionOutput,
@@ -476,6 +484,12 @@ __all__ = [
     "CompanyAiCoderMode",
     "CompanyAiSettings",
     "CompanyAiVideo",
+    "PERSONAL_MCP_AGENTS",
+    "PERSONAL_MCP_TOKEN_PREFIX",
+    "PersonalMcpAgent",
+    "PersonalMcpCheckCode",
+    "PersonalMcpCheckInput",
+    "PersonalMcpCheckOutput",
     "ActionReviewInput",
     "ActionReviewOutput",
     "AgentCard",

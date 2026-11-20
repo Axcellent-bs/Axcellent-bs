@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from '@/lib/nav'
-import { DEV_API, codingSettingsApi, useMe, vcsApi, type CodingStep, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
+import { DEV_API, codingSettingsApi, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
 import { UsageBar } from '@/components/dev/coding'
 import { NotionConnect } from '@/components/planning/notion'
 import { humanizePlanIds } from '@/lib/format'
@@ -13,7 +13,7 @@ import { appChoices, deployRows, dejafixCard, dejafixSummary } from '@/lib/toolF
 import { EMPTY_REPO_FORM, repoAppLabel, repoBody, repoFormError, repoFormOf, type RepoForm } from '@/lib/repoForm'
 import { useSession } from './session'
 import AiConnectionView from '@/components/connect/AiConnectionView'
-import { PreparingChip } from '@/components/Preparing'
+import PersonalMcpConnect from '@/components/connect/PersonalMcpConnect'
 
 // 도구 연결 (/system/tools, 모두 연다): 고객사 개발팀이 쓰는 형상관리·배포·문서 도구와 AI 연결을 잇는 창구.
 // 관리자·일반회원 모두 같은 화면을 쓰고 바꿀 수 있다(관리자만 다른 건 회사 연결·회원·서버 관리 두 화면, 11/19 결정).
@@ -130,24 +130,6 @@ const CODING_MODES: { id: CodingSetting; label: string }[] = [
   { id: 'subscription', label: '내 Claude' },
 ]
 const codingApi = codingSettingsApi(DEV_API)
-// 개발 서버 프록시 주소(/dev-api)처럼 앞이 빠진 주소면 지금 화면 주소를 앞에 붙인다 (명령에 그대로 붙여 넣을 수 있게)
-const MCP_URL = new URL(`${DEV_API.replace(/\/$/, '')}/api/planning/mcp`, window.location.href).href
-// 로컬: run_all.sh가 만든 작업 대기열 전용 토큰(backend/.data/tokens.env WORK_TOKEN)을 읽어 넣는다 (Git Bash, 레포 폴더).
-// 이 값은 내 PC의 Claude Code 설정(~/.claude.json)에 남으므로 승인·머지 권한이 있는 사람 토큰은 쓰지 않는다
-const MCP_ADD = `claude mcp add --transport http axcellent-dev ${MCP_URL} --header "Authorization: Bearer $(sed -n 's/^WORK_TOKEN=//p' backend/.data/tokens.env)"`
-// Codex·Cursor는 토큰을 설정 파일이 아니라 환경변수(AXCELLENT_WORK_TOKEN)에서 읽는다
-const TOKEN_ENV = 'AXCELLENT_WORK_TOKEN'
-const SET_TOKEN_ENV = `setx ${TOKEN_ENV} "$(sed -n 's/^WORK_TOKEN=//p' backend/.data/tokens.env)"`
-const CODEX_ADD = `codex mcp add axcellent-dev --url ${MCP_URL} --bearer-token-env-var ${TOKEN_ENV}`
-const CURSOR_JSON = JSON.stringify({ mcpServers: { 'axcellent-dev': { url: MCP_URL, headers: { Authorization: `Bearer \${env:${TOKEN_ENV}}` } } } }, null, 2)
-const ASK = 'axcellent-dev에서 작업 목록 보여 줘. 하나 가져가서 명세대로 구현하고 PR 올려 줘.'
-type AiClient = 'claude' | 'codex' | 'cursor'
-const AI_CLIENTS: { id: AiClient; label: string }[] = [
-  { id: 'claude', label: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'cursor', label: 'Cursor' },
-]
-
 /** 여러 개 중 하나 고르기 (연결 페이지는 기획 화면 CSS를 안 읽어서 이 화면 안에서 그린다). 고른 것은 파란 바탕·흰 글씨 */
 function Seg<T extends string>({ label, items, value, onPick, disabled }: {
   label: string; items: { id: T; label: string }[]; value?: T; onPick: (id: T) => void; disabled?: boolean
@@ -161,162 +143,6 @@ function Seg<T extends string>({ label, items, value, onPick, disabled }: {
         </button>
       ))}
     </div>
-  )
-}
-
-function CopyLine({ text }: { text: string }) {
-  const [done, setDone] = useState(false)
-  const copy = () => {
-    navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) }).catch(() => {})
-  }
-  return (
-    <div className="flex items-start gap-2">
-      <code className="mono min-w-0 flex-1 break-all rounded-md bg-ink-50 px-3 py-2 text-xs">{text}</code>
-      <button type="button" className="btn-ghost shrink-0 px-2 py-1 text-xs" onClick={copy}>{done ? '복사됨' : '복사'}</button>
-    </div>
-  )
-}
-
-/** AI 도구 연결: 내 PC의 AI 코딩 도구(Claude Code·Codex·Cursor)에 작업 대기열 MCP 서버를 붙이는 순서 */
-function ClaudeConnect({ connected }: { connected: string[] }) {
-  const me = useMe()
-  const mine = me?.name ? me.claude_connected : null
-  const [client, setClient] = useState<AiClient>('claude')
-  return (
-    <div className="space-y-3 rounded-lg border border-ink-100 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-medium">AI 도구 연결</h3>
-        {me?.name && !connected.includes(me.name) && <span className={`chip ${mine ? TONE.ok : TONE.none}`} title="최근 7일 작업 목록을 열었는지">{me.name} {mine ? '연결됨' : '연결 없음'}</span>}
-        <span className={`chip ${connected.length ? TONE.ok : TONE.none}`} title="최근 7일 작업 목록을 연 사람">{connected.length ? `연결됨 ${connected.join(', ')}` : '연결 없음'}</span>
-      </div>
-      <Seg label="AI 도구" items={AI_CLIENTS} value={client} onPick={setClient} />
-      <ol className="list-decimal space-y-3 pl-5 text-sm">
-        {client === 'claude' ? (
-          <>
-            <li className="space-y-1">
-              <span className="flex flex-wrap items-center gap-2">작업 대기열 서버 붙이기 <span className="chip bg-ink-100 text-ink-500">Git Bash · 레포 폴더</span></span>
-              <CopyLine text={MCP_ADD} />
-            </li>
-            <li className="space-y-1"><span>확인</span><CopyLine text="claude mcp list" /></li>
-          </>
-        ) : (
-          <>
-            <li className="space-y-1">
-              <span className="flex flex-wrap items-center gap-2">토큰을 환경변수로 <span className="chip bg-ink-100 text-ink-500">Git Bash · 레포 폴더 · 다시 켠 뒤 적용</span></span>
-              <CopyLine text={SET_TOKEN_ENV} />
-            </li>
-            {client === 'codex' ? (
-              <>
-                <li className="space-y-1"><span>작업 대기열 서버 붙이기</span><CopyLine text={CODEX_ADD} /></li>
-                <li className="space-y-1"><span>확인</span><CopyLine text="codex mcp list" /></li>
-              </>
-            ) : (
-              <li className="space-y-1">
-                <span className="flex flex-wrap items-center gap-2">작업 대기열 서버 붙이기 <span className="chip bg-ink-100 text-ink-500">~/.cursor/mcp.json</span></span>
-                <CopyLine text={CURSOR_JSON} />
-              </li>
-            )}
-          </>
-        )}
-        <li className="space-y-1">
-          <span>레포 폴더에서 작업 가져가기</span>
-          <CopyLine text={ASK} />
-        </li>
-      </ol>
-    </div>
-  )
-}
-
-/** 요청 작업 코딩 방식 + 서버 AI 체험 한도 */
-/** 고객사 API 키(BYOK)와 서버 AI 월 예산. 키는 보내기만 하고 화면에는 끝 4자리만 */
-function CompanyKeyBudget({ cfg, onSaved }: { cfg: CodingSettings; onSaved: (c: CodingSettings) => void }) {
-  const key = cfg.company_key
-  const [form, setForm] = useState({ api_key: '', base_url: key?.base_url ?? '', model: key?.model ?? '' })
-  const [budget, setBudget] = useState(cfg.budget?.limit != null ? String(cfg.budget.limit) : '')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const act = async (f: () => Promise<CodingSettings>) => {
-    setBusy(true)
-    setError(null)
-    try { onSaved(await f()); setForm((x) => ({ ...x, api_key: '' })) } catch (x) { setError((x as Error).message) } finally { setBusy(false) }
-  }
-  const saveKey = (e: FormEvent) => {
-    e.preventDefault()
-    if (!form.api_key && !key?.key_set) return setError('고객사 API 키를 넣어 주세요.')
-    void act(() => codingApi.setCompanyKey({ ...(form.api_key ? { api_key: form.api_key } : {}), base_url: form.base_url.trim(), model: form.model.trim() }))
-  }
-  const saveBudget = (e: FormEvent) => {
-    e.preventDefault()
-    const n = budget.trim() === '' ? null : Number(budget.replace(/,/g, ''))
-    if (n !== null && (!Number.isInteger(n) || n < 0)) return setError('월 예산은 0 이상 정수(토큰)로 넣어 주세요.')
-    void act(() => codingApi.setBudget(n))
-  }
-  const b = cfg.budget
-  return (
-    <div className="space-y-3 rounded-lg border border-ink-100 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-medium">고객사 API 키 · 월 예산</h3>
-        <span className={`chip ${key?.key_set ? TONE.ok : TONE.none}`}>{key?.key_set ? `고객사 키 ${key.key_hint}` : '서버 기본 키 (체험)'}</span>
-        {key?.key_set && <button type="button" className="btn-quiet ml-auto px-2 py-1 text-xs" disabled={busy} onClick={() => { if (window.confirm('고객사 API 키를 지울까요? 그 뒤로는 서버 기본 키와 체험 한도로 돌아요.')) void act(() => codingApi.deleteCompanyKey()) }}>키 지우기</button>}
-      </div>
-      <form className="grid gap-2 sm:grid-cols-[2fr_2fr_1.5fr_auto] sm:items-end" onSubmit={saveKey}>
-        <label className="space-y-1 text-sm"><span className="text-xs text-ink-500">API 키</span>
-          <input className="field mono w-full text-xs" type="password" autoComplete="off" value={form.api_key} placeholder={key?.key_set ? '비우면 지금 키 그대로' : 'sk-…'} onChange={(e) => setForm({ ...form, api_key: e.target.value })} /></label>
-        <label className="space-y-1 text-sm"><span className="text-xs text-ink-500">주소 (비우면 서버 설정)</span>
-          <input className="field mono w-full text-xs" value={form.base_url} placeholder="https://…" onChange={(e) => setForm({ ...form, base_url: e.target.value })} /></label>
-        <label className="space-y-1 text-sm"><span className="text-xs text-ink-500">모델 (비우면 서버 설정)</span>
-          <input className="field mono w-full text-xs" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></label>
-        <button type="submit" className="btn-ghost px-3 py-1.5 text-xs" disabled={busy}>{key?.key_set ? '키 바꾸기' : '키 넣기'}</button>
-      </form>
-      <form className="flex flex-wrap items-end gap-3" onSubmit={saveBudget}>
-        <label className="space-y-1 text-sm"><span className="text-xs text-ink-500">월 예산 (토큰, 비우면 없음)</span>
-          <input className="field mono w-44 text-xs" inputMode="numeric" value={budget} placeholder="예: 5000000" onChange={(e) => setBudget(e.target.value)} /></label>
-        <button type="submit" className="btn-ghost px-3 py-1.5 text-xs" disabled={busy}>예산 저장</button>
-        {b && (b.limit != null
-          ? <UsageBar used={b.used} limit={b.limit} label={`${b.month}`} title="이번 달 서버 AI 코딩이 쓴 토큰 / 월 예산" />
-          : <span className="text-xs text-ink-500">{b.month} 사용 <span className="mono">{b.used.toLocaleString()}</span> 토큰 · 예산 없음</span>)}
-      </form>
-      {error && <p className="text-sm text-red-700">{error}</p>}
-    </div>
-  )
-}
-
-// 서버 AI 코딩 단계별 모델: 비우면 기본 모델
-const STEP_LABEL: { id: CodingStep; label: string }[] = [
-  { id: 'plan', label: '파일 고르기' },
-  { id: 'write', label: '코드 쓰기' },
-  { id: 'review', label: '리뷰' },
-]
-
-function StepModels({ cfg, onSaved }: { cfg: CodingSettings; onSaved: (c: CodingSettings) => void }) {
-  const [draft, setDraft] = useState<Partial<Record<CodingStep, string>>>(cfg.models ?? {})
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const changed = STEP_LABEL.some((s) => (draft[s.id] ?? '') !== (cfg.models?.[s.id] ?? ''))
-  const save = async (e: FormEvent) => {
-    e.preventDefault()
-    setBusy(true)
-    setError(null)
-    try { onSaved(await codingApi.setModels(draft)) } catch (x) { setError((x as Error).message) } finally { setBusy(false) }
-  }
-  return (
-    <form className="space-y-2 rounded-lg border border-ink-100 p-4" onSubmit={save}>
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-medium">단계별 모델</h3>
-        <span className="text-xs text-ink-500">서버 AI만 · 비우면 기본 {cfg.model_default ? <span className="mono">{cfg.model_default}</span> : '모델'}</span>
-        <button type="submit" className="btn-ghost ml-auto px-3 py-1 text-xs" disabled={busy || !changed}>{busy ? '저장 중…' : '저장'}</button>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-3">
-        {STEP_LABEL.map((s) => (
-          <label key={s.id} className="space-y-1 text-sm">
-            <span className="text-xs text-ink-500">{s.label}</span>
-            <input className="field mono w-full text-xs" value={draft[s.id] ?? ''} placeholder={cfg.model_default ?? '기본 모델'}
-              onChange={(e) => setDraft((d) => ({ ...d, [s.id]: e.target.value.trim() }))} maxLength={100} />
-          </label>
-        ))}
-      </div>
-      {error && <p className="text-sm text-red-700">{error}</p>}
-    </form>
   )
 }
 
@@ -344,7 +170,8 @@ function CodingWhy({ cfg }: { cfg: CodingSettings }) {
   )
 }
 
-function CodingModeSection({ part }: { part: AiPart }) {
+/** 내 연결 › 고급 · 개발 요청을 누가 코딩할지: 요청 작업 코딩 방식(회사 설정, 개발 AI). MCP 안내는 내 연결 ④로 옮겼다 */
+function DevPcSection() {
   const [cfg, setCfg] = useState<CodingSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -354,25 +181,8 @@ function CodingModeSection({ part }: { part: AiPart }) {
     setError(null)
     try { setCfg(await codingApi.set(mode)) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
-  if (part === 'all') {
-    return (
-      <div className="space-y-8">
-        <SectionHead title="AI 연결" desc="기획에서 넘어온 요청 작업을 누가 코딩할지 정하고, 서버 AI가 쓸 키·예산·모델과 개발자 PC의 AI 도구를 이어요."
-          right={cfg && <StatusChip tone="ok">지금 {cfg.resolved === 'agent' ? '서버 AI' : '내 Claude'}가 코딩</StatusChip>} />
-        <CodingModeSection part="mode" />
-        <div className="space-y-3">
-          <SectionHead as="h3" title="서버 AI 설정" desc="서버 AI가 코딩할 때만 써요. 비워 두면 서버 기본값을 써요." />
-          {cfg ? <CompanyKeyBudget cfg={cfg} onSaved={setCfg} /> : <Loading error={error} />}
-          {cfg && <StepModels cfg={cfg} onSaved={setCfg} />}
-        </div>
-        <div className="space-y-3">
-          <SectionHead as="h3" title="개발자 PC의 AI 도구" desc="개발자가 자기 PC의 Claude Code·Codex·Cursor로 작업 목록에서 작업을 가져가게 해요." />
-          <ClaudeConnect connected={cfg?.agents_connected ?? []} />
-        </div>
-      </div>
-    )
-  }
   return (
+    <div className="space-y-6">
     <section className="space-y-4 border border-brand-100 bg-brand-50/30 p-5">
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="text-[15px] font-semibold">누가 코딩하나</h3>
@@ -389,6 +199,7 @@ function CodingModeSection({ part }: { part: AiPart }) {
         </dl>
       )}
     </section>
+    </div>
   )
 }
 
@@ -418,10 +229,6 @@ function Help({ label, children, right }: { label: string; children: ReactNode; 
   )
 }
 
-function Loading({ error }: { error: string | null }) {
-  return <p className="text-sm text-ink-500">{error ?? '불러오는 중…'}</p>
-}
-
 /** 도구 연결 보관함(dashboard-api)을 받는 중이거나 못 받았을 때 */
 function ToolsLoading({ error }: { error: string | null }) {
   return error ? <Notice tone="bad">도구 연결을 불러오지 못했어요: {error}</Notice> : <p className="text-sm text-ink-500">불러오는 중…</p>
@@ -433,7 +240,6 @@ function ReadOnlyNotice() {
 }
 
 // 연결 창 왼쪽 메뉴 (설정 창처럼 묶음 › 항목). 고른 항목만 오른쪽에 보인다
-type AiPart = 'mode' | 'all'
 type PanelItem = 'repos' | 'others' | 'deploy' | 'notion' | 'ai' | 'mine'
 const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }[] = [
   { label: '형상관리', items: [
@@ -442,7 +248,8 @@ const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }
   ] },
   { label: '배포', items: [{ id: 'deploy', label: '배포 도구' }] }, // 공용 도구 연결 보관함 (components/connect/DeployTools.tsx)
   { label: '문서', items: [{ id: 'notion', label: '노션' }] }, // 기획 영역 (components/planning/notion.tsx)
-  // AI 연결: 회사 AI 상태·사용량(보기만, components/connect/AiConnectionView.tsx). 내 연결: 개인 연결 토큰(준비 중) + 예전 AI 연결 내용(코딩 방식·서버 AI 설정·개발자 PC AI 도구)
+  // AI 연결: 회사 AI 상태·사용량 + 개발 AI 코딩 설정 보기(components/connect/AiConnectionView.tsx·DevCodingSummary.tsx).
+  // 내 연결: 개인 MCP 연결(components/connect/PersonalMcpConnect.tsx: 토큰·AI 직원·내 몫 %·연결 방법) + 고급 · 코딩 방식
   { label: 'AI', items: [{ id: 'ai', label: 'AI 연결' }, { id: 'mine', label: '내 연결' }] },
 ]
 const PANEL_IDS = PANEL_GROUPS.flatMap((g) => g.items.map((i) => i.id))
@@ -670,14 +477,14 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
         </div>
       ) : tab === 'ai' ? <AiConnectionView /> : tab === 'mine' ? (
         <div className="space-y-8">
-          <section className="space-y-3">
-            <SectionHead title="내 AI 도구로 AXcellent 쓰기" right={<PreparingChip />}
-              desc="내 AI 도구(Claude Code 등)에서 AXcellent AI 직원에게 일을 맡기는 개인 연결 토큰이에요. 나만 보이고, 내 도구 요금은 내 계정에서 나가요." />
-            <p role="status" className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
-              개인 연결 토큰을 만드는 서버 기능이 아직 없어 만들 수 없어요. 서버가 준비되면 여기서 토큰을 만들고 끊을 수 있어요.
-            </p>
-          </section>
-          <CodingModeSection part="all" />
+          <PersonalMcpConnect />
+          <details className="card group p-6">
+            <summary className="cursor-pointer select-none text-[15px] font-semibold">고급 · 개발 요청을 누가 코딩할지</summary>
+            <div className="mt-4 space-y-6">
+              <p className="text-sm text-ink-700">기획에서 넘어온 요청 작업을 서버 AI가 코딩할지, 내 AI 도구(위 연결 방법으로 붙인 Claude Code 등)가 작업 목록에서 가져가 코딩할지 정해요.</p>
+              <DevPcSection />
+            </div>
+          </details>
         </div>
       ) : tab === 'deploy' ? (
         tools.data ? <DeployTools data={tools.data} admin={canEdit} onChanged={tools.reload} /> : <ToolsLoading error={tools.error} />
@@ -790,7 +597,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
   )
 }
 
-/** 도구 연결(/system/tools): 시스템 관리 아래, 모두 연다. 형상관리 · AI(코딩 방식·키·모델·AI 도구). 예전 /connections */
+/** 도구 연결(/system/tools): 시스템 관리 아래, 모두 연다. 형상관리 · 배포 · 문서 · AI(AI 연결 보기 · 내 연결). 예전 /connections */
 export default function ToolConnections() {
   return (
     <div className="space-y-6 px-4 py-8 sm:px-8">

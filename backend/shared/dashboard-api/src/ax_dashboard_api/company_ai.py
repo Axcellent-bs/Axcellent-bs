@@ -17,13 +17,16 @@
 - 관리자가 한 명뿐이면 교체·삭제도 바로 적용하고 회원 모두에게 알린다(알림 목록 `notices`)
 - 응답·로그·이력에는 끝 글자(최대 4자)만. 값을 돌려주는 경로는 없다
 
-설정(`company_ai.json`, 계약 `CompanyAiSettings`): 모델·주소·월 예산(토큰)·코딩 방식·영상.
+설정(`company_ai.json`, 계약 `CompanyAiSettings`): 모델·주소·월 예산(토큰)·상한 %·코딩 방식·영상.
+상한 %(`monthly_limit_percent`, 없으면 100): 이번 달 사용량이 예산의 이 %에 이르면
+`budget_exhausted`.
 바로 적용하고 회원에게 알린다. 바꿀 때마다 `company_ai.history.jsonl`에 남긴다(키는 끝 글자만).
 저장 위치: `AX_COMPANY_AI_DIR` → 회사 연결 파일 옆 `company_ai/`, 그 아래 `<회사 ID>/`.
 
 사용량은 LLM 사용량 저장소(`llm_usage`, `AX_LLM_USAGE_DB`)를 계약 조회(`LlmUsageQuery`)로
-읽기만 한다. 비용(원)은 보이지 않는다. 토큰과 %만. "월"은 회사 시간대(`DATA_TENANT_TIMEZONE`,
-없으면 UTC) 1일 0시부터.
+읽기만 한다. 개인 MCP 연결로 시킨 일(`account_id`가 있는 기록)도 회사 키로 돌아 회사 사용량에
+그대로 센다(그 사람 몫은 personal_mcp.py가 따로 센다). 비용(원)은 보이지 않는다. 토큰과 %만.
+"월"은 회사 시간대(`DATA_TENANT_TIMEZONE`, 없으면 UTC) 1일 0시부터.
 
 체험 키(설치 운영자가 `.env`에 넣은 `LLM_TRIAL_API_KEY`, 한도 `LLM_TRIAL_TOKENS` 토큰)
 - 회사 키가 없을 때만 쓴다. 회사마다 한 번이라 그 회사의 전체 사용량으로 센다
@@ -397,6 +400,32 @@ def _percent(used: int, budget: int | None) -> float | None:
     return round(used * 100 / budget, 1) if budget else None
 
 
+def limit_percent(settings: CompanyAiSettings) -> int:
+    """월 예산 상한 %. 정하지 않았으면 100."""
+    return settings.monthly_limit_percent or 100
+
+
+def limit_tokens(settings: CompanyAiSettings) -> int | None:
+    """예산 × 상한 % (토큰). 예산이 없으면 None(상한 없음)."""
+    budget = settings.monthly_budget_tokens
+    if not budget:
+        return None
+    return budget * limit_percent(settings) // 100
+
+
+def month_usage(cid: str) -> tuple[int, bool, bool]:
+    """(이번 달 회사 사용 토큰, 기록이 켜져 있는지, 다 읽지 못했는지)."""
+    _, start, end = _month_range(cid, None)
+    records, recording, partial = _records(cid, start, end)
+    return _tokens(records), recording, partial
+
+
+def over_limit(cid: str) -> bool:
+    """이번 달 회사 사용량이 예산 상한(예산 × 상한 %)에 이르렀는지. 예산이 없으면 False."""
+    cap = limit_tokens(load_settings(cid))
+    return cap is not None and month_usage(cid)[0] >= cap
+
+
 def _trial(cid: str) -> dict[str, Any]:
     has_key = bool(os.getenv(TRIAL_KEY_ENV, "").strip())
     try:
@@ -438,6 +467,7 @@ class SettingsIn(BaseModel):
     provider: str = Field("auto", pattern=r"^[a-z0-9_]{1,40}$")
     base_url: str = Field("", max_length=500)
     monthly_budget_tokens: int | None = Field(None, ge=0, le=10**13)
+    monthly_limit_percent: int | None = Field(None, ge=1, le=100)
     coder: CompanyAiCoder = Field(default_factory=CompanyAiCoder)
     video: CompanyAiVideo = Field(default_factory=CompanyAiVideo)
     embed_model: str = Field("", max_length=200)
@@ -520,7 +550,7 @@ def _save(body: SettingsIn, authorization: str | None) -> dict:
 
 @admin_router.post("/settings")
 def save_settings(body: SettingsIn, authorization: str | None = Header(None)) -> dict:
-    """모델·주소·월 예산(토큰)·코딩 방식·영상. 바로 적용하고 회원에게 알린다."""
+    """모델·주소·월 예산(토큰)·상한 %·코딩 방식·영상. 바로 적용하고 회원에게 알린다."""
     return _save(body, authorization)
 
 
@@ -642,8 +672,9 @@ def status(authorization: str | None = Header(None)) -> dict:
     records, recording, partial = _records(cid, start, end)
     used = _tokens(records)
     budget = settings.monthly_budget_tokens
+    cap = limit_tokens(settings)
     trial = _trial(cid)
-    over_budget = bool(budget) and used >= (budget or 0)
+    over_budget = cap is not None and used >= cap
     if COMPANY_KEY in keys:
         state = "budget_exhausted" if over_budget else "connected"
     elif trial["available"]:
@@ -665,6 +696,8 @@ def status(authorization: str | None = Header(None)) -> dict:
                 "used_tokens": used,
                 "budget_tokens": budget,
                 "percent": _percent(used, budget),
+                "limit_percent": limit_percent(settings),
+                "limit_tokens": cap,
                 "partial": partial,
             },
             "trial": trial,
@@ -694,6 +727,8 @@ def usage(
                 "total_tokens": 0,
                 "budget_tokens": None,
                 "percent": None,
+                "limit_percent": 100,
+                "limit_tokens": None,
                 "departments": [],
                 "partial": False,
                 "media": None,
@@ -701,7 +736,8 @@ def usage(
         )
     label, start, end = _month_range(cid, month)
     records, recording, partial = _records(cid, start, end)
-    budget = load_settings(cid).monthly_budget_tokens
+    settings = load_settings(cid)
+    budget = settings.monthly_budget_tokens
     total = _tokens(records)
     by: dict[str, dict[str, int]] = {}
     for r in records:
@@ -730,6 +766,8 @@ def usage(
             "total_tokens": total,
             "budget_tokens": budget,
             "percent": _percent(total, budget),
+            "limit_percent": limit_percent(settings),
+            "limit_tokens": limit_tokens(settings),
             "departments": departments,
             "partial": partial,
             "media": None,  # 영상·이미지 수량은 마케팅 몫(설계 11장 6번)에서 채운다

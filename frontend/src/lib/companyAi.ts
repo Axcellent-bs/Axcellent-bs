@@ -16,6 +16,8 @@ export interface CompanyAiSettings {
   provider: string;
   base_url: string;
   monthly_budget_tokens: number | null;
+  /** 월 예산의 몇 %에 이르면 AI 호출을 멈출지(1~100). null이면 100 */
+  monthly_limit_percent: number | null;
   coder: { mode: CoderMode; model: string; base_url: string };
   video: { provider: string; enabled: boolean };
   embed_model: string;
@@ -39,7 +41,11 @@ export interface CompanyAiAdmin {
   usage_recording: boolean;
   history: HistoryEntry[];
 }
-export interface MonthUsage { used_tokens: number; budget_tokens: number | null; percent: number | null }
+export interface MonthUsage {
+  used_tokens: number; budget_tokens: number | null; percent: number | null;
+  /** 서버가 준 상한 %(없으면 100)와 상한 토큰(예산 × %, 예산이 없으면 null) */
+  limit_percent?: number; limit_tokens?: number | null;
+}
 export interface AiStatus {
   company: { id: string; name: string } | null;
   state: string;
@@ -91,6 +97,7 @@ export function readSettings(v: unknown): CompanyAiSettings {
   return {
     model: str(s.model), provider: str(s.provider, "auto") || "auto", base_url: str(s.base_url),
     monthly_budget_tokens: numOrNull(s.monthly_budget_tokens),
+    monthly_limit_percent: numOrNull(s.monthly_limit_percent),
     coder: { mode: coderMode(c.mode), model: str(c.model), base_url: str(c.base_url) },
     video: { provider: str(vid.provider), enabled: vid.enabled === true },
     embed_model: str(s.embed_model), embed_base_url: str(s.embed_base_url),
@@ -134,7 +141,10 @@ export function readStatus(v: unknown): AiStatus | null {
     model: str(v.model),
     has_key: isObj(v.key) && v.key.has_key === true,
     month: strOrNull(v.month),
-    usage: u ? { recording: u.recording === true, used_tokens: num(u.used_tokens), budget_tokens: numOrNull(u.budget_tokens), percent: numOrNull(u.percent), partial: u.partial === true } : null,
+    usage: u ? {
+      recording: u.recording === true, used_tokens: num(u.used_tokens), budget_tokens: numOrNull(u.budget_tokens), percent: numOrNull(u.percent),
+      limit_percent: num(u.limit_percent, 100), limit_tokens: numOrNull(u.limit_tokens), partial: u.partial === true,
+    } : null,
     trial: t ? { available: t.available === true, limit_tokens: num(t.limit_tokens), used_tokens: num(t.used_tokens), percent: numOrNull(t.percent) } : null,
     video: { enabled: vid.enabled === true, provider: str(vid.provider) },
     coder: { mode: coderMode(isObj(v.coder) ? v.coder.mode : undefined) },
@@ -181,7 +191,7 @@ export function providerToSave(_model: string, baseUrl: string, current: string)
 export type SettingsBody = Omit<CompanyAiSettings, "updated_at" | "updated_by">;
 export function settingsBody(
   cur: CompanyAiSettings,
-  patch: Partial<Pick<CompanyAiSettings, "model" | "base_url" | "monthly_budget_tokens" | "coder" | "video">>,
+  patch: Partial<Pick<CompanyAiSettings, "model" | "base_url" | "monthly_budget_tokens" | "monthly_limit_percent" | "coder" | "video">>,
 ): SettingsBody {
   const model = (patch.model ?? cur.model).trim();
   const base_url = (patch.base_url ?? cur.base_url).trim();
@@ -192,6 +202,7 @@ export function settingsBody(
     provider: providerToSave(model, base_url, cur.provider),
     base_url,
     monthly_budget_tokens: patch.monthly_budget_tokens !== undefined ? patch.monthly_budget_tokens : cur.monthly_budget_tokens,
+    monthly_limit_percent: patch.monthly_limit_percent !== undefined ? patch.monthly_limit_percent : cur.monthly_limit_percent,
     coder: { mode: coder.mode, model: coder.model.trim(), base_url: coder.base_url.trim() },
     video: { provider: video.provider.trim(), enabled: video.enabled },
     embed_model: cur.embed_model,
@@ -218,7 +229,21 @@ export function parseBudget(text: string): number | null | "invalid" {
   return n <= BUDGET_MAX ? n : "invalid";
 }
 
+/** 상한 % 칸: 비우면 null(100으로 본다), 1~100 정수만 */
+export function parseLimitPercent(text: string): number | null | "invalid" {
+  const t = text.trim().replace(/%$/, "").trim();
+  if (!t) return null;
+  if (!/^\d+$/.test(t)) return "invalid";
+  const n = Number(t);
+  return n >= 1 && n <= 100 ? n : "invalid";
+}
+
 export const tokensKo = (n: number) => n.toLocaleString("en-US");
+/** 사용량 막대 상한선 문구. 예산이 없어 상한이 없으면 null */
+export function limitLineKo(u: MonthUsage | null): string | null {
+  if (!u || u.limit_tokens == null || u.budget_tokens == null) return null;
+  return `${u.limit_percent ?? 100}%(${tokensKo(u.limit_tokens)} 토큰)에서 멈춰요`;
+}
 export function percentKo(p: number | null): string {
   if (p === null) return "—";
   // 10% 아래는 소수 한 자리까지(0.4%·8.4%), 그 위는 정수
@@ -254,7 +279,7 @@ export const KEY_LABEL: Record<KeyName, string> = {
 const keyLabel = (name?: string) => (name && KEY_LABEL[name as KeyName]) || name || "키";
 const OP_LABEL: Record<string, string> = { add: "등록", replace: "교체", delete: "삭제" };
 const FIELD_LABEL: Record<string, string> = {
-  model: "모델", provider: "공급자", base_url: "주소", monthly_budget_tokens: "월 예산", coder: "코딩 에이전트", video: "영상 생성",
+  model: "모델", provider: "공급자", base_url: "주소", monthly_budget_tokens: "월 예산", monthly_limit_percent: "상한 %", coder: "코딩 에이전트", video: "영상 생성",
   embed_model: "임베딩 모델", embed_base_url: "임베딩 주소",
 };
 

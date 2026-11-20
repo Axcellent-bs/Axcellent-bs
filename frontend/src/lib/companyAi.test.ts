@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  OTHER_COLOR, PIE_COLORS, agentLabel, budgetKo, canApprove, historyLineKo, keyHintKo, parseBudget, percentKo, pieSlices, providerToSave,
+  OTHER_COLOR, PIE_COLORS, agentLabel, budgetKo, limitLineKo, parseLimitPercent, canApprove, historyLineKo, keyHintKo, parseBudget, percentKo, pieSlices, providerToSave,
   providerView, readCompanyAi, readStatus, readUsage, ringPath, saveBlockReason, settingsBody, keyResultKo, stateView, videoView,
   type CompanyAiAdmin, type UsageDepartment,
 } from "./companyAi.ts";
@@ -179,7 +179,7 @@ test("저장 막는 이유: 회사 없음 → 키 저장소 꺼짐 → 저장 �
 test("저장 본문: 서버가 받는 칸만 (updated_at·updated_by는 보내지 않는다)", () => {
   const a = readCompanyAi(adminRaw())!;
   const body = settingsBody(a.settings, { model: " qwen ", base_url: " https://llm.example/v1 ", monthly_budget_tokens: null });
-  assert.deepEqual(Object.keys(body).sort(), ["base_url", "coder", "embed_base_url", "embed_model", "model", "monthly_budget_tokens", "provider", "video"]);
+  assert.deepEqual(Object.keys(body).sort(), ["base_url", "coder", "embed_base_url", "embed_model", "model", "monthly_budget_tokens", "monthly_limit_percent", "provider", "video"]);
   assert.equal(body.model, "qwen");
   assert.equal(body.base_url, "https://llm.example/v1");
   assert.equal(body.provider, "openai_compatible");
@@ -217,4 +217,24 @@ test("영상 생성 상태: 키가 있어야 켜진다", () => {
   assert.deepEqual(videoView(false, true), { tone: "wait", label: "꺼짐 · 키 필요" });
   assert.deepEqual(videoView(true, false), { tone: "off", label: "꺼짐" });
   assert.deepEqual(videoView(true, true), { tone: "ok", label: "켜짐" });
+});
+
+test("상한 %: 비우면 100(기본), 1~100 정수만. 저장 본문에 실린다", () => {
+  assert.equal(parseLimitPercent(""), null);
+  assert.equal(parseLimitPercent(" 80 "), 80);
+  assert.equal(parseLimitPercent("80%"), 80);
+  for (const bad of ["0", "101", "1.5", "x"]) assert.equal(parseLimitPercent(bad), "invalid");
+  const a = readCompanyAi(adminRaw())!;
+  assert.equal(a.settings.monthly_limit_percent, null);
+  assert.equal(settingsBody(a.settings, { monthly_limit_percent: 80 }).monthly_limit_percent, 80);
+  assert.equal(settingsBody(a.settings, {}).monthly_limit_percent, null);
+  const b = readCompanyAi(adminRaw({ settings: { ...adminRaw().settings, monthly_limit_percent: 70 } }))!;
+  assert.equal(b.settings.monthly_limit_percent, 70);
+  assert.equal(historyLineKo({ at: "", by: "민지", action: "settings", changed: ["monthly_limit_percent"] }), "민지 · 설정 변경: 상한 %");
+});
+
+test("상한선 문구: 예산이 있을 때만, 서버가 준 상한으로", () => {
+  assert.equal(limitLineKo({ used_tokens: 10, budget_tokens: 5000000, percent: 0, limit_percent: 80, limit_tokens: 4000000 }), "80%(4,000,000 토큰)에서 멈춰요");
+  assert.equal(limitLineKo({ used_tokens: 10, budget_tokens: null, percent: null, limit_percent: 100, limit_tokens: null }), null);
+  assert.equal(limitLineKo(null), null);
 });

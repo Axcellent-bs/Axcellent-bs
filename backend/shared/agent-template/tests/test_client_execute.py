@@ -4,7 +4,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from ax_agent_template import config
+from ax_agent_template import config, on_behalf
 from ax_agent_template import execute as execute_module
 from ax_agent_template.client import call_agent
 from ax_agent_template.execute import execute
@@ -134,3 +134,33 @@ async def test_execute_sends_own_name_and_ignores_claimed_grade(monkeypatch) -> 
     assert sent[0].requester == "marketing"
     assert sent[0].claimed_grade is None
     assert sent[0].idempotency_key == "ctx_req_test:echo:1"
+
+
+@pytest.mark.asyncio
+async def test_call_agent_carries_on_behalf_of_to_the_next_agent(app: FastAPI) -> None:
+    """총괄 → 부서: 메타를 복사하므로 사람 계정 칸이 그대로 이어진다(개인 AI 연결, 11/20)."""
+    config.set_agent_name("orchestrator")
+    req = _request()
+    req = req.model_copy(update={"meta": req.meta.model_copy(update={"on_behalf_of": "acc-1"})})
+    async with _asgi(app) as http_client:
+        result = await call_agent("http://echo", req, http_client=http_client)
+    assert result.status == "completed"
+    assert result.meta.on_behalf_of == "acc-1"
+
+
+@pytest.mark.asyncio
+async def test_bound_person_overwrites_whatever_the_meta_says(app: FastAPI) -> None:
+    """MCP 서버가 묶은 값(토큰 주인 계정, 묶은 값이 None이면 None)이 메타에 적힌 값을 덮어쓴다."""
+    config.set_agent_name("orchestrator")
+    req = _request()
+    forged = req.model_copy(update={"meta": req.meta.model_copy(update={"on_behalf_of": "x-9"})})
+    for bound, expected in (("acc-2", "acc-2"), (None, None)):
+        token = on_behalf.bind(bound)
+        try:
+            async with _asgi(app) as http_client:
+                result = await call_agent("http://echo", forged, http_client=http_client)
+        finally:
+            on_behalf.unbind(token)
+        assert result.status == "completed"
+        assert result.meta.on_behalf_of == expected
+    assert on_behalf.bound() == (False, None)
