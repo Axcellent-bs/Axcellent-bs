@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Chip, useToast, type ChipTone } from '@dejafix/common-frontend'
 import type { ChatMessage, ChatStatus, ChatThread, CodingMode, CodingStatus, State as S, Task } from '@/lib/planningData'
-import { DEV_API, PlanningApiError, chatApi, codingSettingsApi, useMe, vcsApi, type CodingSettings, type VcsConnection } from '@/lib/planning'
+import { DEV_API, PlanningApiError, chatApi, needAccount, codingSettingsApi, useMe, vcsApi, type CodingSettings, type VcsConnection } from '@/lib/planning'
 import { CODING_LABEL, CancelButton, ResumeButton, codingState, isRunning } from '@/components/dev/coding'
 import { State } from '@/components/planning-common/parts'
 import { go, toPath, idText } from '@/components/planning-common/links'
@@ -48,7 +48,8 @@ function running(s: S, t: ChatThread): boolean {
 /** 헤더 칩과 패널이 같이 쓰는 대화 상태. 패널을 닫았다 열어도 남는다.
  *  지금 계정이 연 대화만 다룬다 (서버가 계정을 확인해 그 계정 대화만 주고, 여기서도 한 번 더 거른다) */
 export function useDevChat(s: S, on: boolean) {
-  const account = useSession().account?.id ?? 'guest'
+  // 세션을 읽는 중이면 null: 목록을 읽거나 보내지 않는다 ('guest'로 보내지 않는다)
+  const account = useSession().account?.id ?? null
   const [local, setLocal] = useState<ChatThread[]>([])
   const [curId, setCurId] = useState<string | null | undefined>(undefined) // undefined = 아직 안 고름(가장 최근 대화)
   const [draft, setDraft] = useState('')
@@ -60,11 +61,21 @@ export function useDevChat(s: S, on: boolean) {
     setHidden([])
   }, [account])
   // SSE 대화 바뀜 표시(id·상태·시각)가 바뀌면 다시 읽는다. 늦게 온 다른 계정 목록은 버린다
+  // 고른 대화가 목록 상한(최근 20개) 밖이어도 바뀌면 그 대화를 id로 다시 읽는다
   const stamp = stampKey(s.chats)
+  const picked = useRef<string | null | undefined>(undefined)
+  picked.current = curId
   useEffect(() => {
-    if (!on) return
+    if (!on || !account) return
     let alive = true
-    api.list(account).then((rows) => { if (alive) setLocal((prev) => mergeThreads(prev, rows)) }).catch(() => undefined)
+    api.list(account).then((rows) => {
+      if (!alive) return
+      setLocal((prev) => mergeThreads(prev, rows))
+      const id = picked.current
+      if (id && !rows.some((t) => t.id === id)) {
+        api.get(id, account).then((t) => { if (alive) setLocal((prev) => mergeThreads(prev, [t])) }).catch(() => undefined)
+      }
+    }).catch(() => undefined)
     return () => { alive = false }
   }, [on, account, stamp])
   const threads = mergeThreads(local, []).filter((t) => t.account === account && !hidden.includes(t.id))
@@ -143,14 +154,15 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   // SSE가 없으면 답·작업을 기다리는 동안, SSE가 있어도 답을 기다리는 동안은 다시 읽는다
   const poll = cur ? pollInterval(chat.live, busy, running(s, cur)) : null
   useEffect(() => {
-    if (!poll || !cur) return
+    const account = chat.account
+    if (!poll || !cur || !account) return
     const id = cur.id
     // 다른 탭을 볼 때는 받지 않고, 앞 요청이 아직이면 이번 차례는 건너뛴다
     let busy = false
     const t = setInterval(() => {
       if (busy || document.hidden) return
       busy = true
-      api.get(id, chat.account).then(chat.upsert).catch(() => undefined).finally(() => { busy = false })
+      api.get(id, account).then(chat.upsert).catch(() => undefined).finally(() => { busy = false })
     }, poll)
     return () => clearInterval(t)
   }, [poll, cur?.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -179,7 +191,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
     setErr(null)
     setDraft('')
     try {
-      const t = await api.send({ ...(cur ? { thread_id: cur.id } : {}), message, ...(repo ? { connection: repo } : {}), mode, account: chat.account })
+      const t = await api.send({ ...(cur ? { thread_id: cur.id } : {}), message, ...(repo ? { connection: repo } : {}), mode, account: needAccount(chat.account) })
       chat.upsert(t)
       chat.select(t.id)
     } catch (x) {
@@ -199,8 +211,8 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
     if (kind === 'remove' && !window.confirm('이 대화를 목록에서 숨길까요? 띄운 작업은 그대로 돌아요.')) return
     setActing(true)
     try {
-      if (kind === 'close') chat.upsert(await api.close(cur.id, chat.account))
-      else chat.drop(await api.remove(cur.id, chat.account))
+      if (kind === 'close') chat.upsert(await api.close(cur.id, needAccount(chat.account)))
+      else chat.drop(await api.remove(cur.id, needAccount(chat.account)))
     } catch (x) {
       toast.show(x instanceof PlanningApiError ? sendErrorText(x.code, x.message) : '개발·배포 서버에 연결할 수 없어요')
     } finally {

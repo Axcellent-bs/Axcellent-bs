@@ -20,7 +20,7 @@ from ax_workflow.api import (
     _ok,
     add_common_routes,
 )
-from ax_workflow.auth import AuthError, check_human, scoped_account
+from ax_workflow.auth import AuthError, check_human, scoped_account, session_admin
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import dump
 from dev_agent import coder, dev_chat, llm_key, vcs, vcs_bridge
@@ -358,13 +358,16 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         """작업 API 소유 확인. 남이 낸 요청(대화)에서 온 작업이면 403 VIEW_ONLY, 아니면 None.
 
         화면이 보기만 하는 대화의 작업 버튼을 숨겨도 진짜 방어는 여기다 (dev_chat.may_operate).
-        계정은 세션 토큰이 정하고(`?account=`가 다르면 403), 세션이 없으면 `?account=` 값이다."""
+        세션 모드면 세션 토큰이 있어야 하고 계정은 세션 계정이다(`?account=`가 다르면 403).
+        세션 설정이 꺼진 데모 모드에서만 `?account=` 값을 쓴다 (auth.scoped_account)."""
         if account is not None and not 0 < len(account) <= 64:
             return _err(400, "INVALID_INPUT", "account는 1~64자 문자열이어야 한다")
-        mine = scoped_account(request.headers.get("authorization"), account)
-        if dev_chat.may_operate(get_service(), task_id, mine, _person(request)):
+        auth = request.headers.get("authorization")
+        mine = scoped_account(auth, account)
+        admin = session_admin(auth)
+        if dev_chat.may_operate(get_service(), task_id, mine, _person(request), admin):
             return None
-        return _err(403, "VIEW_ONLY", dev_chat.VIEW_ONLY)
+        return _err(403, "VIEW_ONLY", dev_chat.TASK_OWNER_ONLY)
 
     def _account_of(request: Request, given: object) -> str | None | JSONResponse:
         """대화 REST의 계정: 형식을 보고 세션 계정과 맞춘다 (`scoped_account`)."""

@@ -1057,16 +1057,24 @@ VIEW_ONLY = (
 
 
 def same_owner(c: ChatThread, account: str | None, who: str | None) -> bool:
-    """이 계정·사람이 대화 `c`의 주인인가. 개발 화면 대화는 계정과 사람(토큰 이름)을 같이 보고,
-    대시보드 대화방·예전 대화는 계정이 없어 사람으로만 본다 (`_account_ok`와 같은 나눔)."""
-    if c.who != who:
-        return False
-    return c.origin != "screen" or c.account == account
+    """이 계정·사람이 대화 `c`의 주인인가. 계정을 남긴 개발 화면 대화는 계정만 본다 (사람 이름은
+    공용 토큰이면 모두 같고, 세션이면 계정이 곧 사람이다). 대시보드 대화방·계정 없는 예전 대화는
+    사람(토큰 이름)으로 본다 (`_account_ok`와 같은 나눔)."""
+    if c.origin == "screen" and c.account is not None:
+        return c.account == account
+    return c.who == who
 
 
 def request_owners(s: State, rid: str) -> list[ChatThread]:
     """요청 `rid`를 기획에 넘긴 대화들 (숨긴 대화도 주인이다). 대화가 낸 요청이 아니면 빈 목록."""
     return [c for c in s.chats if c.request_id == rid]
+
+
+# 작업 API가 남의 대화 요청에서 온 작업을 거절할 때 (작업·PR 화면 토스트)
+TASK_OWNER_ONLY = (
+    "이 작업은 다른 사람이 AI 대화로 낸 요청의 작업이에요. "
+    "중단·재개·폐기 같은 조작은 그 대화를 연 사람이나 관리자만 할 수 있어요."
+)
 
 
 def _owns_request(th: ChatThread, rid: str, s: State) -> bool:
@@ -1081,12 +1089,18 @@ def task_request(s: State, task_id: str) -> str | None:
     return spec.request if spec is not None else None
 
 
-def may_operate(svc: DevService, task_id: str, account: str | None, who: str | None) -> bool:
+def may_operate(
+    svc: DevService, task_id: str, account: str | None, who: str | None, admin: bool = False
+) -> bool:
     """이 계정·사람이 작업을 조작해도 되나 (작업 API: 다시 시도·중단·재개·폐기 등).
+
+    회사 관리자(`admin`, 세션 토큰의 역할)는 누구의 작업이든 조작한다.
 
     `view_only`와 같은 기준이다: 작업이 대화가 낸 요청에서 왔으면 그 대화의 주인만 된다.
     계정을 모르는 호출(None)은 계정이 있는 대화의 주인이 아니다 (fail-closed).
     대화가 낸 요청이 아닌 작업(기획·직접 개발에서 온 작업)은 지금처럼 누구나 된다."""
+    if admin:
+        return True
     rid = task_request(svc.state, task_id)
     owners = request_owners(svc.state, rid) if rid else []
     return not owners or any(same_owner(c, account, who) for c in owners)
