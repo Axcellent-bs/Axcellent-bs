@@ -530,6 +530,8 @@ class ChatThread(DomainModel):
     messages: list[ChatMessage] = Field(default_factory=list)
     task_id: str | None = None
     request_id: str | None = None  # 기획에 넘긴 요청 (REQ-…). 기획서가 확정돼 작업이 생기면 task_id
+    # 기획이 같은 요청에 묶었으면(linked_duplicate) 그 원래 요청. 그 기획서가 확정돼도 작업을 잇는다
+    duplicate_of: str | None = None
     connection: str | None = None
     waiting_for: list[str] = Field(default_factory=list)  # 끝나기를 기다리는 요청 ID
     # 작업을 누가 코딩하나: agent(서버 AI, API 키) · subscription(개발자 본인 Claude, work_queue.py)
@@ -543,6 +545,8 @@ class ChatThread(DomainModel):
     account: str | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
+    # 뒤에서 만든 답을 대화에 적지 못했을 때 한 줄 (관문 거절 등). 다음 메시지가 적히면 지운다
+    last_error: str | None = None
     # 숨김 처리: 대화는 지우지 않고 시각·사람만 남긴다. 예전 대화는 둘 다 없어 None으로 읽힌다
     removed_at: UtcDatetime | None = None
     removed_by: str | None = None
