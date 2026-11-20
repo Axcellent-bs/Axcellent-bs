@@ -1,5 +1,18 @@
 // 개발 화면 "AI와 대화" 패널 규칙 (화면 없이 시험할 수 있게 뺀 것). node --test로 돈다 (devChatView.test.ts)
-import type { ChatThread } from './planningData'
+import type { ChatStamp, ChatStatus, ChatThread } from './planningData'
+
+/** SSE 상태(camelize 뒤)의 chats → 대화 바뀜 표시. 서버는 원문 없이 id·status·updated_at만 싣는다
+ *  (core.public_snapshot). 원문은 계정을 확인하는 /dev-chat으로 읽는다 */
+export function toStamps(d: unknown): ChatStamp[] {
+  if (!Array.isArray(d)) return []
+  return d
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && typeof (x as Record<string, unknown>).id === 'string')
+    .map((x) => ({ id: String(x.id), status: x.status as ChatStatus, updatedAt: String(x.updatedAt ?? '') }))
+}
+
+/** 바뀜 표시 묶음의 열쇠. 이게 바뀌면 화면이 /dev-chat 목록을 다시 읽는다 */
+export const stampKey = (stamps: ChatStamp[] | undefined): string =>
+  (stamps ?? []).map((c) => `${c.id}:${c.status}:${c.updatedAt}`).join('|')
 
 /** SSE 상태 갱신 순서 지키기: 늦게 끝난 오래된 갱신이 최신을 덮어쓰지 않게 한다.
  *  `start()`로 받은 번호를 적용 직전 `fresh(n)`에 넘긴다. 이미 더 최신을 적용했으면 false (버린다) */

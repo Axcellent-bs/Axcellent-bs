@@ -15,6 +15,18 @@ export function setActorName(name: string | null | undefined): void {
   current = clean || null;
 }
 
+let account: string | null = null;
+
+/** 로그인 계정 id. SessionProvider가 부른다 (개발 작업 조작에 `?account=`로 싣는다, planning.ts devTaskApi) */
+export function setActorAccount(id: string | null | undefined): void {
+  account = id || null;
+}
+
+/** 지금 로그인 계정 id (없으면 null) */
+export function actorAccount(): string | null {
+  return account;
+}
+
 /** 요청 머리. 머리 값은 ASCII만 되므로 UTF-8 퍼센트 인코딩해 보낸다 */
 export function actorHeaders(): Record<string, string> {
   return current ? { [ACTOR_HEADER]: encodeURIComponent(current) } : {};

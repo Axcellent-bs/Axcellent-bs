@@ -99,6 +99,32 @@ def check_caller(authorization: str | None) -> str:
     raise AuthError(401, "토큰을 검증할 수 없다")
 
 
+def session_account(authorization: str | None) -> str | None:
+    """로그인 세션 토큰의 계정 id. 세션 토큰이 아니면(공용·목·에이전트·없음) None.
+
+    세션 토큰인데 받을 수 없으면(위조 403, 만료·로그아웃 401) AuthError. 읽기(GET)에도 쓴다."""
+    token = human_auth.bearer(authorization)
+    if not token or not human_auth.is_session_token(token):
+        return None
+    try:
+        return human_auth.verify_session(token).account_id
+    except human_auth.HumanAuthError as exc:
+        raise AuthError(exc.status_code, exc.message) from None
+
+
+def scoped_account(authorization: str | None, given: str | None) -> str | None:
+    """화면이 적은 계정(`?account=`·본문 `account`)을 토큰으로 확인한다.
+
+    세션 토큰이면 그 계정이 답이고, 적은 계정이 다르면 403. 세션이 없으면(공용 토큰 데모 로그인)
+    적은 값을 그대로 쓴다 (계정을 모르면 None: 계정이 있는 대화·작업의 주인이 되지 못한다)."""
+    mine = session_account(authorization)
+    if mine is None:
+        return given
+    if given is not None and given != mine:
+        raise AuthError(403, "로그인한 계정과 다른 계정으로 요청했다")
+    return mine
+
+
 def require_human(authorization: str | None = Header(default=None)) -> str:
     return check_human(authorization)
 

@@ -83,7 +83,7 @@ def add_planning_routes(router: APIRouter, get_service: Callable[[], Any]) -> No
         except GateRefused as exc:
             return _gate_err(exc)
         return _ok(
-            svc.snapshot(),
+            svc.public_snapshot(),
             svc,
             changed=result.changed,
             outcome=result.outcome,

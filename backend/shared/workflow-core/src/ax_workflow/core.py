@@ -144,7 +144,20 @@ class StateService:
         self._notify()
 
     def snapshot(self) -> dict:
+        """서버 안에서 쓰는 전체 상태 (대화 원문 포함). 화면에 내보낼 때는 `public_snapshot`."""
         return dump(self.state)
+
+    def public_snapshot(self) -> dict:
+        """화면(`/state`·SSE·액션 응답)에 내보내는 상태. 누구나 읽는 길이라 개발 AI 대화(`chats`)는
+        원문·제목·계정·사람 없이 id·status·updated_at만 싣는다 (화면은 바뀐 것을 보고 계정을
+        확인하는 `/dev-chat`으로 다시 읽는다). 숨긴 대화는 빼고 내보낸다."""
+        data = dump(self.state)
+        data["chats"] = [
+            {"id": c.id, "status": c.status, "updated_at": dump(c)["updated_at"]}
+            for c in self.state.chats
+            if c.removed_at is None
+        ]
+        return data
 
     def subscribe(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue()

@@ -17,11 +17,10 @@ from ax_workflow.api import (
     _body,
     _err,
     _gate_err,
-    _list,
     _ok,
     add_common_routes,
 )
-from ax_workflow.auth import AuthError, check_human
+from ax_workflow.auth import AuthError, check_human, scoped_account
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import dump
 from dev_agent import coder, dev_chat, llm_key, vcs, vcs_bridge
@@ -355,6 +354,24 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         )
         return _err(status, exc.code, exc.message)
 
+    def _not_owner(request: Request, task_id: str, account: str | None) -> JSONResponse | None:
+        """작업 API 소유 확인. 남이 낸 요청(대화)에서 온 작업이면 403 VIEW_ONLY, 아니면 None.
+
+        화면이 보기만 하는 대화의 작업 버튼을 숨겨도 진짜 방어는 여기다 (dev_chat.may_operate).
+        계정은 세션 토큰이 정하고(`?account=`가 다르면 403), 세션이 없으면 `?account=` 값이다."""
+        if account is not None and not 0 < len(account) <= 64:
+            return _err(400, "INVALID_INPUT", "account는 1~64자 문자열이어야 한다")
+        mine = scoped_account(request.headers.get("authorization"), account)
+        if dev_chat.may_operate(get_service(), task_id, mine, _person(request)):
+            return None
+        return _err(403, "VIEW_ONLY", dev_chat.VIEW_ONLY)
+
+    def _account_of(request: Request, given: object) -> str | None | JSONResponse:
+        """대화 REST의 계정: 형식을 보고 세션 계정과 맞춘다 (`scoped_account`)."""
+        if given is not None and (not isinstance(given, str) or not 0 < len(given) <= 64):
+            return _err(400, "INVALID_INPUT", "account는 1~64자 문자열이어야 한다")
+        return scoped_account(request.headers.get("authorization"), given)
+
     @router.post("/dev-tasks", response_model=None, dependencies=CALLER)
     async def post_dev_task(request: Request) -> dict | JSONResponse:
         """`{title, plan, done?, paths?, connection?, mode?}`
@@ -403,9 +420,13 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/retry", response_model=None, dependencies=HUMAN)
-    async def post_dev_task_retry(task_id: str, request: Request) -> dict | JSONResponse:
+    async def post_dev_task_retry(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """실패·사람 확인으로 멈춘 코딩 작업 다시 돌리기. 본문 `{connection?, paths?}`는 없어도
         된다. paths는 사람이 직접 고른 고칠 파일 (AI가 파일을 고르지 않는다)."""
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         svc = get_service()
         body = await _body(request) or {}
         connection = body.get("connection")
@@ -428,8 +449,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/renew-hold", response_model=None, dependencies=HUMAN)
-    async def post_dev_task_renew_hold(task_id: str) -> dict | JSONResponse:
+    async def post_dev_task_renew_hold(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """PR 열기 보류 건 새로 받기 (만료·모름). 사람이 review_id를 승인한 뒤 retry(approved)."""
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         svc = get_service()
         try:
             result = await svc.renew_hold(task_id)
@@ -440,8 +465,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/cancel", response_model=None, dependencies=HUMAN)
-    async def post_dev_task_cancel(task_id: str) -> dict | JSONResponse:
+    async def post_dev_task_cancel(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """코딩 작업 중단. 열린 PR은 닫고 브랜치를 지운다 (머지된 것은 되돌리지 않는다)."""
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         svc = get_service()
         try:
             result = await svc.cancel_dev_task(task_id)
@@ -452,8 +481,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/return", response_model=None, dependencies=HUMAN)
-    async def post_dev_task_return(task_id: str, request: Request) -> dict | JSONResponse:
+    async def post_dev_task_return(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """사람이 기획에 돌려보내기 `{to, reason}`. 돌고 있으면 멈추고 열린 PR은 닫는다."""
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         svc = get_service()
         body = await _body(request)
         if body is None:
@@ -470,8 +503,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/discard", response_model=None, dependencies=HUMAN)
-    async def post_dev_task_discard(task_id: str, request: Request) -> dict | JSONResponse:
+    async def post_dev_task_discard(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """멈춘 작업 폐기 (중단·실패·돌려보냄, 열린 PR 없음). 다시 돌리지 않는다."""
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         svc = get_service()
         try:
             result = await svc.discard_dev_task(task_id, _person(request))
@@ -482,8 +519,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/to-agent", response_model=None, dependencies=HUMAN)
-    async def post_dev_task_to_agent(task_id: str) -> dict | JSONResponse:
+    async def post_dev_task_to_agent(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """서버 AI로 넘기기: 개발자 Claude 대기열에서 아무도 안 가져간 작업을 서버 AI가 맡는다."""
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         svc = get_service()
         try:
             result = await svc.hand_to_agent(task_id)
@@ -494,8 +535,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/to-subscription", response_model=None, dependencies=HUMAN)
-    async def post_dev_task_to_subscription(task_id: str) -> dict | JSONResponse:
+    async def post_dev_task_to_subscription(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """내 Claude로 넘기기: 멈춘 서버 AI 작업(열린 PR 없음)을 개발자 Claude 대기열에 올린다."""
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         svc = get_service()
         try:
             result = await svc.hand_to_subscription(task_id)
@@ -506,8 +551,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/skip-queue", response_model=None, dependencies=HUMAN)
-    async def post_dev_task_skip_queue(task_id: str, request: Request) -> dict | JSONResponse:
+    async def post_dev_task_skip_queue(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """지금 진행: 앞 작업 순서를 기다리는 작업을 기다리지 않고 잇게 한다 (사람이 누를 때만)."""
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         svc = get_service()
         try:
             result = await svc.skip_queue_dev_task(task_id, _person(request))
@@ -516,10 +565,14 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/text-ok", response_model=None)
-    async def post_dev_task_text_ok(task_id: str, request: Request) -> dict | JSONResponse:
+    async def post_dev_task_text_ok(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """작업 글 경고를 사람이 확인함 → 내 Claude가 가져갈 수 있다 (사람 토큰만)."""
         svc = get_service()
         who = check_human(request.headers.get("authorization"))
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         try:
             result = await svc.ok_task_text(task_id, who)
         except ActionError as exc:
@@ -527,8 +580,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/close-covered", response_model=None, dependencies=HUMAN)
-    async def post_dev_task_close_covered(task_id: str) -> dict | JSONResponse:
+    async def post_dev_task_close_covered(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """반영됨으로 닫기: 바뀐 내용이 없어 멈춘 작업을 앞 작업이 반영한 것으로 완료 (PR 없음)."""
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         svc = get_service()
         try:
             result = await svc.close_dev_task_covered(task_id)
@@ -539,8 +596,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return _ok(result.output, svc)
 
     @router.post("/dev-tasks/{task_id}/revise", response_model=None, dependencies=HUMAN)
-    async def post_dev_task_revise(task_id: str, request: Request) -> dict | JSONResponse:
+    async def post_dev_task_revise(
+        task_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         """사람 확인을 기다리는 코딩 PR에 수정 지시 `{note}`. 개발 AI가 고쳐 같은 PR에 커밋한다."""
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         svc = get_service()
         body = await _body(request) or {}
         note = body.get("note")
@@ -556,10 +617,13 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
 
     # ---- 개발 AI 대화 (dev_chat.py). 계획이 서면 코딩 작업을 띄운다. 대화는 상태 `chats`(SSE)
 
-    @router.get("/dev-chat")
-    def list_dev_chats(account: str | None = None) -> dict:
-        """`?account=` 개발 화면 계정이 연 대화만 준다."""
+    @router.get("/dev-chat", response_model=None)
+    def list_dev_chats(request: Request, account: str | None = None) -> dict | JSONResponse:
+        """`?account=` 개발 화면 계정이 연 대화만 준다. 세션 토큰이면 그 계정 (다르면 403)."""
         svc = get_service()
+        account = _account_of(request, account)
+        if isinstance(account, JSONResponse):
+            return account
         rows = sorted(
             [
                 c
@@ -569,15 +633,21 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             key=lambda c: (c.updated_at, int(c.id.split("-")[-1] or 0)),
             reverse=True,
         )[:MAX_CHATS_LISTED]
-        return _list(rows, svc)
+        data = [dev_chat.rest_view(svc, c) for c in rows]
+        return _ok(data, svc, count=len(data))
 
     @router.get("/dev-chat/{thread_id}", response_model=None)
-    def get_dev_chat(thread_id: str, account: str | None = None) -> dict | JSONResponse:
+    def get_dev_chat(
+        thread_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
         svc = get_service()
+        account = _account_of(request, account)
+        if isinstance(account, JSONResponse):
+            return account
         th = svc.chat_of(thread_id)
         if th is None or not dev_chat.seen_from(th, SCREEN) or not dev_chat.of_account(th, account):
             return _err(404, "NOT_FOUND", f"대화 {thread_id}가 없다")
-        return _ok(dump(th), svc)
+        return _ok(dev_chat.rest_view(svc, th), svc)
 
     @router.get("/me", dependencies=CALLER)
     def get_me(request: Request) -> dict:
@@ -613,9 +683,9 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _err(400, "INVALID_INPUT", f"message는 1~{limit}자 문자열이어야 한다")
         if connection is not None and not isinstance(connection, str):
             return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
-        account = body.get("account")
-        if account is not None and (not isinstance(account, str) or not 0 < len(account) <= 64):
-            return _err(400, "INVALID_INPUT", "account는 1~64자 문자열이어야 한다")
+        account = _account_of(request, body.get("account"))
+        if isinstance(account, JSONResponse):
+            return account
         try:
             mode = body.get("mode")
             who = _person(request)
@@ -626,7 +696,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _coding_err(exc)
         except GateRefused as exc:
             return _gate_err(exc)
-        return _ok(dump(th), svc)
+        return _ok(dev_chat.rest_view(svc, th), svc)
 
     @router.get("/dev-tasks/{task_id}/files", response_model=None)
     async def get_dev_task_files(task_id: str, q: str = "") -> dict | JSONResponse:
@@ -658,14 +728,16 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         '진행해'면 같은 작업을 그 파일로 다시 시도한다."""
         svc = get_service()
         body = await _body(request) or {}
-        account = body.get("account")
-        if account is not None and (not isinstance(account, str) or not 0 < len(account) <= 64):
-            return _err(400, "INVALID_INPUT", "account는 1~64자 문자열이어야 한다")
+        account = _account_of(request, body.get("account"))
+        if isinstance(account, JSONResponse):
+            return account
+        if (refused := _not_owner(request, task_id, account)) is not None:
+            return refused
         try:
             th = await dev_chat.open_for_task(svc, task_id, _person(request), account, SCREEN)
         except ActionError as exc:
             return _coding_err(exc)
-        return _ok(dump(th), svc)
+        return _ok(dev_chat.rest_view(svc, th), svc)
 
     @router.post("/dev-chat/{thread_id}/close", response_model=None, dependencies=CALLER)
     async def close_dev_chat(
@@ -673,11 +745,14 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
     ) -> dict | JSONResponse:
         """대화를 끝낸다 (`closed`). 띄운 작업은 그대로 돈다. `?account=` 연 계정."""
         svc = get_service()
+        account = _account_of(request, account)
+        if isinstance(account, JSONResponse):
+            return account
         try:
             th = await dev_chat.close(svc, thread_id, _person(request), SCREEN, account)
         except ActionError as exc:
             return _coding_err(exc)
-        return _ok(dump(th), svc)
+        return _ok(dev_chat.rest_view(svc, th), svc)
 
     @router.post("/dev-chat/{thread_id}/remove", response_model=None, dependencies=CALLER)
     async def remove_dev_chat(
@@ -686,6 +761,9 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         """대화를 숨긴다 (기록은 남긴다, A2A `dev_chat_remove`와 같은 함수). 띄운 작업은 그대로
         돈다. 답하는 중이어도 숨긴다 (늦게 온 답은 버려진다). `?account=` 연 계정."""
         svc = get_service()
+        account = _account_of(request, account)
+        if isinstance(account, JSONResponse):
+            return account
         try:
             tid = await dev_chat.remove(svc, thread_id, _person(request), SCREEN, account)
         except ActionError as exc:
