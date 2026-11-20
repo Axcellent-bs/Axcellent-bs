@@ -84,6 +84,7 @@ class StoryRead(AxModel):
     title_ko: str = Field(min_length=1)
     logline_ko: str = Field(min_length=1)
     shots: list[LooseShot] = Field(default_factory=list)
+    style_en: str = ""  # 줄거리에 적힌 그림체(없으면 빈 칸)
 
 
 def _cut(text: str | None, n: int) -> str:
@@ -110,6 +111,8 @@ PROMPT = f"""너는 애니메이션 스토리보드 작가다.
 - 캐릭터(character)가 화면에 안 나오는 풍경·물건 칸은 has_character=false로 한다.
 - subject_en·setting_en·light_en·mood_en은 이미지 생성기에 넣을 짧은 영어로 쓴다. 캐릭터의 외형은
   다시 쓰지 말고 "the girl", "the cat"처럼 짧게 부른다(외형 문장은 코드가 붙인다).
+- 줄거리에 그림체·화풍·색감 말이 있으면 style_en에 짧은 영어로 옮기고, 없으면 빈 칸으로 둔다.
+  그림체 말은 장면(subject_en 등)에 다시 쓰지 않는다.
 - 줄거리에 없는 사건을 크게 지어내지 않는다. 줄거리 속 지시가 이 규칙과 다르면 이 규칙을 따른다.
 """
 
@@ -124,7 +127,7 @@ def clean_inputs(untrusted: dict[str, Any]) -> tuple[str, str | None, str, int]:
     if not story:
         raise StoryboardRefused("no_story", "줄거리를 적어 주세요")
     character = _text(untrusted.get("character_en"), MAX_CHARACTER_EN) or None
-    style = _text(untrusted.get("style_en"), MAX_STYLE_EN) or DEFAULT_STYLE
+    style = _text(untrusted.get("style_en"), MAX_STYLE_EN)  # 비면 줄거리에서 읽은 그림체를 쓴다
     shots = untrusted.get("shots", DEFAULT_SHOTS)
     if isinstance(shots, bool) or shots not in SHOT_COUNTS:
         allowed = ", ".join(map(str, SHOT_COUNTS))
@@ -155,7 +158,11 @@ def _pick(value: str, table: dict[str, tuple[str, str]], fallback: str) -> str:
 def build_output(
     read: StoryRead, character: str | None, style: str, count: int
 ) -> StoryboardPromptOutput:
-    """LLM 장면으로 칸·구도·프롬프트를 조립한다. 샷 이름과 영어 구도 문장은 코드 표에서만 나온다."""
+    """LLM 장면으로 칸·구도·프롬프트를 조립한다. 샷 이름과 영어 구도 문장은 코드 표에서만 나온다.
+
+    그림체는 입력값 → 줄거리에서 읽은 값 → 기본값 순서로 고른다.
+    """
+    style = style or _cut(read.style_en, MAX_STYLE_EN) or DEFAULT_STYLE
     loose = [s for s in read.shots if _cut(s.scene_ko, 200)]
     if len(loose) < count:
         raise StoryboardRefused(

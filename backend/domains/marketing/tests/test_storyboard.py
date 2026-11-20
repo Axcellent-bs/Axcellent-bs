@@ -151,3 +151,16 @@ def test_handler_refusal_is_a_failed_result_with_outcome(monkeypatch: pytest.Mon
     monkeypatch.setattr(handlers, "STORYBOARD_LLM", lambda: None)
     result = asyncio.run(handlers.HANDLERS["storyboard_prompt"](_request({"story": STORY})))
     assert result.status == TaskStatus.FAILED and result.outcome == "llm_not_configured"
+
+
+def test_style_written_in_the_story_is_used_when_no_style_is_given() -> None:
+    read = _read(6, style_en="watercolor storybook illustration")
+    out = _make({"story": STORY, "shots": 6}, _llm(read))
+    assert out.style_en == "watercolor storybook illustration"
+    assert out.shots[0].prompt_en.startswith("watercolor storybook illustration.")
+
+
+def test_given_style_wins_over_the_style_read_from_the_story() -> None:
+    read = _read(6, style_en="watercolor")
+    out = _make({"story": STORY, "shots": 6, "style_en": "pixel art"}, _llm(read))
+    assert out.style_en == "pixel art"

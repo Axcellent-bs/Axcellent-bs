@@ -167,6 +167,7 @@ SERVICES: tuple[Service, ...] = (
             "channel_followers",
             "character_sheet_prompt",
             "storyboard_prompt",
+            "higgsfield_status",
             "receive_campaign_brief",
             "list_campaign_briefs",
             "get_campaign_brief",

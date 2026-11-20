@@ -32,17 +32,9 @@ export const SHOT_COUNTS = [6, 9, 12] as const;
 export type ShotCount = (typeof SHOT_COUNTS)[number];
 export const MAX_STORY = 1000;
 
-/** 그림체 고르기. value는 이미지 생성기에 그대로 들어가는 영어 문장이다 */
-export const STYLES: { label: string; value: string }[] = [
-  { label: "손그림 애니메이션", value: "soft hand-painted anime illustration, warm cinematic lighting, rich detailed backgrounds" },
-  { label: "그림책 수채화", value: "storybook watercolor illustration, soft paper texture, gentle pastel colors" },
-  { label: "3D 애니메이션", value: "stylized 3D animated film still, soft global illumination, expressive characters" },
-  { label: "실사 영화", value: "cinematic live-action film still, natural light, shallow depth of field, 35mm" },
-];
-
 const PATH = "/api/dashboard/marketing/storyboard";
 
-export async function makeStoryboard(body: { story: string; character_en?: string; style_en?: string; shots: ShotCount }): Promise<StoryboardResult> {
+export async function makeStoryboard(body: { story: string; character_en?: string; shots: ShotCount }): Promise<StoryboardResult> {
   const res = await fetch(`${DASHBOARD_API_URL}${PATH}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...dashboardAuth() },

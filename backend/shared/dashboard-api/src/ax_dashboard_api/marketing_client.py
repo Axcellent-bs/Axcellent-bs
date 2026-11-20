@@ -667,3 +667,24 @@ async def storyboard_call(
         f"마케팅이 요청을 처리하지 못했다 ({result.outcome})"
     )
     raise ApiError(status, code, str(message))
+
+
+async def higgsfield_status_call() -> dict[str, Any]:
+    """Higgsfield 연결 상태 skill(read). 키 값은 돌아오지 않는다."""
+    config.set_agent_name(AGENT_NAME)
+    request = AgentRequest(
+        meta=RequestMeta(
+            context_id=f"ctx_hfstatus_{uuid.uuid4().hex[:12]}",
+            token=config.agent_token(AGENT_NAME),
+            deadline=datetime.now(UTC) + timedelta(seconds=20),
+            idempotency_key=f"ui:hfstatus:{uuid.uuid4().hex}",
+        ),
+        skill="higgsfield_status",
+        input={},
+    )
+    result = await SEND(TARGET, request)
+    if result.status == TaskStatus.COMPLETED:
+        return result.output or {}
+    if result.status == TaskStatus.CANCELED:
+        raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
+    raise ApiError(502, "UPSTREAM_FAILED", f"마케팅이 요청을 처리하지 못했다 ({result.outcome})")
