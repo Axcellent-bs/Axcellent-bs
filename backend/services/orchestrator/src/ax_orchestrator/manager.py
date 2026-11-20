@@ -386,8 +386,8 @@ class IncidentManager:
         완료가 반영되면 단계가 이어지고, 진행 알림은 마지막 응답 시각만 갱신한다.
         """
         inc = self.incidents.get(env.context_id or "")
-        if inc is None:
-            return "unmatched", None
+        if inc is None:  # 장애 이벤트가 아니면 고객 의뢰의 긴 작업 알림인지 본다
+            return self._resume_request_async(env), None
         kind = "progress" if env.type == EventType.TASK_PROGRESS else "completed"
         model = TaskProgressData if kind == "progress" else TaskCompletedData
         try:
@@ -408,6 +408,16 @@ class IncidentManager:
             inc.log(f"긴 작업 알림을 먼저 받아 보관: {data['task_id']} ({kind}, {env.event_id})")
             return "kept", inc
         return "unmatched", inc
+
+    def _resume_request_async(self, env: EventEnvelope) -> str:
+        """고객 의뢰 단계가 기다리는 긴 작업 알림을 의뢰 실행기에 넘긴다. 결과는 문자열이다."""
+        kind = "progress" if env.type == EventType.TASK_PROGRESS else "completed"
+        model = TaskProgressData if kind == "progress" else TaskCompletedData
+        try:
+            data = model.model_validate(env.data).model_dump(mode="json")
+        except ValueError:
+            return "unmatched"
+        return self.request_runner.receive_async(kind, env.source, data, env.context_id)
 
     async def _resume_review(self, env: EventEnvelope) -> tuple[str, Incident | None]:
         """안전 관문의 사람 결정으로 승인 대기 단계를 잇는다 (`review_id`로 맞춘다).

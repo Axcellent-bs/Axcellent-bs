@@ -48,12 +48,35 @@ def test_steps_follow_only_earlier_steps_and_human_step_has_no_department() -> N
                 assert step.dept is None and step.grade is None
 
 
-def test_promo_video_starts_at_data_analysis_and_is_blocked_until_other_teams_finish() -> None:
+def test_promo_video_runs_trend_then_insight_then_plan_then_a_person_then_marketing() -> None:
     promo = BY_NAME["promo_video"]
     assert promo.first_dept == "data"
-    assert [s.dept for s in promo.steps] == ["data", "planning", None, "marketing"]
-    assert promo.blocked_by
+    assert [s.skill for s in promo.steps] == [
+        "trend_report_create",
+        "trend_report_insight",
+        "receive_insight",
+        "human_check",
+        "generate_media",
+    ]
+    assert [s.dept for s in promo.steps] == ["data", "data", "planning", None, "marketing"]
+    assert promo.blocked_by is None  # 데이터분석·기획 연결이 끝나 실행할 수 있다
     assert promo.changes_state
+
+
+def test_trend_report_is_called_as_a_long_task_with_the_customer_sentence_in_input() -> None:
+    for task in (BY_NAME["promo_video"].steps[0], BY_NAME["trend_report"].steps[0]):
+        assert task.skill == "trend_report_create"
+        assert dict(task.fixed_input) == {"caller": "orchestrator"}  # 아니면 부서가 동기로 끝낸다
+        assert task.text_key == "request_text"
+        assert task.ref_key == "report_id"
+    assert BY_NAME["trend_report"].blocked_by is None
+
+
+def test_insight_is_passed_whole_to_the_planning_step_and_only_numbers_otherwise() -> None:
+    steps = {s.step_id: s for s in BY_NAME["promo_video"].steps}
+    assert steps["insight"].takes_ref == "report_id" and steps["insight"].carries == "insight"
+    assert steps["plan"].takes_carry and steps["plan"].grade == "A"
+    assert steps["plan"].takes_ref is None
 
 
 def test_read_tasks_do_not_change_state_and_change_tasks_say_so() -> None:
@@ -64,16 +87,20 @@ def test_read_tasks_do_not_change_state_and_change_tasks_say_so() -> None:
 
 def test_plan_of_has_what_work_requests_needs() -> None:
     plan = request_tasks.plan_of(BY_NAME["promo_video"])
-    assert plan[1] == {
+    assert plan[2] == {
         "step_id": "plan",
         "dept": "planning",
         "skill": "receive_insight",
         "label": "영상 제작안",
-        "after": ["trend"],
+        "after": ["insight"],
         "grade": "A",
         "kind": "agent",
         "ref_key": None,
         "takes_ref": None,
+        "fixed_input": {},
+        "text_key": None,
+        "carries": None,
+        "takes_carry": True,
     }
     assert plan[0]["ref_key"] == "report_id"  # 트렌드 보고서는 번호(report_id)만 다음 부서에 넘긴다
 

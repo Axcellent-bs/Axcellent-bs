@@ -1,5 +1,6 @@
 """의뢰 실행: 계획의 첫 부서부터 시키고, 단계 상태를 의뢰 기록에 남긴다."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
+from ax_orchestrator import request_tasks
 from ax_orchestrator.registry import SkillEntry
 from ax_orchestrator.request_runner import RequestRunner
 from ax_orchestrator.work_requests import WorkRequests
@@ -230,8 +232,10 @@ async def test_exception_in_caller_fails_the_step_and_does_not_loop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_blocked_task_is_handed_to_a_person_not_run() -> None:
-    reqs, rid = make(plan=PLAN[:1], task="promo_video")  # 일 목록에서 아직 실행 준비가 안 된 일
+async def test_blocked_task_is_handed_to_a_person_not_run(monkeypatch) -> None:
+    waiting = replace(request_tasks.BY_NAME["promo_video"], blocked_by="다른 팀 작업 대기")
+    monkeypatch.setitem(request_tasks.BY_NAME, "promo_video", waiting)  # 아직 실행 준비가 안 된 일
+    reqs, rid = make(plan=PLAN[:1], task="promo_video")
     fake = Fake({"s_a": entry("data", "s_a")}, {"s_a": [result(TaskStatus.COMPLETED)]})
     await runner(reqs, fake).run(rid)
     assert reqs.get(rid)["status"] == "needs_human" and fake.calls == []

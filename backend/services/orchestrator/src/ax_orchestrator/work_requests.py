@@ -60,6 +60,7 @@ def _blank_step() -> dict[str, Any]:
         "review_id": None,
         "handoff_task_id": None,
         "async_task_id": None,
+        "last_signal_at": None,  # 긴 작업을 받아 간 뒤 마지막으로 소식을 들은 때
         "started_at": None,
         "finished_at": None,
     }
@@ -181,6 +182,7 @@ class WorkRequests:
             "context_id": None,
             "thread_id": None,  # 접수한 대화 번호. 진행을 알릴 때 쓴다
             "handoff_task_id": None,  # 사람 받은 요청에 올린 일 번호
+            "carry": {},  # 다음 단계로 그대로 넘길 앞 단계 결과 (화면·조회에는 내지 않는다)
         }
         self._save(row)
         self._trim()
@@ -215,6 +217,7 @@ class WorkRequests:
             ],
         )
         row["steps"] = {}
+        row["carry"] = {}
         for spec in plan:
             step = _blank_step()
             step["grade"] = spec.get("grade")
@@ -222,6 +225,21 @@ class WorkRequests:
         row["log"].append({"at": now().isoformat(), "message": f"일을 골랐다: {task}"})
         self._save(row)
         return copy.deepcopy(row)
+
+    def set_carry(self, request_id: str, step_id: str, value: dict[str, Any] | None) -> None:
+        """단계 결과 중 다음 단계가 그대로 받을 값을 둔다 (None이면 비운다). 쓰고 나면 지운다."""
+        row = self._row(request_id)
+        carry = row.setdefault("carry", {})
+        if value:
+            carry[step_id] = copy.deepcopy(value)
+        else:
+            carry.pop(step_id, None)
+        self._save(row)
+
+    def get_carry(self, request_id: str, step_id: str) -> dict[str, Any] | None:
+        row = self._rows.get(request_id)
+        value = ((row or {}).get("carry") or {}).get(step_id)
+        return copy.deepcopy(value) if isinstance(value, dict) and value else None
 
     def link_thread(self, request_id: str, thread_id: str | None) -> None:
         """의뢰를 접수한 대화를 적는다 (진행 알림을 그 대화로 보낸다)."""
@@ -288,7 +306,7 @@ class WorkRequests:
         step = row["steps"].get(step_id)
         if step is None:
             raise KeyError(f"계획에 없는 단계: {step_id}")
-        unknown = set(fields) - set(step)
+        unknown = set(fields) - set(_blank_step())
         if unknown:
             raise KeyError(f"단계에 없는 칸: {', '.join(sorted(unknown))}")
         step.update(fields)
