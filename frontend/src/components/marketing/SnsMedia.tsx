@@ -9,14 +9,13 @@ import { PublishControlCard } from "./PublishControlCard";
 import { VideoProviderCard } from "./VideoProviderCard";
 import { CostLimitCard } from "./CostLimitCard";
 import { CharacterSheetMaker } from "./CharacterSheetMaker";
-import { HiggsfieldStatusCard } from "./HiggsfieldStatusCard";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, type StoredBrief } from "@/lib/briefs";
 
 // SNS·미디어 탭. 이미지·영상 생성을 안내하고(SNS 게시 흐름·캐러셀·AI 표시 안내는 Instagram 자동 게시 카드의 물음표),
 // 넘어온 기획안은 저장된 미디어 요청으로 미디어 초안을 만들 수 있다(BriefMediaMaker: 사용량 확인 → 생성 → 초안·검사). 게시는 하지 않는다.
 // 안전 장치 보류 큐(finance.reviews)에서 읽을 수 있는 마케팅 항목(publish_sns, generate_media)만 읽기 전용으로 보여 준다.
 // 보류 결정은 장애·공지·캠페인 탭의 보류 큐에서 한다. 이 탭은 결정하지 않는다.
-// 이미지 시트 · 스토리보드 카드 위에 Higgsfield 연결 상태를 30초마다 보여 준다.
+// 이미지 시트 · 스토리보드 카드(Higgsfield 결과는 카드 안 RenderPanel이 보여 준다).
 
 const REFRESH_MS = 15_000;
 const SNS_ACTIONS = ["publish_sns", "generate_media", "generate_creative_video"] as const;
@@ -88,7 +87,6 @@ export function SnsMedia() {
       <VideoProviderCard />
       <CostLimitCard />
 
-      <HiggsfieldStatusCard />
       <CharacterSheetMaker />
 
       <Section title="받은 기획안에서 넘어온 작업" desc="받은 기획안 탭에서 SNS·미디어로 넘긴 기획안입니다. 넘기면 글 초안과 미디어 요청 초안까지만 만들고, 아래 다음 단계는 사람이 이어서 합니다. '미디어 만들기'를 누르면 예상 비용을 확인한 뒤 저장된 종류·필드로 미디어를 만들고 초안 검사까지 합니다. 게시는 하지 않으며 사람 승인(C 등급)이 따로 필요합니다. 종류와 필드는 받은 기획안 탭에서 바꿀 수 있습니다.">
