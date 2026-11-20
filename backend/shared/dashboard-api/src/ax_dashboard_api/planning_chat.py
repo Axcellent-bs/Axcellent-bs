@@ -35,7 +35,9 @@ SendFn = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 SEND: SendFn = call_agent  # 테스트에서 바꿀 수 있다
 
 
-async def call(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def call(
+    skill: str, payload: dict[str, Any], *, tenant_id: str | None = None
+) -> dict[str, Any]:
     config.set_agent_name(AGENT_NAME)
     request = AgentRequest(
         meta=RequestMeta(
@@ -43,6 +45,7 @@ async def call(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=DEADLINE_SECONDS),
             idempotency_key=f"ui:planchat:{uuid.uuid4().hex}",
+            **({"tenant_id": tenant_id} if tenant_id else {}),  # 개인 MCP 창구: 토큰의 회사
         ),
         skill=skill,
         input=payload,

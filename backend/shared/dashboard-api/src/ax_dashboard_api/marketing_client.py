@@ -600,7 +600,9 @@ CHAT_REFUSALS = {
 }
 
 
-async def chat_call(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def chat_call(
+    skill: str, payload: dict[str, Any], *, tenant_id: str | None = None
+) -> dict[str, Any]:
     """마케팅 AI 대화 skill 호출. 거절(outcome)은 오류 모양(`{error:{code,message}}`)으로 바꾼다."""
     config.set_agent_name(AGENT_NAME)
     request = AgentRequest(
@@ -609,6 +611,7 @@ async def chat_call(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=CHAT_DEADLINE_SECONDS),
             idempotency_key=f"ui:chat:{uuid.uuid4().hex}",
+            **({"tenant_id": tenant_id} if tenant_id else {}),  # 개인 MCP 창구: 토큰의 회사
         ),
         skill=skill,
         input=payload,

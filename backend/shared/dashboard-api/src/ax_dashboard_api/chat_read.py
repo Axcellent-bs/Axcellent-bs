@@ -38,19 +38,26 @@ _CALLS = {
 }
 
 
-async def get_thread(agent: str, thread_id: str, who: str,
-                     authorization: str | None) -> dict[str, Any]:  # fmt: skip
-    """부서 대화 하나 (부서 열람 규칙 그대로: `who` 본인이면 원문, 아니면 restricted)."""
+async def get_thread(agent: str, thread_id: str, who: str, authorization: str | None,
+                     *, role: str | None = None,
+                     tenant_id: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """부서 대화 하나 (부서 열람 규칙 그대로: `who` 본인이면 원문, 아니면 restricted).
+
+    개인 MCP 창구(`mcp_gateway.py`)는 사람 토큰이 없어 고객지원 자격(`role`)과 회사(`tenant_id`)를
+    직접 준다. 화면 경로는 둘 다 비워 지금처럼 `authorization`에서 정한다."""
     if agent == "support":
-        _, role = support_chat.viewer_of(authorization)
+        if role is None:
+            _, role = support_chat.viewer_of(authorization)
         out = await support_client.call(
-            "support_chat_get", {"thread_id": thread_id, "viewer": who, "role": role}
+            "support_chat_get",
+            {"thread_id": thread_id, "viewer": who, "role": role},
+            tenant_id=tenant_id,
         )
         return out if isinstance(out, dict) else {}
     call = _CALLS.get(agent)
     if call is None:
         raise ApiError(404, "NOT_FOUND", f"모르는 부서다 ({agent})")
-    out = await call(f"{agent}_chat_get", {"who": who, "thread_id": thread_id})
+    out = await call(f"{agent}_chat_get", {"who": who, "thread_id": thread_id}, tenant_id=tenant_id)
     thread = out.get("thread") if isinstance(out, dict) else None
     return thread if isinstance(thread, dict) else {}
 

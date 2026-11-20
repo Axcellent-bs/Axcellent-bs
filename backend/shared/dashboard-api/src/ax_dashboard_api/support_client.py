@@ -31,13 +31,14 @@ SendFn = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 SEND: SendFn = call_agent  # 테스트에서 바꿀 수 있다
 
 
-def _meta(context_id: str, key: str | None) -> RequestMeta:
+def _meta(context_id: str, key: str | None, tenant_id: str | None = None) -> RequestMeta:
     config.set_agent_name(AGENT_NAME)
     return RequestMeta(
         context_id=context_id,
         token=config.agent_token(AGENT_NAME),
         deadline=datetime.now(UTC) + timedelta(seconds=DEADLINE_SECONDS),
         idempotency_key=key,
+        **({"tenant_id": tenant_id} if tenant_id else {}),  # 개인 MCP 창구: 토큰의 회사
     )
 
 
@@ -91,6 +92,7 @@ async def call(
     target: str | None = None,
     key: str | None = None,
     errors: Mapping[str, tuple[int, str]] | None = None,
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """support skill을 부른다. 상태를 바꾸는 skill에는 `target`(대상)을 줘 멱등 키를 만든다.
 
@@ -101,7 +103,7 @@ async def call(
     context_id = f"{UI_CONTEXT_PREFIX}{uuid.uuid4().hex[:12]}"
     key = key or (f"{context_id}:{skill}:{target}" if target else None)
     request = AgentRequest(
-        meta=_meta(context_id, key),
+        meta=_meta(context_id, key, tenant_id),
         skill=skill,
         input=input or {},
         untrusted=untrusted or {},

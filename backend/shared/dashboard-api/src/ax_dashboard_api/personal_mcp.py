@@ -34,6 +34,7 @@
 - POST `/token/delete`  끊기
 - POST `/settings`      고른 AI 직원·내 몫 %
 - POST `/mcp/check`     MCP 서버 → 토큰 검사(에이전트 토큰)
+- POST `/mcp`           전 직원 MCP 창구(개인 토큰, `mcp_gateway.py`). `inspect`를 바로 쓴다
 """
 
 from __future__ import annotations
@@ -434,7 +435,15 @@ def _mcp_server(authorization: str | None) -> str:
 
 def check(body: PersonalMcpCheckInput) -> PersonalMcpCheckOutput:
     """토큰 → 주인 계정, 고른 AI 직원인지, 회사 상한·내 몫 안인지."""
-    found = _read_index().get(token_hash(body.token))
+    return inspect(body.token, body.agent)
+
+
+def inspect(token: str, agent: str | None) -> PersonalMcpCheckOutput:
+    """`check`의 몸통. `agent`가 None이면 토큰·계정만 본다(전 직원 창구의 `tools/list` 등).
+
+    dashboard-api 안의 MCP 창구(`mcp_gateway.py`)는 HTTP로 묻지 않고 이 함수를 바로 부른다.
+    """
+    found = _read_index().get(token_hash(token))
     if found is None:
         return PersonalMcpCheckOutput(
             allowed=False,
@@ -458,8 +467,10 @@ def check(body: PersonalMcpCheckInput) -> PersonalMcpCheckOutput:
         "limit_tokens": usage["limit_tokens"],
         "percent": usage["percent_of_budget"],
     }
-    if body.agent not in settings.agents:
-        message = f"내 연결에서 고르지 않은 AI 직원이에요 ({body.agent})"
+    if agent is None:
+        return PersonalMcpCheckOutput(allowed=True, code="OK", **base)
+    if agent not in settings.agents:
+        message = f"내 연결에서 고르지 않은 AI 직원이에요 ({agent})"
         return PersonalMcpCheckOutput(
             allowed=False, code="AGENT_NOT_CHOSEN", message=message, **base
         )

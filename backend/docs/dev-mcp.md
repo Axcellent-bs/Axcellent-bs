@@ -33,6 +33,24 @@
 - 가져간 사람 이름은 계정 이름입니다. 도구를 돌리는 동안 A2A 메타 `on_behalf_of`와 LLM 사용 기록 계정(`llm_calls.account_id`)이 토큰 주인 계정입니다(도구 입력 값은 무시).
 - 아래 작업 대기열 토큰(`DEV_WORK_TOKENS`)·사람 토큰도 예전처럼 받습니다.
 
+## 전 직원 창구 (개인 MCP 연결, 11/20)
+
+개발 AI 밖 AI 직원(총괄·고객지원·재무·데이터분석·마케팅·기획·개발·인프라)에게는 dashboard-api의 **전 직원 창구**로 말을 겁니다.
+화면 AI 대화방과 같은 대화이고, 승인이 필요한 일은 그대로 사람 승인에 올라갑니다(설계 9.2).
+
+```bash
+claude mcp add --transport http axcellent <dashboard-api 주소>/api/dashboard/me/ai-connection/mcp \
+  --header "Authorization: Bearer axm_…"
+```
+
+- 토큰은 내 연결에서 발급한 개인 MCP 연결 토큰(`axm_…`)만 받습니다. 작업 대기열 토큰·사람 토큰·세션 토큰은 401 `PERSONAL_TOKEN_REQUIRED`.
+- 도구는 내 연결에서 고른 직원마다 `ask_<직원>` 하나(`ask_data`, `ask_finance` …). 입력은 `message`(할 말)와 선택 `thread_id`(이어 갈 대화).
+  답이 20초 안에 안 붙으면 `status: answering`으로 돌아오고, 같은 `thread_id`로 `message` 없이 다시 부르면 답을 읽습니다.
+- 인사·아카이브 AI는 아직 대화 창구가 없어 도구가 없습니다(준비 중).
+- 막힘: 고르지 않은 직원 403 `AGENT_NOT_CHOSEN`, 내 몫·회사 상한 429, 모르는·끊은 토큰 401. 부서가 막은 것(남의 대화, 닫힌 대화 등)은 도구 오류(`isError`)로 돌아옵니다.
+- Codex·Cursor는 화면 시스템 관리 › 도구 연결 › 내 연결 › 연결 방법의 설정 글을 그대로 씁니다. 아래 작업 대기열(`axcellent-dev`)과 같은 토큰입니다.
+- 서버: 브라우저에서 부를 일이 있으면 `DASHBOARD_MCP_ALLOWED_ORIGINS`, 답 기다리는 시간은 `DASHBOARD_MCP_WAIT_SECONDS`(기본 20).
+
 ## Claude Code에 붙이기
 
 서버 관리자에게 내 **작업 대기열 토큰**을 받습니다 (서버 `DEV_WORK_TOKENS`의 `이름:토큰`, 로컬은 `run_all.sh`가 만든 `backend/.data/tokens.env`의 `WORK_TOKEN`, 데모 목 모드는 `human:<내 이름>`).
