@@ -2,8 +2,8 @@
 // 화면 시험 도구(jsdom 등)가 없어서 화면이 그리는 값을 정하는 함수를 시험한다.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ToolConnection, ToolField, ToolKind } from "../../lib/toolConnections";
-import { DEPLOY_CHOICES, bodyOf, deployRows, formActions, formReducer, initForm, missingFields } from "../../lib/toolForms.ts";
+import type { LatestDeploy, ToolConnection, ToolField, ToolKind } from "../../lib/toolConnections";
+import { DEPLOY_CHOICES, bodyOf, deployRows, formActions, formReducer, initForm, latestDeployView, missingFields } from "../../lib/toolForms.ts";
 
 const f = (key: string, label: string, extra: Partial<ToolField> = {}): ToolField => ({ key, label, secret: false, required: true, help: "", ...extra });
 // 서버 FIELDS(dashboard-api tool_connections.py)와 같은 모양
@@ -120,4 +120,33 @@ test("고치기: 저장된 값으로 채우고 비밀 칸은 비운다. 저장�
   assert.equal(bodyOf(s).id, "j9");
   // 새 연결은 비밀 칸이 필수
   assert.deepEqual(missingFields(FIELDS.jenkins, initForm("jenkins", FIELDS.jenkins)), ["Jenkins 주소", "사용자 이름", "API 토큰", "작업 이름", "대상 서비스"]);
+});
+
+// 서비스별 최근 배포 (dashboard-api GET /api/dashboard/deployments/latest → 인프라 받아 둔 이력)
+const dep = (extra: Partial<LatestDeploy> = {}): LatestDeploy => ({
+  service: "shop-api", version: "v3.0.1", deployed_at: "2026-11-18T05:05:00Z", source: "github_actions", is_rollback: false, version_from_sha: false, ...extra,
+});
+const fmt = (iso: string) => `T(${iso})`;
+
+test("최근 배포: 그 서비스 행의 버전 · 시각", () => {
+  const v = latestDeployView("shop-api", { state: "ok", rows: [dep({ service: "other", version: "v9" }), dep()] }, fmt);
+  assert.deepEqual(v, { tone: "ok", text: "최근 배포 v3.0.1 · T(2026-11-18T05:05:00Z)", note: null });
+});
+
+test("최근 배포: 기록이 없으면 '아직 받은 배포 기록 없음' (지어내지 않는다)", () => {
+  assert.deepEqual(latestDeployView("shop-api", { state: "ok", rows: [] }, fmt), { tone: "off", text: "아직 받은 배포 기록 없음 (2분마다 확인)", note: null });
+  assert.equal(latestDeployView("", { state: "ok", rows: [dep()] }, fmt).text, "아직 받은 배포 기록 없음 (2분마다 확인)");
+});
+
+test("최근 배포: 못 읽으면 '확인할 수 없음' + 이유, 읽는 중은 따로", () => {
+  assert.deepEqual(latestDeployView("shop-api", { state: "error", reason: "incident에 연결할 수 없다" }, fmt), { tone: "wait", text: "최근 배포 확인할 수 없음", note: "incident에 연결할 수 없다" });
+  // 못 읽음과 기록 없음은 다른 색
+  assert.notEqual(latestDeployView("shop-api", { state: "error", reason: "x" }, fmt).tone, latestDeployView("shop-api", { state: "ok", rows: [] }, fmt).tone);
+  assert.equal(latestDeployView("shop-api", { state: "loading" }, fmt).text, "최근 배포 불러오는 중…");
+});
+
+test("최근 배포: 커밋 앞자리 버전·롤백 다시 배포는 그대로 밝힌다", () => {
+  assert.equal(latestDeployView("shop-api", { state: "ok", rows: [dep({ version: "abc1234", version_from_sha: true })] }, fmt).text, "최근 배포 커밋 abc1234 · T(2026-11-18T05:05:00Z)");
+  assert.equal(latestDeployView("shop-api", { state: "ok", rows: [dep({ is_rollback: true })] }, fmt).note, "롤백으로 다시 배포한 버전");
+  assert.equal(latestDeployView("shop-api", { state: "ok", rows: [dep({ source: "jenkins" })] }, fmt).note, null);
 });

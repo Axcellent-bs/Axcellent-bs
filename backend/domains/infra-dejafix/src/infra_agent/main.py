@@ -1,7 +1,8 @@
 """ax-agent-infra 서버 진입점.
 
 템플릿 `create_agent_app(card, HANDLERS)`가 `/.well-known/agent-card.json`, `/health`,
-`POST /a2a`를 준다. 여기에 시연 준비 `POST /api/infra/demo-deploy`(운영자 admin만)를 더한다.
+`POST /a2a`를 준다. 여기에 시연 준비 `POST /api/infra/demo-deploy`(운영자 admin만)와
+서비스별 최근 배포 읽기 `GET /api/infra/deployments/latest`(dashboard-api·운영자 토큰만)를 더한다.
 시작할 때 DejaFix 현재 장애 감시(`dejafix_watch`, 주소는 매 회차 정함)와
 배포 이력 미리 받기(`deploy_poll`, 목 모드가 아닐 때만)를 켠다. 템플릿 앱은 FastAPI lifespan을 써서
 `on_startup`이 돌지 않으므로 lifespan을 감싼다.
@@ -29,6 +30,8 @@ from infra_agent.handlers import HANDLERS
 from infra_agent.runtime import get_runtime
 
 ADMIN = "admin"
+# 최근 배포 읽기를 부를 수 있는 에이전트: 도구 연결 화면을 중계하는 dashboard-api와 운영자
+LATEST_READERS = frozenset({"dashboard-api", ADMIN})
 
 
 def _card_path() -> Path:
@@ -60,6 +63,19 @@ def require_admin(authorization: str | None = Header(default=None)) -> None:
         raise HTTPException(401, "토큰을 검증할 수 없다") from exc
     if name != ADMIN:
         raise HTTPException(403, "운영자(admin) 토큰이 필요하다")
+
+
+def require_reader(authorization: str | None = Header(default=None)) -> None:
+    """dashboard-api·운영자 에이전트 토큰만. 없거나 모르면 401, 다른 에이전트면 403."""
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(401, "토큰이 필요하다 (Authorization: Bearer 토큰)")
+    try:
+        name = verify_token(token.strip())
+    except PermissionError as exc:
+        raise HTTPException(401, "토큰을 검증할 수 없다") from exc
+    if name not in LATEST_READERS:
+        raise HTTPException(403, "dashboard-api 또는 운영자(admin) 토큰이 필요하다")
 
 
 class DemoDeployInput(BaseModel):
@@ -165,6 +181,41 @@ def demo_deploy_reset(body: DemoResetInput) -> dict:
         rt.history.mark_rolled_back(top)
         marked.append(_deployment_view(top))
     return {"data": {"service": body.service, "rolled_back": marked}}
+
+
+@app.get("/api/infra/deployments/latest", dependencies=[Depends(require_reader)])
+def latest_deployments() -> dict:
+    """서비스별 지금 돌고 있는 배포(되돌리지 않은 가장 최근 성공 배포). 읽기만 한다.
+
+    배포 도구에서 받은 실행(`deploy_poll`이 120초마다 받는 성공 실행)만 내보낸다. 패키지 시연
+    이력(`deployments.json`)·시연 준비 기록(`source` 없음)은 화면에 보내지 않는다(지어내지 않는다).
+    도구 이력이 없는 서비스는 목록에 없다. `source`는 도구 이름(`github_actions`·`jenkins`).
+    이력은 연결 보관함 파일을 읽어 거르므로 동기 함수로 두어 이벤트 루프 밖(스레드 풀)에서 돈다.
+    """
+    history = get_runtime().history
+    # 한 번만 읽은 사본으로 고른다. live()는 보관함을 읽으므로 서비스마다 부르지 않고(요청당 한 번),
+    # deploy_poll이 이벤트 루프에서 이력 목록을 통째로 바꿔도 이 스레드는 같은 사본을 본다
+    live = list(history.live())
+    rolled_back = set(history.rolled_back)
+    latest: dict[str, Deployment] = {}
+    for d in live:
+        if d.source is None or d.deploy_id in rolled_back:
+            continue  # 도구에서 받은 배포가 아니거나 되돌린 배포
+        current = latest.get(d.service)
+        if current is None or d.deployed_at > current.deployed_at:
+            latest[d.service] = d
+    rows: list[dict[str, Any]] = [
+        {
+            "service": d.service,
+            "version": d.version,
+            "deployed_at": d.deployed_at.isoformat().replace("+00:00", "Z"),
+            "source": d.source,
+            "is_rollback": d.is_rollback,
+            "version_from_sha": d.version_from_sha,
+        }
+        for _, d in sorted(latest.items())
+    ]
+    return {"data": rows}
 
 
 def _deployment_view(deployment: Deployment) -> dict[str, Any]:
