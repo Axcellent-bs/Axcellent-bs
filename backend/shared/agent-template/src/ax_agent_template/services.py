@@ -168,6 +168,8 @@ SERVICES: tuple[Service, ...] = (
             "character_sheet_prompt",
             "storyboard_prompt",
             "higgsfield_status",
+            "creative_records_list",
+            "creative_record_get",
             "receive_campaign_brief",
             "list_campaign_briefs",
             "get_campaign_brief",

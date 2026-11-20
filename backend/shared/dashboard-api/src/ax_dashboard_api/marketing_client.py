@@ -591,7 +591,9 @@ CHARACTER_SHEET_REFUSALS = {
 CHARACTER_SHEET_DEADLINE_SECONDS = 120  # 이미지를 읽는 LLM 호출이라 대화보다 길게 둔다
 
 
-async def character_sheet_call(image: dict[str, Any], note: str | None) -> dict[str, Any]:
+async def character_sheet_call(
+    image: dict[str, Any], note: str | None, thumbnail: str | None = None
+) -> dict[str, Any]:
     """캐릭터 시트 프롬프트 skill.
 
     이미지·메모는 사람이 올린 것이라 untrusted로만 넘긴다(저장 안 함).
@@ -600,6 +602,8 @@ async def character_sheet_call(image: dict[str, Any], note: str | None) -> dict[
     untrusted: dict[str, Any] = {"image": image}
     if note:
         untrusted["note"] = note
+    if thumbnail:  # 제작 기록에 남길 작은 미리보기(원본은 저장하지 않는다)
+        untrusted["thumbnail"] = thumbnail
     request = AgentRequest(
         meta=RequestMeta(
             context_id=f"ctx_charsheet_{uuid.uuid4().hex[:12]}",
@@ -634,7 +638,11 @@ STORYBOARD_DEADLINE_SECONDS = 120  # 칸 12개를 쓰는 LLM 호출이라 대화
 
 
 async def storyboard_call(
-    story: str, character_en: str | None, style_en: str | None, shots: int
+    story: str,
+    character_en: str | None,
+    style_en: str | None,
+    shots: int,
+    record_id: str | None = None,
 ) -> dict[str, Any]:
     """스토리보드 프롬프트 skill.
 
@@ -646,6 +654,8 @@ async def storyboard_call(
         untrusted["character_en"] = character_en
     if style_en:
         untrusted["style_en"] = style_en
+    if record_id:  # 이 제작 기록에 스토리보드를 붙인다
+        untrusted["record_id"] = record_id
     request = AgentRequest(
         meta=RequestMeta(
             context_id=f"ctx_storyboard_{uuid.uuid4().hex[:12]}",
@@ -688,3 +698,35 @@ async def higgsfield_status_call() -> dict[str, Any]:
     if result.status == TaskStatus.CANCELED:
         raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
     raise ApiError(502, "UPSTREAM_FAILED", f"마케팅이 요청을 처리하지 못했다 ({result.outcome})")
+
+
+async def _creative_read(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
+    config.set_agent_name(AGENT_NAME)
+    request = AgentRequest(
+        meta=RequestMeta(
+            context_id=f"ctx_creative_{uuid.uuid4().hex[:12]}",
+            token=config.agent_token(AGENT_NAME),
+            deadline=datetime.now(UTC) + timedelta(seconds=20),
+            idempotency_key=f"ui:creative:{uuid.uuid4().hex}",
+        ),
+        skill=skill,
+        input=payload,
+    )
+    result = await SEND(TARGET, request)
+    if result.status == TaskStatus.COMPLETED:
+        return result.output or {}
+    if result.status == TaskStatus.CANCELED:
+        raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
+    if result.outcome == "not_found":
+        raise ApiError(404, "NOT_FOUND", "제작 기록이 없다")
+    raise ApiError(502, "UPSTREAM_FAILED", f"마케팅이 요청을 처리하지 못했다 ({result.outcome})")
+
+
+async def creative_records_call(limit: int) -> dict[str, Any]:
+    """제작 기록 목록(read)."""
+    return await _creative_read("creative_records_list", {"limit": limit})
+
+
+async def creative_record_call(record_id: str) -> dict[str, Any]:
+    """제작 기록 하나(read)."""
+    return await _creative_read("creative_record_get", {"record_id": record_id})

@@ -103,3 +103,9 @@ def test_mock_mode_does_not_pretend(
     monkeypatch.setenv("DASHBOARD_MOCK", "1")
     assert client.post(URL, json={"image": IMAGE}).status_code == 501
     assert fake.calls == []
+
+
+def test_thumbnail_goes_untrusted_for_the_record(client: TestClient, fake: Fake) -> None:
+    res = client.post(URL, json={"image": IMAGE, "thumbnail_base64": "/9j/4AAQ"})
+    assert res.status_code == 200
+    assert fake.calls[0][1].untrusted == {"image": IMAGE, "thumbnail": "/9j/4AAQ"}

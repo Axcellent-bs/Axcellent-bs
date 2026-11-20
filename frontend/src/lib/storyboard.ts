@@ -26,6 +26,7 @@ export interface StoryboardResult {
   shots: StoryboardShot[];
   sheet_prompt_en: string;
   negative_prompt_en: string;
+  record_id?: string | null; // 붙인 제작 기록 번호
 }
 
 export const SHOT_COUNTS = [6, 9, 12] as const;
@@ -34,11 +35,11 @@ export const MAX_STORY = 1000;
 
 const PATH = "/api/dashboard/marketing/storyboard";
 
-export async function makeStoryboard(body: { story: string; character_en?: string; shots: ShotCount }): Promise<StoryboardResult> {
+export async function makeStoryboard(body: { story: string; character_en?: string; shots: ShotCount; record_id?: string | null }): Promise<StoryboardResult> {
   const res = await fetch(`${DASHBOARD_API_URL}${PATH}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...dashboardAuth() },
-    body: JSON.stringify({ ...body, story: body.story.trim(), character_en: body.character_en?.trim() || undefined }),
+    body: JSON.stringify({ ...body, story: body.story.trim(), character_en: body.character_en?.trim() || undefined, record_id: body.record_id || undefined }),
     cache: "no-store",
   });
   const parsed: unknown = await res.json().catch(() => undefined);

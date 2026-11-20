@@ -34,6 +34,7 @@ export interface CharacterSheetResult {
   layout_ko: string[];
   prompt_en: string;
   negative_prompt_en: string;
+  record_id?: string | null; // 제작 기록 번호(CR-…)
 }
 
 /** 올리기 전에 긴 변을 이 크기로 줄인다(서버 한도 2MB, 앞단 요청 크기도 작게) */
@@ -42,7 +43,10 @@ export const ACCEPT = "image/png,image/jpeg,image/webp";
 const PATH = "/api/dashboard/marketing/character-sheet";
 
 /** 이미지 파일을 긴 변 MAX_SIDE 이하의 JPEG로 줄여 base64로 돌려준다(투명 배경은 흰색) */
-export async function shrinkImage(file: File): Promise<{ media_type: "image/jpeg"; data_base64: string; preview: string }> {
+/** 제작 기록에 남길 작은 미리보기(긴 변) */
+export const THUMB_SIDE = 256;
+
+export async function shrinkImage(file: File): Promise<{ media_type: "image/jpeg"; data_base64: string; preview: string; thumb_base64: string }> {
   if (!ACCEPT.split(",").includes(file.type)) throw new Error("PNG·JPEG·WebP 이미지만 올릴 수 있어요");
   const url = URL.createObjectURL(file);
   try {
@@ -62,17 +66,23 @@ export async function shrinkImage(file: File): Promise<{ media_type: "image/jpeg
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     const preview = canvas.toDataURL("image/jpeg", 0.9);
-    return { media_type: "image/jpeg", data_base64: preview.slice(preview.indexOf(",") + 1), preview };
+    const t = Math.min(1, THUMB_SIDE / Math.max(canvas.width, canvas.height));
+    const small = document.createElement("canvas");
+    small.width = Math.max(1, Math.round(canvas.width * t));
+    small.height = Math.max(1, Math.round(canvas.height * t));
+    small.getContext("2d")?.drawImage(canvas, 0, 0, small.width, small.height);
+    const thumb = small.toDataURL("image/jpeg", 0.8);
+    return { media_type: "image/jpeg", data_base64: preview.slice(preview.indexOf(",") + 1), preview, thumb_base64: thumb.slice(thumb.indexOf(",") + 1) };
   } finally {
     URL.revokeObjectURL(url);
   }
 }
 
-export async function makeCharacterSheet(image: { media_type: string; data_base64: string }, note: string): Promise<CharacterSheetResult> {
+export async function makeCharacterSheet(image: { media_type: string; data_base64: string }, note: string, thumb?: string): Promise<CharacterSheetResult> {
   const res = await fetch(`${DASHBOARD_API_URL}${PATH}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...dashboardAuth() },
-    body: JSON.stringify({ image, note: note.trim() || undefined }),
+    body: JSON.stringify({ image, note: note.trim() || undefined, thumbnail_base64: thumb || undefined }),
     cache: "no-store",
   });
   const parsed: unknown = await res.json().catch(() => undefined);
