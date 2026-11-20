@@ -289,9 +289,17 @@ def in_progress(s: State, owner_id: str, area: str | None = None) -> list[Item]:
 
     명부에 없는 영역 값이면 지어내지 않고 빈 목록이다 (경로 접두사를 area로 받지 않는다).
     """
+    return [i for i in in_progress_all(s, area) if i.owner_id == owner_id]
+
+
+def in_progress_all(s: State, area: str | None = None) -> list[Item]:
+    """담당자 없이 영역(`area`, 없으면 전체)의 진행 중 항목 (총괄 `list_dev_progress`).
+
+    `in_progress`와 같은 판정이다. 명부에 없는 영역 값이면 지어내지 않고 빈 목록이다.
+    """
     if area is not None and not is_roster_area(area):
         return []
-    return [i for i in all_items(s) if i.owner_id == owner_id and (area is None or i.area == area)]
+    return [i for i in all_items(s) if area is None or i.area == area]
 
 
 def known_ids(s: State) -> set[str]:

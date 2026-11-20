@@ -125,6 +125,16 @@ class ListInProgressOutput(AxModel):
     unavailable: str | None = None
 
 
+class ListDevProgressInput(AxModel):
+    """개발 진행 중 항목 전체 (총괄의 "개발 진행 상황", read). 출력은 `ListInProgressOutput`.
+
+    `list_in_progress`와 진행 중 판정은 같고 담당자(`owner_id`)로 거르지 않는다. 채팅 계정과 명부
+    `member_id`를 잇는 곳이 없어서 총괄은 담당자를 알 수 없다. `area`는 명부 `RosterEntry.area`와
+    같은 값이고 없으면 전체다. 명부에 없는 값이면 지어내지 않고 빈 목록이다."""
+
+    area: str | None = None  # `RosterEntry.area`
+
+
 class ListDevOutcomesInput(AxModel):
     """개발 작업 결과 (인사·총괄의 부서·에이전트 평가 근거, read).
 

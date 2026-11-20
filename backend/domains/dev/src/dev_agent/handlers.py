@@ -25,6 +25,7 @@ from ax_contracts.schemas.planning import (
     LinkIncidentOutput,
     ListDevOutcomesInput,
     ListDevOutcomesOutput,
+    ListDevProgressInput,
     ListInProgressInput,
     ListInProgressOutput,
     ReceiveReleaseOrderInput,
@@ -338,6 +339,49 @@ async def list_in_progress(request: AgentRequest) -> AgentResult:
                 f"prs WHERE NOT merged AND {_where(inp.owner_id, inp.area)}",
                 "prs WHERE merged AND (linked incident follow-up open OR request not closed) "
                 f"AND {_where(inp.owner_id, inp.area)}",
+            ],
+            data_summary=summary,
+            ref_ids=_item_refs(rows),
+        ),
+    )
+
+
+async def list_dev_progress(request: AgentRequest) -> AgentResult:
+    """담당자 없이 영역(없으면 전체)의 진행 중 항목 (read, 총괄의 "개발 진행 상황").
+
+    진행 중 판정은 `list_in_progress`와 같고 담당자로만 거르지 않는다. 상태를 바꾸지 않는다."""
+    try:
+        inp = ListDevProgressInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    rows, at = await get_service().list_dev_progress(
+        context_id=request.meta.context_id,
+        requester=_requester(request),
+        area=inp.area,
+    )
+    kinds = {k: sum(1 for i in rows if i.kind == k) for k in ("deployment", "ticket", "pr")}
+    owners = len({i.owner_id for i in rows})
+    if rows:
+        summary = (
+            f"진행 중 항목 {len(rows)}건 · 담당 {owners}명 (배포 확인 전 {kinds['deployment']}, "
+            f"미완료 작업 {kinds['ticket']}, 열린 PR {kinds['pr']}) · 명부에 연결된 담당자만"
+        )
+    elif inp.area is not None and not is_roster_area(inp.area):
+        summary = f"확인할 수 없음: 명부에 없는 영역 '{inp.area}' ({', '.join(ROSTER_AREAS)})"
+    else:
+        where = f"영역 {inp.area}의 " if inp.area else ""
+        summary = f"확인할 수 없음: {where}진행 중 항목 없음"
+    where = f" AND area = '{inp.area}'" if inp.area else ""
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        output=ListInProgressOutput(items=_items(rows), collected_at=at).model_dump(mode="json"),
+        evidence=Evidence(
+            queries=[
+                f"tasks WHERE state != '완료'{where}",
+                f"prs WHERE NOT merged{where}",
+                "prs WHERE merged AND (linked incident follow-up open OR request not closed)"
+                + where,
             ],
             data_summary=summary,
             ref_ids=_item_refs(rows),
@@ -735,6 +779,7 @@ DEV_HANDLERS = {
     "revert_merged_pr": revert_merged_pr,
     "verify_rollback_target": verify_rollback_target,
     "list_in_progress": list_in_progress,
+    "list_dev_progress": list_dev_progress,
     "list_dev_outcomes": list_dev_outcomes,
     "verify_handover": verify_handover,
     "start_dev": start_dev,

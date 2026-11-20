@@ -94,6 +94,7 @@ SKILL_KO: dict[str, str] = {
     "link_incident": "사건 연결",
     "verify_rollback_target": "롤백 대상 확인",
     "list_in_progress": "진행 중인 작업 보기",
+    "list_dev_progress": "개발 진행 현황 보기",
     "verify_handover": "인계 확인",
     "diagnose_incident": "장애 진단",
     "rollback_deployment": "배포 롤백",
