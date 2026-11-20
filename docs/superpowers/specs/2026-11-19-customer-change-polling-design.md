@@ -35,7 +35,7 @@
 - 지금: 캣북스 shop-api `monitor.py`가 p95·5xx를 재서 보내요(시연용 장애 주입과 바로 이어지게). 받는 곳은 총괄뿐이에요.
 - 대체 경로(이미 있음): Zabbix → DejaFix → 인프라 `infra_agent/dejafix_watch.py`가 `GET /api/incidents?status=problem`을 30초마다 읽고 `component` 태그가 붙은 장애를 `infra.anomaly_detected`로 보내요. 총괄은 이것도 `INCIDENT_EVENTS`로 받아 사건을 열어요. **열기는 이미 대체돼요.**
 - 빈 곳: **복구 신호**예요. `dejafix_watch`는 장애가 목록에서 빠져도 아무것도 보내지 않아요. 그래서 DejaFix 길로 열린 사건은 `recovered_at`이 비고, 복구를 기다리는 단계(배너 내리기)가 안 돌아요.
-- 제안(이 문서 범위 밖, 인프라·총괄 몫): `dejafix_watch`가 직전 회차에 보냈던 장애가 `problem` 목록에서 빠지면 복구 신호를 하나 보내요. 새 종류 `infra.recovered`를 계약에 **추가**하고(데이터는 `InfraAnomalyData` 재사용), 총괄이 `SHOP_RECOVERED`와 같은 길로 받아요. `shop.recovered`를 인프라가 그대로 쓰는 방법도 있지만 "쇼핑몰이 알린 사실"이라는 뜻과 `source=shop-api` 표시가 섞여서 권하지 않아요.
+- **결정(예진 님 11/20)**, 인프라·총괄 몫(PR 6): `dejafix_watch`가 직전 회차에 보냈던 장애가 `problem` 목록에서 빠지면 복구 신호를 하나 보내요. 새 종류 `infra.recovered`를 계약에 **추가**하고(데이터는 `InfraAnomalyData` 재사용), 총괄이 `SHOP_RECOVERED`와 같은 길로 받아요. `shop.recovered`를 인프라가 그대로 쓰는 방법도 있지만 "쇼핑몰이 알린 사실"이라는 뜻과 `source=shop-api` 표시가 섞여서 권하지 않아요.
 - 그 전까지 캣북스의 `shop.degraded`·`shop.recovered` 전송은 **그대로 둬요**(시연 장애 주입 흐름 `fault_released`가 여기에 걸려 있어요). 이 문서의 "outbox 제거"는 주문·결제·환불·반품·판매자 7종만이에요.
 
 ## 읽기 경로 조사
@@ -85,7 +85,7 @@
 
 ### 추천: A
 
-소비처를 덜 바꾸고(재무 0줄), 규칙(도메인끼리 import 금지, 계약은 추가만)을 그대로 지켜요. 위치는 **dashboard-api**예요. 이유: 이미 변환기·회사 연결·`POST /events`·주기 작업(`main.py` `_retention_loop`)이 여기 있고, 컨테이너를 늘리지 않아요(11/17 멘토링 "컨테이너 줄이기").
+소비처를 덜 바꾸고(재무 0줄), 규칙(도메인끼리 import 금지, 계약은 추가만)을 그대로 지켜요. 위치는 **dashboard-api**를 추천해요(**결정 대기**). 이유: 이미 변환기·회사 연결·`POST /events`·주기 작업(`main.py` `_retention_loop`)이 여기 있고, 컨테이너를 늘리지 않아요(11/17 멘토링 "컨테이너 줄이기").
 
 ## 감지기 설계 (A)
 
@@ -104,7 +104,25 @@
 | `seller.registered` | (지금 소비처 없음) 만들지 않아요 | — |
 
 - **계약 모양을 다 못 채우는 종류가 있어요.** `sales-export` 줄만으로는 `OrderCreatedData.items[].seller_id`(필수), `OrderCancelledData.reason_code`(필수), `PaymentFailedData.failure_code`(필수)를 알 수 없어요. 값을 지어내면 안 되니, 이 셋은 캣북스에서 `orders/{id}`를 더 읽어 채울 수 있을 때만 만들고 변환기 고객사에서는 만들지 않아요(또는 계약에 선택 필드로 된 새 데이터 모델을 **추가**해야 해요).
-- 그래서 추천 범위는 **PR 1은 `payment.refunded`만**(유일한 소비처)이에요. 나머지 4종은 감지 규칙 표만 두고, 쓰는 곳이 생길 때 계약 추가와 같이 켜요(질문 1). `return.received`·`seller.registered`는 읽을 곳이 `sales-export` 밖이라 호출이 늘어서 쓰는 곳이 생길 때 해요.
+- **결정(예진 님 11/20): 감지할 변화는 `payment.refunded` + `order.cancelled` 둘이에요.** `order.created`·`payment.succeeded`·`payment.failed`는 감지 규칙 표만 두고 꺼 둬요.
+
+#### `order.cancelled` 필수 칸 채우기 (계약 확인: `ax_contracts/schemas/event.py` `OrderCancelledData`)
+
+| 칸 | 판매 기록(`SalesOrderRow`)만으로 | 처리 |
+|---|---|---|
+| `order_id` | 있음 | 그대로 |
+| `cancelled_amount` (int, 필수) | 계산 가능 | `items_amount + shipping_fee - points_used - coupon_discount`(주문 결제 금액). 이미 환불된 몫(`refunds` 합)이 있으면 빼요. 계산식은 코드에 고정, 지어내지 않아요 |
+| `reason_code` (`buyer`·`seller`·`system`, 필수) | **없음** | 아래 |
+
+`reason_code`는 판매 기록에 없고, shop-api 계약 스냅숏에도 취소 사유를 읽는 경로가 없어요(`orders/{id}/cancel`은 쓰기뿐). 값을 지어내지 않고 이렇게 해요.
+
+1. **계약에 칸을 추가해요(삭제·변경 없음)**: `SalesOrderRow`에 `cancel_reason_code: Literal["buyer", "seller", "system"] | None = None`을 **추가**해요. 기본값이 `None`이라 지금 쓰는 곳(데이터 수집기 등)은 그대로예요. `OrderCancelledData`는 건드리지 않아요(`reason_code`를 선택으로 바꾸거나 `unknown` 값을 더하는 것은 타입 변경이라 하지 않아요).
+2. **채우는 쪽**:
+   - 캣북스: `sales-export`가 주문 취소 기록(누가 취소했는지: 손님 취소 경로 → `buyer`, 판매자·관리자 → `seller`, 결제 시간 초과 등 자동 → `system`)으로 칸을 채워요. 판매 서버 코드는 catbooks-demo 세션 몫이라 인계해요.
+   - 변환기 고객사: 짝 파일 `orders.fields`에 `cancel_reason_code` 식과 `values` 값 표를 **추가**할 수 있게 해요(예: 고객사 취소 주체 칸 → `buyer`·`seller`·`system`). 사이트에 그런 칸이 없으면 비워 둬요.
+3. **감지기 규칙**: 취소로 바뀐 줄에 `cancel_reason_code`가 있을 때만 `order.cancelled`를 만들어요. 비어 있으면 **만들지 않고** 상태 파일에 "사유 없음으로 건너뜀" 건수만 남겨요(상태 주소에도 보여요).
+4. 지금 `order.cancelled`를 받는 곳은 없어요. 받는 곳이 생길 때 위 칸이 채워지는 고객사부터 동작해요.
+ `return.received`·`seller.registered`는 읽을 곳이 `sales-export` 밖이라 호출이 늘어서 쓰는 곳이 생길 때 해요.
 - `PaymentRefundedData`에 `payment_id`가 필수인데 `sales-export` 환불 줄에는 없어요. 캣북스는 바뀐 주문만 `GET /api/shop/orders/{id}`로 한 번 더 읽어 채우고, 변환기 고객사처럼 결제 id가 없으면 재무 `books.py`와 같은 규칙(`pay_of_<order_id>`, `rfd_of_<order_id>_<누적금액>`)으로 만들어요. 계약을 바꾸지 않아요.
 - `source`는 `"change-detector"`(새 이름)로 해요. 재무는 `source`를 보지 않아요. 화면 출처 이름표(`lib/data.ts`)에 "변화 감지"를 하나 **추가**해요.
 - `tenant_id`는 회사 연결 파일의 회사예요(고객사별 설치라 설치 하나에 회사 하나).
@@ -148,12 +166,12 @@
 
 | PR | 내용 | 영향 도메인 (담당) |
 |---|---|---|
-| 1 | 감지기 뼈대: dashboard-api 주기 작업, 상태 파일, 커서, 처음 켤 때 조용히 채우기, 그림자 모드, `payment.refunded` 감지(나머지 4종은 규칙만, 꺼 둠), 상태 주소. 캣북스(shop-api 직결)만. `shop-api.json` 스냅숏에 `sales-export` 추가. 단위 시험은 가짜 판매 서버 응답(목 스위치, 테스트 전용) | dashboard-api(공용), 재무(받는 쪽 확인만, 코드 0줄) |
+| 1 | 감지기 뼈대: dashboard-api 주기 작업, 상태 파일, 커서, 처음 켤 때 조용히 채우기, 그림자 모드, `payment.refunded`·`order.cancelled` 감지(나머지 3종은 규칙만, 꺼 둠), `SalesOrderRow.cancel_reason_code` 계약 추가, 상태 주소. 캣북스(shop-api 직결)만. `shop-api.json` 스냅숏에 `sales-export` 추가. 단위 시험은 가짜 판매 서버 응답(목 스위치, 테스트 전용) | dashboard-api(공용), 재무(받는 쪽 확인만, 코드 0줄) |
 | 2 | 변환기 `sales-export` 보완: `(updated_at, order_id)` 커서, `updated_since` 넘기기, 환불 줄, 결제 실패 상태 값 | dashboard-api 변환기(사이트 변환기 작업자와 맞추기), 데이터(같은 주소를 5분마다 읽는 수집기 확인: 예진) |
 | 3 | 화면: 회사 연결 연결 지도에 "변화 감지" 상태, 출처 이름표 추가 | 프론트 |
 | 4 | 전환: 그림자 모드 끄기, `POST /events` `deprecated` 표시 추가, `AX_COMPANY_KEYS` 기본값·안내 정리, `agent-common.md` 카탈로그 정리 | dashboard-api, 재무 |
 | 5 (catbooks-demo) | 캣북스 outbox 7종 전송 제거 | 캣북스 판매 서버(재헌) |
-| 6 (따로) | 장애 복구 신호: `infra.recovered` 추가, `dejafix_watch`가 빠진 장애에 복구 신호, 총괄이 받기 | 인프라, 총괄(준하) |
+| 6 (따로) | 장애 복구 신호(11/20 결정): `infra.recovered` 계약 추가, `dejafix_watch`가 장애가 닫히면(`problem` 목록에서 빠지면) 복구 알림, 총괄이 받기 | 인프라, 총괄(준하) |
 
 ## 하지 않을 것 (이번)
 
@@ -162,8 +180,11 @@
 - 계약 값 삭제·이름 변경
 - 고객사 사이트에 무언가 설치하게 하기(고객사는 가만히 있어요)
 
-## 예진 님이 정할 것
+## 정한 것 (예진 님 11/20)
 
-1. **만들 이벤트 범위**: 추천은 `payment.refunded`만 먼저예요(유일한 소비처, 계약 모양을 다 채울 수 있음). 나머지 4종은 쓰는 곳이 생길 때 계약 추가와 같이 켜요.
-2. **장애 복구 신호**: 추천은 `infra.recovered`를 계약에 추가하고 `dejafix_watch`가 보내는 것(PR 6)이에요. 그 전까지 캣북스 `shop.degraded`·`shop.recovered` 전송은 남겨요.
-3. **감지기 위치**: 추천은 dashboard-api 안(컨테이너 안 늘림, 변환기·회사 연결과 같은 곳)이에요. 데이터 수집기와 같은 `sales-export`를 따로 읽게 되지만 분당 1~3번이라 한도 안이에요.
+1. **감지할 변화**: `payment.refunded` + `order.cancelled`. 주문 취소 사유(`reason_code`)는 판매 기록에 없어서 `SalesOrderRow`에 `cancel_reason_code` 칸을 **추가**해 채우고, 비어 있으면 이벤트를 만들지 않아요(위 "`order.cancelled` 필수 칸 채우기").
+2. **쇼핑몰 복구 신호**: DejaFix 감시(`dejafix_watch`)가 장애가 닫히면 복구 알림(`infra.recovered`, 계약 추가)을 보내요(PR 6). 그때까지 캣북스의 `shop.degraded`·`shop.recovered` 전송은 남겨요.
+
+## 결정 대기
+
+1. **감지기 위치**: 추천은 dashboard-api 안(컨테이너 안 늘림, 변환기·회사 연결과 같은 곳)이에요. 데이터 수집기와 같은 `sales-export`를 따로 읽게 되지만 분당 1~3번이라 한도 안이에요.
