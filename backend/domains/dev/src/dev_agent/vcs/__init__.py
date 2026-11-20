@@ -408,8 +408,9 @@ def _save() -> None:
         return
     folder = Path(path).parent
     if not folder.exists():  # 회사 폴더가 아직 없다. 토큰이 들어 있어 만든 사용자만 연다
-        folder.parent.mkdir(parents=True, exist_ok=True)
-        folder.mkdir(mode=0o700, exist_ok=True)
+        folder.parent.parent.mkdir(parents=True, exist_ok=True)
+        folder.parent.mkdir(mode=company_files.DIR_MODE, exist_ok=True)
+        folder.mkdir(mode=company_files.DIR_MODE, exist_ok=True)
     rows = [{**dataclasses.asdict(c), "paths": list(c.paths)} for c in (_screen or {}).values()]
     tmp = path + ".tmp"
     # 토큰·App 개인 키가 들어 있어 만든 사용자만 읽는다 (llm_key와 같은 방식). 프로세스 umask
