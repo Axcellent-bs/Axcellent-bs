@@ -7,6 +7,7 @@
 | `request_compensation` | A |
 | `list_claims` | read |
 | `get_claim` | read |
+| `list_buyer_orders` | read |
 | `claim_stats` | read |
 | `book_issue_stats` | read |
 | `claim_queue` | read |

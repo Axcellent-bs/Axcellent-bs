@@ -91,7 +91,7 @@
     },
     {
       "id": "planning_chat_send",
-      "description": "말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 planning_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. LLM은 기획 상태에서 코드가 모은 사실(받은 요청·기획서·결정·제안)만 풀어 쓴다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy. 기획 AI 직접 대화(dashboard-api /api/dashboard/planning-chat). 조회·설명만 하고 요청·기획서·제안 상태는 바꾸지 않아 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "description": "말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 planning_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. LLM은 기획 상태에서 코드가 모은 사실(받은 요청·기획서·결정·제안)만 풀어 쓴다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy. 기획 AI 직접 대화(dashboard-api /api/dashboard/planning-chat). 사람이 기획 제안에 대한 일을 분명히 시키면 LLM이 동작(make_plan 기획안 만들기·approve_proposal 마케팅으로 넘기기·proposal_to_request 개발로 넘기기, 한 번에 3개까지)을 고르고, 코드가 제안 번호를 검사해 화면 버튼과 같은 액션 창구로 실행한다. 결과 문장은 코드가 쓴다. 폐기·삭제·기획서 확정·배포는 하지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#PlanningChatSendInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#PlanningChatThreadOutput",
       "grade": "A",
@@ -103,7 +103,7 @@
     },
     {
       "id": "planning_chat_list",
-      "description": "대화 목록(최근 순). 본인 대화는 원문, 다른 사람 대화는 messages 빈 목록+summary+restricted true. 30분 말이 없는 대화는 이때 끝낸다. 기획 AI 직접 대화(dashboard-api /api/dashboard/planning-chat). 조회·설명만 하고 요청·기획서·제안 상태는 바꾸지 않아 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "description": "대화 목록(최근 순). 본인 대화는 원문, 다른 사람 대화는 messages 빈 목록+summary+restricted true. 30분 말이 없는 대화는 이때 끝낸다. 기획 AI 직접 대화(dashboard-api /api/dashboard/planning-chat). 사람이 기획 제안에 대한 일을 분명히 시키면 LLM이 동작(make_plan 기획안 만들기·approve_proposal 마케팅으로 넘기기·proposal_to_request 개발로 넘기기, 한 번에 3개까지)을 고르고, 코드가 제안 번호를 검사해 화면 버튼과 같은 액션 창구로 실행한다. 결과 문장은 코드가 쓴다. 폐기·삭제·기획서 확정·배포는 하지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#PlanningChatListInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#PlanningChatListOutput",
       "grade": "read",
@@ -115,7 +115,7 @@
     },
     {
       "id": "planning_chat_get",
-      "description": "대화 하나. 열람 규칙은 planning_chat_list와 같다. 없으면 not_found. 기획 AI 직접 대화(dashboard-api /api/dashboard/planning-chat). 조회·설명만 하고 요청·기획서·제안 상태는 바꾸지 않아 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "description": "대화 하나. 열람 규칙은 planning_chat_list와 같다. 없으면 not_found. 기획 AI 직접 대화(dashboard-api /api/dashboard/planning-chat). 사람이 기획 제안에 대한 일을 분명히 시키면 LLM이 동작(make_plan 기획안 만들기·approve_proposal 마케팅으로 넘기기·proposal_to_request 개발로 넘기기, 한 번에 3개까지)을 고르고, 코드가 제안 번호를 검사해 화면 버튼과 같은 액션 창구로 실행한다. 결과 문장은 코드가 쓴다. 폐기·삭제·기획서 확정·배포는 하지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#PlanningChatRef",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#PlanningChatThreadOutput",
       "grade": "read",
@@ -127,7 +127,7 @@
     },
     {
       "id": "planning_chat_close",
-      "description": "대화를 끝낸다(status closed). 요약이 비어 있으면 첫 질문 일부를 남긴다. 남의 대화는 forbidden. 기획 AI 직접 대화(dashboard-api /api/dashboard/planning-chat). 조회·설명만 하고 요청·기획서·제안 상태는 바꾸지 않아 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
+      "description": "대화를 끝낸다(status closed). 요약이 비어 있으면 첫 질문 일부를 남긴다. 남의 대화는 forbidden. 기획 AI 직접 대화(dashboard-api /api/dashboard/planning-chat). 사람이 기획 제안에 대한 일을 분명히 시키면 LLM이 동작(make_plan 기획안 만들기·approve_proposal 마케팅으로 넘기기·proposal_to_request 개발로 넘기기, 한 번에 3개까지)을 고르고, 코드가 제안 번호를 검사해 화면 버튼과 같은 액션 창구로 실행한다. 결과 문장은 코드가 쓴다. 폐기·삭제·기획서 확정·배포는 하지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#PlanningChatRef",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#PlanningChatThreadOutput",
       "grade": "A",

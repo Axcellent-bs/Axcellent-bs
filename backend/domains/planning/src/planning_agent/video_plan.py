@@ -8,6 +8,9 @@
 - 장면 프롬프트는 마케팅 영상 템플릿과 같은 금지를 지킨다: 영상에 글자를 그리게 하지 않고(자막은
   편집 때 오버레이), 실존 인물·실제 브랜드·주소·긴 숫자열을 넣지 않는다. 걸리면 규칙 제작안을 쓴다
 - LLM이 없거나 실패하면 규칙 제작안(같은 입력이면 같은 결과)
+- 마케팅 장면 템플릿 힌트(`media_hints`, 11/20 재헌 님과 맞춤)는 코드 규칙으로만 채운다:
+  계절은 제안을 받은 날(한국 시간)의 달, 색감은 고른 방향. 책 분류는 기획이 모르니 비운다.
+  마케팅이 검사해 통과한 값만 쓰고 나머지는 자기 추천값을 쓴다
 """
 
 from __future__ import annotations
@@ -15,11 +18,12 @@ from __future__ import annotations
 import asyncio
 import re
 import unicodedata
+from datetime import timedelta, timezone
 
 from pydantic import BaseModel, Field, ValidationError
 
 from ax_agent_template.llm import LLMClient
-from ax_contracts.schemas.planning import VideoPlan, VideoScene
+from ax_contracts.schemas.planning import VideoMediaHints, VideoPlan, VideoScene
 from ax_workflow.models import Proposal
 
 DEFAULT_SECONDS = 30
@@ -38,6 +42,13 @@ NEGATIVE = (
     "No text, no letters, no numbers, no logos, no watermarks, no subtitles, no real people, "
     "no celebrities, no real brands, no readable book covers"
 )
+_KST = timezone(timedelta(hours=9))
+# 방향 → 색감 (마케팅 scene_templates.toml color_theme 값 중 TONE 분위기에 맞는 것)
+COLOR = {
+    "ride_trend": "sunset orange",
+    "own_trend": "soft pastel",
+    "with_product": "warm cream",
+}
 TONE = {
     "ride_trend": "lively and timely",
     "own_trend": "fresh and original",
@@ -122,6 +133,24 @@ def _short(text: str, n: int) -> str:
     return one if len(one) <= n else one[: n - 1].rstrip() + "…"
 
 
+def _season(month: int) -> str:
+    if 3 <= month <= 5:
+        return "spring"
+    if 6 <= month <= 8:
+        return "summer"
+    if 9 <= month <= 11:
+        return "autumn"
+    return "winter"
+
+
+def media_hints(p: Proposal) -> VideoMediaHints:
+    """마케팅 장면 템플릿 힌트. 같은 제안이면 같은 값, 모르는 것은 비운다."""
+    return VideoMediaHints(
+        season=_season(p.created_at.astimezone(_KST).month),
+        color_theme=COLOR.get(p.angle or ""),
+    )
+
+
 def rule_plan(p: Proposal) -> VideoPlan:
     """LLM 없이 쓰는 제작안. 같은 제안이면 같은 결과."""
     d = duration_of(p)
@@ -167,7 +196,7 @@ def rule_plan(p: Proposal) -> VideoPlan:
     script = " → ".join(f"{s.start_s}~{s.end_s}초 {s.visual}" for s in scenes)
     return VideoPlan(
         concept=_short(p.idea, 200), duration_s=d, script=_short(script, 800), scenes=scenes,
-        style=STYLE, negative=NEGATIVE, written_by="rule",
+        style=STYLE, negative=NEGATIVE, written_by="rule", media_hints=media_hints(p),
     )  # fmt: skip
 
 
@@ -235,6 +264,7 @@ def _from_llm(p: Proposal, got: _PlanOut, d: int) -> VideoPlan | None:
         return VideoPlan(
             concept=_short(got.concept, 200), duration_s=d, script=_short(got.script, 800),
             scenes=scenes, style=STYLE, negative=NEGATIVE, written_by="llm",
+            media_hints=media_hints(p),
         )  # fmt: skip
     except ValidationError:
         return None

@@ -3,6 +3,7 @@ import type { ExecutionRecord } from "@/lib/finance";
 import { incidentNo } from "@/lib/format";
 import { mergeTalk } from "@/lib/officeTalk";
 import type { CommLine } from "@/lib/types";
+import type { WorkRequestRow } from "@/lib/workRequests";
 
 // AI 대화방의 방 목록과 방별 대화. 대화 기록(/agents/chat)과 AI 오피스(/agents/office)가 같이 쓴다.
 // 방은 세 가지다.
@@ -36,6 +37,8 @@ export interface RoomSources {
   comms: CommLine[];
   /** 단톡방 사람 대화 (useOfficeTalk items, 방은 item.room) */
   talk: ChatItem[];
+  /** 고객 의뢰(사람 토큰이 있을 때만). 끝난 의뢰의 뒤 조회 줄을 거르는 데 쓴다 */
+  requests?: WorkRequestRow[];
 }
 
 /** 장애 방 짧은 번호: 사건 번호 앞 4자리 ("#066f") */
@@ -83,7 +86,7 @@ export function sortIncidentRooms(incidents: OrchIncident[]): OrchIncident[] {
 /** 방 하나의 대화: 기록(buildTimeline) + 그 방에서 사람이 건 말. 1:1 방은 비어 있다(DirectChat이 따로 그린다) */
 export function roomItems(room: string, src: RoomSources): ChatItem[] {
   if (room !== ALL_ROOM && !src.incidents.some((i) => i.context_id === room)) return [];
-  const base = buildTimeline(src.incidents, src.executions, src.comms, room);
+  const base = buildTimeline(src.incidents, src.executions, src.comms, room, src.requests ?? []);
   return mergeTalk(base, src.talk.filter((t) => t.room === room));
 }
 

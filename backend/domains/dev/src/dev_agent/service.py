@@ -60,6 +60,7 @@ from ax_workflow.handover import (
     area_of_text,
     check_handover,
     in_progress,
+    in_progress_all,
 )
 from ax_workflow.hr_link import HrClient, HrRecordResult
 from ax_workflow.models import (
@@ -2162,6 +2163,28 @@ class DevService(PlanningCore):
                     "read",
                 )
             )
+
+        await self._apply(log)
+        return items, t
+
+    async def list_dev_progress(
+        self, *, context_id: str, requester: str, area: str | None
+    ) -> tuple[list[Item], datetime]:
+        """담당자 없이 영역(없으면 전체)의 진행 중 항목과 조회 시각 (read). 활동 로그만 남긴다."""
+        items = in_progress_all(self.state, area)
+        t = self.clock()
+
+        async def log(s: State) -> None:
+            where = "전체" + (f" · {area}" if area else "")
+            ids = ", ".join(i.item_id for i in items) or "없음"
+            s.activity.append(
+                self._act(t, context_id, requester, "planning", "list_dev_progress", "A2A",
+                          f"개발 진행 현황 조회 ({where})", "read")
+            )  # fmt: skip
+            s.activity.append(
+                self._act(t, context_id, "planning", requester, "list_dev_progress", "A2A",
+                          f"진행 중 항목 {len(items)}건 회신: {ids}", "read")
+            )  # fmt: skip
 
         await self._apply(log)
         return items, t

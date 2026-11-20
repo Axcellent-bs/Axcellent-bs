@@ -418,6 +418,41 @@ async def fetch_order(order_id: str, *, client: httpx.AsyncClient | None = None)
     return to_order(response.json()["data"])
 
 
+async def fetch_buyer_orders(buyer_id: str, limit: int = 20) -> tuple[list[Order], bool]:
+    """구매자의 결제가 끝난 주문을 결제 시각 최근 순으로 읽는다. (주문들, 더 있어 잘렸는가)
+
+    `GET /orders?buyer_id=`로 번호를 받고 주문을 하나씩 읽는다(최대 `limit`번). 판매 서버가
+    `buyer_id` 조건을 무시해도 남의 주문이 섞이지 않게, 목록 줄과 읽은 주문 모두 구매자를 다시 본다.
+    연결 실패는 `ShopError`.
+    """
+    found: list[Order] = []
+    async with shared_client() as client:
+        response = await _send(
+            "GET", "/orders", params={"buyer_id": buyer_id, "limit": limit}, client=client
+        )
+        if response.status_code != 200:
+            raise _error(response)
+        body = response.json()
+        truncated = bool((body.get("meta") or {}).get("next_cursor"))
+        for row in body.get("data", [])[:limit]:
+            if row.get("buyer_id") not in (None, buyer_id) or not row.get("order_id"):
+                continue
+            order = await fetch_order(row["order_id"], client=client)
+            if order is not None and order.buyer_id == buyer_id:
+                found.append(order)
+    found.sort(key=lambda o: o.paid_at, reverse=True)
+    return found, truncated
+
+
+async def load_buyer_orders(buyer_id: str, limit: int = 20) -> tuple[list[Order], bool]:
+    """구매자의 주문들. 출처는 `order_source()`가 정한다(`load_order`와 같다)."""
+    if order_source() == "seed":
+        mine = [o.model_copy(deep=True) for o in orders.SEED_ORDERS if o.buyer_id == buyer_id]
+        mine.sort(key=lambda o: o.paid_at, reverse=True)
+        return mine[:limit], len(mine) > limit
+    return await fetch_buyer_orders(buyer_id, limit)
+
+
 async def fetch_order_facts(order_id: str) -> dict[str, Any] | None:
     """주문 원본(결제 시도 포함)을 읽는다. 없으면 None, 연결 실패는 `ShopError`.
 

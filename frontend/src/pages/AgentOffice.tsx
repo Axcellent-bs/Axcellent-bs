@@ -3,6 +3,7 @@ import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/compo
 import { OfficeChat, type Typing } from "@/components/office/OfficeChat";
 import { useChatRooms, type Conn } from "@/components/office/useChatRooms";
 import { RequestHandoffCard } from "@/components/office/RequestHandoffCard";
+import { useWorkRequests } from "@/components/office/useWorkRequests";
 import { PixelOffice } from "@/components/office/PixelOffice";
 import { ALL_ROOM, buildTimeline, incidentTitle, skillKo, type ChatItem } from "@/lib/agentChat";
 import { mergeTalk } from "@/lib/officeTalk";
@@ -118,9 +119,12 @@ export default function AgentOffice() {
   }, [items, mode]);
   useEffect(() => { seenRef.current = new Map(); }, [mode]);
 
+  // 고객 의뢰(wr_) 단계로도 자리 불을 켠다 (실시간만, 10초마다, 사람 토큰 없으면 읽지 않음). 고객 의뢰 넘김 카드와 같은 값을 쓴다
+  const work = useWorkRequests(mode === "live");
+  const liveRequests = mode === "live" ? work.rows : null;
   const baseView = useMemo(
-    () => deriveOffice(shownIncidents, items, seen, now, campaign ? { desks: campaign.desks, board: campaign.board, overlay: campaign.overlay } : {}),
-    [shownIncidents, items, seen, now, campaign],
+    () => deriveOffice(shownIncidents, items, seen, now, campaign ? { desks: campaign.desks, board: campaign.board, overlay: campaign.overlay } : { requests: liveRequests }),
+    [shownIncidents, items, seen, now, campaign, liveRequests],
   );
 
   // ------------------------------------------------ 사람이 부서 AI에게 말 걸기 (단톡방 대화는 모두에게 보인다. 1:1 직접 대화와는 따로)

@@ -7,7 +7,7 @@
 - 넘겨받은 기획서는 사람 클릭 없이 PR 만들기 → 검수 → 불일치면 수정 후 재검수 → 자동 머지 검사까지 간다. 규칙에 걸리면 `auto_review` 대기열(교차검증 대기·사람 확인).
 - 자동 처리 범위(`auto_policy`)의 주인이다. 바뀌면 `receive_dev_result`에 실어 기획에 맞춘다.
 - 코딩 에이전트(`coder.py`)·개발 AI 대화(`dev_chat.py`)·개발자 본인 Claude 작업(`work_queue.py`·`work_api.py`, MCP)·저장소 작업 공간(`repo_api.py`)·형상관리 연결(`vcs/`·`vcs_bridge.py`·`repo_routing.py`)·배포 기록(`deploy_store.py`·`deploy_signals.py`·`deploy.py`)·머지 교차검증 근거(`cross_check.py`)가 여기 있다.
-- 장애 사건에 관련 PR 후보(`find_related_prs`)·롤백 대상 확인(`verify_rollback_target`)·사건 연결(`link_incident`), 인사 인수인계용 진행 중 항목(`list_in_progress`)·인계 확인(`verify_handover`)을 맡는다.
+- 장애 사건에 관련 PR 후보(`find_related_prs`)·롤백 대상 확인(`verify_rollback_target`)·사건 연결(`link_incident`), 인사 인수인계용 진행 중 항목(`list_in_progress`)·총괄용 진행 중 항목 전체(`list_dev_progress`)·인계 확인(`verify_handover`)을 맡는다.
 
 ## 2. 구성
 | 모듈 | 내용 |
@@ -31,6 +31,7 @@
 | `link_incident` | A | orchestrator, infra | `LinkIncidentInput` → `LinkIncidentOutput`. `linked_paras`는 `"SPEC-5:R3"` 형식. 같은 제목 요청이 있으면 그 ID + outcome `linked_duplicate`. `idempotency_key` 필수, 같은 키 두 번째는 이전 결과 |
 | `verify_rollback_target` | read | safety | `VerifyRollbackTargetInput` → `VerifyRollbackTargetOutput`. 배포가 사건 뒤 → `deploy_after_incident`, 배포 전 30분(시연값, AS-B 미결) 안 머지 PR 있음 → 승인 `deploy_before_incident`, 없음 → `no_deploy_in_window`. 거절도 `completed` + outcome `rejected_by_review` |
 | `list_in_progress` | read | hr, orchestrator | `ListInProgressInput` → `ListInProgressOutput`. 담당자(`owner_id` = 명부 `member_id`)·영역(`area`)의 `deployment`·`ticket`·`pr` 항목. 다른 담당자·영역 항목은 넣지 않는다. 우선순위 recommended |
+| `list_dev_progress` | read | orchestrator | `ListDevProgressInput` → `ListInProgressOutput`. 총괄의 "개발 진행 상황 알려 줘"용. 담당자로 거르지 않고 진행 중 항목 전체(`area`를 주면 그 영역만). 진행 중 판정은 `list_in_progress`와 같다. 명부에 없는 `area`면 빈 목록 + "확인할 수 없음". 우선순위 recommended |
 | `verify_handover` | read | safety | `VerifyHandoverInput` 또는 safety 교차검증 형식(`execution_id`·`action`=`confirm_handover`·`requester`·`params{handover_id·owner_id·area·item_ids·completeness_percent…}`, #187) → `VerifyHandoverOutput`. hr `confirm_handover`(B)의 교차검증. 담당자·영역을 모르면 승인하지 않고 `failed` + `invalid_input`(safety는 보류). 빠진 진행 중 항목 0건 → 승인 `complete`, 있으면 거절 `missing_items` + `missing`. 이미 끝난 항목은 `stale_item_ids`(판정에 안 씀). 거절도 `completed` + outcome `rejected_by_review` |
 | `start_dev` | A | planning | `DevHandoffInput` → `DevHandoffOutput`. 기획이 확정한 기획서·작업을 받아 PR까지 잇는다 (flow) |
 

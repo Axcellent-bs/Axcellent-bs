@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type Keyb
 import { PreparingChip } from "@/components/Preparing";
 import { HandoffLine, PlanCard, PROCEED_TEXT } from "@/components/office/DevCards";
 import { ChatCardView } from "@/components/office/ChatCards";
+import { RequestProgressCard } from "@/components/office/RequestProgressCard";
+import { placeRequestCards } from "@/lib/requestCards";
 import { ConfirmRemove, REMOVE_LABEL } from "@/components/office/ConfirmRemove";
 import { removeFailText, useToast } from "@/components/office/useToast";
 import { DASHBOARD_API_URL, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from "@/lib/env";
@@ -288,6 +290,10 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
     }
   };
   const messages = thread?.messages ?? [];
+  // 총괄 1:1: 의뢰 번호가 처음 나온 총괄 글 아래 의뢰 진행 카드, 같은 의뢰의 다음 알림 줄은 숨김 (사람 토큰이 있을 때만, 원본 대화는 그대로)
+  const reqCards = agent.key === "orchestrator" && SAFETY_HUMAN_TOKEN
+    ? placeRequestCards(messages.map((m) => ({ id: m.id, room: "direct", text: m.text, fromOrchestrator: m.role === "assistant" })))
+    : { cardAt: new Map<string, string>(), hidden: new Set<string>() };
   // "이대로 진행": 마지막 계획 메시지에만, 이야기 중(talking)인 내 대화일 때만 (개발 화면과 같은 규칙)
   const last = messages[messages.length - 1];
   const goId = !readOnly && thread?.status === "talking" && last?.role === "assistant" && last.kind === "plan" && last.plan ? last.id : null;
@@ -360,8 +366,8 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
             <p className="py-12 text-center text-sm text-ink-500">{agent.name}에게 하고 싶은 말을 적어 보세요.</p>
           ) : (
             <ol role="log" aria-live="polite" aria-label={`${agent.name}와 나눈 대화`} className="flex flex-col gap-3">
-              {messages.map((m) => <Bubble key={m.id} m={m} name={agent.name} me={!readOnly} requestId={thread?.requestId ?? null}
-                cards={(agent.key === "data" || agent.key === "marketing") && !readOnly} threadId={thread?.id ?? null}
+              {messages.filter((m) => !reqCards.hidden.has(m.id)).map((m) => <Bubble key={m.id} m={m} name={agent.name} me={!readOnly} requestId={thread?.requestId ?? null}
+                cards={(agent.key === "data" || agent.key === "marketing") && !readOnly} threadId={thread?.id ?? null} requestCard={reqCards.cardAt.get(m.id)}
                 onGo={m.id === goId ? () => void send(undefined, PROCEED_TEXT) : undefined} goBusy={goBusy} />)}
               {isAnswering(thread) && !sending && <li className="animate-pulse px-1 text-xs text-ink-500">{agent.name}가 답하는 중…</li>}
               {sending && (
@@ -422,8 +428,10 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
 }
 
 /** `cards`: 메시지 카드(분석 의뢰·보고서 진행·완료)를 그린다. 데이터분석 AI 1:1만 켠다 (다른 부서 대화는 그대로) */
-function Bubble({ m, name, me, requestId = null, onGo, goBusy = false, cards = false, threadId = null }: {
+/** requestCard: 총괄 1:1에서 의뢰 번호가 처음 나온 총괄 말풍선 아래 붙일 의뢰 진행 카드 (lib/requestCards placeRequestCards) */
+function Bubble({ m, name, me, requestId = null, onGo, goBusy = false, cards = false, threadId = null, requestCard }: {
   m: ChatMessage; name: string; me: boolean; requestId?: string | null; onGo?: () => void; goBusy?: boolean; cards?: boolean; threadId?: string | null;
+  requestCard?: string;
 }) {
   const mine = m.role === "user";
   return (
@@ -436,6 +444,7 @@ function Bubble({ m, name, me, requestId = null, onGo, goBusy = false, cards = f
         {m.kind === "started" && <p className="mt-1 text-xs opacity-80">코딩 작업을 시작했어요. 개발 AI 작업 현황에서 볼 수 있어요.</p>}
       </div>
       {cards && m.card && <ChatCardView card={m.card} messageId={m.id} threadId={threadId} />}
+      {requestCard && <RequestProgressCard requestId={requestCard} />}
     </li>
   );
 }

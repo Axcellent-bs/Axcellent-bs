@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useOfficeTalk, type OfficeTalk } from "@/components/office/useOfficeTalk";
+import { useWorkRequests } from "@/components/office/useWorkRequests";
 import type { ChatItem, OrchIncident } from "@/lib/agentChat";
 import { api, ApiError } from "@/lib/api";
 import { buildRooms, type ChatRoom } from "@/lib/chatRooms";
@@ -82,9 +83,12 @@ export function useChatRooms({ enabled = true, rooms }: { enabled?: boolean; roo
   }, [enabled, refresh]);
 
   const talk = useOfficeTalk();
+  // 고객 의뢰(사람 토큰이 있을 때만): 끝난 의뢰(ctx_wr_)의 뒤 조회 줄을 사건처럼 거른다. 의뢰 넘김 카드·오피스 자리와 같은 값
+  const work = useWorkRequests(enabled);
+  const requests = work.rows;
   const { all, incidents: incidentRooms, items } = useMemo(
-    () => buildRooms({ incidents, executions, comms, talk: talk.items }),
-    [incidents, executions, comms, talk.items],
+    () => buildRooms({ incidents, executions, comms, talk: talk.items, requests: requests ?? [] }),
+    [incidents, executions, comms, talk.items, requests],
   );
 
   // 읽음: 방마다 본 말풍선 수. 화면을 열 때 이미 있던 방은 지금까지를 읽은 것으로 두고(열자마자 배지가 쌓이지 않게),
