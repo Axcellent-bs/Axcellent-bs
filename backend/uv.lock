@@ -332,6 +332,7 @@ dependencies = [
     { name = "ax-secret-store" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "pyyaml" },
     { name = "uvicorn" },
 ]
 
@@ -342,6 +343,7 @@ requires-dist = [
     { name = "ax-secret-store", editable = "shared/secret-store" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "pyyaml", specifier = ">=6" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
