@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
+from marketing_agent import company_scope
 from marketing_agent.media.config import LEDGER_DB_ENV
 from marketing_agent.media.usage import KINDS, UsageAmount
 
@@ -50,7 +51,8 @@ CREATE TABLE IF NOT EXISTS media_ledger (
     usage_source  TEXT,
     result_json   TEXT,
     created_at    TEXT NOT NULL,
-    settled_at    TEXT
+    settled_at    TEXT,
+    tenant_id     TEXT NOT NULL DEFAULT 'catbooks'
 );
 CREATE INDEX IF NOT EXISTS media_ledger_key ON media_ledger (key);
 CREATE INDEX IF NOT EXISTS media_ledger_month ON media_ledger (month);
@@ -115,10 +117,11 @@ def _row(values: tuple) -> LedgerRow:
 class MediaLedger:
     """`path`가 없으면 환경변수 `MARKETING_MEDIA_LEDGER_DB`, 그것도 없으면 메모리."""
 
-    def __init__(self, path: str | None = None) -> None:
+    def __init__(self, path: str | None = None, company_id: str | None = None) -> None:
         self.path = (
             path if path is not None else (os.getenv(LEDGER_DB_ENV, "").strip() or ":memory:")
         )
+        self.company_id = company_scope.scope_id(company_id)  # 회사 칸(여러 회사 1-6)
         self._lock = threading.Lock()
         try:
             self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
@@ -128,6 +131,7 @@ class MediaLedger:
                 for name, kind in _USAGE_COLUMNS:
                     if name not in have:
                         self._conn.execute(f"ALTER TABLE media_ledger ADD COLUMN {name} {kind}")  # noqa: S608
+                company_scope.ensure_tenant_column(self._conn, "media_ledger")  # 옛 줄은 캣북스
         except sqlite3.Error as error:
             raise LedgerError(f"미디어 장부를 열 수 없다: {type(error).__name__}") from error
 
@@ -145,8 +149,8 @@ class MediaLedger:
         """같은 달 같은 종류의 확정 사용량 + 예약·실패 추정 사용량(종류의 단위)."""
         rows = self._query(
             f"SELECT {_USED_SQL} FROM media_ledger"  # noqa: S608
-            f" WHERE month = ? AND media_kind = ? AND {_COUNTED}",
-            (month, kind),
+            f" WHERE month = ? AND media_kind = ? AND tenant_id = ? AND {_COUNTED}",
+            (month, kind, self.company_id),
         )
         return int(rows[0][0])
 
@@ -156,9 +160,10 @@ class MediaLedger:
 
     def settled_for(self, key: str) -> LedgerRow | None:
         rows = self._query(
-            f"SELECT {_COLUMNS} FROM media_ledger WHERE key = ? AND status = 'settled'"  # noqa: S608
+            f"SELECT {_COLUMNS} FROM media_ledger"  # noqa: S608
+            " WHERE key = ? AND tenant_id = ? AND status = 'settled'"
             " ORDER BY seq DESC LIMIT 1",
-            (key,),
+            (key, self.company_id),
         )
         return _row(rows[0]) if rows else None
 
@@ -182,35 +187,36 @@ class MediaLedger:
         try:
             with self._lock, self._conn:
                 done = self._conn.execute(
-                    f"SELECT {_COLUMNS} FROM media_ledger WHERE key = ? AND status = 'settled'"  # noqa: S608
+                    f"SELECT {_COLUMNS} FROM media_ledger"  # noqa: S608
+                    " WHERE key = ? AND tenant_id = ? AND status = 'settled'"
                     " ORDER BY seq DESC LIMIT 1",
-                    (key,),
+                    (key, self.company_id),
                 ).fetchall()
                 if done:
                     return Reservation("settled", _row(done[0]))
                 running = self._conn.execute(
-                    f"SELECT {_COLUMNS} FROM media_ledger WHERE key = ? AND status = 'reserved'"  # noqa: S608
-                    " LIMIT 1",
-                    (key,),
+                    f"SELECT {_COLUMNS} FROM media_ledger"  # noqa: S608
+                    " WHERE key = ? AND tenant_id = ? AND status = 'reserved' LIMIT 1",
+                    (key, self.company_id),
                 ).fetchall()
                 if running:
                     return Reservation("in_progress", _row(running[0]))
                 used = int(
                     self._conn.execute(
                         f"SELECT {_USED_SQL} FROM media_ledger"  # noqa: S608
-                        f" WHERE month = ? AND media_kind = ? AND {_COUNTED}",
-                        (month, media_kind),
+                        f" WHERE month = ? AND media_kind = ? AND tenant_id = ? AND {_COUNTED}",
+                        (month, media_kind, self.company_id),
                     ).fetchone()[0]
                 )
                 if monthly_cap is not None and used + usage.amount > monthly_cap:
                     return Reservation("over_budget", None, used)
                 cursor = self._conn.execute(
                     "INSERT INTO media_ledger (key, month, status, media_kind, provider, model_id,"
-                    " krw_est, usage_unit, usage_est, created_at)"
-                    " VALUES (?, ?, 'reserved', ?, ?, ?, 0, ?, ?, ?)",
+                    " krw_est, usage_unit, usage_est, created_at, tenant_id)"
+                    " VALUES (?, ?, 'reserved', ?, ?, ?, 0, ?, ?, ?, ?)",
                     (
                         key, month, media_kind, provider, model_id, usage.unit, usage.amount,
-                        now.isoformat(),
+                        now.isoformat(), self.company_id,
                     ),
                 )  # fmt: skip
                 inserted = self._conn.execute(

@@ -19,6 +19,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from marketing_agent import company_scope
+
 DB_ENV = "MARKETING_CHAT_DB"
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
 SUMMARY_CHARS = 200
@@ -42,7 +44,8 @@ CREATE TABLE IF NOT EXISTS marketing_chat_threads (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     removed_at TEXT,
-    removed_by TEXT
+    removed_by TEXT,
+    tenant_id  TEXT NOT NULL DEFAULT 'catbooks'
 );
 """
 _REMOVED_COLUMNS = ("removed_at", "removed_by")  # 숨김 처리 열: 예전 DB에는 없어서 시작 때 덧붙인다
@@ -64,8 +67,14 @@ def make_title(message: str) -> str:
 class ChatStore:
     """`path`가 없으면 환경변수 `MARKETING_CHAT_DB`, 그것도 없으면 메모리."""
 
-    def __init__(self, path: str | None = None, now: Callable[[], datetime] = _now) -> None:
+    def __init__(
+        self,
+        path: str | None = None,
+        now: Callable[[], datetime] = _now,
+        company_id: str | None = None,
+    ) -> None:
         self.path = path if path is not None else (os.getenv(DB_ENV, "").strip() or ":memory:")
+        self.company_id = company_scope.scope_id(company_id)  # 회사 칸(여러 회사 1-6)
         self.now = now
         self._lock = threading.Lock()
         try:
@@ -80,6 +89,9 @@ class ChatStore:
                         self._conn.execute(
                             f"ALTER TABLE marketing_chat_threads ADD COLUMN {col} TEXT"
                         )
+                company_scope.ensure_tenant_column(
+                    self._conn, "marketing_chat_threads"
+                )  # 옛 줄은 캣북스
         except sqlite3.Error as error:
             raise ChatStorageError(f"대화 저장소를 열 수 없다: {type(error).__name__}") from error
         self.recover_orphans()
@@ -113,16 +125,17 @@ class ChatStore:
 
     def get(self, thread_id: str) -> dict[str, Any] | None:
         rows = self._query(
-            "SELECT * FROM marketing_chat_threads WHERE id = ? AND removed_at IS NULL",
-            (thread_id,),
+            "SELECT * FROM marketing_chat_threads"
+            " WHERE id = ? AND removed_at IS NULL AND tenant_id = ?",
+            (thread_id, self.company_id),
         )
         return self._view(rows[0]) if rows else None
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
         rows = self._query(
-            "SELECT * FROM marketing_chat_threads WHERE removed_at IS NULL"
+            "SELECT * FROM marketing_chat_threads WHERE removed_at IS NULL AND tenant_id = ?"
             " ORDER BY updated_at DESC, seq DESC LIMIT ?",
-            (limit,),
+            (self.company_id, limit),
         )
         return [self._view(r) for r in rows]
 
@@ -145,9 +158,10 @@ class ChatStore:
                 seq = int(row["n"]) + 1
                 self._conn.execute(
                     "INSERT INTO marketing_chat_threads"
-                    "(seq, id, title, status, who, summary, messages, created_at, updated_at)"
-                    " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?)",
-                    (seq, f"mktchat-{seq}", title, who, at, at),
+                    "(seq, id, title, status, who, summary, messages, created_at, updated_at,"
+                    " tenant_id)"
+                    " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?, ?)",
+                    (seq, f"mktchat-{seq}", title, who, at, at, self.company_id),
                 )
         except sqlite3.Error as error:
             raise ChatStorageError(f"대화를 저장할 수 없다: {type(error).__name__}") from error
@@ -186,8 +200,9 @@ class ChatStore:
         try:
             with self._lock, self._conn:
                 row = self._conn.execute(
-                    "SELECT * FROM marketing_chat_threads WHERE id = ? AND removed_at IS NULL",
-                    (thread_id,),
+                    "SELECT * FROM marketing_chat_threads"
+                    " WHERE id = ? AND removed_at IS NULL AND tenant_id = ?",
+                    (thread_id, self.company_id),
                 ).fetchone()
                 if row is None:
                     return None
@@ -198,13 +213,14 @@ class ChatStore:
                 th["messages"] = th["messages"][-MAX_MESSAGES:]
                 self._conn.execute(
                     "UPDATE marketing_chat_threads SET status = ?, summary = ?, messages = ?,"
-                    " updated_at = ? WHERE id = ?",
+                    " updated_at = ? WHERE id = ? AND tenant_id = ?",
                     (
                         status,
                         th["summary"][:SUMMARY_CHARS],
                         json.dumps(th["messages"], ensure_ascii=False),
                         at,
                         thread_id,
+                        self.company_id,
                     ),
                 )
                 th["status"], th["updated_at"] = status, at
@@ -271,8 +287,8 @@ class ChatStore:
         return (
             self._write(
                 "UPDATE marketing_chat_threads SET removed_at = ?, removed_by = ?"
-                " WHERE id = ? AND removed_at IS NULL",
-                (self.now().isoformat(), by, thread_id),
+                " WHERE id = ? AND removed_at IS NULL AND tenant_id = ?",
+                (self.now().isoformat(), by, thread_id, self.company_id),
             )
             > 0
         )
@@ -311,7 +327,8 @@ class ChatStore:
         try:
             rows = self._query(
                 "SELECT id FROM marketing_chat_threads"
-                " WHERE status = 'answering' AND removed_at IS NULL"
+                " WHERE status = 'answering' AND removed_at IS NULL AND tenant_id = ?",
+                (self.company_id,),
             )
         except ChatStorageError:
             raise

@@ -45,6 +45,7 @@ from ax_contracts.schemas.planning import (
     CampaignBriefInput,
     CampaignBriefOutput,
 )
+from marketing_agent import company_scope
 
 DB_ENV = "MARKETING_BRIEFS_DB"
 CAMPAIGN_ID_PREFIX = "cmp_"
@@ -157,7 +158,8 @@ CREATE TABLE IF NOT EXISTS campaign_briefs (
     proposal_id TEXT NOT NULL UNIQUE,
     campaign_id TEXT NOT NULL UNIQUE,
     received_at TEXT NOT NULL,
-    payload     TEXT NOT NULL
+    payload     TEXT NOT NULL,
+    tenant_id   TEXT NOT NULL DEFAULT 'catbooks'
 );
 """
 _HANDOFF_SCHEMA = """
@@ -165,7 +167,8 @@ CREATE TABLE IF NOT EXISTS brief_sns_handoffs (
     proposal_id TEXT PRIMARY KEY,
     status      TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
-    payload     TEXT NOT NULL
+    payload     TEXT NOT NULL,
+    tenant_id   TEXT NOT NULL DEFAULT 'catbooks'
 );
 """
 _AUTO_HANDOFF_SCHEMA = """
@@ -173,7 +176,8 @@ CREATE TABLE IF NOT EXISTS brief_auto_handoff (
     proposal_id TEXT PRIMARY KEY,
     attempts    INTEGER NOT NULL,
     last_at     TEXT NOT NULL,
-    last_reason TEXT
+    last_reason TEXT,
+    tenant_id   TEXT NOT NULL DEFAULT 'catbooks'
 );
 """
 _log = logging.getLogger(__name__)
@@ -186,8 +190,9 @@ class BriefStorageError(Exception):
 class BriefStore:
     """받은 기획안 저장소. `path`가 없으면 환경변수 `MARKETING_BRIEFS_DB`, 그것도 없으면 메모리."""
 
-    def __init__(self, path: str | None = None) -> None:
+    def __init__(self, path: str | None = None, company_id: str | None = None) -> None:
         self.path = path if path is not None else (os.getenv(DB_ENV, "").strip() or ":memory:")
+        self.company_id = company_scope.scope_id(company_id)  # 회사 칸(여러 회사 1-6)
         self._lock = threading.Lock()
         try:
             self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
@@ -195,6 +200,8 @@ class BriefStore:
                 self._conn.execute(_SCHEMA)
                 self._conn.execute(_HANDOFF_SCHEMA)
                 self._conn.execute(_AUTO_HANDOFF_SCHEMA)
+                for table in ("campaign_briefs", "brief_sns_handoffs", "brief_auto_handoff"):
+                    company_scope.ensure_tenant_column(self._conn, table)  # 옛 줄은 캣북스
         except sqlite3.Error as error:
             raise BriefStorageError(
                 f"기획안 저장소를 열 수 없다: {type(error).__name__}"
@@ -204,11 +211,12 @@ class BriefStore:
         self._conn.close()
 
     def _rows(self, where: str = "", args: tuple[str, ...] = ()) -> list[StoredBrief]:
+        clause = "WHERE tenant_id = ?" + (f" AND {where}" if where else "")
         try:
             with self._lock:
                 rows = self._conn.execute(
-                    f"SELECT proposal_id, payload FROM campaign_briefs {where} ORDER BY seq",  # noqa: S608
-                    args,
+                    f"SELECT proposal_id, payload FROM campaign_briefs {clause} ORDER BY seq",  # noqa: S608
+                    (self.company_id, *args),
                 ).fetchall()
         except sqlite3.Error as error:
             raise BriefStorageError(f"기획안을 읽을 수 없다: {type(error).__name__}") from error
@@ -221,7 +229,7 @@ class BriefStore:
         return found
 
     def existing(self, proposal_id: str) -> StoredBrief | None:
-        found = self._rows("WHERE proposal_id = ?", (proposal_id,))
+        found = self._rows("proposal_id = ?", (proposal_id,))
         return found[0] if found else None
 
     def add(self, brief: CampaignBriefInput, at: datetime) -> CampaignBriefOutput:
@@ -238,13 +246,15 @@ class BriefStore:
         try:
             with self._lock, self._conn:
                 self._conn.execute(
-                    "INSERT INTO campaign_briefs (proposal_id, campaign_id, received_at, payload)"
-                    " VALUES (?, ?, ?, ?)",
+                    "INSERT INTO campaign_briefs"
+                    " (proposal_id, campaign_id, received_at, payload, tenant_id)"
+                    " VALUES (?, ?, ?, ?, ?)",
                     (
                         stored.proposal_id,
                         stored.campaign_id,
                         stored.received_at.isoformat(),
                         stored.model_dump_json(),
+                        self.company_id,
                     ),
                 )
         except sqlite3.IntegrityError:  # 동시에 같은 기획안이 들어왔다. 먼저 들어간 것이 이긴다
@@ -264,7 +274,7 @@ class BriefStore:
             if found is not None and campaign_id not in (None, found.campaign_id):
                 return None
             return found
-        found_list = self._rows("WHERE campaign_id = ?", (campaign_id or "",))
+        found_list = self._rows("campaign_id = ?", (campaign_id or "",))
         return found_list[0] if found_list else None
 
     # --- SNS·미디어 넘김 기록 -------------------------------------------------------
@@ -273,7 +283,9 @@ class BriefStore:
         try:
             with self._lock:
                 row = self._conn.execute(
-                    "SELECT payload FROM brief_sns_handoffs WHERE proposal_id = ?", (proposal_id,)
+                    "SELECT payload FROM brief_sns_handoffs"
+                    " WHERE proposal_id = ? AND tenant_id = ?",
+                    (proposal_id, self.company_id),
                 ).fetchone()
         except sqlite3.Error as error:
             raise BriefStorageError(f"넘김 기록을 읽을 수 없다: {type(error).__name__}") from error
@@ -293,9 +305,10 @@ class BriefStore:
                 rows = self._conn.execute(
                     "SELECT b.proposal_id FROM campaign_briefs b"
                     " LEFT JOIN brief_sns_handoffs h ON h.proposal_id = b.proposal_id"
-                    " WHERE h.proposal_id IS NULL OR h.status != 'handed'"
+                    " AND h.tenant_id = b.tenant_id"
+                    " WHERE b.tenant_id = ? AND (h.proposal_id IS NULL OR h.status != 'handed')"
                     " ORDER BY b.seq LIMIT ?",
-                    (limit,),
+                    (self.company_id, limit),
                 ).fetchall()
         except sqlite3.Error as error:
             raise BriefStorageError(
@@ -308,8 +321,9 @@ class BriefStore:
         try:
             with self._lock:
                 row = self._conn.execute(
-                    "SELECT attempts, last_at FROM brief_auto_handoff WHERE proposal_id = ?",
-                    (proposal_id,),
+                    "SELECT attempts, last_at FROM brief_auto_handoff"
+                    " WHERE proposal_id = ? AND tenant_id = ?",
+                    (proposal_id, self.company_id),
                 ).fetchone()
         except sqlite3.Error as error:
             raise BriefStorageError(
@@ -322,15 +336,17 @@ class BriefStore:
         try:
             with self._lock, self._conn:
                 self._conn.execute(
-                    "INSERT INTO brief_auto_handoff (proposal_id, attempts, last_at, last_reason)"
-                    " VALUES (?, 1, ?, ?) ON CONFLICT(proposal_id) DO UPDATE SET"
+                    "INSERT INTO brief_auto_handoff"
+                    " (proposal_id, attempts, last_at, last_reason, tenant_id)"
+                    " VALUES (?, 1, ?, ?, ?) ON CONFLICT(proposal_id) DO UPDATE SET"
                     " attempts = attempts + 1, last_at = excluded.last_at,"
                     " last_reason = excluded.last_reason",
-                    (proposal_id, at.isoformat(), reason),
+                    (proposal_id, at.isoformat(), reason, self.company_id),
                 )
                 row = self._conn.execute(
-                    "SELECT attempts FROM brief_auto_handoff WHERE proposal_id = ?",
-                    (proposal_id,),
+                    "SELECT attempts FROM brief_auto_handoff"
+                    " WHERE proposal_id = ? AND tenant_id = ?",
+                    (proposal_id, self.company_id),
                 ).fetchone()
         except sqlite3.Error as error:
             raise BriefStorageError(
@@ -344,12 +360,13 @@ class BriefStore:
             with self._lock, self._conn:
                 self._conn.execute(
                     "INSERT OR REPLACE INTO brief_sns_handoffs"
-                    " (proposal_id, status, updated_at, payload) VALUES (?, ?, ?, ?)",
+                    " (proposal_id, status, updated_at, payload, tenant_id) VALUES (?, ?, ?, ?, ?)",
                     (
                         record.proposal_id,
                         record.status,
                         record.updated_at.isoformat(),
                         record.model_dump_json(),
+                        self.company_id,
                     ),
                 )
         except sqlite3.Error as error:

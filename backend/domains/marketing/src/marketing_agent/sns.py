@@ -37,7 +37,7 @@ from pydantic import Field, StrictBool, ValidationError, field_validator, model_
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel, UtcDatetime
-from marketing_agent import sns_hashtags, sns_media
+from marketing_agent import company_scope, sns_hashtags, sns_media
 from marketing_agent.briefs import BriefStorageError, BriefStore
 from marketing_agent.notice import NoticeStore
 from marketing_agent.schemas import NoticeKind
@@ -317,7 +317,8 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sns_drafts (
     post_draft_id TEXT PRIMARY KEY,
     created_at    TEXT NOT NULL,
-    payload       TEXT NOT NULL
+    payload       TEXT NOT NULL,
+    tenant_id     TEXT NOT NULL DEFAULT 'catbooks'
 );
 """
 
@@ -328,14 +329,16 @@ class SnsStore:
     id가 내용 주소라 같은 초안을 다시 저장해도 같은 줄이다.
     """
 
-    def __init__(self, path: str | None = None) -> None:
+    def __init__(self, path: str | None = None, company_id: str | None = None) -> None:
         self.path = (
             path if path is not None else (os.getenv(DRAFT_DB_ENV, "").strip() or ":memory:")
         )
+        self.company_id = company_scope.scope_id(company_id)  # 회사 칸(여러 회사 1-6)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
         with self._lock, self._conn:
             self._conn.execute(_SCHEMA)
+            company_scope.ensure_tenant_column(self._conn, "sns_drafts")  # 옛 줄은 캣북스
 
     def close(self) -> None:
         self._conn.close()
@@ -345,8 +348,8 @@ class SnsStore:
             if draft.status == "draft" and not draft.merged_from:
                 # 같은 내용의 초안을 다시 저장해도 병합 기록(흡수한 원본·병합 표시)은 지우지 않는다
                 row = self._conn.execute(
-                    "SELECT payload FROM sns_drafts WHERE post_draft_id = ?",
-                    (draft.post_draft_id,),
+                    "SELECT payload FROM sns_drafts WHERE post_draft_id = ? AND tenant_id = ?",
+                    (draft.post_draft_id, self.company_id),
                 ).fetchone()
                 if row is not None:
                     try:
@@ -363,9 +366,14 @@ class SnsStore:
                             }
                         )
             self._conn.execute(
-                "INSERT OR REPLACE INTO sns_drafts (post_draft_id, created_at, payload)"
-                " VALUES (?, ?, ?)",
-                (draft.post_draft_id, _now().isoformat(), draft.model_dump_json()),
+                "INSERT OR REPLACE INTO sns_drafts (post_draft_id, created_at, payload, tenant_id)"
+                " VALUES (?, ?, ?, ?)",
+                (
+                    draft.post_draft_id,
+                    _now().isoformat(),
+                    draft.model_dump_json(),
+                    self.company_id,
+                ),
             )
 
     def update_meta(self, drafts: list[SnsPostDraft]) -> None:
@@ -373,8 +381,8 @@ class SnsStore:
         with self._lock, self._conn:
             for draft in drafts:
                 cursor = self._conn.execute(
-                    "UPDATE sns_drafts SET payload = ? WHERE post_draft_id = ?",
-                    (draft.model_dump_json(), draft.post_draft_id),
+                    "UPDATE sns_drafts SET payload = ? WHERE post_draft_id = ? AND tenant_id = ?",
+                    (draft.model_dump_json(), draft.post_draft_id, self.company_id),
                 )
                 if cursor.rowcount != 1:
                     raise KeyError(draft.post_draft_id)  # with 블록이 되돌린다
@@ -382,7 +390,8 @@ class SnsStore:
     def get(self, post_draft_id: str) -> SnsPostDraft | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT payload FROM sns_drafts WHERE post_draft_id = ?", (post_draft_id,)
+                "SELECT payload FROM sns_drafts WHERE post_draft_id = ? AND tenant_id = ?",
+                (post_draft_id, self.company_id),
             ).fetchone()
         if row is None:
             return None
@@ -418,9 +427,10 @@ class SnsStore:
         """
         with self._lock:
             rows = self._conn.execute(
-                "SELECT payload FROM sns_drafts WHERE json_extract(payload, '$.media_from') = ?"
+                "SELECT payload FROM sns_drafts WHERE tenant_id = ?"
+                " AND json_extract(payload, '$.media_from') = ?"
                 " ORDER BY created_at DESC, post_draft_id",
-                (post_draft_id,),
+                (self.company_id, post_draft_id),
             ).fetchall()
         for (payload,) in rows:
             try:
@@ -440,9 +450,9 @@ class SnsStore:
             where += " AND COALESCE(json_extract(payload, '$.status'), 'draft') != 'merged'"
         with self._lock:
             return self._conn.execute(
-                f"SELECT payload, created_at FROM sns_drafts WHERE {where}"  # noqa: S608
+                f"SELECT payload, created_at FROM sns_drafts WHERE tenant_id = ? AND {where}"  # noqa: S608
                 " ORDER BY created_at DESC, post_draft_id",
-                (source_kind,),
+                (self.company_id, source_kind),
             ).fetchall()
 
 

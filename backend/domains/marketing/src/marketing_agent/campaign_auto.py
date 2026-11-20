@@ -60,6 +60,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
+from marketing_agent import company_scope
 from marketing_agent.campaign import (
     KST_OFFSET_H,
     BriefContent,
@@ -103,7 +104,8 @@ CREATE TABLE IF NOT EXISTS campaign_runs (
     started_at TEXT NOT NULL,
     payload TEXT NOT NULL,
     views_state TEXT,
-    views_next_at TEXT
+    views_next_at TEXT,
+    tenant_id TEXT NOT NULL DEFAULT 'catbooks'
 )
 """
 _LOG_SCHEMA = """
@@ -112,7 +114,8 @@ CREATE TABLE IF NOT EXISTS campaign_auto_log (
     campaign_id TEXT NOT NULL,
     at TEXT NOT NULL,
     result TEXT NOT NULL,
-    detail TEXT NOT NULL
+    detail TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'catbooks'
 )
 """
 
@@ -163,8 +166,9 @@ def ends_at(ends_on: str) -> datetime:
 class CampaignTracker:
     """시작된 캠페인 대장. `path`가 없으면 환경변수 `MARKETING_CAMPAIGNS_DB`, 없으면 메모리."""
 
-    def __init__(self, path: str | None = None) -> None:
+    def __init__(self, path: str | None = None, company_id: str | None = None) -> None:
         self.path = path if path is not None else (os.getenv(DB_ENV, "").strip() or ":memory:")
+        self.company_id = company_scope.scope_id(company_id)  # 회사 칸(여러 회사 1-6)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
         with self._lock, self._conn:
@@ -174,6 +178,8 @@ class CampaignTracker:
             for column in ("views_state", "views_next_at"):
                 if column not in have:  # 이전 버전 파일 대장
                     self._conn.execute(f"ALTER TABLE campaign_runs ADD COLUMN {column} TEXT")  # noqa: S608
+            for table in ("campaign_runs", "campaign_auto_log"):
+                company_scope.ensure_tenant_column(self._conn, table)  # 옛 줄은 캣북스
 
     def close(self) -> None:
         self._conn.close()
@@ -185,8 +191,8 @@ class CampaignTracker:
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR IGNORE INTO campaign_runs"
-                " (campaign_id, status, ends_on, due_at, started_at, payload)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                " (campaign_id, status, ends_on, due_at, started_at, payload, tenant_id)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     started.campaign_id,
                     ACTIVE,
@@ -194,29 +200,32 @@ class CampaignTracker:
                     due,
                     datetime.now(UTC).isoformat(),
                     started.model_dump_json(),
+                    self.company_id,
                 ),
             )
 
     def get(self, campaign_id: str) -> StartedCampaign | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT payload FROM campaign_runs WHERE campaign_id = ?", (campaign_id,)
+                "SELECT payload FROM campaign_runs WHERE campaign_id = ? AND tenant_id = ?",
+                (campaign_id, self.company_id),
             ).fetchone()
         return StartedCampaign.model_validate_json(row[0]) if row else None
 
     def status(self, campaign_id: str) -> str | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT status FROM campaign_runs WHERE campaign_id = ?", (campaign_id,)
+                "SELECT status FROM campaign_runs WHERE campaign_id = ? AND tenant_id = ?",
+                (campaign_id, self.company_id),
             ).fetchone()
         return row[0] if row else None
 
     def _set_status(self, campaign_id: str, status: str, *, only_active: bool = False) -> None:
-        sql = "UPDATE campaign_runs SET status = ? WHERE campaign_id = ?"
+        sql = "UPDATE campaign_runs SET status = ? WHERE campaign_id = ? AND tenant_id = ?"
         if only_active:
             sql += f" AND status = '{ACTIVE}'"  # noqa: S608 - 상수
         with self._lock, self._conn:
-            self._conn.execute(sql, (status, campaign_id))
+            self._conn.execute(sql, (status, campaign_id, self.company_id))
 
     def mark_human_recorded(self, campaign_id: str) -> None:
         """사람이 결과를 저장했다. 자동 전달은 이 캠페인을 더 보내지 않는다."""
@@ -229,7 +238,8 @@ class CampaignTracker:
     def views_state(self, campaign_id: str) -> str | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT views_state FROM campaign_runs WHERE campaign_id = ?", (campaign_id,)
+                "SELECT views_state FROM campaign_runs WHERE campaign_id = ? AND tenant_id = ?",
+                (campaign_id, self.company_id),
             ).fetchone()
         return row[0] if row else None
 
@@ -238,24 +248,34 @@ class CampaignTracker:
         with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE campaign_runs SET views_state = ?, views_next_at = ?"
-                " WHERE campaign_id = ? AND status = ?",
-                (state, next_at.isoformat() if next_at else None, campaign_id, RECORDED_AUTO),
+                " WHERE campaign_id = ? AND status = ? AND tenant_id = ?",
+                (
+                    state,
+                    next_at.isoformat() if next_at else None,
+                    campaign_id,
+                    RECORDED_AUTO,
+                    self.company_id,
+                ),
             )
 
     def _close_views(self, campaign_id: str, state: str, *, only_pending: bool) -> None:
-        sql = "UPDATE campaign_runs SET views_state = ?, views_next_at = NULL WHERE campaign_id = ?"
+        sql = (
+            "UPDATE campaign_runs SET views_state = ?, views_next_at = NULL"
+            " WHERE campaign_id = ? AND tenant_id = ?"
+        )
         if only_pending:
             sql += f" AND views_state = '{VIEWS_PENDING}'"  # noqa: S608 - 상수
         with self._lock, self._conn:
-            self._conn.execute(sql, (state, campaign_id))
+            self._conn.execute(sql, (state, campaign_id, self.company_id))
 
     def views_due(self, now: datetime) -> list[StartedCampaign]:
         """자동 전송을 마치고 7일 조회수 재확인 시각이 된 캠페인(사람이 저장·취소한 것은 빠진다)."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT payload FROM campaign_runs WHERE status = ? AND views_state = ?"
-                " AND views_next_at IS NOT NULL AND views_next_at <= ? ORDER BY views_next_at",
-                (RECORDED_AUTO, VIEWS_PENDING, now.isoformat()),
+                " AND views_next_at IS NOT NULL AND views_next_at <= ? AND tenant_id = ?"
+                " ORDER BY views_next_at",
+                (RECORDED_AUTO, VIEWS_PENDING, now.isoformat(), self.company_id),
             ).fetchall()
         return [StartedCampaign.model_validate_json(r[0]) for r in rows]
 
@@ -263,15 +283,17 @@ class CampaignTracker:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT payload FROM campaign_runs WHERE status = ? AND due_at IS NOT NULL"
-                " AND due_at <= ? AND (next_try_at IS NULL OR next_try_at <= ?) ORDER BY due_at",
-                (ACTIVE, now.isoformat(), now.isoformat()),
+                " AND due_at <= ? AND (next_try_at IS NULL OR next_try_at <= ?) AND tenant_id = ?"
+                " ORDER BY due_at",
+                (ACTIVE, now.isoformat(), now.isoformat(), self.company_id),
             ).fetchall()
         return [StartedCampaign.model_validate_json(r[0]) for r in rows]
 
     def attempts(self, campaign_id: str) -> int:
         with self._lock:
             row = self._conn.execute(
-                "SELECT attempts FROM campaign_runs WHERE campaign_id = ?", (campaign_id,)
+                "SELECT attempts FROM campaign_runs WHERE campaign_id = ? AND tenant_id = ?",
+                (campaign_id, self.company_id),
             ).fetchone()
         return int(row[0]) if row else 0
 
@@ -279,8 +301,8 @@ class CampaignTracker:
         with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE campaign_runs SET attempts = attempts + 1, next_try_at = ?"
-                " WHERE campaign_id = ?",
-                (next_try.isoformat() if next_try else None, campaign_id),
+                " WHERE campaign_id = ? AND tenant_id = ?",
+                (next_try.isoformat() if next_try else None, campaign_id, self.company_id),
             )
         return self.attempts(campaign_id)
 
@@ -289,18 +311,24 @@ class CampaignTracker:
 
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO campaign_auto_log (campaign_id, at, result, detail)"
-                " VALUES (?, ?, ?, ?)",
-                (campaign_id, at.isoformat(), result, json.dumps(detail, ensure_ascii=False)),
+                "INSERT INTO campaign_auto_log (campaign_id, at, result, detail, tenant_id)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (
+                    campaign_id,
+                    at.isoformat(),
+                    result,
+                    json.dumps(detail, ensure_ascii=False),
+                    self.company_id,
+                ),
             )
 
     def log(self, campaign_id: str | None = None) -> list[dict[str, Any]]:
         import json
 
-        sql = "SELECT campaign_id, at, result, detail FROM campaign_auto_log"
-        args: tuple[str, ...] = ()
+        sql = "SELECT campaign_id, at, result, detail FROM campaign_auto_log WHERE tenant_id = ?"
+        args: tuple[str, ...] = (self.company_id,)
         if campaign_id is not None:
-            sql, args = sql + " WHERE campaign_id = ?", (campaign_id,)
+            sql, args = sql + " AND campaign_id = ?", (self.company_id, campaign_id)
         with self._lock:
             rows = self._conn.execute(sql + " ORDER BY seq", args).fetchall()
         return [

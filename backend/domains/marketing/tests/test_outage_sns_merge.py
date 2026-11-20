@@ -296,7 +296,7 @@ def test_media_attached_and_pending_publish_are_left_alone() -> None:
     publisher.store().create(
         pend.PendingPost(
             idempotency_key="k1",
-            tenant_id="t",
+            tenant_id="shop-demo",
             context_id=CTX,
             post_draft_id=held.post_draft_id,
             content_sha="x",

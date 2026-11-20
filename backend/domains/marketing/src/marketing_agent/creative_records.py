@@ -23,6 +23,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from marketing_agent import company_scope
+
 logger = logging.getLogger("marketing.creative_records")
 
 DB_ENV = "MARKETING_CREATIVE_DB"
@@ -42,7 +44,8 @@ CREATE TABLE IF NOT EXISTS marketing_creative_records (
     sheet TEXT NOT NULL,
     storyboard TEXT,
     storyboard_at TEXT,
-    render TEXT
+    render TEXT,
+    tenant_id TEXT NOT NULL DEFAULT 'catbooks'
 )
 """
 
@@ -61,8 +64,9 @@ def clean_thumbnail(raw: Any) -> str | None:
 class CreativeRecords:
     """`path`가 없으면 환경변수 `MARKETING_CREATIVE_DB`, 그것도 없으면 메모리."""
 
-    def __init__(self, path: str | None = None) -> None:
+    def __init__(self, path: str | None = None, company_id: str | None = None) -> None:
         self.path = path if path is not None else (os.getenv(DB_ENV, "").strip() or ":memory:")
+        self.company_id = company_scope.scope_id(company_id)  # 회사 칸(여러 회사 1-6)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
         self._conn.row_factory = sqlite3.Row
@@ -71,6 +75,9 @@ class CreativeRecords:
             info = self._conn.execute("PRAGMA table_info(marketing_creative_records)")
             if "render" not in {r["name"] for r in info}:  # 2026-11-20 Higgsfield 그림·영상 칸
                 self._conn.execute("ALTER TABLE marketing_creative_records ADD COLUMN render TEXT")
+            company_scope.ensure_tenant_column(
+                self._conn, "marketing_creative_records"
+            )  # 옛 줄은 캣북스
 
     def add_sheet(self, sheet: dict[str, Any], note: str | None, thumbnail: str | None) -> str:
         record_id = f"CR-{uuid.uuid4().hex[:12]}"
@@ -78,14 +85,22 @@ class CreativeRecords:
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO marketing_creative_records"
-                " (record_id, created_at, note, thumbnail, sheet) VALUES (?, ?, ?, ?, ?)",
-                (record_id, now, (note or "")[:MAX_NOTE] or None, thumbnail, json.dumps(sheet)),
+                " (record_id, created_at, note, thumbnail, sheet, tenant_id)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    record_id,
+                    now,
+                    (note or "")[:MAX_NOTE] or None,
+                    thumbnail,
+                    json.dumps(sheet),
+                    self.company_id,
+                ),
             )
             self._conn.execute(
-                "DELETE FROM marketing_creative_records WHERE record_id NOT IN ("
-                " SELECT record_id FROM marketing_creative_records"
+                "DELETE FROM marketing_creative_records WHERE tenant_id = ? AND record_id NOT IN ("
+                " SELECT record_id FROM marketing_creative_records WHERE tenant_id = ?"
                 " ORDER BY created_at DESC LIMIT ?)",
-                (KEEP,),
+                (self.company_id, self.company_id, KEEP),
             )
         return record_id
 
@@ -97,8 +112,9 @@ class CreativeRecords:
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "UPDATE marketing_creative_records"
-                " SET story = ?, shots = ?, storyboard = ?, storyboard_at = ? WHERE record_id = ?",
-                (story[:MAX_STORY], shots, json.dumps(storyboard), now, record_id),
+                " SET story = ?, shots = ?, storyboard = ?, storyboard_at = ?"
+                " WHERE record_id = ? AND tenant_id = ?",
+                (story[:MAX_STORY], shots, json.dumps(storyboard), now, record_id, self.company_id),
             )
         return cur.rowcount == 1
 
@@ -106,8 +122,9 @@ class CreativeRecords:
         """목록은 가볍게: 요약·미리보기·칸 수만."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM marketing_creative_records ORDER BY created_at DESC LIMIT ?",
-                (max(1, min(limit, KEEP)),),
+                "SELECT * FROM marketing_creative_records WHERE tenant_id = ?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (self.company_id, max(1, min(limit, KEEP))),
             ).fetchall()
         out = []
         for r in rows:
@@ -132,7 +149,8 @@ class CreativeRecords:
     def get(self, record_id: str) -> dict[str, Any] | None:
         with self._lock:
             r = self._conn.execute(
-                "SELECT * FROM marketing_creative_records WHERE record_id = ?", (record_id,)
+                "SELECT * FROM marketing_creative_records WHERE record_id = ? AND tenant_id = ?",
+                (record_id, self.company_id),
             ).fetchone()
         if r is None:
             return None
@@ -152,15 +170,18 @@ class CreativeRecords:
     def get_render(self, record_id: str) -> dict[str, Any]:
         with self._lock:
             r = self._conn.execute(
-                "SELECT render FROM marketing_creative_records WHERE record_id = ?", (record_id,)
+                "SELECT render FROM marketing_creative_records"
+                " WHERE record_id = ? AND tenant_id = ?",
+                (record_id, self.company_id),
             ).fetchone()
         return json.loads(r["render"]) if r is not None and r["render"] else {}
 
     def set_render(self, record_id: str, render: dict[str, Any]) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "UPDATE marketing_creative_records SET render = ? WHERE record_id = ?",
-                (json.dumps(render, ensure_ascii=False), record_id),
+                "UPDATE marketing_creative_records SET render = ?"
+                " WHERE record_id = ? AND tenant_id = ?",
+                (json.dumps(render, ensure_ascii=False), record_id, self.company_id),
             )
 
 

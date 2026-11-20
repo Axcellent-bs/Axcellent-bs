@@ -28,11 +28,11 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from ax_secret_store import get_secret
+from marketing_agent import company_scope
 from marketing_agent.media import quota_store
 from marketing_agent.media.base import MediaKind
 from marketing_agent.media.video_limits import (
@@ -186,7 +186,7 @@ class MediaSettings:
             audio_provider=_text("MARKETING_AUDIO_PROVIDER").lower() or MOCK,
             audio_model=_text("MARKETING_AUDIO_MODEL"),
             audio_mode=audio_mode_from_env(),
-            media_dir=Path(_text(MEDIA_DIR_ENV) or Path(tempfile.gettempdir()) / "marketing_media"),
+            media_dir=company_scope.media_dir(),
         )
 
     @property

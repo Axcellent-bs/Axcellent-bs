@@ -22,6 +22,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ax_contracts.schemas.common import TENANT_ID_ALIASES
+from marketing_agent import company_scope
+
 DB_ENV = "MARKETING_SNS_PENDING_DB"
 
 HELD, APPROVED, PUBLISHING = "held", "approved", "publishing"
@@ -152,13 +155,22 @@ def _now() -> str:
 class PendingStore:
     """`path`가 없으면 `MARKETING_SNS_PENDING_DB`, 그것도 없으면 메모리."""
 
-    def __init__(self, path: str | None = None) -> None:
+    def __init__(self, path: str | None = None, company_id: str | None = None) -> None:
         self.path = path if path is not None else (os.getenv(DB_ENV, "").strip() or ":memory:")
+        self.company_id = company_scope.scope_id(company_id)  # 회사 칸(여러 회사 1-6)
+        # 이 칸은 요청 메타 값이라 옛 줄에 별칭(shop-demo)이 있을 수 있다. 값은 그대로 두고
+        # 읽을 때 같은 회사로 본다
+        self._tenants = (
+            self.company_id,
+            *(a for a, c in TENANT_ID_ALIASES.items() if c == self.company_id),
+        )
+        self._in = f"tenant_id IN ({', '.join('?' * len(self._tenants))})"
         self._lock = threading.Lock()
         try:
             self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
             with self._lock, self._conn:
                 self._conn.executescript(_SCHEMA)
+                company_scope.ensure_tenant_column(self._conn, "sns_pending")
         except sqlite3.Error as error:
             raise PendingStorageError(
                 f"게시 대기 저장소를 열 수 없다: {type(error).__name__}"
@@ -168,11 +180,16 @@ class PendingStore:
         self._conn.close()
 
     def _query(self, where: str, args: tuple = ()) -> list[PendingPost]:
+        """`where`는 `WHERE ...`로 시작한다. 이 저장소의 회사 줄만 읽는다."""
+        if where.startswith("WHERE "):
+            clause = f"WHERE {self._in} AND {where[len('WHERE ') :]}"
+        else:  # 조건 없이 정렬만(`ORDER BY ...`)이거나 빈 글
+            clause = f"WHERE {self._in} {where}".rstrip()
         try:
             with self._lock:
                 rows = self._conn.execute(
-                    f"SELECT {_COLUMNS} FROM sns_pending {where}",  # noqa: S608
-                    args,
+                    f"SELECT {_COLUMNS} FROM sns_pending {clause}",  # noqa: S608
+                    (*self._tenants, *args),
                 ).fetchall()
         except sqlite3.Error as error:
             raise PendingStorageError(f"대기 건을 읽을 수 없다: {type(error).__name__}") from error
@@ -203,8 +220,9 @@ class PendingStore:
             with self._lock, self._conn:
                 self._conn.execute(
                     "UPDATE sns_pending SET result = json_set(COALESCE(result, '{}'),"
-                    " '$.review_expires_at', ?) WHERE idempotency_key = ? AND status = ?",
-                    (expires_at, key, HELD),
+                    " '$.review_expires_at', ?) WHERE idempotency_key = ? AND status = ?"
+                    f" AND {self._in}",
+                    (expires_at, key, HELD, *self._tenants),
                 )
         except sqlite3.Error as error:
             raise PendingStorageError(
@@ -220,9 +238,15 @@ class PendingStore:
         """
         sql = (
             "UPDATE sns_pending SET result = json_patch(COALESCE(result, '{}'), ?),"
-            " updated_at = ? WHERE idempotency_key = ? AND status = ?"
+            f" updated_at = ? WHERE idempotency_key = ? AND status = ? AND {self._in}"
         )
-        args: list[Any] = [json.dumps(patch, ensure_ascii=False), _now(), key, PUBLISHED]
+        args: list[Any] = [
+            json.dumps(patch, ensure_ascii=False),
+            _now(),
+            key,
+            PUBLISHED,
+            *self._tenants,
+        ]
         if where_review_status is not None:
             sql += " AND json_extract(result, '$.ai_label_review.status') = ?"
             args.append(where_review_status)
@@ -238,9 +262,9 @@ class PendingStore:
         try:
             with self._lock:
                 row = self._conn.execute(
-                    "SELECT COUNT(*) FROM sns_pending WHERE updated_at >= ?"
+                    f"SELECT COUNT(*) FROM sns_pending WHERE updated_at >= ? AND {self._in}"  # noqa: S608
                     " AND (status = ? OR publish_sent = 1)",
-                    (since.astimezone(UTC).isoformat(), PUBLISHED),
+                    (since.astimezone(UTC).isoformat(), *self._tenants, PUBLISHED),
                 ).fetchone()
         except sqlite3.Error as error:
             raise PendingStorageError(
@@ -437,7 +461,7 @@ class PendingStore:
             values[name] = value
         values["updated_at"] = _now()
         sets = ", ".join(f"{name} = ?" for name in values)  # 이름은 위 허용 목록에서만 온다
-        where, args = "idempotency_key = ?", [key]
+        where, args = f"idempotency_key = ? AND {self._in}", [key, *self._tenants]
         if expect is not None:
             where += " AND status = ?"
             args.append(expect)
