@@ -5,7 +5,8 @@ import type { ChatThread as BaseThread } from "@/lib/planningData";
 import { withRawCards } from "@/lib/chatCards";
 
 /** 대화 하나. 서버가 남의 대화를 가리면 messages가 비고 restricted·summary가 온다 */
-export type ChatThread = BaseThread & { who?: string; summary?: string; restricted?: boolean; messageCount?: number };
+/** shared: 단톡방에서 건 대화라 남의 것이라도 원문이 온다(restricted=false). owner: 그 대화를 건 사람 (11/20 공통 약속, 예전 서버는 없음) */
+export type ChatThread = BaseThread & { who?: string; summary?: string; restricted?: boolean; messageCount?: number; shared?: boolean; owner?: string | null };
 
 /** 대화 목록·상세·보내기 주소. 닫기(`/<id>/close`)는 `directChatApi(ep, {closable: true})`로 켠 창구만 쓴다 */
 export interface ChatEndpoint { base: string; path: string }
@@ -70,7 +71,8 @@ export const directChatApi = (ep: ChatEndpoint, opts: { closable?: boolean; getB
   return {
     list: () => request(ep, "").then(toThreads),
     get: (id: string) => request(ep, opts.getByQuery ? `?thread_id=${encodeURIComponent(id)}` : `/${encodeURIComponent(id)}`).then(one),
-    send: (x: { thread_id?: string; message: string }) => request(ep, "", { method: "POST", body: JSON.stringify(x) }).then(one),
+    // room_id: 단톡방에서 보낼 때만 (safety만 이 창구를 쓴다. 중계 부서에는 화면이 넣지 않는다, lib/officeTalkView.ts)
+    send: (x: { thread_id?: string; message: string; room_id?: string }) => request(ep, "", { method: "POST", body: JSON.stringify(x) }).then(one),
     ...(opts.closable ? { close: (id: string) => request(ep, `/${encodeURIComponent(id)}/close`, { method: "POST", body: "{}" }).then(one) } : {}),
     // 대화 지우기 (본인 대화만, 서버가 확인). POST 전용 `<주소>/<id>/remove` (DELETE는 쓰지 않는다)
     remove: (id: string) => request(ep, `/${encodeURIComponent(id)}/remove`, { method: "POST", body: "{}" }).then(() => undefined),

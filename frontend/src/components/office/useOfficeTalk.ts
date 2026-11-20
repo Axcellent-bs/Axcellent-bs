@@ -4,6 +4,8 @@ import { PROCEED_TEXT } from "@/components/office/DevCards";
 import { ALL_ROOM, type ChatItem } from "@/lib/agentChat";
 import { POLL_MS, classifyFailure, isAnswering } from "@/lib/directChat";
 import { ROOM_POLL_MS, listOfficeRoom, touchOfficeRoom, type OfficeEntry } from "@/lib/officeRoom";
+import { loadOwners, saveOwner } from "@/lib/directThreads";
+import { notThreadOwner, officeSendBody, ownsThread, senderName, threadDisplay } from "@/lib/officeTalkView";
 import { useSession, type Account } from "@/demo/session";
 
 // 단톡방(전체 대화방·장애·이슈 방)에서 부서 AI에게 말 걸기. 단톡방 대화는 모두에게 보인다.
@@ -12,7 +14,9 @@ import { useSession, type Account } from "@/demo/session";
 //   원문은 각 부서 대화 창구에서 읽는다(목록에 새로 오르거나 마지막 시각이 바뀐 대화, 답을 기다리는 대화만).
 // - 방: 전체 대화방은 ALL_ROOM("all"), 장애·이슈 방은 총괄 사건 context_id. 장애 방에서 건 말은 그 방에서만 보인다.
 // - 1:1 직접 대화(DirectChat)와는 대화를 나눈다: 단톡방 대화는 1:1 대화를 잇지 않고, 1:1 대화는 목록에 올리지 않는다(비공개).
-// - 내 단톡방 대화는 목록의 보낸 사람(from_id)이 내 계정인 대화다. 같은 부서라도 방마다 따로 잇는다.
+// - 11/20 공유(공통 약속): 대화 상세가 shared면 남의 대화라도 원문 말풍선("<owner> → @부서")을 그린다. shared가 아닌 restricted만 한 줄 요약.
+//   safety·hr·archive에 보낼 때만 body에 room_id를 넣고(중계 8곳은 그대로), POST /office-room이 403 NOT_THREAD_OWNER면 줄을 만들지 않는다
+// - 내 단톡방 대화는 목록의 보낸 사람(from_id)이 내 계정이고 owners·서버 owner도 나인 대화다(남의 대화에 이어 쓰지 않음). 같은 부서라도 방마다 따로 잇는다.
 //   끝난 대화(closed)만 새 대화로 시작하고, 기획에 넘긴 대화(handed)는 같은 대화에 잇는다 (직접 대화와 같은 규칙).
 
 type Talk = NonNullable<DirectAgent["talk"]>;
@@ -156,12 +160,15 @@ export function useOfficeTalk(): OfficeTalk {
     return () => { window.clearInterval(timer); };
   }, [waiting, account, read]);
 
-  // 내 단톡방 대화 중 그 방·그 부서의 가장 최근 대화 (방마다 따로 잇는다)
+  // 내 단톡방 대화 중 그 방·그 부서의 가장 최근 대화 (방마다 따로 잇는다).
+  // shared로 남의 대화 원문도 보이지만, 이어 쓰는 건 내 대화만 (목록 from_id · 이 브라우저 owners · 서버 owner, lib/officeTalkView ownsThread)
   const myThread = useCallback((key: string, room: string): Thread | null => {
     if (!account) return null;
+    const owners = loadOwners();
     let best: Loaded | null = null;
     for (const l of Object.values(loaded)) {
-      if (l.entry.agent !== key || l.entry.roomId !== room || l.entry.fromId !== account.id || !l.thread) continue;
+      if (l.entry.agent !== key || l.entry.roomId !== room || !l.thread) continue;
+      if (!ownsThread({ fromId: l.entry.fromId, threadId: l.entry.threadId, owner: l.thread.owner }, { id: account.id, name: account.name }, owners)) continue;
       if (!best || l.entry.updatedAt > best.entry.updatedAt) best = l;
     }
     return best?.thread ?? null;
@@ -176,13 +183,20 @@ export function useOfficeTalk(): OfficeTalk {
     if (cur && !keep) note("지난 대화가 끝나서 새 대화로 시작했어요", room);
     setSending((s) => ({ ...s, [sk]: { text: message, at: new Date().toISOString(), room } }));
     try {
-      const next = await a.talk.send({ ...(keep ? { thread_id: cur.id } : {}), message });
+      // safety·hr·archive만 body에 room_id (단톡방 대화라 모두가 원문을 본다). 중계 8곳은 body를 바꾸지 않는다
+      const next = await a.talk.send(officeSendBody({ agent: key, room, threadId: keep ? cur.id : null, message }));
+      if (!keep) saveOwner(next.id, account.id);
       const k = keyOf(key, next.id);
       const fallback: OfficeEntry = { agent: key, threadId: next.id, fromId: account.id, fromName: account.name || "나", createdAt: next.createdAt, updatedAt: new Date().toISOString(), roomId: room };
       let entry = fallback;
       try {
         entry = (await touchOfficeRoom({ agent: key, threadId: next.id, fromId: account.id, fromName: account.name || "나", roomId: room })) ?? fallback;
       } catch (err) {
+        if (notThreadOwner(err)) {
+          // 남의 대화를 단톡방 줄로 올리려 한 것 (서버 403 NOT_THREAD_OWNER): 줄을 만들지 않고 화면 오류로도 띄우지 않는다
+          console.warn(`[office-room] ${key} 대화 ${next.id}는 내 대화가 아니라 단톡방 줄을 만들지 않았어요`);
+          return true;
+        }
         note(`${a.name}에 보냈지만 단톡방 목록에 올리지 못해 다른 사람에게는 안 보일 수 있어요: ${errText(err, "단톡방 목록")}`, room);
       }
       dead.current.delete(k);
@@ -225,10 +239,12 @@ export function useOfficeTalk(): OfficeTalk {
       if (!t || !a) continue;
       const room = l.entry.roomId;
       const mine = l.entry.fromId === account.id;
-      const who = mine ? account.name || "나" : l.entry.fromName || "다른 사람";
-      if (t.restricted) {
-        // 사람마다 다른 토큰을 쓰는 설정이면 서버가 남의 대화 원문을 가린다. 요약만 한 줄
-        out.push({ kind: "system", id: `direct:${a.key}:${t.id}:restricted`, at: t.updatedAt || l.entry.updatedAt, room, text: `${who}님이 ${a.name}와 나눈 대화${t.summary ? `: ${t.summary}` : " (원문은 본인만 봐요)"}` });
+      // 보낸 사람 줄 "<owner> → @<부서>": 남의 대화면 서버 owner, 없으면 단톡방 목록 from_name
+      const who = senderName({ mine, accountName: account.name, owner: t.owner, fromName: l.entry.fromName });
+      const look = threadDisplay(t, who, a.name);
+      if (look.kind === "restricted") {
+        // shared가 아닌 남의 대화(1:1·예전 줄)는 서버가 원문을 가린다. 지금처럼 요약만 한 줄
+        out.push({ kind: "system", id: `direct:${a.key}:${t.id}:restricted`, at: t.updatedAt || l.entry.updatedAt, room, text: look.text });
         continue;
       }
       // "이대로 진행"은 내 대화의 마지막 계획 메시지에만, 대화가 아직 이야기 중(talking)일 때만 (개발 화면과 같은 규칙)

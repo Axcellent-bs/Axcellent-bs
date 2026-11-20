@@ -26,11 +26,13 @@ import { humanizePlanIds } from "@/lib/format"
 // 그래서 대화 주인은 이 브라우저가 기억한다(OWNER_KEY). 서버가 가린 대화(restricted, 인사 AI)는 서버가 준 요약만 보여 준다.
 
 /** 대화 하나. 서버가 다른 사람 대화를 가리면 messages가 비고 restricted·summary가 온다 */
-type ChatThread = BaseThread & { summary?: string; restricted?: boolean; messageCount?: number };
+/** shared·owner: 단톡방에서 건 대화면 남의 것이라도 원문이 오고(shared), 건 사람(owner) (11/20, 예전 서버는 없음) */
+type ChatThread = BaseThread & { summary?: string; restricted?: boolean; messageCount?: number; shared?: boolean; owner?: string | null };
 interface Talk {
   list: () => Promise<ChatThread[]>;
   get: (id: string) => Promise<ChatThread>;
-  send: (x: { thread_id?: string; message: string }) => Promise<ChatThread>;
+  /** room_id: 단톡방에서 safety·hr·archive에 보낼 때만 (useOfficeTalk). 1:1 직접 대화에서는 넣지 않는다 */
+  send: (x: { thread_id?: string; message: string; room_id?: string }) => Promise<ChatThread>;
   /** 대화 끝내기. 이 창구가 지원할 때만 있다 (끝내면 서버가 한두 줄 요약을 남긴다) */
   close?: (id: string) => Promise<ChatThread>;
   /** 대화 지우기 (본인 대화만, 서버가 확인). POST `<주소>/<id>/remove` */
