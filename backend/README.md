@@ -245,7 +245,7 @@ assignments:
 - 회사 폴더가 없거나 틀리면(카탈로그 없음, 커넥터가 카탈로그와 다름) 서버를 켜지 않고 이유를 알려 준다.
 - 조직도를 찾지 못하면 켜면서 분명히 알린다: `조직도 없음: 꺼진 서비스로 가는 일은 no_assignee로 실패합니다`
 
-## 회사 폴더 (여러 회사 1-4)
+## 회사 폴더 (여러 회사 1-4·1-6)
 
 회사마다 다른 공통층 파일은 `.data/companies/<회사 ID>/` 아래에 둔다. 지금은 캣북스 하나(`catbooks`).
 
@@ -256,6 +256,13 @@ assignments:
 | 켠 서비스 | `.data/enabled_services.json` | `companies/catbooks/enabled_services.json` | `AX_ENABLED_SERVICES_FILE` |
 | 변환기 폴더 | `.data/site_adapter/` | `companies/catbooks/site_adapter/` | `AX_SITE_ADAPTER_DIR` |
 | 비용 정책 + 기록 | `SAFETY_STATE_DB` 옆 `cost_policy.json` | `companies/catbooks/cost_policy.json` | `SAFETY_COST_POLICY_FILE` |
+| 형상관리 연결 (dev, 1-6) | `.data/vcs_connections.json` | `companies/catbooks/vcs_connections.json` | `PLANNING_VCS_STORE` |
+| 기획 대화·노션 연결 (planning, 1-6) | `PLANNING_STATE_DIR/planning_chat.db`·`notion_token.json` | `companies/catbooks/` 같은 이름 | 없음. `PLANNING_STATE_DIR`가 없으면 메모리만. 업무 흐름 상태 파일은 `PLANNING_STATE_DIR` 그대로 |
+| 재무 기록·내보내기·대화 (finance, 1-6) | `.data/finance_state.json`·`finance_exports/`·`finance_chat.db` | `companies/catbooks/` 같은 이름 | `FINANCE_STATE_FILE`·`FINANCE_EXPORT_DIR`·`FINANCE_CHAT_DB`(대화는 예전처럼 `FINANCE_STATE_FILE` 옆도) |
+| 인프라 배포 기록 (infra, 1-6) | 패키지 안 `data/deployments.json` | `companies/catbooks/infra_deployments.json`(있을 때만) | `INFRA_DEPLOYMENTS_FILE` |
+
+회사 칸(1-6): `infra_chat.db`는 줄마다 `tenant_id`(옛 줄은 켤 때 `catbooks`로 채움). 재무 메모리 주문 모음은
+회사 ID마다 따로(`finance_agent.books.order_store`).
 
 - 켜는 값은 `AX_COMPANIES_DIR`(run_all.sh 기본 `.data/companies`). 안 정하면 모두 예전 자리다
 - 옮기기(`ax_agent_template.company_files`): 예전 자리에 있고 회사 폴더에 없으면 처음 읽을 때 한 번 옮긴다.

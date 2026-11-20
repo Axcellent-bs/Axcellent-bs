@@ -164,7 +164,7 @@ bash backend/scripts/pg_demo_file.sh clear    # 시연 끝: 올린 PG 자료 빼
 원천 자료(쇼핑몰, 안전 장치)를 받지 못한 값입니다. 재무 AI는 추정값을 만들지 않습니다. 화면 아래 "받지 못한 자료"에 이름이 나옵니다.
 
 **기록이 사라졌어요.**
-결산 확정, 대사 메모, 이벤트로 쌓은 쿠폰·환불 장부, 올린 PG 자료는 `FINANCE_STATE_FILE`(`run_all.sh` 기본 `backend/.data/finance_state.json`)에 남아 다시 켜도 이어집니다. 이 설정 없이 띄우면 메모리에만 있어 다시 켤 때 비워집니다.
+결산 확정, 대사 메모, 이벤트로 쌓은 쿠폰·환불 장부, 올린 PG 자료는 `FINANCE_STATE_FILE`(`run_all.sh` 기본 `backend/.data/companies/catbooks/finance_state.json`, 예전 자리 `backend/.data/finance_state.json`은 처음 켤 때 옮긴다)에 남아 다시 켜도 이어집니다. 이 설정 없이 띄우면 메모리에만 있어 다시 켤 때 비워집니다.
 
 **재무 서버를 혼자 띄워 보고 싶어요.**
 `backend/`에서 `FINANCE_MOCK=1 uv run uvicorn finance_agent.main:app --port 8105` (목 장부는 오늘 날짜 기준 최근 2주치). 판매자 정산은 고객지원 서버가 있어야 보입니다.

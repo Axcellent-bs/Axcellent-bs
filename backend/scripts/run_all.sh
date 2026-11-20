@@ -211,10 +211,11 @@ WEB="http://localhost:3090,http://127.0.0.1:3090,http://localhost:3001,http://lo
 export DASHBOARD_CORS_ORIGINS="$WEB" FINANCE_CORS_ORIGINS="$WEB"
 export SAFETY_CORS_ORIGINS="$WEB" PLANNING_CORS_ORIGINS="$WEB"
 # 화면에서 넣은 형상관리 연결(토큰 포함)을 다시 켜도 남게 저장한다. .data/는 git에 안 올라간다
-export PLANNING_VCS_STORE="$PWD/$DATA/vcs_connections.json"
+# 기본은 회사 폴더의 vcs_connections.json (여러 회사 1-6). PLANNING_VCS_STORE를 정했으면(셸·.env) 그 경로
 # 화면에서 넣은 고객사 API 키(BYOK)도 같은 곳에 저장한다 (커밋하지 않는다)
 export DEV_LLM_KEY_STORE="$PWD/$DATA/llm_key.json"
 # 기획·개발 상태를 서비스 역할마다 파일에 이어 쓴다 (다시 켜도 요청·작업·PR·대화가 남음)
+# 기획 대화(planning_chat.db)·노션 연결(notion_token.json)은 회사 폴더를 켰으면 회사 폴더로 옮긴다 (여러 회사 1-6)
 export PLANNING_STATE_DIR="$PWD/$DATA"
 # data: 오늘 네이버 판정("지금 급등 중" 배지)을 파일에 남겨 다시 켜도 그날 배지가 유지되게
 export DATA_TODAY_BOARD_DB="$PWD/$DATA/today_board.db"
@@ -278,17 +279,17 @@ export AX_OFFICE_ROOM_DB="$PWD/$DATA/office_room.db"
 # 총괄 이벤트 저장소 (다시 켜도 이벤트 기록과 처리한 event_id가 남는다)
 export ORCHESTRATOR_DB="$PWD/$DATA/orchestrator.db"
 # 재무 기록(판매자 심사·정산 보류·장부·사람 결정). 다시 켜도 이어진다
-export FINANCE_STATE_FILE="$PWD/$DATA/finance_state.json"
+# 기본은 회사 폴더의 finance_state.json·finance_exports/·finance_chat.db (여러 회사 1-6).
+# FINANCE_STATE_FILE·FINANCE_EXPORT_DIR·FINANCE_CHAT_DB를 정했으면(셸·.env) 그 경로
 # 판매자 정산 묶음 기록(고객지원, settlement). 다시 켜도 이어진다. 처음 한 번 재무 기록의 묶음을 가져온다
 export SUPPORT_SETTLEMENT_FILE="$PWD/$DATA/support_settlement.json"
-export SUPPORT_SETTLEMENT_IMPORT_FILE="$FINANCE_STATE_FILE"
+# SUPPORT_SETTLEMENT_IMPORT_FILE(재무 기록에서 처음 한 번 가져오기)은 아래 .env를 읽은 뒤 재무 기록 자리로 정한다
 # 고객지원 AI가 지급일이 된 주의 정산 지급 승인을 스스로 요청한다(10분마다 확인). 승인은 고객지원 담당
 export SUPPORT_SETTLEMENT_AUTO_REQUEST="${SUPPORT_SETTLEMENT_AUTO_REQUEST:-on}"
-export FINANCE_EXPORT_DIR="${FINANCE_EXPORT_DIR:-$PWD/$DATA/finance_exports}"
 export FINANCE_BANK_INBOX="${FINANCE_BANK_INBOX:-$PWD/$DATA/finance_bank_inbox}"
 # PG 정산 파일(CSV) 폴더. 넣으면 재무가 읽어 그 판매일 기간을 파일과 대사한다
 export FINANCE_PG_INBOX="${FINANCE_PG_INBOX:-$PWD/$DATA/finance_pg_inbox}"
-mkdir -p "$FINANCE_EXPORT_DIR" "$FINANCE_BANK_INBOX" "$FINANCE_PG_INBOX"
+mkdir -p "$FINANCE_BANK_INBOX" "$FINANCE_PG_INBOX"
 # 외부 연결 쓰기 보류(긴급 취약). 다시 켜도 잊지 않게 파일에 둔다
 export SAFETY_CONNECTION_HOLDS_FILE="$PWD/$DATA/connection_holds.json"
 # 안전 관문 상태(실행 기록·멱등성 키·보류 큐·감사 로그). 다시 켜도 보류 건과 실행 기록이 남는다
@@ -312,6 +313,8 @@ _company_file() {
   fi
 }
 ENABLED_FILE_SHOWN=$(_company_file "${AX_ENABLED_SERVICES_FILE:-}" enabled_services.json)
+# 고객지원 정산 묶음의 처음 한 번 가져오기 원본: 재무 기록 자리 (정했으면 그 경로, 아니면 회사 폴더·옮기기 전이면 옛 자리)
+export SUPPORT_SETTLEMENT_IMPORT_FILE="${SUPPORT_SETTLEMENT_IMPORT_FILE:-$(_company_file "${FINANCE_STATE_FILE:-}" finance_state.json)}"
 CONNECTION_FILE_SHOWN=$(_company_file "" company_connection.json)
 # 회사 폴더로 옮기기 전 백업: 아직 안 옮긴 옛 자리 파일을 묶어
 # $DATA/backup-before-companies-<시각>-<내용 확인값>.tgz로 둔다 (만든 사용자만 읽게 umask 077).
@@ -323,12 +326,16 @@ case "${AX_COMPANY_FOLDERS:-}" in
 off|0|false|no)
   export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_services.json}"
   export AX_TOOL_CONNECTIONS_FILE="${AX_TOOL_CONNECTIONS_FILE:-$PWD/$DATA/tool_connections.json}"
+  # 여러 회사 1-6: 형상관리 연결·재무 기록·재무 내보내기도 예전 기본 자리로 (비어 있으면 회사 폴더 값으로 되살린다)
+  export PLANNING_VCS_STORE="${PLANNING_VCS_STORE:-$PWD/$DATA/vcs_connections.json}"
+  export FINANCE_STATE_FILE="${FINANCE_STATE_FILE:-$PWD/$DATA/finance_state.json}"
+  export FINANCE_EXPORT_DIR="${FINANCE_EXPORT_DIR:-$PWD/$DATA/finance_exports}"
   ;;
 *)
   _old=""
   for _f in company_connection.json company_connection.json.history.jsonl tool_connections.json \
     tool_connections.json.history.jsonl enabled_services.json site_adapter cost_policy.json \
-    cost_policy.json.history.jsonl; do
+    cost_policy.json.history.jsonl vcs_connections.json planning_chat.db notion_token.json     finance_state.json finance_exports finance_chat.db; do
     if [ -e "$PWD/$DATA/$_f" ] && [ ! -e "$AX_COMPANIES_DIR/catbooks/$_f" ]; then _old="$_old $_f"; fi
   done
   if [ -n "$_old" ]; then
