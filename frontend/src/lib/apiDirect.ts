@@ -111,6 +111,16 @@ export function routeDirect(i: RouteInput): RouteResult | null {
   return null;
 }
 
+/**
+ * 서버가 토큰을 보지 않는 읽기인지(위 표의 auth "none"). 이런 읽기에는 Authorization을 싣지 않는다
+ * (헤더가 없어야 단순 요청이라 직접 호스트로 갈 때 OPTIONS 사전 요청이 생기지 않는다). path는 접두 뒤 경로(쿼리 무시)
+ */
+export function tokenFree(service: DirectService, path: string): boolean {
+  const q = path.indexOf("?");
+  const p = q < 0 ? path : path.slice(0, q);
+  return DIRECT_ROUTES.some((r) => r.service === service && r.auth === "none" && r.path.test(p));
+}
+
 /** 직접 길 쉬는 시간(실패 뒤) */
 export const REST_MS = 60_000;
 

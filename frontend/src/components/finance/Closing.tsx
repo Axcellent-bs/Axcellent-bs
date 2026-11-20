@@ -160,7 +160,7 @@ export function ClosingSection({ tick, onChanged, focus }: {
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button className="btn-primary" disabled={!humanTokenSet || confirming || r.closable === false} onClick={() => confirm(r)}>{confirming ? "확정하는 중…" : "결산 확정"}</button>
                         {r.closable === false && <span className="text-sm text-ink-500">아직 끝나지 않은 기간이라 끝난 뒤 확정할 수 있습니다.</span>}
-                        {!humanTokenSet && <span className="text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</span>}
+                        {!humanTokenSet && <span className="text-sm text-amber-800">로그인이 필요해요. 로그인하면 버튼이 켜져요.</span>}
                       </div>
                     </>
                   )}

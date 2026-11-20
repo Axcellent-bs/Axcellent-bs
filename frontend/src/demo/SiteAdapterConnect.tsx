@@ -119,7 +119,7 @@ export default function SiteAdapterConnect({ onState, tenant }: { onState?: (s: 
       <SectionHead as="h3" title="다른 형식 API 연결" right={status}
         desc="사이트가 자기 API(예약·주문·상품 목록)를 갖고 있으면, 칸 짝을 정해 AXcellent 규격으로 바꿔 읽어요. 플랫폼으로 만든 사이트도 API 주소와 키가 있으면 같은 방법으로 이어요." />
 
-      {!HUMAN_TOKEN_SET && <Notice>사람 토큰이 없어 둘러보기·연결이 꺼져 있어요. run_web.sh로 화면을 켜면 들어가요.</Notice>}
+      {!HUMAN_TOKEN_SET && <Notice>로그인이 필요해요. 로그인하면 둘러보기·연결할 수 있어요.</Notice>}
       {loadError && <Notice tone="bad">변환기 상태를 읽지 못했어요: {loadError}</Notice>}
       {linked && state?.connection?.verified_at && (
         <p className="text-sm text-ink-700">마지막 확인 {ago(state.connection.verified_at)} · {state.connection.updated_by ?? '—'}</p>

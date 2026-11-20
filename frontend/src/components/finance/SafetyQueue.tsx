@@ -114,7 +114,7 @@ export function SafetyQueue({ reviews, error, highlight, reload, intro = FINANCE
         {intro} 금액과 이유를 보고 진행 또는 멈춤을 누르세요. 진행은 되돌릴 수 없고, 애매하면 멈춤을 누르세요. 정한 시간 안에 아무도 누르지 않으면 자동으로 멈춥니다.
       </p>
       {error && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{SAFETY_SERVER}에서 보류 큐를 받지 못했습니다. {error}</p>}
-      {!canDecide && pending.length > 0 && <p className="mt-3 text-sm text-amber-800">결정 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
+      {!canDecide && pending.length > 0 && <p className="mt-3 text-sm text-amber-800">로그인이 필요해요. 로그인하면 결정 버튼이 켜져요.</p>}
       {problem && <p role="alert" className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{problem}</p>}
 
       {pending.length > 0 && canDecide && (

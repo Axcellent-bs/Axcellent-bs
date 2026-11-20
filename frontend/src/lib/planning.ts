@@ -6,6 +6,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useVisibleInterval } from './visibleInterval'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import { isNginxBlocked, NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from '@/lib/apiError'
+import { tokenFree } from '@/lib/apiDirect'
+import { sessionAuth } from '@/lib/humanToken'
 import { RULE_LABEL, type Action, type FillPreview, type Activity, type AuditItem, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
 
 export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
@@ -183,7 +185,10 @@ export async function approveReview(reviewId: string, note = '교차검증 대�
 }
 
 async function call<T>(base: string, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init })
+  // 머리 없는 읽기(GET)는 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이). 토큰을 안 보는 읽기(state)는 싣지 않는다
+  const read = (init?.method ?? 'GET').toUpperCase() === 'GET' && !new Headers(init?.headers).has('authorization')
+    && !tokenFree(base === DEV_API ? 'dev' : 'planning', `/api/planning${path}`)
+  const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init, ...(read ? { headers: { ...Object.fromEntries(new Headers(init?.headers)), ...sessionAuth() } } : {}) })
   const parsed: unknown = await res.json().catch(() => undefined)
   const body = parsed ?? {}
   if (!res.ok) {

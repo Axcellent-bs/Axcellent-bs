@@ -250,7 +250,7 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
           <button
             className="btn-primary text-xs"
             disabled={!HUMAN_TOKEN_SET || blocked !== null || lengthProblem !== null}
-            title={!HUMAN_TOKEN_SET ? "사람 토큰이 없어 쓸 수 없습니다" : undefined}
+            title={!HUMAN_TOKEN_SET ? "로그인이 필요해요" : undefined}
             onClick={() => { setResult(null); setStep("confirm"); }}
           >
             {prepared ? "미디어 다시 만들기" : "미디어 만들기"}

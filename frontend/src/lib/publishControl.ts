@@ -56,7 +56,7 @@ export function publishControlResultKo(answer: PublishControlAnswer): PublishCon
 /** 연결 오류(HTTP 상태)를 화면 문구로. 서버가 보낸 문장은 쓰지 않는다 */
 export function publishControlHttpErrorKo(status: number | undefined, code?: string | null): string {
   if (code === NGINX_BLOCKED_CODE) return NGINX_BLOCKED_MESSAGE;
-  if (status === 401 || status === 403) return "자동 게시 상태를 바꿀 권한이 없습니다. 사람 토큰 설정을 확인해 주세요.";
+  if (status === 401 || status === 403) return "자동 게시 상태를 바꿀 권한이 없습니다. 로그인이 끝났을 수 있으니 다시 로그인해 주세요.";
   if (status === 404) return "서버가 아직 이 기능을 지원하지 않습니다.";
   if (status === 400 || status === 422) return "입력을 서버가 받아들이지 않았습니다. 사유는 200자까지입니다.";
   return "자동 게시 상태 서버에 닿지 못했습니다. 잠시 뒤 다시 시도해 주세요.";

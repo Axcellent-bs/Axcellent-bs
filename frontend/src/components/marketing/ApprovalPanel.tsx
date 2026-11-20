@@ -76,7 +76,7 @@ export function ApprovalPanel({ state, onDone }: { state: PublishState; onDone: 
       </div>
       <p className="text-ink-700">AI 생성 표시: <b>{state.ai_label ?? "서버가 표시 문구를 알려 주지 않았습니다"}</b></p>
 
-      {!liveHumanTokenSet && <p className="text-amber-800">사람 결정 토큰(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있습니다.</p>}
+      {!liveHumanTokenSet && <p className="text-amber-800">로그인이 필요해요. 로그인하면 결정 버튼이 켜져요.</p>}
       {expired && <p className="text-red-800">승인 시간이 지났습니다. 곧 만료로 닫히며, 닫히면 사람이 다시 요청할 수 있습니다. 새로고침해 확인해 주세요.</p>}
 
       <label className="flex items-center gap-2 text-ink-900">

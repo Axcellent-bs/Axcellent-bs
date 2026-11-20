@@ -154,7 +154,7 @@ export function OutageProceed({ draft, onDone }: { draft: OutageSnsDraft; onDone
           <span className="text-ink-500">이미지는 준비됐습니다. 요청만으로는 게시되지 않고, 사람 승인이 필요합니다.</span>
         </div>
       ) : flow.stage === "not_started" ? (
-        <p className="text-amber-800">{!HUMAN_TOKEN_SET ? "사람 토큰이 없어 진행할 수 없습니다." : blocked}</p>
+        <p className="text-amber-800">{!HUMAN_TOKEN_SET ? "로그인이 필요해요. 로그인하면 진행할 수 있어요." : blocked}</p>
       ) : null}
 
       {result && !busy && (
