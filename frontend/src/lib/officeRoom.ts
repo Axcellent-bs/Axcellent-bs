@@ -36,10 +36,15 @@ const toEntry = (x: Record<string, unknown>): OfficeEntry | null =>
       }
     : null;
 
+/** 단톡방 목록 서버 오류: 상태 코드와 서버 오류 코드(예: 403 NOT_THREAD_OWNER = 남의 대화를 올리려 함) */
+export class OfficeRoomError extends Error {
+  constructor(message: string, readonly status: number, readonly code: string | null) { super(message); }
+}
+
 async function call(init?: RequestInit, query = ""): Promise<unknown> {
   const res = await fetch(`${URL}${query}`, { cache: "no-store", ...init, headers: headers() });
-  const body = (await res.json().catch(() => null)) as { data?: unknown; error?: { message?: string } } | null;
-  if (!res.ok || !body) throw new Error(body?.error?.message ?? `단톡방 목록 서버 응답 ${res.status}`);
+  const body = (await res.json().catch(() => null)) as { data?: unknown; error?: { code?: string; message?: string } } | null;
+  if (!res.ok || !body) throw new OfficeRoomError(body?.error?.message ?? `단톡방 목록 서버 응답 ${res.status}`, res.status, body?.error?.code ?? null);
   return body.data;
 }
 
