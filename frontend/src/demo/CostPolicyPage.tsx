@@ -67,7 +67,7 @@ export default function CostPolicyPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-4 py-8 sm:px-8">
       <PageHead where="시스템 관리" title="비용·안전 정책">
         영상·이미지·BGM 한 건 비용, 하루 합계, 영상 길이의 안전 정책 기준값을 보고, 바꿔 달라는 요청을 올려요. 값은 승인과 적용을 거쳐야 바뀌어요.
       </PageHead>
