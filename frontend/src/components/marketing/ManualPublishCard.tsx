@@ -142,7 +142,7 @@ export function ManualPublishCard({ state, onDone }: { state: PublishState; onDo
         <button className="btn-primary text-xs" disabled={!canRecordManual({ permalink: link, labelChecked, tokenSet: HUMAN_TOKEN_SET, busy })} onClick={() => void record()}>
           {busy ? "기록하는 중" : "게시 완료로 기록"}
         </button>
-        {!HUMAN_TOKEN_SET && <span className="text-ink-500">사람 토큰이 설정되지 않아 기록할 수 없습니다.</span>}
+        {!HUMAN_TOKEN_SET && <span className="text-ink-500">로그인이 필요해요. 로그인하면 기록할 수 있어요.</span>}
       </div>
       {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-red-800" role="alert">{error}</p>}
       <p className="text-ink-500">{MANUAL_LIMIT_NOTE}</p>

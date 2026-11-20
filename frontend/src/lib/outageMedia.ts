@@ -91,7 +91,7 @@ export function outagePublishResultKo(answer: PublishAnswer): PublishResult {
 /** 연결 오류(HTTP 상태)를 화면 문구로. 서버가 보낸 문장은 쓰지 않는다. 앞단(nginx) 차단은 공용 안내를 쓴다 */
 export function outageHttpErrorKo(status: number | undefined, code?: string | null): string {
   if (code === NGINX_BLOCKED_CODE) return NGINX_BLOCKED_MESSAGE;
-  if (status === 401 || status === 403) return "진행할 권한이 없습니다. 사람 토큰 설정(또는 서버의 이 경로 허용)을 확인해 주세요.";
+  if (status === 401 || status === 403) return "진행할 권한이 없습니다. 로그인이 끝났을 수 있으니 다시 로그인해 주세요(그래도 안 되면 서버의 이 경로 허용을 확인해 주세요).";
   if (status === 404) return "초안을 찾을 수 없거나 서버가 아직 이 기능을 지원하지 않습니다.";
   if (status === 400 || status === 422) return "요청을 서버가 받아들이지 않았습니다. 새로고침한 뒤 다시 시도해 주세요.";
   if (status === 502) return "마케팅 AI에 연결할 수 없습니다. 마케팅 서버가 켜져 있는지 확인해 주세요.";

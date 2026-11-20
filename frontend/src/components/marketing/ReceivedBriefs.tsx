@@ -58,7 +58,7 @@ function HandoffBox({ item, onDone }: { item: StoredBrief; onDone: () => void })
         {h?.status === "failed" && <span className="chip bg-amber-50 text-amber-800">넘기지 못함</span>}
         {(!h || h.status === "not_handed") && <span className="chip bg-ink-50 text-ink-700">아직 안 넘김</span>}
         {!handed && (
-          <button className="btn-primary ml-auto text-xs" disabled={busy || !HUMAN_TOKEN_SET} onClick={() => void run()} title={HUMAN_TOKEN_SET ? undefined : "사람 토큰이 없어 쓸 수 없습니다"}>
+          <button className="btn-primary ml-auto text-xs" disabled={busy || !HUMAN_TOKEN_SET} onClick={() => void run()} title={HUMAN_TOKEN_SET ? undefined : "로그인이 필요해요"}>
             {busy ? "넘기는 중" : h?.status === "failed" ? "다시 넘기기" : "SNS·미디어로 넘기기"}
           </button>
         )}
@@ -83,7 +83,7 @@ function HandoffBox({ item, onDone }: { item: StoredBrief; onDone: () => void })
           )}
         </div>
       )}
-      {!HUMAN_TOKEN_SET && <p className="text-xs text-ink-500">사람 토큰이 설정돼 있지 않아 넘길 수 없습니다.</p>}
+      {!HUMAN_TOKEN_SET && <p className="text-xs text-ink-500">로그인이 필요해요. 로그인하면 넘길 수 있어요.</p>}
       {h?.status === "failed" && <p className="text-xs text-amber-800">{handoffReasonKo(h.reason_code)}</p>}
       {handed && h && (
         <p className="text-xs text-ink-700">

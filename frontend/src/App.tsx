@@ -1,4 +1,4 @@
-import { Suspense, lazy, type ReactNode } from 'react'
+import { Fragment, Suspense, lazy, type ReactNode } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router'
 
 import { AdminShell } from '@/components/admin/AdminShell'
@@ -10,6 +10,7 @@ import { useCompany, useCompanyLoaded } from '@/demo/company'
 import Setup from '@/demo/Setup'
 import CatalogHome from '@/demo/CatalogHome'
 import OperatorLogin from '@/control/OperatorLogin'
+import { useHumanTokenSet } from '@/lib/useHumanTokenSet'
 
 // 로그인한 뒤 들어가는 업무 페이지는 따로 받는다(페이지별 코드 나누기). 처음 화면을 열 때 모든 페이지 코드를
 // 한꺼번에 받지 않고, 그 페이지를 처음 열 때 그 페이지 코드만 받는다. 로그인 전 화면은 바로 보이게 그대로 둔다
@@ -70,6 +71,9 @@ function Guarded({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const company = useCompany()
   const loaded = useCompanyLoaded()
+  // 쓰기 버튼(HUMAN_TOKEN_SET 등 132곳)은 렌더할 때 살아 있는 값을 읽는다. 로그인·로그아웃으로 켜짐·꺼짐이 바뀌면
+  // 업무 화면을 새로 그려 모든 버튼이 새 값을 보게 한다(바뀔 때만. 같은 사람의 세션 토큰 갱신은 다시 그리지 않는다)
+  const tokenSet = useHumanTokenSet()
   // 서버 로그인이 켜져 있는지 묻는 동안은 기다린다(데모 로그인의 ?as=·지난 계정은 꺼져 있다고 확인된 뒤에 들어간다)
   if (!account && mode === 'checking') return <PageLoading />
   // 서버 세션이 만료되면 로그인 화면으로
@@ -77,7 +81,7 @@ function Guarded({ children }: { children: ReactNode }) {
   // 연결 회사를 아직 못 읽었으면 기다린다(먼저 보내 버리면 연결된 회사도 새로 열 때마다 회사 연결 화면으로 간다)
   if (!company && !loaded) return <PageLoading />
   if (!canOpen(account, pathname, !!company)) return <Navigate to={homeOf(account)} replace />
-  return <>{children}</>
+  return <Fragment key={tokenSet ? 'human-token' : 'no-human-token'}>{children}</Fragment>
 }
 
 function Pages() {

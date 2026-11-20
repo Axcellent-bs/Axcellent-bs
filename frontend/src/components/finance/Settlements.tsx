@@ -229,7 +229,7 @@ export function SettlementsSection({ tick, source, request, canRequest = true, o
                         {sending ? "요청하는 중…" : "정산 묶음 지급 승인 요청"}
                       </button>
                       <span className="text-sm text-ink-500">
-                        {inFlight ? "이미 요청한 묶음이 있습니다." : readyCount === 0 ? "지급 준비된 판매자가 없습니다." : !canRequest ? "결정 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 버튼이 꺼져 있습니다." : "누르면 안전 장치 보류 큐로 갑니다. 돈은 아직 나가지 않습니다."}
+                        {inFlight ? "이미 요청한 묶음이 있습니다." : readyCount === 0 ? "지급 준비된 판매자가 없습니다." : !canRequest ? "로그인이 필요해요. 로그인하면 버튼이 켜져요." : "누르면 안전 장치 보류 큐로 갑니다. 돈은 아직 나가지 않습니다."}
                       </span>
                     </div>
                   )}

@@ -63,7 +63,7 @@ export function videoProviderResultKo(answer: VideoProvidersAnswer): VideoProvid
 }
 
 export function videoProviderHttpErrorKo(status: number | undefined, code?: string | null): string {
-  if (status === 401 || status === 403) return "바꿀 권한이 없습니다. 사람 토큰 설정을 확인해 주세요.";
+  if (status === 401 || status === 403) return "바꿀 권한이 없습니다. 로그인이 끝났을 수 있으니 다시 로그인해 주세요.";
   if (status === 404) return "서버가 아직 이 기능을 지원하지 않습니다.";
   if (status === 400 || status === 422) return code === "INVALID_SPEC" ? "스펙이 규칙에 맞지 않습니다." : "입력을 서버가 받아들이지 않았습니다.";
   if (status === 409) return "지금 상태에서는 할 수 없습니다(꺼진 공급자이거나 모델 표에 없는 모델).";

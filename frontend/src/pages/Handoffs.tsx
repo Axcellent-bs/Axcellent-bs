@@ -138,7 +138,7 @@ function Detail({ task, onClosed }: { task: HandoffTask; onClosed: (t: HandoffTa
             <span className="ml-auto text-xs text-ink-500">{result.length}/{RESULT_MAX}</span>
           </div>
           {!HUMAN_TOKEN_SET && (
-            <p className="text-xs text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 버튼이 꺼져 있어요. frontend/.env에 넣고 개발 서버를 다시 켜 주세요.</p>
+            <p className="text-xs text-amber-800">로그인이 필요해요. 로그인하면 버튼이 켜져요.</p>
           )}
           {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
         </div>

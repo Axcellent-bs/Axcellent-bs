@@ -81,7 +81,7 @@ function Row({ row, onChanged }: { row: AgentDiagnosisRow; onChanged: () => void
             </>
           ) : (
             <button type="button" className="btn-ghost text-xs" disabled={!SAFETY_HUMAN_TOKEN}
-              title={SAFETY_HUMAN_TOKEN ? undefined : "사람 권한 토큰이 없어 철회할 수 없어요"} onClick={() => setAsking(true)}>전달 철회</button>
+              title={SAFETY_HUMAN_TOKEN ? undefined : "로그인이 필요해요"} onClick={() => setAsking(true)}>전달 철회</button>
           )}
           {failed && <span role="alert" className="text-xs text-red-700">{failed}</span>}
         </div>

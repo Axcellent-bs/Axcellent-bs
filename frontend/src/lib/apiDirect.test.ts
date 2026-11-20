@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 읽기 API 직접 호스트 길: 켜는 조건, 허용 경로, 토큰 규칙, 실패 시 되돌아가기.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DIRECT_ROUTES, installApiDirect, readDirectConfig, routeDirect, type DirectConfig } from "./apiDirect.ts";
+import { DIRECT_ROUTES, installApiDirect, readDirectConfig, routeDirect, tokenFree, type DirectConfig } from "./apiDirect.ts";
 
 const BASE = "https://api-app.axcellent.cloud";
 const cfg = readDirectConfig({ VITE_API_DIRECT_BASE: BASE, VITE_API_DIRECT_SERVICES: "dashboard,orch,safety,planning,dev" }) as DirectConfig;
@@ -102,4 +102,15 @@ test("중단 신호는 되돌리지 않고 그대로 던진다", async () => {
   const f = (async () => { throw new DOMException("aborted", "AbortError"); }) as typeof fetch;
   const restore = installApiDirect(cfg, { fetch: f })!;
   try { await assert.rejects(globalThis.fetch("/orch/api/incidents"), { name: "AbortError" }); } finally { restore(); }
+});
+
+test("토큰을 안 보는 읽기(tokenFree): 표의 auth none 경로만 참, 쿼리는 무시, 다른 경로·서비스는 거짓", () => {
+  assert.equal(tokenFree("safety", "/api/safety/executions"), true);
+  assert.equal(tokenFree("orch", "/api/incidents?limit=5"), true);
+  assert.equal(tokenFree("planning", "/api/planning/state"), true);
+  assert.equal(tokenFree("dev", "/api/planning/state"), true);
+  assert.equal(tokenFree("safety", "/api/safety/reviews"), false);
+  assert.equal(tokenFree("orch", "/api/requests"), false);
+  assert.equal(tokenFree("planning", "/api/planning/review-queue"), false);
+  assert.equal(tokenFree("dashboard", "/api/dashboard/auth/me"), false);
 });

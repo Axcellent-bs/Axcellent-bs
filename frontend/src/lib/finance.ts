@@ -1,5 +1,7 @@
 import { ApiError } from "./apiError";
 import { FINANCE_AGENT_URL, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
+import { onHumanTokenChange, sessionAuth } from "./humanToken";
+import { tokenFree } from "./apiDirect";
 import { actorHeaders } from "./actor";
 import { humanizeIds, incidentNo } from "./format";
 import { ExampleMissing, exampleCall, exampleOn } from "./financeExample";
@@ -601,9 +603,14 @@ export const SAFETY_SERVER = serverName(SAFETY_API_URL, "안전 장치 서버");
 
 /** 사람 결정 버튼을 켤지. 예시 데이터 모드는 서버에 보내지 않으므로 늘 켠다 (전환하면 화면을 다시 읽는다) */
 export const exampleMode = exampleOn();
-export const humanTokenSet = SAFETY_HUMAN_TOKEN.length > 0 || exampleMode;
+export let humanTokenSet = SAFETY_HUMAN_TOKEN.length > 0 || exampleMode;
 /** 재무 화면 밖(고객지원·마케팅)의 보류 결정용. 재무 화면의 예시 데이터 전환과 상관없이 늘 실제 서버를 본다 */
-export const liveHumanTokenSet = SAFETY_HUMAN_TOKEN.length > 0;
+export let liveHumanTokenSet = SAFETY_HUMAN_TOKEN.length > 0;
+// 로그인·로그아웃하면 다시 고른다(살아 있는 바인딩. 화면 다시 그리기는 App.tsx Guarded의 useHumanTokenSet)
+onHumanTokenChange(() => {
+  humanTokenSet = SAFETY_HUMAN_TOKEN.length > 0 || exampleMode;
+  liveHumanTokenSet = SAFETY_HUMAN_TOKEN.length > 0;
+});
 
 /** `raw`: 파일을 그대로 보낸다(JSON으로 바꾸지 않는다) */
 interface CallOptions { method?: "GET" | "POST"; body?: unknown; raw?: Blob; human?: boolean; live?: boolean }
@@ -620,6 +627,8 @@ async function call(base: string, server: string, path: string, opts: CallOption
   if (opts.raw !== undefined) headers["Content-Type"] = "application/octet-stream";
   else if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.human && SAFETY_HUMAN_TOKEN) headers.Authorization = `Bearer ${SAFETY_HUMAN_TOKEN}`;
+  // 읽기: 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이). 안전 장치의 토큰을 안 보는 읽기는 싣지 않는다
+  else if (!opts.human && !(base === SAFETY_API_URL && tokenFree("safety", path))) Object.assign(headers, sessionAuth());
   // 재무 서버만: 공용 토큰이라 누가 했나를 화면 계정 이름으로 같이 보낸다 (안전 장치 서버는 이 머리를 받지 않는다)
   if (opts.human && base === FINANCE_AGENT_URL) Object.assign(headers, actorHeaders());
   let res: Response;
@@ -638,7 +647,7 @@ async function call(base: string, server: string, path: string, opts: CallOption
     const code = body?.error?.code ?? null;
     const message = body?.error?.message
       ?? (res.status === 404 ? `${server}에 아직 이 기능이 없습니다 (404).`
-        : res.status === 401 || res.status === 403 ? "사람 권한이 없어 처리하지 못했습니다. VITE_SAFETY_HUMAN_TOKEN을 확인하세요."
+        : res.status === 401 || res.status === 403 ? "권한이 없어 처리하지 못했어요. 로그인이 끝났을 수 있으니 다시 로그인해 주세요."
           : `요청에 실패했습니다 (${res.status}).`);
     throw new FinanceApiError(message, res.status, code);
   }
@@ -650,7 +659,7 @@ async function download(path: string, fallback: string): Promise<void> {
   if (exampleMode) throw new FinanceApiError("예시 데이터에서는 내려받지 않습니다. '실제 데이터'로 바꿔서 내려받으세요.", 0, "example_missing");
   let res: Response;
   try {
-    res = await fetch(`${FINANCE_AGENT_URL}${path}`, { cache: "no-store" });
+    res = await fetch(`${FINANCE_AGENT_URL}${path}`, { cache: "no-store", headers: sessionAuth() });
   } catch {
     throw new FinanceApiError(`${FINANCE_SERVER}에 연결하지 못했습니다. 서버가 켜져 있는지 확인하세요.`, 0, "unreachable");
   }

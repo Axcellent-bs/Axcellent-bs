@@ -113,7 +113,7 @@ export function BankSection({ tick }: { tick: number }) {
         </label>
         <span className="text-sm text-ink-500">은행 화면의 거래내역 조회에서 받은 파일(CSV·엑셀 xlsx)을 고치지 말고 그대로 올리세요. 재무 AI가 날짜·입금·출금·적요 칸을 찾아 읽고, 같은 내역은 한 번만 셉니다.</span>
       </div>
-      {!humanTokenSet && <p className="mb-2 text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 올리기 버튼이 꺼져 있습니다.</p>}
+      {!humanTokenSet && <p className="mb-2 text-sm text-amber-800">로그인이 필요해요. 로그인하면 올리기 버튼이 켜져요.</p>}
       {message && <p role="status" className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-sm text-ink-700">{message}</p>}
       <ResourceBody res={res}>
         {(b) => !b.uploaded ? <Empty>아직 올린 은행 거래내역이 없습니다. 올리면 그 기간의 PG 정산금 입금을 맞춰 봅니다.</Empty> : (
