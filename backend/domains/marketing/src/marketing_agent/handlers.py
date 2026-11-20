@@ -35,6 +35,8 @@ from ax_contracts.schemas import (
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.finance import ContentFormat
 from ax_contracts.schemas.marketing_creative import (
+    CreativeRecordAttachInput,
+    CreativeRecordAttachOutput,
     CreativeRecordGetInput,
     CreativeRecordGetOutput,
     CreativeRecordsListInput,
@@ -778,6 +780,37 @@ async def creative_video_request(request: AgentRequest) -> AgentResult:
         output=out.model_dump(mode="json"),
         evidence=_evidence(
             ["creative_video_request"], f"영상 요청 {data.record_id}: {video.get('status')}", []
+        ),
+    )
+
+
+async def creative_record_attach(request: AgentRequest) -> AgentResult:
+    """사람이 올린 그림·영상을 제작 기록에 붙인다(A `attach_creative_file`)."""
+    data = _parse(request, CreativeRecordAttachInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        item = await _render.attach_upload(
+            request.meta,
+            data.record_id,
+            data.part,
+            data.asset,
+            data.sha256,
+            data.size_bytes,
+            data.label,
+            data.who,
+        )
+    except _render.RenderError as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome=str(error), output={"message": str(error)}
+        )
+    out = CreativeRecordAttachOutput(record_id=data.record_id, part=data.part, item=item)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["creative_record_attach"], f"파일 붙임 {data.record_id} {data.part}", []
         ),
     )
 
@@ -1671,6 +1704,7 @@ HANDLERS = {
     "creative_records_list": creative_records_list,
     "creative_record_get": creative_record_get,
     "creative_video_request": creative_video_request,
+    "creative_record_attach": creative_record_attach,
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,

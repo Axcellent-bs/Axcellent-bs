@@ -1444,7 +1444,7 @@ async def marketing_creative_video(
 @router.get("/marketing/creative-records/{record_id}/asset/{part}")
 async def marketing_creative_asset(
     record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
-    part: str = Path(pattern=r"^(sheet_image|board_image|video)$"),
+    part: str = Path(pattern=r"^(sheet_image|board_image|video|final_video)$"),
 ) -> FileResponse:
     """제작 기록의 Higgsfield 결과 파일(시트 그림·스토리보드 그림·영상).
 
@@ -1454,6 +1454,23 @@ async def marketing_creative_asset(
         raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
     path, media_type = await marketing_client.creative_asset(record_id, part)
     return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/marketing/creative-records/{record_id}/upload/{part}")
+async def marketing_creative_upload(
+    request: Request,
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+    part: str = Path(pattern=r"^(sheet_image|board_image|video|final_video)$"),
+    name: str | None = Query(None, max_length=120),
+) -> dict:
+    """사람이 만든 그림·영상을 제작 기록에 올린다(`creative_record_attach`, A).
+
+    본문은 파일 바이트 그대로(JPG·PNG 그림 또는 MP4 영상). 형식은 앞 바이트로 확인한다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.creative_upload(record_id, part, request.stream(), who, name))
 
 
 class MarketingChatSendBody(BaseModel):

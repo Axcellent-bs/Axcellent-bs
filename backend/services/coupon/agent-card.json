@@ -149,6 +149,18 @@
       "priority": "recommended"
     },
     {
+      "id": "creative_record_attach",
+      "description": "사람이 화면에서 올린 그림·영상을 제작 기록(input.record_id: CR-…)의 칸(part: sheet_image·board_image·video·final_video)에 붙인다(A attach_creative_file). 파일은 dashboard-api가 미디어 폴더 creative/<기록>/에 먼저 저장하고 asset 이름·sha256만 넘긴다. 저장된 파일의 sha256이 같을 때만 render.<part>를 done·source=upload로 바꾼다. 거절 outcome: not_found·bad_asset·file_missing·in_progress·gate_<상태>.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeRecordAttachInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeRecordAttachOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "creative_video_request",
       "description": "제작 기록(input.record_id: CR-…)의 스토리보드 그림을 시작 이미지로 Higgsfield 영상 만들기를 사람 승인(C generate_creative_video)에 올린다. 영상 월 사용량 예산을 먼저 예약하고, 보류되면 render.video.status=awaiting_approval·review_id를 남긴다. 승인 뒤 기록을 읽을 때(creative_record_get) 같은 키로 관문을 다시 물어 executed면 만들고 파일을 저장한다. 거절 outcome: not_found·board_image_not_ready·model_not_configured·higgsfield_key_missing·quota_exceeded·quota_not_configured·storage_error·in_progress.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeVideoRequestInput",

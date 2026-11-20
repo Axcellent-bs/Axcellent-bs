@@ -887,3 +887,10 @@ connection_field = "connection_id"
 owner = "dev"
 requesters = ["planning", "dev"]
 base_grade = "A"
+
+# 사람이 직접 올린 완성 파일(그림·영상)을 제작 기록에 붙이기(2026-11-20).
+# 밖으로 나가는 것 없이 기록에 파일을 다는 일이라 A. 크레딧·공개와 무관하다
+[[actions]]
+action = "attach_creative_file"
+owner = "marketing"
+base_grade = "A"

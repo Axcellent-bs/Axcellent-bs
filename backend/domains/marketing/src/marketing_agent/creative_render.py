@@ -83,6 +83,14 @@ SHEET_ASPECT, BOARD_ASPECT, VIDEO_ASPECT = "16:9", "3:4", "9:16"
 
 PARTS = ("sheet_image", "board_image", "video")
 FILES = {"sheet_image": "sheet.jpg", "board_image": "board.jpg", "video": "video.mp4"}
+ATTACH_ACTION = "attach_creative_file"  # 사람이 올린 파일을 기록에 붙임(A)
+# 사람이 올릴 수 있는 칸과 저장 이름(그림은 JPEG·PNG, 영상은 MP4)
+UPLOAD_FILES = {
+    "sheet_image": ("sheet.jpg", "sheet.png"),
+    "board_image": ("board.jpg", "board.png"),
+    "video": ("video.mp4",),
+    "final_video": ("final.mp4",),
+}
 _ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 PENDING = {"queued", "in_progress"}
 FAILED = {"failed", "nsfw", "canceled"}
@@ -623,3 +631,68 @@ def expire_stale(record_id: str) -> None:
             changed = True
     if changed:
         _creative.store().set_render(record_id, render)
+
+
+# ---------------------------------------------------------------- 사람이 올린 파일
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+async def attach_upload(
+    meta: RequestMeta,
+    record_id: str,
+    part: str,
+    asset: str,
+    sha256: str,
+    size_bytes: int,
+    label: str | None,
+    who: str | None,
+) -> dict[str, Any]:
+    """dashboard-api가 저장한 파일을 기록의 render.<part>로 붙인다(관문 A 뒤).
+
+    다른 도구(Higgsfield 화면, 2D 제작 등)로 만든 결과도 제작 기록에 남기려는 길.
+    """
+    if asset not in UPLOAD_FILES.get(part, ()):
+        raise RenderError("bad_asset")
+    store = _creative.store()
+    if store.get(record_id) is None:
+        raise RenderError("not_found")
+    path = _dir(record_id) / asset
+    if not path.is_file() or _sha256(path) != sha256:
+        raise RenderError("file_missing")
+    cur = store.get_render(record_id).get(part) or {}
+    if cur.get("status") in ("running", "awaiting_approval"):
+        raise RenderError("in_progress")
+    key = f"{meta.context_id}:creative_attach:{record_id}:{part}:{sha256[:16]}"
+    params = {
+        "record_id": record_id,
+        "part": part,
+        "asset": asset,
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "summary": f"제작 기록 {record_id}에 {part} 파일 붙이기 (사람이 올림)",
+    }
+    decision = await execute(
+        ATTACH_ACTION,
+        params,
+        meta.model_copy(update={"idempotency_key": key}),
+        _evidence(record_id, f"{part} 파일 올림"),
+    )
+    if decision.status != "executed":
+        raise RenderError(f"gate_{decision.status}")
+    return _set(
+        record_id,
+        part,
+        status="done",
+        error=None,
+        asset=asset,
+        sha256=sha256,
+        source="upload",
+        label=label,
+        by=who,
+        review_id=None,
+    )
