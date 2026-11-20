@@ -59,11 +59,20 @@ def _suspect(deployment: Deployment, confidence: str) -> SuspectDeployment:
 
 
 def diagnose(
-    history: DeploymentHistory, component: str | None, now: datetime, *, mock: bool
+    history: DeploymentHistory,
+    component: str | None,
+    now: datetime,
+    *,
+    mock: bool,
+    connected: set[str] | None = None,
 ) -> Diagnosis:
     scope = [component] if component else []
     # 되돌린 배포는 더 이상 돌고 있지 않아 원인 후보가 아니다
-    rows = [d for d in history.for_component(component) if d.deploy_id not in history.rolled_back]
+    rows = [
+        d
+        for d in history.for_component(component, connected=connected)
+        if d.deploy_id not in history.rolled_back
+    ]
     if mock:
         picked = rows[:1]
         suspects = [_suspect(d, "high") for d in picked]

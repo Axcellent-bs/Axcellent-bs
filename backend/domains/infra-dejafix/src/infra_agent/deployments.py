@@ -120,29 +120,37 @@ class DeploymentHistory:
     def load(cls) -> DeploymentHistory:
         return cls([_parse(row) for row in load_rows()])
 
-    def live(self) -> list[Deployment]:
+    def live(self, connected: set[str] | None = None) -> list[Deployment]:
         """쓰는 이력. 배포 도구가 연결됐거나 도구 이력이 있는 서비스는 시연 이력을 뺀다.
 
         그래서 연결 직후 첫 받기 전에는 그 서비스의 원인 후보·롤백 대상이 없다(원인 미확정 경로).
+        `connected`를 주면 보관함을 읽지 않고 그 값을 쓴다
+        (async 핸들러가 이벤트 루프 밖에서 미리 읽어 넘긴다).
         """
-        tooled = self.connected() | {d.service for d in self.deployments if d.source is not None}
+        if connected is None:
+            connected = self.connected()
+        tooled = connected | {d.service for d in self.deployments if d.source is not None}
         return [d for d in self.deployments if d.source is not None or d.service not in tooled]
 
-    def for_component(self, component: str | None) -> list[Deployment]:
+    def for_component(
+        self, component: str | None, *, connected: set[str] | None = None
+    ) -> list[Deployment]:
         """그 구성요소를 바꾼 배포, 최근 것이 앞.
 
         우리가 롤백으로 띄운 다시 배포(`is_rollback`)는 이전 버전으로 돌아간 것이라 넣지 않는다.
         """
         rows = [
             d
-            for d in self.live()
+            for d in self.live(connected)
             if not d.is_rollback and (component is None or component in d.components)
         ]
         return sorted(rows, key=lambda d: d.deployed_at, reverse=True)
 
-    def find(self, service: str, version: str) -> Deployment | None:
+    def find(
+        self, service: str, version: str, *, connected: set[str] | None = None
+    ) -> Deployment | None:
         """같은 버전이 여러 번 배포됐으면(시연을 되풀이) 되돌리지 않은 것 중 가장 최근 것."""
-        rows = [d for d in self.live() if d.service == service and d.version == version]
+        rows = [d for d in self.live(connected) if d.service == service and d.version == version]
         live = [d for d in rows if d.deploy_id not in self.rolled_back]
         return max(live or rows, key=lambda d: d.deployed_at, default=None)
 
@@ -152,11 +160,13 @@ class DeploymentHistory:
         rows = [d for d in rows if d.deploy_id not in self.rolled_back]
         return max(rows, key=lambda d: d.deployed_at, default=None)
 
-    def previous_good(self, target: Deployment) -> Deployment | None:
+    def previous_good(
+        self, target: Deployment, *, connected: set[str] | None = None
+    ) -> Deployment | None:
         """같은 서비스에서 대상 배포 바로 앞의, 되돌리지 않은 배포."""
         earlier = [
             d
-            for d in self.live()
+            for d in self.live(connected)
             if d.service == target.service
             and d.deployed_at < target.deployed_at
             and d.deploy_id not in self.rolled_back

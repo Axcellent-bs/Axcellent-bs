@@ -7,7 +7,8 @@ v0은 DB 없이 프로세스 메모리에만 둔다(재시작하면 배포 이�
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -28,6 +29,33 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+class KeyLocks:
+    """키마다 하나씩만 들어가는 잠금. 그 키를 기다리는 요청이 없으면 잠금을 지운다(쌓이지 않음).
+
+    프로세스 안에서만 막는다 (infra 서버는 워커 하나로 돈다. 여러 프로세스로 띄우면 막지 못한다).
+    """
+
+    def __init__(self) -> None:
+        self._locks: dict[str, tuple[asyncio.Lock, int]] = {}
+
+    @asynccontextmanager
+    async def hold(self, key: str) -> AsyncIterator[None]:
+        lock, users = self._locks.get(key) or (asyncio.Lock(), 0)
+        self._locks[key] = (lock, users + 1)
+        try:
+            async with lock:
+                yield
+        finally:
+            lock, users = self._locks[key]
+            if users <= 1:
+                del self._locks[key]
+            else:
+                self._locks[key] = (lock, users - 1)
+
+    def empty(self) -> bool:
+        return not self._locks
+
+
 @dataclass
 class Runtime:
     history: DeploymentHistory = field(default_factory=DeploymentHistory.load)
@@ -42,6 +70,8 @@ class Runtime:
     # context_id → (service, version) → 원인 PR. 진단이 넣고 되돌리기가 읽는다
     pr_suspects: dict[str, dict[tuple[str, str], PrSuspect]] = field(default_factory=dict)
     rollbacks: dict[str, dict[str, Any]] = field(default_factory=dict)  # idempotency_key → 결과
+    # 같은 롤백(멱등 키)을 한 번에 하나씩만 처리한다: 동시에 온 같은 요청이 두 번 배포하지 않게
+    rollback_locks: KeyLocks = field(default_factory=KeyLocks)
     releases: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )  # 과거 처리 방식 다시 하기 결과
