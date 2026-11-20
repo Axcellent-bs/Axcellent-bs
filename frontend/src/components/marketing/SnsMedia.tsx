@@ -9,13 +9,15 @@ import { PublishControlCard } from "./PublishControlCard";
 import { VideoProviderCard } from "./VideoProviderCard";
 import { CostLimitCard } from "./CostLimitCard";
 import { CharacterSheetMaker } from "./CharacterSheetMaker";
+import { StoryboardMaker } from "./StoryboardMaker";
+import type { CharacterSheetResult } from "@/lib/characterSheet";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, type StoredBrief } from "@/lib/briefs";
 
 // SNS·미디어 탭. 이미지·영상 생성을 안내하고(SNS 게시 흐름·캐러셀·AI 표시 안내는 Instagram 자동 게시 카드의 물음표),
 // 넘어온 기획안은 저장된 미디어 요청으로 미디어 초안을 만들 수 있다(BriefMediaMaker: 비용 확인 → 생성 → 초안·검사). 게시는 하지 않는다.
 // 안전 장치 보류 큐(finance.reviews)에서 읽을 수 있는 마케팅 항목(publish_sns, generate_media)만 읽기 전용으로 보여 준다.
 // 보류 결정은 장애·공지·캠페인 탭의 보류 큐에서 한다. 이 탭은 결정하지 않는다.
-// 비용 장부 숫자(오늘·이달 합계, 건당 상한)를 읽는 API는 화면에 연결돼 있지 않아 지어내지 않고 빈 상태로 둔다.
+// 이미지 시트(캐릭터 시트 프롬프트)를 만들면 그 캐릭터 문장을 스토리보드 만들기로 넘겨 쓴다.
 
 const REFRESH_MS = 15_000;
 const SNS_ACTIONS = ["publish_sns", "generate_media"] as const;
@@ -40,7 +42,6 @@ function Section({ title, desc, children }: { title: string; desc?: ReactNode; c
 }
 
 const Empty = ({ children }: { children: ReactNode }) => <p className="py-6 text-center text-sm text-ink-500">{children}</p>;
-const NOT_WIRED = "아직 화면에 연결되지 않았습니다.";
 
 export function SnsMedia() {
   const [holds, setHolds] = useState<Review[] | null>(null);
@@ -48,6 +49,7 @@ export function SnsMedia() {
   const [loading, setLoading] = useState(false);
   const [handed, setHanded] = useState<StoredBrief[] | null>(null);
   const [handedError, setHandedError] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<CharacterSheetResult | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,19 +90,8 @@ export function SnsMedia() {
       <VideoProviderCard />
       <CostLimitCard />
 
-      <CharacterSheetMaker />
-
-      <Section title="이미지·영상 만들기" desc="B 등급 일입니다. 안전 장치가 비용(cost_krw)을 코드 규칙으로 검사하고, 적어 낸 비용과 계산이 다르거나 기준을 넘으면 사람 확인으로 보류합니다.">
-        <ul className="space-y-1 text-sm text-ink-700">
-          <li>생성한 이미지·영상에는 AI 생성 표시를 넣습니다.</li>
-          <li>비용은 건당 상한과 하루 합계 기준으로 막습니다. 기준을 넘은 건은 아래 보류 목록에 나옵니다.</li>
-        </ul>
-        <div className="rounded-2xl border border-ink-100 p-4">
-          <p className="text-xs font-medium text-ink-700">비용 장부 (오늘·이달 합계, 건당 상한)</p>
-          <Empty>{NOT_WIRED}</Empty>
-        </div>
-      </Section>
-
+      <CharacterSheetMaker onResult={setSheet} />
+      <StoryboardMaker sheet={sheet} />
 
       <Section title="받은 기획안에서 넘어온 작업" desc="받은 기획안 탭에서 SNS·미디어로 넘긴 기획안입니다. 넘기면 글 초안과 미디어 요청 초안까지만 만들고, 아래 다음 단계는 사람이 이어서 합니다. '미디어 만들기'를 누르면 예상 비용을 확인한 뒤 저장된 종류·필드로 미디어를 만들고 초안 검사까지 합니다. 게시는 하지 않으며 사람 승인(C 등급)이 따로 필요합니다. 종류와 필드는 받은 기획안 탭에서 바꿀 수 있습니다.">
         <ol className="flex flex-wrap items-center gap-1 text-xs text-ink-700" aria-label="다음 단계">

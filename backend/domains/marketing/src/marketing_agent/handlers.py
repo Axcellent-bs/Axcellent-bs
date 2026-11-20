@@ -46,6 +46,7 @@ from marketing_agent import (
     video_providers,
 )
 from marketing_agent import character_sheet as _character_sheet
+from marketing_agent import storyboard as _storyboard
 from marketing_agent.brief_handoff import (
     AUTO,
     DRAFT_MEDIA_KIND,
@@ -592,6 +593,39 @@ async def channel_followers(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=_evidence(["channel_followers"], summary, []),
+    )
+
+
+# 스토리보드 프롬프트(read). 테스트는 이 값을 가짜 LLM을 돌려주는 함수로 바꾼다
+STORYBOARD_LLM: Any = None
+
+
+async def storyboard_prompt(request: AgentRequest) -> AgentResult:
+    """줄거리와 이미지 시트 캐릭터 문장으로 장면별 구도를 정한 스토리보드 프롬프트(read)."""
+    from marketing_agent.chat import default_llm
+
+    factory = STORYBOARD_LLM or default_llm
+    try:
+        out = await _storyboard.make_storyboard(
+            request.untrusted, factory, context_id=request.meta.context_id
+        )
+    except _storyboard.StoryboardRefused as refused:
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome=refused.code,
+            output={"message": refused.message},
+        )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["storyboard_prompt"],
+            f"스토리보드 프롬프트 {len(out.shots)}칸 "
+            f"(캐릭터 문장 {'사용' if out.character_used else '없음'})",
+            [],
+        ),
     )
 
 
@@ -1462,6 +1496,7 @@ HANDLERS = {
     "list_active_notices": list_active_notices,
     "channel_followers": channel_followers,
     "character_sheet_prompt": character_sheet_prompt,
+    "storyboard_prompt": storyboard_prompt,
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,

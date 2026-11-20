@@ -51,6 +51,12 @@ from ax_contracts.schemas.hr import (
     TeamHeadcountOutput,
 )
 from ax_contracts.schemas.marketing_character import MAX_CHARACTER_IMAGE_BASE64
+from ax_contracts.schemas.marketing_storyboard import (
+    DEFAULT_SHOTS,
+    MAX_CHARACTER_EN,
+    MAX_STORY,
+    MAX_STYLE_EN,
+)
 from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
     archive_client,
@@ -1350,6 +1356,35 @@ async def marketing_character_sheet(body: CharacterSheetBody) -> dict:
         raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "캐릭터 시트는 실제 모드에서만 된다")
     note = (body.note or "").strip() or None
     return ok(await marketing_client.character_sheet_call(body.image.model_dump(), note))
+
+
+class StoryboardBody(BaseModel):
+    story: str = Field(min_length=1, max_length=MAX_STORY)
+    character_en: str | None = Field(default=None, max_length=MAX_CHARACTER_EN)
+    style_en: str | None = Field(default=None, max_length=MAX_STYLE_EN)
+    shots: Literal[6, 9, 12] = DEFAULT_SHOTS
+
+
+@router.post("/marketing/storyboard")
+async def marketing_storyboard(body: StoryboardBody) -> dict:
+    """줄거리와 이미지 시트 캐릭터 문장으로 장면별 구도를 정한 스토리보드 프롬프트를 만든다.
+
+    마케팅 `storyboard_prompt`(read). 이미지를 만들지 않고 저장하지 않는다.
+    목 모드에서는 하지 않는다(LLM이 장면을 나눠야 한다).
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "스토리보드는 실제 모드에서만 된다")
+    story = body.story.strip()
+    if not story:
+        raise ApiError(422, "NO_STORY", "줄거리를 적어 주세요")
+    return ok(
+        await marketing_client.storyboard_call(
+            story,
+            (body.character_en or "").strip() or None,
+            (body.style_en or "").strip() or None,
+            body.shots,
+        )
+    )
 
 
 class MarketingChatSendBody(BaseModel):
