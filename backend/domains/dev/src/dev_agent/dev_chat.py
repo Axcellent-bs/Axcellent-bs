@@ -25,6 +25,9 @@
 - 되묻기는 2번까지(`MAX_QUESTIONS`). 그 뒤에 계획이 있으면 더 묻지 않고 계획을 보여 준다.
 - "진행해" 같은 말이 오면 계획(이번 답 또는 지난 계획)이 있을 때 기획에 넘긴다.
 - 작업과 이어진 대화에 또 쓰면 작업 진행 상태만 알려 준다 (다른 변경은 새 대화).
+- 멈춘 작업을 대화로 넘기면(`open_for_task`) 멈춘 이유를 적고 같은 턴 기계로 LLM을 한 번 불러
+  원인·고칠 파일을 답한다 (사람 말 없이 다시 시도하지 않는다). LLM이 없거나 실패하면 이유 한 줄과
+  정해 둔 안내(파일을 고르거나 알려 달라)로 떨어진다.
 - 사람 확인을 기다리는 PR에 이어 말하면, 문구·스타일만 바꾸는 간단한 수정인지 AI가 판단한다
   (`REVISION_PROMPT`). 간단하면 같은 PR에 커밋하고, 아니거나 판단을 못 하면 기획에 넘긴다.
 - LLM 오류는 `error` 메시지 한 줄 (예외 내용·비밀 값은 넣지 않는다).
@@ -34,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -49,6 +53,8 @@ from dev_agent import coder, vcs, vcs_bridge
 
 if TYPE_CHECKING:
     from dev_agent.service import DevService
+
+log = logging.getLogger(__name__)
 
 MAX_MESSAGE_CHARS = 4000
 MAX_QUESTIONS = 2  # 되묻기 횟수 (넘으면 더 묻지 않고 계획을 보여 준다. 시작은 "진행해" 뒤)
@@ -107,6 +113,10 @@ SYSTEM_PROMPT = (
     "- last_task의 status가 failed·waiting_human이고 pr이 없으면 멈춘 작업이다 (error가 이유). "
     "개발팀원과 고칠 파일을 정해 plan.paths에 files의 파일 경로(폴더 말고)를 넣는다. "
     "'진행해'면 기획에 새로 넘기지 않고 같은 작업을 그 파일로 다시 시도한다.\n"
+    "- conversation에 user 말이 없으면 멈춘 작업을 막 넘겨받은 첫 턴이다. last_task의 error·"
+    "title·plan·done·review_notes와 files를 보고 왜 멈췄는지 짧게 설명하고, 고칠 파일을 "
+    "plan.paths에 넣은 계획을 제안한다. 모르면 무엇이 필요한지 묻는다. 다시 시도는 "
+    "개발팀원이 '진행해'라고 해야 한다.\n"
     "- 레포 코드를 바꾸는 일이 아니면(SNS 게시, 쿠폰 발행, 캠페인·광고 집행, 환불 처리처럼 "
     "다른 부서가 운영으로 하는 일) 계획을 세우지 말고 action ask로 그 부서 AI(AI 대화방 직접 "
     "대화)나 기획에 요청하라고 안내한다. 화면 문구·배너·페이지를 바꾸는 일은 코드 변경이다.\n"
@@ -310,7 +320,7 @@ def _last_task(svc: DevService, th: ChatThread) -> dict | None:
     if task is None or task.coding is None:
         return None
     c = task.coding
-    return {
+    out: dict[str, Any] = {
         "id": task.id,
         "title": task.title,
         "status": c.status,
@@ -318,6 +328,13 @@ def _last_task(svc: DevService, th: ChatThread) -> dict | None:
         "files": [f.path for f in c.files],
         "error": c.error,
     }
+    if stuck_task(svc, task.id):  # 멈춘 작업은 원인을 보도록 작업 글·리뷰 지적까지 준다
+        job = svc.coding_job(task.id, 0)
+        out["plan"] = job.plan[: coder.MAX_PLAN_CHARS] if job else ""
+        out["done"] = list(job.done)[: coder.MAX_DONE_LINES] if job else []
+        out["picked"] = list(c.picked)
+        out["review_notes"] = list(c.review.notes)[:10] if c.review else []
+    return out
 
 
 STUCK_STATUSES = ("failed", "waiting_human", "canceled")
@@ -335,6 +352,58 @@ def stuck_task(svc: DevService, task_id: str | None) -> bool:
     return not any(p.task == task_id and not p.merged and not p.closed for p in svc.state.prs)
 
 
+# 멈춘 작업을 넘겼는데 AI가 원인을 보지 못했을 때의 안내 (사람이 파일을 정한다)
+STUCK_GUIDE = (
+    "고칠 파일이나 바꿀 내용을 알려 주세요. 파일을 정한 뒤 '진행해'라고 하시면 "
+    "같은 작업을 그 파일로 다시 시도할게요."
+)
+
+
+def _open_thread_for(
+    svc: DevService, task_id: str, who: str | None, account: str | None, origin: str
+) -> ChatThread | None:
+    """이 작업을 넘겨 연 대화가 아직 열려 있고 그 뒤로 작업을 다시 돌리지 않았으면 그 대화.
+
+    끝낸(closed)·지운 대화, 다시 시도를 띄운(started) 대화는 다시 쓰지 않는다."""
+    for th in sorted(_live(svc.state), key=lambda c: c.updated_at, reverse=True):
+        if th.task_id != task_id or th.status not in ("talking", "answering"):
+            continue
+        if not (seen_from(th, origin) and _account_ok(th, origin, account) and _owner_ok(th, who)):
+            continue
+        if not _restarted_since(svc, task_id, th.created_at):
+            return th
+    return None
+
+
+# 작업을 다시 돌린 활동 기록 (사람 다시 시도·고른 파일로 다시 쓰기·자동 재시도·PR 수정 지시)
+RESTART_POINTS = ("dev_task_retry", "dev_task_revise")
+
+
+def _restarted_since(svc: DevService, task_id: str, at: datetime) -> bool:
+    """`at` 뒤에 이 작업을 다시 돌렸나 (그렇다면 지금 멈춘 건 그 뒤에 다시 멈춘 것이다).
+
+    작업의 `updated_at`은 다른 갱신에도 바뀌므로 다시 돌린 활동 기록(`{작업 id} …`)으로 본다."""
+    head = f"{task_id} "
+    return any(
+        a.point in RESTART_POINTS and a.at > at and a.text.startswith(head)
+        for a in svc.state.activity
+    )
+
+
+# 같은 작업을 동시에 넘기면 확인~대화 만들기를 하나씩 (대화 2개·LLM 2회 막기).
+# asyncio.Lock은 처음 기다린 이벤트 루프에 묶이므로 루프가 바뀌면 새로 만든다
+_opening: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
+
+
+def _open_lock(task_id: str) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    got = _opening.get(task_id)
+    if got is None or got[0] is not loop:
+        got = (loop, asyncio.Lock())
+        _opening[task_id] = got
+    return got[1]
+
+
 async def open_for_task(
     svc: DevService,
     task_id: str,
@@ -342,11 +411,14 @@ async def open_for_task(
     account: str | None = None,
     origin: str = "screen",
 ) -> ChatThread:
-    """멈춘 작업을 개발 AI 대화로 넘긴다: 작업과 이어진 새 대화를 열고 멈춘 이유를 먼저 보여 준다.
+    """멈춘 작업을 개발 AI 대화로 넘긴다: 작업과 이어진 새 대화를 열고 멈춘 이유를 먼저 적는다.
 
-    대화에서 고칠 파일을 정하고 '진행해'면 같은 작업을 그 파일로 다시 시도한다
-    (기획에 새 요청 없음).
-    LLM은 부르지 않는다 (첫 말은 정해 둔 글)."""
+    이어서 대화 턴(`_answer`)으로 LLM을 한 번 불러 원인·고칠 파일을 답한다 (작업 제목·글·멈춘
+    이유·지난 파일·리뷰 지적·레포 파일 목록이 입력, `last_task`). 다시 시도는 하지 않는다:
+    사람이 '진행해'라고 하면 같은 작업을 그 계획의 파일로 다시 시도한다 (기획에 새 요청 없음).
+    `send`처럼 `answering`인 대화를 바로 돌려주고 답은 뒤에서 붙는다.
+    LLM이 없거나 실패하면 이유 한 줄(`error`)과 정해 둔 안내로 떨어진다.
+    같은 작업을 넘겨 연 대화가 아직 열려 있으면 그 대화를 그대로 준다 (LLM 다시 안 부름)."""
     if svc.role == "planning":
         raise ActionError("WRONG_ROLE", "개발 AI 대화는 개발 서비스(dev)에서 돈다")
     task = next((t for t in svc.state.tasks if t.id == task_id), None)
@@ -354,19 +426,66 @@ async def open_for_task(
         raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
     if not stuck_task(svc, task_id):
         raise ActionError("NOT_STUCK", f"{task_id}는 멈춘 작업이 아니다 (진행 중·PR 있음·끝남)")
-    c = task.coding
-    files = ", ".join(f.path for f in c.files[:5])
-    text = (
-        f"{task_id} '{task.title}' 작업이 멈췄어요: {c.error or c.status}\n"
-        + (f"지난번에 고른 파일: {files}\n" if files else "")
-        + "고칠 파일이나 바꿀 내용을 알려 주세요. 파일을 정한 뒤 '진행해'라고 하시면 "
-        "같은 작업을 그 파일로 다시 시도할게요."
-    )
-    return await svc.chat_add(
-        None, "assistant", text, kind="question", task_id=task_id, status="talking",
-        connection=c.connection, title=f"{task_id} 이어서: {task.title}"[:60], who=who,
-        origin=origin, account=account,
-    )  # fmt: skip
+    llm = get_llm()
+    async with _open_lock(task_id):  # 확인과 만들기 사이에 같은 작업 대화가 또 생기지 않게
+        found = _open_thread_for(svc, task_id, who, account, origin)
+        if found is not None:
+            return found
+        c = task.coding
+        files = ", ".join(f.path for f in c.files[:5])
+        text = f"{task_id} '{task.title}' 작업이 멈췄어요: {c.error or c.status}" + (
+            f"\n지난번에 고른 파일: {files}" if files else ""
+        )
+        th = await svc.chat_add(
+            None, "assistant", text, task_id=task_id,
+            status="answering" if llm is not None else "talking",
+            connection=c.connection, title=f"{task_id} 이어서: {task.title}"[:60], who=who,
+            origin=origin, account=account,
+        )  # fmt: skip
+        if llm is None:
+            await svc.chat_add(
+                th.id, "assistant", "AI가 설정되지 않아 원인을 살펴보지 못했어요.", kind="error"
+            )
+            return await svc.chat_add(th.id, "assistant", STUCK_GUIDE, kind="question")
+    conns = vcs_bridge.targets()
+    if not BACKGROUND:
+        return await _diagnose(svc, llm, th.id, conns)
+    job = asyncio.get_running_loop().create_task(_diagnose_background(svc, llm, th.id, conns))
+    _running.add(job)
+    job.add_done_callback(_running.discard)
+    return th
+
+
+async def _diagnose(svc: DevService, llm: Any, tid: str, conns: list[vcs.Connection]) -> ChatThread:
+    """넘겨받은 멈춘 작업에 대한 첫 답. 사람 말이 없는 턴이라 '진행해'로 보지 않는다.
+
+    AI 답(질문·계획)이 대화에 올라가지 않았으면 (LLM 오류·시간 초과·관문 거절) 정해 둔 안내를
+    붙인다. 안내도 적지 못하면 대화를 그대로 둔다."""
+    before = svc.chat_of(tid)
+    seen = len(before.messages) if before is not None else 0
+    th = await _answer(svc, llm, tid, "", conns, "talking")
+    if any(m.role == "assistant" and m.kind in ("question", "plan") for m in th.messages[seen:]):
+        return th
+    try:
+        return await svc.chat_add(tid, "assistant", STUCK_GUIDE, kind="question", status="talking")
+    except Exception:  # noqa: BLE001 - 관문 거절 등: 안내를 못 적어도 대화는 남긴다
+        log.warning("멈춘 작업 대화 %s에 안내를 적지 못함", tid, exc_info=True)
+        found = svc.chat_of(tid)
+        if found is None:
+            raise ActionError("NOT_FOUND", f"대화 {tid}가 없다") from None
+        return found
+
+
+async def _diagnose_background(
+    svc: DevService, llm: Any, tid: str, conns: list[vcs.Connection]
+) -> None:
+    """뒤에서 도는 첫 답. 지운 대화·관문 거절 등 어떤 예외도 로그만 남긴다."""
+    try:
+        await _diagnose(svc, llm, tid, conns)
+    except ActionError:  # 답하는 사이 대화를 지웠다
+        pass
+    except Exception:  # noqa: BLE001 - 뒤에서 도는 일이라 밖으로 던질 곳이 없다
+        log.warning("멈춘 작업 대화 %s 첫 답을 만들지 못함", tid, exc_info=True)
 
 
 async def _retry_with(svc: DevService, th: ChatThread, plan: ChatPlan, reply: str) -> ChatThread:
@@ -439,6 +558,16 @@ async def _listing(conns: list[vcs.Connection], text: str = "") -> dict[str, lis
     return out
 
 
+def _listing_hint(th: ChatThread, last_task: dict | None) -> str:
+    """파일 목록을 고를 낱말: 사람 말, 멈춘 작업이면 그 작업 글도.
+
+    멈춘 작업을 넘겨받은 첫 턴엔 사람 말이 없다."""
+    said = " ".join(m.text for m in th.messages[-MAX_HISTORY:] if m.role == "user")
+    if last_task and "plan" in last_task:
+        said = " ".join([said, last_task["title"], last_task["plan"], *last_task.get("done", [])])
+    return said
+
+
 async def _ask_llm(
     llm: Any, th: ChatThread, conns: list[vcs.Connection], last_task: dict | None = None
 ) -> ChatTurn:
@@ -452,9 +581,7 @@ async def _ask_llm(
             for c in conns
         ],
         "chosen_connection": th.connection,
-        "files": await _listing(
-            chosen, " ".join(m.text for m in th.messages[-MAX_HISTORY:] if m.role == "user")
-        ),
+        "files": await _listing(chosen, _listing_hint(th, last_task)),
         "questions_asked": questions_asked(th),
         "last_task": last_task,
     }
