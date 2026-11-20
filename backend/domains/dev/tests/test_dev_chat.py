@@ -599,23 +599,41 @@ class NoPick(CoderLLM):
         return await super().structured(prompt, schema, untrusted, images, context_id)
 
 
+def _stuck(c: TestClient, service: PlanningService) -> str:
+    """파일을 못 골라 실패한 작업을 만든다."""
+    coder.set_llm(NoPick())
+    body = {"title": "배너 문구", "plan": "배너 문구를 바꾼다", "done": "신간 문구"}
+    task_id = c.post("/api/planning/dev-tasks", json=body).json()["data"]["task_id"]
+    assert _settle(service, task_id) == "failed"
+    return task_id
+
+
+STUCK_PLAN = TurnPlan(
+    title="배너 문구", plan="Banner.tsx의 배너 문구를 바꾼다.", paths=[BANNER, "../etc/passwd"]
+)
+# 넘겨받자마자 AI가 원인을 보고 고칠 파일을 제안한다 (action start여도 스스로 시작하지 않는다)
+DIAGNOSE = ChatTurn(
+    reply="작업 글에 파일 이름이 없어 고칠 파일을 못 골랐어요. Banner.tsx를 고치면 돼요.",
+    action="start",
+    plan=STUCK_PLAN,
+)
+
+
 def test_stuck_task_goes_to_chat_and_retries_with_chosen_files(
     service: PlanningService, adapter
 ) -> None:
     """멈춘 작업을 AI 대화로 넘기면, 대화로 고른 파일로 같은 작업을 다시 시도한다 (새 요청 없음)."""
-    coder.set_llm(NoPick())
-    fake = ChatLLM([START])
+    fake = ChatLLM([ChatTurn(reply="어느 파일을 고칠까요?", action="ask"), START])
     dev_chat.set_llm(fake)
     with TestClient(app) as c:
-        body = {"title": "배너 문구", "plan": "배너 문구를 바꾼다", "done": "신간 문구"}
-        task_id = c.post("/api/planning/dev-tasks", json=body).json()["data"]["task_id"]
-        assert _settle(service, task_id) == "failed"
+        task_id = _stuck(c, service)
         r = c.post(f"/api/planning/dev-tasks/{task_id}/to-chat", json={"account": "admin"})
         assert r.status_code == 200, r.text
         th = r.json()["data"]
         assert th["task_id"] == task_id and th["status"] == "talking"
         assert "고칠 파일을 고르지 못함" in th["messages"][0]["text"]
-        assert fake.calls == []  # 넘길 때 LLM 없음
+        assert len(fake.calls) == 1  # 넘길 때 AI가 한 번 본다
+        assert th["messages"][-1]["kind"] == "question"
 
         coder.set_llm(CoderLLM())
         th = _post(c, thread_id=th["id"], message="Banner.tsx 문구를 바꿔", account="admin").json()
@@ -624,11 +642,180 @@ def test_stuck_task_goes_to_chat_and_retries_with_chosen_files(
         assert _settle(service, task_id) == "merged"
     assert adapter.tickets.got == []  # 기획에 새 요청을 만들지 않는다
     assert _task(service, task_id).coding.picked == [BANNER]  # ../etc/passwd는 빠진다
-    assert len(fake.calls) == 1  # 계획 턴만 LLM ("진행해"는 LLM 없음)
+    assert len(fake.calls) == 2  # 넘길 때 + 계획 턴 ("진행해"는 LLM 없음)
 
     with TestClient(app) as c:  # 멈춘 작업이 아니면 넘기지 않는다
         r = c.post(f"/api/planning/dev-tasks/{task_id}/to-chat", json={})
         assert r.status_code == 400 and r.json()["error"]["code"] == "NOT_STUCK"
+
+
+def test_stuck_task_to_chat_ai_diagnoses_then_go_retries_its_plan(
+    service: PlanningService, adapter
+) -> None:
+    """넘기면 AI가 멈춘 이유·작업 글·지난 파일·레포 파일을 보고 원인과 계획을 답한다.
+
+    스스로 다시 시도하지 않고, 사람이 '진행해'라고 하면 그 계획의 파일로 다시 시도한다."""
+    fake = ChatLLM([DIAGNOSE])
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        task_id = _stuck(c, service)
+        th = c.post(f"/api/planning/dev-tasks/{task_id}/to-chat", json={"account": "admin"})
+        th = th.json()["data"]
+        assert len(fake.calls) == 1
+        got = fake.calls[0]
+        last = got["last_task"]
+        assert last["id"] == task_id and last["status"] == "failed"
+        assert "고칠 파일을 고르지 못함" in last["error"]
+        assert last["plan"] == "배너 문구를 바꾼다" and last["done"] == ["신간 문구"]
+        assert BANNER in next(iter(got["files"].values()))  # 레포 파일 목록
+        assert not any(m["role"] == "user" for m in got["conversation"])  # 사람 말 없음
+
+        # 답이 대화에 계획으로 올라가고, 작업은 그대로 멈춰 있다
+        assert th["status"] == "talking"
+        ans = th["messages"][-1]
+        assert ans["role"] == "assistant" and ans["kind"] == "plan"
+        assert "Banner.tsx를 고치면" in ans["text"] and ans["plan"]["paths"] == [BANNER]
+        assert _task(service, task_id).coding.status == "failed"
+        assert not any(m["kind"] == "started" for m in th["messages"])
+
+        coder.set_llm(CoderLLM())
+        th = _post(c, thread_id=th["id"], message="진행해", account="admin").json()["data"]
+        assert th["status"] == "started" and BANNER in th["messages"][-1]["text"]
+        assert _settle(service, task_id) == "merged"
+    assert _task(service, task_id).coding.picked == [BANNER]
+    assert len(fake.calls) == 1  # 버튼 한 번에 LLM 1회, "진행해"는 LLM 없음
+    assert adapter.tickets.got == []
+
+
+def test_stuck_task_to_chat_twice_reuses_the_open_thread(service: PlanningService, adapter) -> None:
+    """같은 작업을 다시 넘기면 열린 대화를 그대로 준다 (LLM을 다시 부르지 않는다)."""
+    fake = ChatLLM([DIAGNOSE])
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        task_id = _stuck(c, service)
+        url = f"/api/planning/dev-tasks/{task_id}/to-chat"
+        one = c.post(url, json={"account": "admin"}).json()["data"]
+        two = c.post(url, json={"account": "admin"}).json()["data"]
+        other = c.post(url, json={"account": "guest"}).json()["data"]
+    assert two["id"] == one["id"] and len(two["messages"]) == len(one["messages"])
+    assert other["id"] != one["id"]  # 다른 계정은 자기 대화를 연다
+    assert len(fake.calls) == 1 + 1  # admin 한 번 + guest 한 번
+
+
+def test_stuck_task_to_chat_at_once_opens_one_thread(
+    service: PlanningService, adapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """두 번 빠르게 눌러도(동시 2요청) 대화 1개, LLM 1회."""
+    fake = ChatLLM([DIAGNOSE, DIAGNOSE])
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        task_id = _stuck(c, service)
+        real_add = service.chat_add
+
+        async def slow_add(*args, **kwargs):  # 실제 관문 호출처럼 적기 전에 차례를 넘긴다
+            await asyncio.sleep(0.01)
+            return await real_add(*args, **kwargs)
+
+        monkeypatch.setattr(service, "chat_add", slow_add)
+
+        async def both():
+            return await asyncio.gather(
+                dev_chat.open_for_task(service, task_id, None, "admin"),
+                dev_chat.open_for_task(service, task_id, None, "admin"),
+            )
+
+        one, two = c.portal.call(both)
+    assert one.id == two.id
+    assert [t.id for t in service.state.chats if t.task_id == task_id] == [one.id]
+    assert len(fake.calls) == 1
+
+
+def test_stuck_task_to_chat_reuse_rules(service: PlanningService, adapter) -> None:
+    """다른 갱신(고른 파일 저장 등)으로 작업 시각만 바뀌면 같은 대화.
+
+    끝낸·지운 대화와 다시 돌렸다 또 멈춘 작업은 새 대화를 연다."""
+    fake = ChatLLM([DIAGNOSE] * 4)
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        task_id = _stuck(c, service)
+        url = f"/api/planning/dev-tasks/{task_id}/to-chat"
+        first = c.post(url, json={"account": "admin"}).json()["data"]["id"]
+
+        coding = _task(service, task_id).coding  # 넘긴 뒤 파일 직접 고르기 저장처럼 갱신만
+        coding.picked = [BANNER]
+        coding.updated_at = service.clock() + timedelta(minutes=5)
+        assert c.post(url, json={"account": "admin"}).json()["data"]["id"] == first
+        assert len(fake.calls) == 1
+
+        c.portal.call(dev_chat.close, service, first, None, "screen", "admin")
+        closed_next = c.post(url, json={"account": "admin"}).json()["data"]["id"]
+        assert closed_next != first
+
+        c.portal.call(dev_chat.remove, service, closed_next, None, "screen", "admin")
+        removed_next = c.post(url, json={"account": "admin"}).json()["data"]["id"]
+        assert removed_next not in (first, closed_next)
+
+        _task(service, task_id).coding.picked = []  # 다시 돌렸다 또 멈춤 (파일을 못 고름)
+        r = c.post(f"/api/planning/dev-tasks/{task_id}/retry", json={})
+        assert r.status_code == 200, r.text
+        assert _settle(service, task_id) == "failed"
+        again = c.post(url, json={"account": "admin"}).json()["data"]["id"]
+        assert again not in (first, closed_next, removed_next)
+    assert len(fake.calls) == 4
+
+
+@pytest.mark.parametrize(
+    "llm",
+    [None, LLMResponseError("bad"), TimeoutError()],
+    ids=["not-configured", "error", "timeout"],
+)
+def test_stuck_task_to_chat_without_ai_falls_back_to_guide(
+    service: PlanningService, adapter, llm
+) -> None:
+    """LLM이 없거나 실패하면 대화는 남기고, 이유 한 줄 + 정해 둔 안내로 떨어진다."""
+    fake = None if llm is None else ChatLLM([llm])
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        task_id = _stuck(c, service)
+        r = c.post(f"/api/planning/dev-tasks/{task_id}/to-chat", json={"account": "admin"})
+        assert r.status_code == 200, r.text
+        th = r.json()["data"]
+    assert th["status"] == "talking" and th["task_id"] == task_id
+    kinds = [m["kind"] for m in th["messages"]]
+    assert kinds[-2:] == ["error", "question"]
+    err = th["messages"][-2]["text"]
+    assert "\n" not in err and "bad" not in err  # 한 줄, 예외 내용 없음
+    assert "고칠 파일" in th["messages"][-1]["text"]
+    assert "고칠 파일을 고르지 못함" in th["messages"][0]["text"]
+    assert _task(service, task_id).coding.status == "failed"
+
+
+def test_stuck_task_to_chat_answers_in_background(service: PlanningService, adapter) -> None:
+    """화면은 바로 열린다: 넘기면 answering인 대화를 바로 주고, AI 답은 뒤에서 붙는다."""
+    gate = asyncio.Event()
+
+    class Slow(ChatLLM):
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            await gate.wait()
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    fake = Slow([DIAGNOSE])
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        task_id = _stuck(c, service)
+        dev_chat.set_background(True)
+        th = c.post(f"/api/planning/dev-tasks/{task_id}/to-chat", json={"account": "admin"})
+        th = th.json()["data"]
+        assert th["status"] == "answering" and [m["role"] for m in th["messages"]] == ["assistant"]
+        busy = _post(c, thread_id=th["id"], message="진행해", account="admin")
+        assert busy.json()["error"]["code"] == "THREAD_BUSY"
+        c.portal.call(gate.set)
+        deadline = time.monotonic() + 5
+        while service.chat_of(th["id"]).status == "answering" and time.monotonic() < deadline:
+            time.sleep(0.02)
+    done = service.chat_of(th["id"])
+    assert done.status == "talking" and done.messages[-1].kind == "plan"
+    assert _task(service, task_id).coding.status == "failed"
 
 
 def test_pick_files_list_for_a_stuck_task(service: PlanningService, adapter) -> None:

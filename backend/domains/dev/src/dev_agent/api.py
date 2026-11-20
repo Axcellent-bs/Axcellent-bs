@@ -624,7 +624,8 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
     async def post_dev_task_to_chat(task_id: str, request: Request) -> dict | JSONResponse:
         """멈춘 작업을 개발 AI 대화로 넘긴다 (작업과 이어진 새 대화). 본문 `{account?}`.
 
-        대화에서 고칠 파일을 정하고 '진행해'면 같은 작업을 그 파일로 다시 시도한다."""
+        `answering`인 대화를 바로 주고, AI가 뒤에서 멈춘 이유를 보고 원인·고칠 파일을 답한다.
+        '진행해'면 같은 작업을 그 파일로 다시 시도한다."""
         svc = get_service()
         body = await _body(request) or {}
         account = body.get("account")

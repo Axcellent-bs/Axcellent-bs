@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { SheetBoard } from "@/components/marketing/SheetBoard";
 import { StoryboardView } from "@/components/marketing/StoryboardMaker";
+import { RenderPanel } from "@/components/marketing/RenderPanel";
 import { getCreativeRecord, thumbSrc, type CreativeRecord } from "@/lib/creativeRecords";
 import type { CreativeCard } from "@/lib/planningData";
 
@@ -54,6 +55,7 @@ export function CreativeChatCard({ card }: { card: CreativeCard }) {
           <StoryboardView r={rec.storyboard} />
         </div>
       )}
+      <RenderPanel recordId={card.record_id} />
       <Link to={`/marketing/records?id=${card.record_id}`} className="inline-block text-xs text-brand-700 underline">제작 기록에서 크게 보기 · {card.record_id}</Link>
     </div>
   );

@@ -5,6 +5,7 @@ import { RECORD_ID, getCreativeRecord, listCreativeRecords, thumbSrc, type Creat
 import { SheetBoard } from "./SheetBoard";
 import { StoryboardView } from "./StoryboardMaker";
 import { PromptBox } from "./PromptParts";
+import { RenderPanel } from "./RenderPanel";
 
 // 마케팅 › 제작 기록 (/marketing/records). SNS·미디어 탭에서 만든 이미지 시트와 이어 만든 스토리보드를
 // 기록마다 다시 본다. 목록을 누르면 ?id=CR-… 로 상세가 열린다. 읽기만 하고 아무것도 바꾸지 않는다.
@@ -34,6 +35,7 @@ function Detail({ id }: { id: string }) {
           {rec.story && <><dt className="text-ink-500">줄거리</dt><dd className="text-ink-900">{rec.story}</dd></>}
         </dl>
       )}
+      <RenderPanel recordId={rec.record_id} />
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-ink-900">이미지 시트</h3>
         <SheetBoard r={rec.sheet} thumb={thumbSrc(rec.thumbnail_base64)} />

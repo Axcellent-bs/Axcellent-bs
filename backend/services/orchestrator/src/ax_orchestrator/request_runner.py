@@ -330,7 +330,7 @@ class RequestRunner:
             )
             return
         self._update(rid, step_id, status="running", grade=grade, started_at=stamp())
-        result = await self._call(engine, row, spec, entry.dept, step_id, payload)
+        result = await self._call(engine, row, spec, entry.dept, step_id, payload, grade)
         self._apply(rid, step_id, result, spec)
 
     # ---- 부서 호출 ----------------------------------------------------------------
@@ -366,9 +366,17 @@ class RequestRunner:
         dept: str,
         step_id: str,
         payload: dict[str, Any],
+        grade: str | None = None,
     ) -> AgentResult | str:
-        """부서를 부른다. 읽기 일이라 실패·마감 초과는 정해진 횟수만 다시 부른다. 못 받으면 이유."""
+        """부서를 부른다. 못 받으면 이유.
+
+        읽기 단계만 실패·취소를 정해진 횟수 다시 부른다. 상태를 바꾸거나 비용이 드는 단계(A·B·C)는
+        한 번만 보낸다: 첫 호출이 이미 일을 시작했을 수 있어 다시 보내면 중복·충돌(예: 영상 제작이
+        "이미 진행 중"으로 거절)이 난다. 기다리는 시간은 단계의 `timeout_s`, 없으면 기본값이다.
+        """
         rid = row["request_id"]
+        retry = grade == request_tasks.READ_GRADE  # 등급을 모르면 다시 보내지 않는다
+        timeout = float(spec.get("timeout_s") or self._step_timeout)
         failed = canceled = attempts = 0
         while True:
             attempts += 1
@@ -378,7 +386,7 @@ class RequestRunner:
                     context_id=row.get("context_id") or f"ctx_{rid}",
                     token="orchestrator",
                     path=["orchestrator"],
-                    deadline=now() + timedelta(seconds=self._step_timeout),
+                    deadline=now() + timedelta(seconds=timeout),
                     idempotency_key=f"{rid}:{spec['skill']}:{step_id}",
                 ),
                 skill=spec["skill"],
@@ -386,17 +394,20 @@ class RequestRunner:
                 untrusted={"request_text": row["text"]},  # 고객 글은 데이터 칸으로만
             )
             try:
-                result = await asyncio.wait_for(
-                    engine.caller(dept, req), timeout=self._step_timeout + 5
-                )
+                result = await asyncio.wait_for(engine.caller(dept, req), timeout=timeout + 5)
             except TimeoutError:
                 return "부서 응답 시간 초과"
-            if result.status == TaskStatus.CANCELED and canceled < MAX_CANCELED_RETRIES:
+            if retry and result.status == TaskStatus.CANCELED and canceled < MAX_CANCELED_RETRIES:
                 canceled += 1
                 await asyncio.sleep(self._retry_delay)
                 continue
             retryable = result.output.get("retryable") is not False
-            if result.status == TaskStatus.FAILED and retryable and failed < MAX_FAILED_RETRIES:
+            if (
+                retry
+                and result.status == TaskStatus.FAILED
+                and retryable
+                and failed < MAX_FAILED_RETRIES
+            ):
                 failed += 1
                 await asyncio.sleep(self._retry_delay)
                 continue

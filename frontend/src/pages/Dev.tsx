@@ -90,7 +90,7 @@ export default function DevPage() {
           {section === 'agents' && <AgentTalk s={s} item={item} />}
           {section === 'metrics' && tab === 'autonomy' && <Autonomy s={s} d={d} item={item} />}
           {section === 'metrics' && tab === 'audit' && <Audit s={s} d={d} />}
-          {section === 'metrics' && tab === 'activity' && <><Activity s={s} item={item} /><AgentDiagnosisInbox agent="dev" /></>}
+          {section === 'metrics' && tab === 'activity' && <><Activity s={s} item={item} part="dev" /><AgentDiagnosisInbox agent="dev" /></>}
         </>
       )}
     </PlanningShell>
