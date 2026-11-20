@@ -50,6 +50,8 @@ class TaskStep:
     # 이 단계 결과에서 다음 단계가 그대로 받을 값의 칸 이름 / 앞 단계가 둔 값을 입력으로 받는다
     carries: str | None = None
     takes_carry: bool = False
+    # 고객 문장에서 부서 입력 칸을 채우는 규칙 이름 (`request_inputs.RULES`)
+    fill: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,8 +82,9 @@ def _one(
     skill: str,
     grade: str = READ_GRADE,
     blocked_by: str | None = None,
+    fill: str | None = None,
 ) -> TaskDef:
-    step = TaskStep("run", dept, skill, label, grade)
+    step = TaskStep("run", dept, skill, label, grade, fill=fill)
     return TaskDef(name, label, description, examples, (step,), blocked_by)
 
 
@@ -158,6 +161,7 @@ TASKS: tuple[TaskDef, ...] = (
         ("이번 달 매출 분석해 주세요", "지난 7일 매출 정리해 줘"),
         "data",
         "sales_analysis",
+        fill="sales_period",
     ),
     _one(
         "customer_segment",
@@ -166,6 +170,7 @@ TASKS: tuple[TaskDef, ...] = (
         ("20대 여성은 뭘 많이 사요", "30대 남성이 즐겨 사는 책 알려 주세요"),
         "data",
         "segment_question",
+        fill="customer_text",
     ),
     _one(
         "anomaly_check",
@@ -174,6 +179,7 @@ TASKS: tuple[TaskDef, ...] = (
         ("어제 결제 실패가 튄 곳이 있나요", "지표에 이상한 데 없는지 봐 주세요"),
         "data",
         "anomaly_detection",
+        fill="anomaly_window",
     ),
     _one(
         "event_proposal",
@@ -182,6 +188,7 @@ TASKS: tuple[TaskDef, ...] = (
         ("12월 이벤트 제안해 주세요", "연말 프로모션 아이디어 줘"),
         "data",
         "event_proposal",
+        fill="month_upcoming",
     ),
     _one(
         "inquiry_status",
@@ -206,6 +213,7 @@ TASKS: tuple[TaskDef, ...] = (
         ("지난주 판매자 정산 내역 보여 주세요",),
         "support",
         "seller_settlement",
+        fill="settlement_week",
     ),
     _one(
         "closing_report",
@@ -214,6 +222,7 @@ TASKS: tuple[TaskDef, ...] = (
         ("이번 달 손익 정리해 주세요", "주간 결산 만들어 줘"),
         "finance",
         "closing_report",
+        fill="closing_period",
     ),
     _one(
         "notice_draft",
@@ -246,6 +255,7 @@ TASKS: tuple[TaskDef, ...] = (
         ("비슷한 과거 장애 기록 찾아 주세요",),
         "archive",
         "find_similar_cases",
+        fill="search_query",
     ),
     _one(
         "team_headcount",
@@ -254,6 +264,7 @@ TASKS: tuple[TaskDef, ...] = (
         ("다음 달 팀별 인원 알려 주세요",),
         "hr",
         "team_headcount",
+        fill="month_any",
     ),
     _one(
         "feature_request",
@@ -303,6 +314,7 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "text_key": s.text_key,
             "carries": s.carries,
             "takes_carry": s.takes_carry,
+            "fill": s.fill,
         }
         for s in task.steps
     ]

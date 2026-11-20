@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from ax_orchestrator import request_tasks
+from ax_orchestrator import request_inputs, request_tasks
 from ax_orchestrator.models import now
 from ax_orchestrator.request_classifier import PROMPT_VERSION, Decision, classify
 from ax_orchestrator.work_requests import OPEN_STATES, WorkRequests
@@ -52,8 +52,15 @@ def _day(value: str) -> str:
 
 
 class RequestIntake:
-    def __init__(self, requests: WorkRequests, *, daily_limit: int = DAILY_LIMIT) -> None:
+    def __init__(
+        self,
+        requests: WorkRequests,
+        *,
+        daily_limit: int = DAILY_LIMIT,
+        clock: Callable[[], datetime] = now,
+    ) -> None:
         self._requests = requests
+        self._clock = clock
         self._daily_limit = daily_limit
         # 일을 정해 기록하면 번호를 넘겨 실행을 시작한다(`RequestRunner.start`). None이면 접수만
         self.on_task: Callable[[str], None] | None = None
@@ -148,6 +155,11 @@ class RequestIntake:
             alternatives=d.alternatives,
         )
         if d.outcome == "task" and d.task is not None:
+            ask, notes = request_inputs.check(d.task, text, self._clock())
+            if (
+                ask is not None
+            ):  # 부서가 요구하는 입력을 문장에서 못 찾았다: 부서에 보내지 않고 묻는다
+                return self._ask_input(rid, account, thread_id, ask)
             self._close_clarifications(account, thread_id, rid)
             self._requests.set_plan(
                 rid,
@@ -164,7 +176,7 @@ class RequestIntake:
             return IntakeResult(
                 True,
                 "task",
-                self._task_reply(rid, d.task, started),
+                self._task_reply(rid, d.task, started, notes),
                 f"의뢰 접수: {d.task.label}",
                 rid,
             )
@@ -209,18 +221,39 @@ class RequestIntake:
             rid,
         )
 
+    def _ask_input(self, rid: str, account: str, thread_id: str | None, ask: str) -> IntakeResult:
+        """일은 정했는데 필요한 입력(기간 등)이 문장에 없다: 한 번만 되묻고, 또 없으면 사람에게."""
+        if self._clarified_before(account, thread_id, rid):
+            self._requests.set_status(
+                rid, "needs_human", "필요한 입력을 되물었는데도 알 수 없어 사람에게 넘겼다"
+            )
+            self._escalate(rid, "unclear")
+            return IntakeResult(
+                True,
+                "unclear",
+                f"내용을 정하지 못했어요. 담당자가 확인해서 알려 드릴게요. (번호 {rid})",
+                "의뢰 확인 필요",
+                rid,
+            )
+        self._requests.set_status(rid, "received", "필요한 입력(기간 등)이 없어 되물었다")
+        return IntakeResult(True, "clarify", ask, "의뢰 확인 중", rid)
+
     def _escalate(self, rid: str, why: str) -> None:
         if self.on_escalate is not None:
             self.on_escalate(rid, why)
 
     @staticmethod
-    def _task_reply(rid: str, task: request_tasks.TaskDef, started: bool) -> str:
+    def _task_reply(
+        rid: str, task: request_tasks.TaskDef, started: bool, notes: list[str] | None = None
+    ) -> str:
         first = request_tasks.dept_label(task.first_dept)
         head = f"의뢰를 접수했어요. (번호 {rid}) '{task.label}' 일로 분류했고 "
         if started:
             reply = head + f"{first}에 시켰어요."
         else:  # 아직 자동으로 돌릴 수 없는 일이거나 실행기가 없다: 접수만 하고 담당자가 확인한다
             reply = head + f"{first}부터 시작할 일이에요. 지금은 접수까지만 되고 담당자가 확인해요."
+        if notes:
+            reply += f" ({', '.join(notes)})"
         if task.changes_state:
             reply += " 상태를 바꾸는 일이라 승인을 거친 뒤에 진행돼요."
         return reply
