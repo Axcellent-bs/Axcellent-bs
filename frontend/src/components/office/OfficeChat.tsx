@@ -1,10 +1,11 @@
 import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { DIRECT_AGENTS } from "@/components/office/DirectChat";
 import { roomPeople } from "@/lib/chatRooms";
-import { MessengerLog, PinNotice, StatusChip, TypingLines } from "@/components/office/Messenger";
+import { MessengerLog, PinNotice, StatusChip, TypingLines, WorkLogBar } from "@/components/office/Messenger";
+import { useQuietLog } from "@/components/office/useQuietLog";
 import { TalkInput } from "@/components/office/TalkInput";
 import type { OfficeTalk } from "@/components/office/useOfficeTalk";
-import { ALL_ROOM, type ChatItem, type OrchIncident } from "@/lib/agentChat";
+import { ALL_ROOM, timelineLanes, type ChatItem, type OrchIncident } from "@/lib/agentChat";
 import { Link } from "@/lib/nav";
 import { useScrollAnchor } from "@/components/office/useScrollAnchor";
 
@@ -15,7 +16,10 @@ import { useScrollAnchor } from "@/components/office/useScrollAnchor";
 
 export interface Typing { key: string; name: string; what: string }
 
-export function OfficeChat({ items, typing, freshIds, title, longTitle, status, inc, room = ALL_ROOM, talk, picker, wide, onWide, big = true }: {
+/** 대화 칸에 보이는 줄 수 (작업 기록을 거른 뒤 마지막 N줄) */
+const SHOWN = 80;
+
+export function OfficeChat({ items: all, typing, freshIds, title, longTitle, status, inc, room = ALL_ROOM, talk, picker, wide, onWide, big = true }: {
   items: ChatItem[]; typing: Typing[]; freshIds: ReadonlySet<string>; title: string; status?: string;
   /** 장애 방의 긴 문장 이름 (방 머리 아래 보조 줄) */
   longTitle?: string;
@@ -32,6 +36,10 @@ export function OfficeChat({ items, typing, freshIds, title, longTitle, status, 
   /** "대화 기록에서 크게 보기" 링크 */
   big?: boolean;
 }) {
+  // 작업 기록 줄(AI끼리 주고받은 호출 기록)은 기본으로 접는다. 토글은 방과 상관없이 하나 (AI 대화방과 같은 값, useQuietLog)
+  const [showLog, setShowLog] = useQuietLog();
+  const lanes = useMemo(() => timelineLanes(all), [all]);
+  const items = useMemo(() => (showLog ? all : lanes.chat).slice(-SHOWN), [showLog, all, lanes]);
   const box = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   // 내가 보내면 맨 아래로 (붙어 있던 위치와 상관없이)
@@ -78,6 +86,7 @@ export function OfficeChat({ items, typing, freshIds, title, longTitle, status, 
           <MessengerLog items={items} talk={talk} fresh={freshIds} label={`${title} 대화`} hold={{ decideHref: big ? chatHref : undefined }} />
         )}
       </div>
+      <WorkLogBar logCount={lanes.logCount} failCount={lanes.failCount} show={showLog} onToggle={() => setShowLog(!showLog)} />
       <TypingLines names={typing} />
       {talk && <TalkInput talk={talk} onSent={toBottom} where="office" room={room} roomName={inc ? title : undefined} />}
     </section>

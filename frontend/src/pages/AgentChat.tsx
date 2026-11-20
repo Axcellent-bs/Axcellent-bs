@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { ALL_ROOM, messageCount, type ChatItem, type OrchIncident } from "@/lib/agentChat";
+import { ALL_ROOM, messageCount, timelineLanes, type ChatItem, type OrchIncident } from "@/lib/agentChat";
 import { matchRoom, roomPeople, roomTime, type ChatRoom } from "@/lib/chatRooms";
 import { Link, useRouter, useSearchParams } from "@/lib/nav";
 import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
-import { Avatar, MessengerLog, PinNotice, StatusChip, TypingLines } from "@/components/office/Messenger";
+import { Avatar, MessengerLog, PinNotice, StatusChip, TypingLines, WorkLogBar } from "@/components/office/Messenger";
+import { useQuietLog } from "@/components/office/useQuietLog";
 import { RequestHandoffCard } from "@/components/office/RequestHandoffCard";
 import { TalkInput } from "@/components/office/TalkInput";
 import { useChatRooms, type ChatRooms, type Conn } from "@/components/office/useChatRooms";
@@ -287,7 +288,11 @@ function RoomPane(p: PaneProps) {
   const direct = directAgentOf(room);
   const inc: OrchIncident | undefined = incidents.find((i) => i.context_id === room);
   const roomInfo: ChatRoom | undefined = room === ALL_ROOM ? all : incidentRooms.find((r) => r.id === room);
-  const items = useMemo(() => data.items[room] ?? [], [data.items, room]);
+  // 작업 기록 줄(AI끼리 주고받은 호출 기록, lib/commFilter.ts chatLane)은 기본으로 접고 맨 아래 한 줄로 센다. 토글은 방과 상관없이 하나
+  const [showLog, setShowLog] = useQuietLog();
+  const allItems = useMemo(() => data.items[room] ?? [], [data.items, room]);
+  const lanes = useMemo(() => timelineLanes(allItems), [allItems]);
+  const items = showLog ? allItems : lanes.chat;
   const isAll = room === ALL_ROOM;
   const title = direct ? `🔒 ${direct.name}` : roomInfo?.title ?? (room.startsWith("ctx_") ? "찾을 수 없는 방" : room);
 
@@ -418,6 +423,7 @@ function RoomPane(p: PaneProps) {
           </>
         )}
       </div>
+      <WorkLogBar logCount={lanes.logCount} failCount={lanes.failCount} show={showLog} onToggle={() => setShowLog(!showLog)} />
       <TypingLines names={answering} />
       {talkable && <TalkInput talk={talk} onSent={() => toBottom(true)} where="chat" room={room} roomName={inc ? title : undefined} />}
       {fresh > 0 && (

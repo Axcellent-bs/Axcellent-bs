@@ -9,6 +9,7 @@ import { humanizePlanIds } from "@/lib/format";
 import { humanizeSkills } from "@/lib/skillNames";
 import { messageWidth } from "@/lib/chatView";
 import type { FoldLine } from "@/lib/safetyFold";
+import { quietLogText } from "@/lib/quietLog";
 import { Link } from "@/lib/nav";
 
 // 메신저형 대화 그리기. 대화 기록(/agents/chat)과 AI 오피스 단톡방이 같이 쓴다.
@@ -219,6 +220,20 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label, panes = 1 }
       );
       continue;
     }
+    // 작업 기록 줄(펼쳤을 때만 온다): 제자리에 회색 작은 말풍선 한 줄
+    if (it.lane === "log") {
+      prev = null;
+      rows.push(
+        <li key={it.id} data-chat-id={it.id} className={`flex max-w-[85%] items-baseline gap-1.5 pl-11 text-[11.5px] text-ink-500 ${pop}`}>
+          <span className="chat-pill min-w-0 bg-ink-900/[.05] px-2.5 py-0.5" title={[it.tag, it.raw].filter(Boolean).join(" · ") || undefined}>
+            <b className="font-medium text-ink-700">{it.from}</b>{it.to && it.to !== "받는 쪽 미기록" ? <> → {it.to}</> : null} · {TONE_ICON[it.tone]}{say(it.text)}
+            {it.repeat ? <span className="ml-1 font-semibold">×{it.repeat}</span> : null}
+          </span>
+          <time dateTime={it.at} className="shrink-0 tabular-nums">{hhmm(it.at)}</time>
+        </li>,
+      );
+      continue;
+    }
     const mine = !!it.human;
     const at = it.at ? Date.parse(it.at) : 0;
     const who = `${it.fromKey}|${it.from}`;
@@ -256,6 +271,22 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label, panes = 1 }
 }
 
 /** 답을 쓰는 중인 부서: "개발 AI가 답을 쓰는 중…" */
+/** 대화 칸 맨 아래(입력칸 위) 한 줄: "작업 기록 N줄 접힘" + 실패 칩 + [작업 기록 보기]. 접을 줄이 없으면 그리지 않는다 */
+export function WorkLogBar({ logCount, failCount, show, onToggle }: { logCount: number; failCount: number; show: boolean; onToggle: () => void }) {
+  if (logCount === 0) return null;
+  return (
+    <div className="flex items-center gap-2 border-t border-ink-900/[.07] px-4 py-1.5 text-xs text-ink-500">
+      <span aria-hidden="true">🗂</span>
+      <span>{quietLogText(logCount, show)}</span>
+      {failCount > 0 && <span className="chip bg-red-50 py-0 text-[11px] font-semibold text-red-700">실패 {failCount}</span>}
+      <button type="button" onClick={onToggle} aria-pressed={show}
+        className="ml-auto rounded px-1.5 py-0.5 font-medium text-brand-700 hover:bg-ink-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+        {show ? "작업 기록 접기" : "작업 기록 보기"}
+      </button>
+    </div>
+  );
+}
+
 export function TypingLines({ names }: { names: { key: string; name: string; what?: string }[] }) {
   if (!names.length) return null;
   return (
