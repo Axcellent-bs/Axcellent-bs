@@ -1,4 +1,4 @@
-import { STEP_STATUS, type StepStatus, type WorkRequestRow } from "./workRequests.ts";
+import { STEP_STATUS, type StepStatus, type WorkRequestRow, type WorkRequestTask } from "./workRequests.ts";
 
 // 고객 의뢰 하나가 부서 사이로 넘어가는 모습 ("누가 누구에게 보냈나"). 의뢰의 plan(단계·부서)과 steps(상태)만 쓴다.
 // 장애 이슈(OrchIncident)와 섞지 않는다: 장애 통계·대화방 이슈 목록에 들어가지 않는 의뢰 전용 줄이다.
@@ -59,6 +59,17 @@ export function requestHandoffs(row: WorkRequestRow): RequestHandoff[] {
     });
   }
   return out;
+}
+
+/** 사람이 읽는 의뢰 이름: 총괄이 고른 일 이름표(예: "홍보 영상 만들기"). 일을 못 정했으면 "의뢰" */
+export function requestTitle(row: Pick<WorkRequestRow, "task">, tasks: WorkRequestTask[]): string {
+  return tasks.find((t) => t.name === row.task)?.label ?? "의뢰";
+}
+
+/** 의뢰 번호(wr_7545c235ef)를 짧게: 뒤의 영숫자 앞 네 자만 "#7545"로. 전체 번호는 마우스를 올리면(title) 보인다 */
+export function shortNo(requestId: string): string {
+  const body = requestId.replace(/^wr_/, "");
+  return `#${body.slice(0, 4)}`;
 }
 
 /** 넘김이 하나라도 있는 의뢰만, 최근 것부터 */
