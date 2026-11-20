@@ -63,7 +63,7 @@ class FakeShop:
             return httpx.Response(
                 self.fail_status, json={"error": {"code": "UPSTREAM_TRUNCATED", "message": "x"}}
             )
-        path = request.url.path
+        path = request.url.path.removeprefix("/site-adapter")  # 변환기 고객사도 같은 주소
         if path == "/api/shop/sales-export":
             return self._export(request)
         if path.startswith("/api/shop/orders/"):
@@ -397,10 +397,14 @@ async def test_connection_change_restarts_quietly(
 
 
 @pytest.mark.asyncio
-async def test_adapter_connection_is_not_read(
+async def test_adapter_connection_is_read_after_adapter_fix(
     shop: FakeShop, bus: list[EventEnvelope], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """변환기 고객사는 변환기 보완(PR 2) 전까지 읽지 않는다."""
+    """변환기 보완(PR 2: 커서·`updated_since`·환불 줄) 뒤에는 변환기 고객사도 읽는다.
+
+    변환기 주문 상세에는 결제 id가 없으니(사이트에 없음) 환불마다 상세를 다시 읽지 않고
+    재무와 같은 규칙(`pay_of_<주문>`)으로 만든다. 상세 읽기는 변환기에서 고객사 전체 읽기다.
+    """
     adapter = cc.Connection(
         shop_api_url="http://dashboard-api:8000/site-adapter",
         verified_at=None,
@@ -411,11 +415,25 @@ async def test_adapter_connection_is_not_read(
         tenant="nubi",
     )
     monkeypatch.setattr(cc, "read_connection", lambda: adapter)
+    monkeypatch.setenv(tenant.TENANT_ENV, "nubi")
+    shop.put(order("NB-1", "2026-11-20T01:00:00Z"))
 
+    first = await cd.run_once()
+    assert first.error is None and first.baseline is True
+    assert shop.calls == ["/site-adapter/api/shop/sales-export"]
+
+    shop.put(order("NB-1", "2026-11-20T03:00:00Z", status="cancelled", cancel_reason_code="buyer",
+                   refunds=[refund(None, 4000, "2026-11-20T03:00:00Z")]))  # fmt: skip
+    shop.calls.clear()
     result = await cd.run_once()
 
-    assert shop.calls == []
-    assert result.error == cd.ADAPTER_NOT_YET
+    assert result.error is None
+    assert shop.calls == ["/site-adapter/api/shop/sales-export"]  # 주문 상세는 읽지 않는다
+    assert [e.event_id for e in result.events] == [
+        "chg:nubi:payment.refunded:NB-1:rfd_of_NB-1_4000",
+        "chg:nubi:order.cancelled:NB-1",
+    ]
+    assert result.events[0].data["payment_id"] == "pay_of_NB-1"
 
 
 @pytest.mark.asyncio
