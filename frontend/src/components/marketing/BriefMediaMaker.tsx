@@ -2,16 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { useAuthedMedia } from "@/lib/authedMedia";
-import { shortDateTime, won } from "@/lib/format";
+import { shortDateTime } from "@/lib/format";
 import { briefs, mediaKindKo, mediaPreviewUrl, type StoredBrief } from "@/lib/briefs";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { AudioChoice } from "./AudioChoice";
 import { LongVideoWarning } from "./LongVideoWarning";
 import { ManualPublishCard, PublishLineView } from "./ManualPublishCard";
-import { approvalLink, clampDuration, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, gateLongStart, isReel, longWarningKo, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, waitKo, PUBLISH_EXPIRY_MIN, type MediaEstimate, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
+import { approvalLink, clampDuration, durationNoteKo, durationProblemKo, estimateBlockKo, estimateLines, gateLongStart, isReel, longWarningKo, mediaHttpErrorKo, mediaResultKo, publishHttpErrorKo, publishReasonKo, publishResultKo, publishStatusLine, usageKo, waitKo, PUBLISH_EXPIRY_MIN, type MediaEstimate, type MediaResult, type PreparedMedia, type PublishResult, type PublishState } from "@/lib/briefMedia";
 
 // 넘어온 기획안 한 건의 "미디어 만들기". 저장된 미디어 요청(종류·필드)을 서버가 그대로 실행해 초안을 만든다.
-// - 누르면 먼저 예상 비용(서버가 단가표·장부에서 계산한 값)을 보여 주고, 사람이 확인해야 시작한다.
+// - 누르면 먼저 예상 사용량과 이번 달 예산(서버가 장부에서 계산한 값, 원화 없음)을 보여 주고, 사람이 확인해야 시작한다.
 // - 이 화면은 게시하지 않는다. "게시 요청"은 C 등급 승인 대기 건(10분 만료)만 만들고, 게시는 사람 승인(카드 안 승인 패널 또는 승인 화면) 뒤에만 된다.
 // - 승인 시간이 지나 닫힌 건만 사람이 "다시 요청"할 수 있다(자동 재요청 없음).
 // - 숫자·상태는 서버가 준 값만 쓴다. 서버가 주지 않으면 비워 두고 버튼을 끈다.
@@ -123,7 +123,7 @@ function Prepared({ proposalId, prepared, publish, estimate, onDone }: { proposa
         <span className="text-ink-500" title={prepared.post_draft_id ?? undefined}>
           {mediaKindKo(isReel(prepared.media_kind) ? "video" : "image")}
           {prepared.prepared_at && ` · ${shortDateTime(prepared.prepared_at)} 만듦`}
-          {prepared.cost_krw != null && ` · 생성 비용 ${won(prepared.cost_krw)}`}
+          {prepared.usage != null && ` · 사용량 ${usageKo(prepared.usage)}`}
         </span>
       </div>
       <Preview proposalId={proposalId} prepared={prepared} />
@@ -206,9 +206,9 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
     }
   }
 
-  // 영상은 길이를 바꿔 다시 고를 수 있으므로, 비용 상한에 걸린 것은 길이 칸이 따로 안내한다(버튼은 길이 기준으로 끈다)
-  const lengthDecides = video !== null && (estimate?.reason_code === "cost_over_single" || estimate?.reason_code === "budget_exceeded");
-  const blocked = !estimate ? "서버가 예상 비용을 알려 주지 않아 만들 수 없습니다. 서버가 이 기능을 지원하는지 확인해 주세요."
+  // 영상은 길이를 바꿔 다시 고를 수 있으므로, 월 예산에 걸린 것은 길이 칸이 따로 안내한다(버튼은 길이 기준으로 끈다)
+  const lengthDecides = video !== null && (estimate?.reason_code === "quota_exceeded");
+  const blocked = !estimate ? "서버가 예상 사용량을 알려 주지 않아 만들 수 없습니다. 서버가 이 기능을 지원하는지 확인해 주세요."
     : estimate.status !== "ok" && !lengthDecides ? estimateBlockKo(estimate.reason_code) : null;
 
   return (
@@ -218,7 +218,7 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
       {step === "busy" ? (
         <p className="text-ink-700" role="status">만드는 중입니다 ({seconds}초 지남). {waitKo(kind)}</p>
       ) : step === "confirm" && estimate ? (
-        <div className="space-y-2" role="group" aria-label="비용 확인">
+        <div className="space-y-2" role="group" aria-label="사용량 확인">
           <p className="font-medium text-ink-700">{mediaKindKo(kind)}을(를) 만들까요?</p>
           <ul className="list-disc space-y-0.5 pl-5 text-ink-700">
             {estimateLines(estimate, length).map((line) => <li key={line}>{line}</li>)}
@@ -256,7 +256,7 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
             {prepared ? "미디어 다시 만들기" : "미디어 만들기"}
           </button>
           {blocked ? <span className="text-amber-800">{blocked}</span>
-            : <span className="text-ink-500">누르면 예상 비용을 먼저 보여 줍니다. 게시는 하지 않습니다.</span>}
+            : <span className="text-ink-500">누르면 예상 사용량을 먼저 보여 줍니다. 게시는 하지 않습니다.</span>}
         </div>
       )}
 

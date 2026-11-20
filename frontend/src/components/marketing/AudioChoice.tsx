@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { HUMAN_TOKEN_SET } from "@/lib/env";
 import { briefs } from "@/lib/briefs";
-import { audioDecisionKo, audioHttpErrorKo, audioIntroKo, audioResultKo, bgmCostKo, canChooseAudio, type AudioChoice as Choice, type AudioResult, type MediaEstimate, type PreparedMedia } from "@/lib/briefMedia";
+import { audioDecisionKo, audioHttpErrorKo, audioIntroKo, audioResultKo, bgmUsageKo, canChooseAudio, type AudioChoice as Choice, type AudioResult, type MediaEstimate, type PreparedMedia } from "@/lib/briefMedia";
 
 // 만든 영상의 소리를 사람이 한 번 정하는 확인 단계: "이 영상 그대로 사용" / "배경음악 따로 만들기".
 // - 영상은 AI 공급자가 만든 소리를 그대로 두고 한 번만 만든다. 별도 배경음악은 여기서 고를 때만 만든다.
@@ -63,14 +63,14 @@ export function AudioChoice({ proposalId, prepared, estimate, publishStatus, onD
           <ul className="list-disc space-y-0.5 pl-5 text-ink-700">
             {choice === "keep" ? (
               <>
-                <li>영상에 들어 있는 소리를 그대로 씁니다. 새로 만드는 것은 없고 비용도 나지 않습니다.</li>
+                <li>영상에 들어 있는 소리를 그대로 씁니다. 새로 만드는 것은 없고 사용량도 늘지 않습니다.</li>
                 <li>AI 표시는 그대로 들어갑니다. 게시는 사람 승인이 한 번 더 필요합니다.</li>
               </>
             ) : (
               <>
-                <li>{bgmCostKo(estimate?.bgm)}</li>
+                <li>{bgmUsageKo(estimate?.bgm)}</li>
                 <li>영상 소리를 AI가 만든 배경음악(노래·가사·목소리 없는 연주곡)으로 바꿉니다. 영상 화면은 그대로입니다.</li>
-                <li>비용이 상한을 넘거나 안전 장치가 판단하면 사람 확인으로 보류될 수 있습니다. 보류되면 영상은 그대로 두고 비용도 나지 않습니다.</li>
+                <li>이달 사용량 예산을 넘거나 안전 장치가 판단하면 사람 확인으로 보류될 수 있습니다. 보류되면 영상은 그대로 두고 비용도 나지 않습니다.</li>
                 <li>AI 표시를 다시 입히고 검사를 다시 합니다.</li>
               </>
             )}
@@ -107,7 +107,7 @@ export function AudioChoice({ proposalId, prepared, estimate, publishStatus, onD
               배경음악 따로 만들기
             </button>
           </div>
-          <p className="text-ink-500">{bgmCostKo(estimate?.bgm)}</p>
+          <p className="text-ink-500">{bgmUsageKo(estimate?.bgm)}</p>
         </div>
       )}
       {result && step !== "busy" && (

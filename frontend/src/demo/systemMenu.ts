@@ -8,7 +8,7 @@ export const TOOLS_HREF = "/system/tools";
 export const SYSTEM_MENU: readonly SubItem[] = [
   { href: "/system/connect", label: "회사 연결" },
   { href: "/system/members", label: "회원·서버 관리" },
-  { href: "/system/policy", label: "비용·안전 정책" },
+  { href: "/system/policy", label: "사용량·안전 정책" },
   { href: "/system/keys", label: "키 관리" },
   { href: TOOLS_HREF, label: "도구 연결" },
 ];

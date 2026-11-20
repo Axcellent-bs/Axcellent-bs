@@ -1,4 +1,4 @@
-// node --test로 돈다 (npm test). 비용·안전 정책 창의 순수 계산.
+// node --test로 돈다 (npm test). 사용량·안전 정책 창의 순수 계산(고칠 수 있는 정책은 영상 길이 하나).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -7,12 +7,12 @@ import {
 } from "./costPolicy.ts";
 
 const item = (over: Record<string, unknown> = {}) => ({
-  key: "video_cost_single", label: "영상 건당 비용", scope: "video_item", unit: "krw", op: ">=", default: 2000, value: 2000, min: 100, absolute_max: 10000,
+  key: "video_duration", label: "영상 길이", scope: "video_duration", unit: "s", op: ">", default: 90, value: 90, min: 1, absolute_max: 90,
   source: "default", updated_by: null, updated_at: null, ...over,
 });
 const raw = (over: Record<string, unknown> = {}) => ({
   editable: true,
-  items: [item(), item({ key: "video_duration", label: "영상 길이", scope: "video_duration", unit: "s", default: 90, value: 90, min: 1, absolute_max: 90 })],
+  items: [item()],
   requests: [], history: [], viewer: { can_edit_policy: true }, ...over,
 });
 const state = (over: Record<string, unknown> = {}) => readCostPolicy(raw(over)) as CostPolicyState;
@@ -28,7 +28,7 @@ test("읽기: 목록이 없으면 null, 모양이 틀린 항목은 버린다, �
 });
 
 test("값 표기와 입력 해석", () => {
-  assert.equal(valueKo(2000, "krw"), "2,000원");
+  assert.equal(valueKo(2000, "krw"), "2,000원"); // 예전 서버가 원 단위 항목을 주는 경우 표기만 남아 있다
   assert.equal(valueKo(90, "s"), "90초");
   assert.equal(valueKo(null, "krw"), "-");
   assert.equal(parseValue("2,500"), 2500);
@@ -43,32 +43,31 @@ test("요청 검사: 하한~절대 상한, 같은 값, 사유", () => {
   assert.match(requestProblem(undefined, 1, "r") ?? "", /항목/);
   assert.match(requestProblem(rule, null, "r") ?? "", /값을 적어/);
   assert.match(requestProblem(rule, Number.NaN, "r") ?? "", /숫자/);
-  assert.match(requestProblem(rule, 50, "r") ?? "", /100원~10,000원/);
-  assert.match(requestProblem(rule, 10001, "r") ?? "", /코드 상수/);
-  assert.match(requestProblem(rule, 2000, "r") ?? "", /같습니다/);
-  assert.match(requestProblem(rule, 3000, "  ") ?? "", /사유/);
-  assert.equal(requestProblem(rule, 3000, "프로모션"), null);
-  assert.equal(requestProblem(rule, 100, "r"), null);
-  assert.equal(requestProblem(rule, 10000, "r"), null);
+  assert.match(requestProblem(rule, 0, "r") ?? "", /1초~90초/);
+  assert.match(requestProblem(rule, 91, "r") ?? "", /코드 상수/);
+  assert.match(requestProblem(rule, 90, "r") ?? "", /같습니다/);
+  assert.match(requestProblem(rule, 45, "  ") ?? "", /사유/);
+  assert.equal(requestProblem(rule, 45, "숏폼만 쓴다"), null);
+  assert.equal(requestProblem(rule, 1, "r"), null);
 });
 
 test("요청 줄: 승인됐고 적용 전만 적용 가능, 적용된 것은 숨긴다", () => {
   const s = state({
     requests: [
-      { review_id: "a", status: "approved", rule_key: "video_cost_single", requested_value: 3000, requested_by: "재무", reason: "r" },
+      { review_id: "a", status: "approved", rule_key: "video_duration", requested_value: 30, requested_by: "재무", reason: "r" },
       { review_id: "b", status: "pending", rule_key: "video_duration", requested_value: 60, requested_by: "재무", reason: "r" },
-      { review_id: "c", status: "approved", rule_key: "video_cost_single", requested_value: 2500, requested_by: "재무", reason: "r" },
-      { review_id: "d", status: "rejected", rule_key: "video_cost_single", requested_value: 2400, requested_by: "재무", reason: "r" },
+      { review_id: "c", status: "approved", rule_key: "video_duration", requested_value: 45, requested_by: "재무", reason: "r" },
+      { review_id: "d", status: "rejected", rule_key: "video_duration", requested_value: 40, requested_by: "재무", reason: "r" },
     ],
-    history: [{ at: "2026-11-19T00:00:00Z", key: "video_cost_single", old: 2000, new: 2500, requested_by: "재무", approved_by: "총괄", review_id: "c", reason: "r" }],
+    history: [{ at: "2026-11-19T00:00:00Z", key: "video_duration", old: 90, new: 45, requested_by: "재무", approved_by: "총괄", review_id: "c", reason: "r" }],
   });
   assert.deepEqual(openRequests(s).map((r) => r.review_id), ["a", "b"]);
   assert.equal(canApply(s, s.requests[0]), true);
   assert.equal(canApply(s, s.requests[1]), false);
   assert.equal(canApply(s, s.requests[2]), false);
   assert.match(requestStatusKo("approved"), /적용 버튼/);
-  assert.equal(requestLineKo(s.items, s.requests[0]), "영상 건당 비용: 2,000원 → 3,000원");
-  assert.match(historyLineKo(s.items, s.history[0]), /2,000원 → 2,500원 \(요청 재무, 승인 총괄, r\)/);
+  assert.equal(requestLineKo(s.items, s.requests[0]), "영상 길이: 90초 → 30초");
+  assert.match(historyLineKo(s.items, s.history[0]), /90초 → 45초 \(요청 재무, 승인 총괄, r\)/);
 });
 
 test("오류 문구: 서버 코드별, 코드 없으면 상태별", () => {

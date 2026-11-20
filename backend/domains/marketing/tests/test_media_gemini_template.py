@@ -43,12 +43,7 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[httpx.Request]:
         "MARKETING_IMAGE_PROVIDER": "gemini",
         "MARKETING_IMAGE_MODEL": "gemini-nano-banana-2.1",
         "MARKETING_IMAGE_API_KEY": "test-key-not-real",
-        "MARKETING_FX_USD_KRW": "1500",
-        "MARKETING_FX_AS_OF": datetime.now(UTC).date().isoformat(),
-        "MARKETING_FX_MAX_AGE_DAYS": "7",
-        "MARKETING_COST_SAFETY_MARGIN_PCT": "10",
-        "MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM": "1000",
-        "MARKETING_MEDIA_MONTHLY_BUDGET_KRW": "100000",
+        "MARKETING_QUOTA_IMAGE_COUNT_MONTHLY": "100",
         "MARKETING_MEDIA_DIR": str(tmp_path / "media"),
     }.items():
         monkeypatch.setenv(name, value)
@@ -107,7 +102,7 @@ def _request(**over: object) -> AgentRequest:
 
 
 @pytest.mark.asyncio
-async def test_template_path_generates_gemini_image_with_shipped_price_table(
+async def test_template_path_generates_gemini_image_and_records_response_tokens(
     env: list[httpx.Request],
 ) -> None:
     result = await skill.generate_media(
@@ -121,16 +116,18 @@ async def test_template_path_generates_gemini_image_with_shipped_price_table(
     assert len(env) == 1
     sent = json.loads(env[0].content)
     assert sent["response_format"]["aspect_ratio"] == "1:1"
-    # 단가는 표 값 그대로: 출력 1,120토큰 x 30 USD/백만 토큰 (+ 입력 토큰)
-    assert float(out["usd_actual"]) >= OUT_USD
-    assert out["cost_est_krw"] >= out["cost_krw"] > 0
+    # 원화는 계산하지 않고 응답의 토큰만 사용량에 남긴다
+    assert out["cost_krw"] == 0 and out["usd_actual"] is None
+    usage = out["usage"]
+    assert (usage["unit"], usage["amount"]) == ("images", 1)
+    assert usage["output_tokens"] and usage["output_tokens"] > 0
 
 
 @pytest.mark.asyncio
-async def test_unpriced_quality_still_refused_when_entries_define_quality(
-    env: list[httpx.Request], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_quality_missing_from_a_price_table_no_longer_blocks_generation(
+    env: list[httpx.Request], tmp_path: Path
 ) -> None:
-    """quality가 정의된 항목끼리는 정확히 비교한다: 표에 없는 quality는 호출 전에 거부."""
+    """단가표에 없는 quality여도 호출 전에 거부하지 않는다(단가표는 호출 조건이 아니다)."""
     prices = tmp_path / "prices.toml"
     prices.write_text(
         """
@@ -156,4 +153,4 @@ checked_on = "2026-11-11"
         from_decision=handlers._from_decision,
         prices_path=prices,
     )
-    assert result.outcome == "price_not_found" and env == []
+    assert result.outcome == "generated" and len(env) == 1

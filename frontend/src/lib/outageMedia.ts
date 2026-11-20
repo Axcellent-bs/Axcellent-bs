@@ -35,7 +35,7 @@ export interface OutageMediaAnswer {
   output: { stage?: string; review_id?: string; media_flow?: OutageMediaFlow | null } | null;
 }
 
-/** 진행할 수 없는 이유(비용이 나기 전에 서버가 막은 것) */
+/** 진행할 수 없는 이유(공급자를 부르기 전에 서버가 막은 것) */
 const OUTAGE_BLOCK_KO: Record<string, string> = {
   already_merged: "다른 초안에 병합된 초안이라 진행할 수 없습니다. 대표 초안에서 진행해 주세요.",
   publish_history: "이미 게시 요청 이력이 있는 초안이라 새로 진행할 수 없습니다.",
@@ -44,20 +44,20 @@ const OUTAGE_BLOCK_KO: Record<string, string> = {
   media_attached: "이미 이미지가 붙은 초안입니다.",
   not_outage_draft: "장애 사과·보상 초안이 아니라 진행할 수 없습니다.",
   draft_not_found: "초안을 찾을 수 없습니다. 새로고침해 주세요.",
-  estimate_unavailable: "예상 비용을 계산할 수 없어 진행할 수 없습니다.",
+  estimate_unavailable: "예상 사용량을 계산할 수 없어 진행할 수 없습니다.",
   storage_error: "저장소를 읽을 수 없어 진행하지 않았습니다. 잠시 뒤 다시 시도해 주세요.",
-  post_tools_unavailable: "서버에 이미지 처리 도구가 없어 만들지 않았습니다. 비용은 나지 않았습니다.",
+  post_tools_unavailable: "서버에 이미지 처리 도구가 없어 만들지 않았습니다. 공급자는 부르지 않았습니다.",
 };
 
 export function outageBlockKo(code: string | null | undefined): string {
   return (code && OUTAGE_BLOCK_KO[code]) || estimateBlockKo(code ?? null);
 }
 
-/** 확인 단계에 덧붙일 고정 안내(비용 줄은 `estimateLines`) */
+/** 확인 단계에 덧붙일 고정 안내(사용량 줄은 `estimateLines`) */
 export const OUTAGE_CONFIRM_NOTES: string[] = [
   "초안 글은 바뀌지 않고, 사과 분위기의 이미지만 새로 만들어 붙입니다. 이미지에는 글자가 들어가지 않습니다.",
   "이미지 생성 후에도 게시는 사람 승인이 한 번 더 필요합니다.",
-  `승인하지 않고 ${PUBLISH_EXPIRY_MIN}분이 지나면 게시 요청은 만료되고 이미지 비용만 남습니다.`,
+  `승인하지 않고 ${PUBLISH_EXPIRY_MIN}분이 지나면 게시 요청은 만료되고 만든 이미지(사용량)만 남습니다.`,
   "만든 이미지에는 AI 표시가 들어갑니다.",
 ];
 

@@ -55,9 +55,9 @@ from marketing_agent.brief_handoff import (
     HandoffBriefToSnsOutput,
     SnsMediaRequestDraft,
     build_media_request,
+    media_problem,
     media_request_for,
     prepared_of,
-    price_problem,
     state_of,
     view_of,
 )
@@ -806,7 +806,7 @@ def _draft_state(draft_id: str | None) -> DraftState | None:
 
 
 def _media_estimate(request: AgentRequest, record: SnsHandoffRecord | None) -> dict | None:
-    """넘긴 요청 초안의 예상 비용·상한(단가표·장부에서 계산). 참고 정보라 못 구하면 None."""
+    """넘긴 요청 초안의 예상 사용량·이번 달 예산(장부에서 계산). 참고 정보라 못 구하면 None."""
     if record is None or record.status != "handed" or not record.media_request:
         return None
     try:
@@ -883,21 +883,21 @@ def _handoff_media(
     """(미디어 요청 초안, 막힌 이유 코드, 이유 상세). 생성은 하지 않고 만들 수 있는지만 본다.
 
     옛 호출(종류만)은 필드를 채우지 않는다. `auto`·`autofill`·`fields`가 있으면 추천으로 채우고
-    관리자 값으로 덮어쓴다. 자동으로 고른 종류가 가격표에 막히면 이미지로 물러난다(이유를 남긴다).
+    관리자 값으로 덮어쓴다. 자동으로 고른 종류를 서버가 못 만들면 이미지로 물러난다(이유를 남긴다).
     관리자가 직접 고른 종류는 물러나지 않는다(fail-closed).
     """
     settings = MediaSettings.from_env()
     try:
         if not data.fills:
             media = media_request_for(item.proposal_id, data.media_kind)
-            return media, price_problem(media, settings), {}
+            return media, media_problem(media, settings), {}
         media = build_media_request(item, data.media_kind, data.fields)
-        problem = price_problem(media, settings)
+        problem = media_problem(media, settings)
         if problem is not None and data.media_kind == AUTO and media.media_kind != "image":
             fallback = build_media_request(
                 item, "image", data.fields, kind_source="auto_fallback", blocked=problem
             )
-            if price_problem(fallback, settings) is None:
+            if media_problem(fallback, settings) is None:
                 return fallback, None, {}
         return media, problem, {}
     except FieldRejected as error:

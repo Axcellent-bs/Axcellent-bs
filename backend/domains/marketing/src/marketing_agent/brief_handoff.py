@@ -15,8 +15,9 @@
 그래서 돈이 나가는 호출도 외부 게시도 없고, 쓰는 것은 마케팅 전용 저장소(기획안 DB의 넘김
 기록, SNS 초안 DB의 초안)뿐이다. 새 안전 액션이 필요 없다(`draft_sns_post`처럼 `execute()` 없음).
 
-가격표는 fail-closed다: 실제 공급자가 설정돼 있는데 단가표(`prices.toml`)에 그 조합이 없거나
-모델이 비어 있으면 넘기지 않고 `failed`(이유 코드)로 기록한다. 목 모드(`mock`)는 단가가 필요 없다.
+서버가 만들 수 없으면 넘기지 않고 `failed`(이유 코드)로 기록한다(fail-closed): 실제 공급자인데
+모델이 비어 있거나, 우리 키로 만드는데 그 종류의 월 사용량 예산이 비어 있을 때.
+목 모드(`mock`)는 둘 다 필요 없다. 원화 단가표는 보지 않는다.
 
 멱등: 이미 `handed`면 보관본을 그대로 돌려준다(초안이 저장소에서 사라졌으면 같은 내용으로 다시
 저장 - 초안 id는 내용 주소라 같다). `failed`는 다시 넘기면 처음부터 다시 시도한다.
@@ -27,14 +28,14 @@
   근거가 없는 필드는 미정(`missing_fields`)으로 남는다.
 - 관리자가 고른 값이 우선한다: 종류를 직접 주면 그 종류(`kind_source="admin"`), `fields`로 준 값은
   추천 값을 덮어쓴다(`field_sources[이름]="admin"`). 값은 장면 템플릿 화이트리스트 검사를 거친다.
-- 자동으로 고른 종류를 서버가 만들 수 없으면(단가표·모델 없음) 넘김을 막지 않고 이미지로 넘긴 뒤
+- 자동으로 고른 종류를 서버가 만들 수 없으면(모델·예산 설정 없음) 넘김을 막지 않고 이미지로 넘긴 뒤
   `kind_source="auto_fallback"`과 `recommendation_blocked`(이유 코드)를 남긴다. 관리자가 직접 고른
   종류는 그대로 fail-closed다.
 - 이미 넘긴 기획안은 `revise=true`일 때만 요청 초안을 다시 만든다(종류·필드 바꾸기). 막히면
   보관본을 바꾸지 않고 `revise_rejected`(이유 코드)를 돌려준다. `revise`가 없으면 전처럼 멱등이다.
 - 옛 호출(종류만 주고 `autofill` 없음)은 전과 같이 필드를 채우지 않는다.
 
-이유 코드(`reason_code`): `price_not_found`·`model_not_configured`·`price_table_error`(가격표),
+이유 코드(`reason_code`): `model_not_configured`·`quota_not_configured`(모델·사용량 예산 설정),
 `unknown_scene_template`, 초안 단계는 `draft_sns_post`의 outcome 그대로
 (`caption_too_long`·`forbidden_phrase` 등). 관리자 필드 값이 걸리면 `invalid_field`
 (+ `field`, `field_code`).
@@ -44,7 +45,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -57,9 +57,7 @@ from marketing_agent.briefs import (
     StoredBrief,
     StoredBriefView,
 )
-from marketing_agent.media import pricing
 from marketing_agent.media.config import MOCK, MediaSettings
-from marketing_agent.media.pricing import PriceNotFound, PriceTableError
 from marketing_agent.media.prompts import (
     PromptRejected,
     check_field_value,
@@ -241,30 +239,18 @@ def build_media_request(
     )
 
 
-def price_problem(
-    request: SnsMediaRequestDraft, settings: MediaSettings, prices_path: Path | None = None
-) -> str | None:
-    """단가표로 이 요청을 만들 수 있는지. 없으면 이유 코드(fail-closed), 되면 None."""
-    kind = "video" if request.media_kind == "video" else "image"  # 캐러셀은 이미지 단가
-    provider = settings.provider(kind)
-    if provider == MOCK:
+def media_problem(request: SnsMediaRequestDraft, settings: MediaSettings) -> str | None:
+    """서버가 이 요청을 만들 수 있는지. 못 만들면 이유 코드(fail-closed), 되면 None.
+
+    실제 공급자는 모델이 있어야 하고, 우리 키로 만들면 그 종류의 월 사용량 예산이 있어야 한다.
+    """
+    kind = "video" if request.media_kind == "video" else "image"  # 캐러셀은 이미지
+    if settings.provider(kind) == MOCK:
         return None
-    model = settings.model(kind)
-    if not model:
+    if not settings.model(kind):
         return "model_not_configured"
-    try:
-        pricing.find_entry(
-            provider=provider,
-            model=model,
-            kind=kind,
-            resolution=request.resolution,
-            quality=request.quality if kind == "image" else None,
-            path=prices_path,
-        )
-    except PriceNotFound:
-        return "price_not_found"
-    except PriceTableError:
-        return "price_table_error"
+    if settings.quota_applies and settings.quota(kind) is None:
+        return "quota_not_configured"
     return None
 
 
@@ -338,7 +324,7 @@ __all__ = [
     "build_media_request",
     "media_request_for",
     "prepared_of",
-    "price_problem",
+    "media_problem",
     "recommendation_for",
     "request_sha",
     "state_of",

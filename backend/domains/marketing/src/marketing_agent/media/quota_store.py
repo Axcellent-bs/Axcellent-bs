@@ -1,8 +1,12 @@
-"""영상 비용 상한 설정 저장소(JSON 파일 + 변경 이력). 화면 값이 환경변수보다 우선한다.
+"""우리 키 사용량 예산 설정 저장소(JSON 파일 + 변경 이력). 화면 값이 환경변수보다 우선한다.
 
-- 파일: `MARKETING_COST_LIMITS_FILE`(없으면 `<MARKETING_MEDIA_DIR>/cost_limits.json`).
-  내용: 영상 건당 상한 `video_per_item_krw`, 월 예산 `monthly_budget_krw`, 하향 셀프 승인 허용
+- 예산은 원화가 아니라 종류별 월 사용량이다(`usage.py`): 영상 초, 이미지 장, BGM 곡.
+  종류가 다르면 단위가 달라 합치지 않는다. 고객사 키는 예산을 걸지 않는다(`config.py`).
+- 파일: `MARKETING_COST_LIMITS_FILE`(없으면 `<MARKETING_MEDIA_DIR>/cost_limits.json`,
+  이름은 예전 그대로).
+  내용: `video_seconds_monthly`·`image_count_monthly`·`audio_count_monthly`, 하향 셀프 승인 허용
   `lower_self_approve`(기본 꺼짐), 대기 중인 요청 `requests`(최근 10건, 화면 표시용).
+  예전 원화 값(`video_per_item_krw`·`monthly_budget_krw`)은 읽지 않는다(없는 것으로 본다).
 - 이력: `<파일>.history.jsonl`에 바꿀 때마다 한 줄(언제·누가·무엇을·이전값·새값·사유).
 - 읽기는 `video_store`·`company_connection`처럼 mtime 캐시(경로·mtime·크기)로 재시작 없이 반영한다.
   쓰는 곳은 마케팅 skill(`cost_limits.py`, execute() 관문 뒤) 한 곳이다. 진행 중 생성 건은
@@ -23,11 +27,20 @@ from typing import Any
 
 FILE_ENV = "MARKETING_COST_LIMITS_FILE"
 MEDIA_DIR_ENV = "MARKETING_MEDIA_DIR"
-FIELDS = ("video_per_item_krw", "monthly_budget_krw")
-# 코드 상수. 화면 설정은 이 범위 안에서만 저장된다(정책 상한은 이보다 더 좁을 수 있다)
-MIN_KRW = 1  # 0원 불가
-ABSOLUTE_MAX_VIDEO_ITEM_KRW = 10_000  # safety `video_cost_single` 절대 상한과 같다(시험이 확인)
-ABSOLUTE_MAX_MONTHLY_KRW = 5_000_000
+# 종류 → 설정 칸. 단위는 영상 초·이미지 장·BGM 곡
+FIELD_BY_KIND = {
+    "video": "video_seconds_monthly",
+    "image": "image_count_monthly",
+    "audio": "audio_count_monthly",
+}
+FIELDS = tuple(FIELD_BY_KIND.values())
+# 코드 상수. 화면 설정은 이 범위 안에서만 저장된다
+MIN_AMOUNT = 1  # 0 불가
+ABSOLUTE_MAX = {
+    "video_seconds_monthly": 360_000,  # 100시간
+    "image_count_monthly": 100_000,
+    "audio_count_monthly": 20_000,
+}
 MAX_REQUESTS = 10
 _LOCK = threading.Lock()
 _cache: tuple[tuple[str, int, int], dict[str, Any]] | None = None
@@ -38,16 +51,15 @@ class CostLimitStoreError(Exception):
 
 
 def absolute_max(field: str) -> int:
-    return (
-        ABSOLUTE_MAX_VIDEO_ITEM_KRW if field == "video_per_item_krw" else ABSOLUTE_MAX_MONTHLY_KRW
-    )
+    return ABSOLUTE_MAX[field]
 
 
 def valid_amount(field: str, value: object) -> bool:
     return (
         isinstance(value, int)
         and not isinstance(value, bool)
-        and MIN_KRW <= value <= absolute_max(field)
+        and field in ABSOLUTE_MAX
+        and MIN_AMOUNT <= value <= absolute_max(field)
     )
 
 
@@ -118,12 +130,10 @@ def value(field: str) -> int | None:
     return row["value"] if row else None
 
 
-def video_per_item() -> int | None:
-    return value("video_per_item_krw")
-
-
-def monthly_budget() -> int | None:
-    return value("monthly_budget_krw")
+def quota(kind: str) -> int | None:
+    """화면에서 정한 그 종류의 월 예산. 없으면 None(환경변수를 쓴다)."""
+    field = FIELD_BY_KIND.get(kind)
+    return value(field) if field else None
 
 
 def lower_self_approve() -> bool:
@@ -206,7 +216,16 @@ def set_option(enabled: bool, who: str, reason: str) -> None:
 
 def requests() -> list[dict[str, Any]]:
     rows = _read().get("requests")
-    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+    if not isinstance(rows, list):
+        return []
+    # 예전 원화 요청(payload 칸이 다름)은 보여 주지 않는다
+    return [
+        r
+        for r in rows
+        if isinstance(r, dict)
+        and isinstance(r.get("payload"), dict)
+        and set(r["payload"]) <= set(FIELDS)
+    ]
 
 
 def add_request(row: dict[str, Any]) -> None:

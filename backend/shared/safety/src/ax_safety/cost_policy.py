@@ -3,7 +3,8 @@
 `thresholds.toml`은 기본값이고 사람만 고친다. 이 모듈은 그 위에
 "승인 관문을 통과한 사람 변경"만 덮어쓴다.
 
-- 덮어쓸 수 있는 규칙은 `EDITABLE`의 5개뿐이다. 각 규칙에 코드 상수 하한·절대 상한이 있고,
+- 덮어쓸 수 있는 규칙은 `EDITABLE`의 1개(영상 길이)뿐이다. 원화 비용 규칙은 없앴다(사용량 예산으로
+  대체). 각 규칙에 코드 상수 하한·절대 상한이 있고,
   범위 밖 값은 쓰기도 거부하고 읽을 때도 무시한다(손으로 고친 파일도 기본값으로: fail-closed).
 - 파일: `SAFETY_COST_POLICY_FILE`(없으면 `SAFETY_STATE_DB` 옆 `cost_policy.json`,
   둘 다 없으면 덮어쓰기 없음 = 기본값만, 변경 요청은 거절). 이력은 `<파일>.history.jsonl`.
@@ -35,8 +36,8 @@ _LOCK = threading.Lock()
 class Editable:
     key: str
     label: str
-    scope: str  # video_item | image_item | audio_item | daily_all_media | video_duration
-    unit: str  # krw | s
+    scope: str  # video_duration
+    unit: str  # s
     minimum: int
     absolute_max: int  # 코드 절대 상한. 사람 승인으로도 이 값을 넘길 수 없다(코드를 바꿔야 한다)
 
@@ -44,21 +45,7 @@ class Editable:
 # 절대 상한은 기본값(thresholds.toml)보다 크거나 같아야 한다(시험이 확인한다).
 # 영상 길이는 숏폼 상한 90초(마케팅 ABSOLUTE_MAX_DURATION_S)라 낮추기만 된다
 EDITABLE: dict[str, Editable] = {
-    e.key: e
-    for e in (
-        Editable("video_cost_single", "영상 건당 비용", "video_item", "krw", 100, 10_000),
-        Editable("image_cost_single", "이미지 건당 비용", "image_item", "krw", 50, 2_000),
-        Editable("audio_cost_single", "BGM 건당 비용", "audio_item", "krw", 50, 1_000),
-        Editable(
-            "media_cost_daily",
-            "하루 합계(이미지·영상·BGM 합산)",
-            "daily_all_media",
-            "krw",
-            1_000,
-            100_000,
-        ),
-        Editable("video_duration", "영상 길이", "video_duration", "s", 1, 90),
-    )
+    e.key: e for e in (Editable("video_duration", "영상 길이", "video_duration", "s", 1, 90),)
 }
 
 

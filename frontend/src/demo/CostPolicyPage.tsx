@@ -11,10 +11,11 @@ import {
 } from '@/lib/costPolicy'
 import { applyPolicyRequest, getCostPolicy, requestPolicyValue } from '@/lib/costPolicyApi'
 
-// 비용·안전 정책 (관리자 /system/policy). 안전 정책의 비용·길이 기준값을 보고, 바꿔 달라는 요청을 올린다.
+// 사용량·안전 정책 (관리자 /system/policy). 안전 정책의 기준값(영상 길이)을 보고, 바꿔 달라는 요청을 올린다.
+// - 원화 비용 기준(건당·하루 합계·0원)은 없다. 우리 키 월 사용량 예산(영상 초·이미지 장·BGM 곡)은 마케팅 화면 '사용량 예산·정책'에서 정한다.
 // - 값·기본값·절대 상한은 서버가 준 것만 보여 준다. 절대 상한은 코드 상수라 승인으로도 넘길 수 없다.
 // - 요청은 사람 승인(요청자와 다른 사람)이 필요하고, 승인 뒤 '승인됨 → 적용'을 눌러야 파일에 반영된다. 안전 서버가 재시작 없이 다시 읽는다.
-// - 하루 합계는 이미지·영상·BGM을 합산한 값이다. 에이전트·일반회원·공용 토큰은 못 바꾼다.
+// - 에이전트·일반회원·공용 토큰은 못 바꾼다.
 const REFRESH_MS = 20_000
 const TONE = { ok: 'bg-brand-50 text-brand-700', warn: 'bg-amber-50 text-amber-800', bad: 'bg-red-50 text-red-800' } as const
 
@@ -68,8 +69,8 @@ export default function CostPolicyPage() {
 
   return (
     <div className="space-y-6 px-4 py-8 sm:px-8">
-      <PageHead where="시스템 관리" title="비용·안전 정책">
-        영상·이미지·BGM 한 건 비용, 하루 합계, 영상 길이의 안전 정책 기준값을 보고, 바꿔 달라는 요청을 올려요. 값은 승인과 적용을 거쳐야 바뀌어요.
+      <PageHead where="시스템 관리" title="사용량·안전 정책">
+        영상 길이 같은 안전 정책 기준값을 보고, 바꿔 달라는 요청을 올려요. 원화 비용 기준은 없고, 우리 키로 만들 때의 월 사용량 예산은 마케팅 화면에서 정해요. 값은 승인과 적용을 거쳐야 바뀌어요.
       </PageHead>
 
       {!loaded && <p className="text-sm text-ink-500">불러오는 중</p>}
@@ -96,7 +97,6 @@ export default function CostPolicyPage() {
                   <tr key={r.key}>
                     <td className="py-2 pr-4">
                       <span className="font-medium">{r.label}</span>
-                      {r.scope === 'daily_all_media' && <span className="chip ml-2">이미지·영상·BGM 합산</span>}
                     </td>
                     <td className="py-2 pr-4 font-semibold">{valueKo(r.value, r.unit)}</td>
                     <td className="py-2 pr-4 text-ink-700">{valueKo(r.default, r.unit)}</td>
@@ -109,7 +109,7 @@ export default function CostPolicyPage() {
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-ink-500">절대 상한과 하한은 코드 상수라 승인으로도 넘길 수 없어요(넘으려면 코드를 바꿔야 해요). 하루 합계는 이미지·영상·BGM을 모두 합친 값이에요.</p>
+          <p className="text-xs text-ink-500">절대 상한과 하한은 코드 상수라 승인으로도 넘길 수 없어요(넘으려면 코드를 바꿔야 해요).</p>
         </section>
       )}
 
@@ -141,7 +141,6 @@ export default function CostPolicyPage() {
           <ul className="list-disc space-y-1 pl-5 text-xs text-ink-700">
             <li>승인은 요청한 사람과 다른 사람이 해야 해요. 승인 화면에서 승인하면 이 창에 '승인됨 → 적용'이 나타나요.</li>
             <li>적용은 승인 뒤 '적용' 버튼을 눌러야 해요. 바뀐 값은 안전 서버가 재시작 없이 다시 읽어요.</li>
-            <li>하루 합계는 이미지·영상·BGM 합산이에요. 영상 한 건 상한과 따로 봐요.</li>
             <li>에이전트·일반회원·공용 토큰은 못 바꿔요. 정책 변경 권한이 있는 운영자·관리자만 요청해요.</li>
           </ul>
           <div className="flex flex-wrap items-end gap-3">

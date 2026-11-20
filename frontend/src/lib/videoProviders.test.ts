@@ -10,14 +10,14 @@ const row = (over: Partial<VideoProviderRow> = {}): VideoProviderRow => ({
 
 test("드롭다운 라벨에 막힌 사유가 붙는다", () => {
   assert.equal(providerOptionLabel(row()), "Kling");
-  assert.equal(providerOptionLabel(row({ priced: false, models: [], key_configured: false })), "Kling (단가 미확인, 키 없음)");
+  assert.equal(providerOptionLabel(row({ priced: false, models: [], key_configured: false })), "Kling (지원 모델 없음, 키 없음)");
   assert.equal(providerOptionLabel(row({ kind: "custom", selectable: false })), "Kling (직접 추가, 꺼짐)");
 });
 
-test("선택 문제: 단가 없는 내장은 막고, 목은 통과", () => {
+test("선택 문제: 지원 모델 없는 내장은 막고, 목은 통과", () => {
   assert.equal(selectionProblem(row(), "kling-4.0"), null);
-  assert.match(selectionProblem(row({ priced: false, models: [] }), "x") ?? "", /단가/);
-  assert.match(selectionProblem(row(), "other") ?? "", /단가가 확인된 모델/);
+  assert.match(selectionProblem(row({ priced: false, models: [] }), "x") ?? "", /지원하는 모델이 없어/);
+  assert.match(selectionProblem(row(), "other") ?? "", /모델 표에 있는 모델/);
   assert.match(selectionProblem(row({ key_configured: false }), "kling-4.0") ?? "", /MARKETING_KLING_API_KEY/);
   assert.equal(selectionProblem(row({ id: "mock", key_env: null, priced: true, models: [] }), ""), null);
   assert.match(selectionProblem(undefined, "") ?? "", /목록에 없는/);

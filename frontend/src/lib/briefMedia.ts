@@ -3,30 +3,35 @@
 import { safePermalink } from "./manualPublish.ts";
 import { NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from "./apiError.ts";
 
-/** 지금 요청 초안으로 만들 때의 예상 비용·상한. 마케팅이 조회 때 단가표·장부에서 계산한다 */
+export type UsageUnit = "seconds" | "images" | "tracks";
+/** 사용량 한 건. 단위는 공급자 단위 그대로(영상 초·이미지 장·BGM 곡)이고, 토큰은 응답에 있을 때만 */
+export interface MediaUsage { unit: UsageUnit; amount: number; input_tokens: number | null; output_tokens: number | null }
+/** 그 종류의 이번 달 사용량·예산·남은 %. 고객사 키면 `applies`가 false라 예산이 없다 */
+export interface MediaQuota { unit: UsageUnit; used: number; limit: number | null; remaining_pct: number | null; applies: boolean }
+
+/** 지금 요청 초안으로 만들 때의 예상 사용량과 이번 달 예산. 마케팅이 조회 때 장부에서 계산한다(원화 없음) */
 export interface MediaEstimate {
   status: "ok" | "blocked";
   reason_code: string | null;
   media_kind: string | null;
-  /** 예상 비용(원). 계산할 수 없으면 null */
-  cost_krw: number | null;
-  /** 이미 끝난 생성이라 다시 만들어도 비용이 나지 않는다 */
+  /** 예상 사용량. 계산할 수 없으면 null */
+  usage: MediaUsage | null;
+  /** 이미 끝난 생성이라 다시 만들어도 사용량이 늘지 않는다 */
   settled: boolean;
-  /** price_table = 단가표, mock = 목 공급자(테스트 전용), ledger = 생성 장부의 확정액 */
-  basis: "price_table" | "mock" | "ledger" | null;
-  per_item_limit_krw: number | null;
-  monthly_budget_krw: number | null;
-  month_total_krw: number | null;
+  /** estimate = 요청한 만큼으로 센 예상, mock = 목 공급자(테스트 전용), ledger = 생성 장부의 확정값 */
+  basis: "estimate" | "mock" | "ledger" | null;
+  /** 이번 달 사용량·예산·남은 %. 옛 서버는 없다 */
+  quota: MediaQuota | null;
   /** 영상만. 길이 입력용: 상한은 운영자가 서버 설정(MARKETING_VIDEO_MAX_DURATION_S)으로 정한 값이다 */
   video?: VideoEstimate | null;
-  /** 영상 소리를 아직 정하지 않았을 때만. "배경음악 따로 만들기"의 추가 비용(BGM 한 곡). 옛 서버는 없다 */
+  /** 영상 소리를 아직 정하지 않았을 때만. "배경음악 따로 만들기"의 추가 사용량(BGM 한 곡). 옛 서버는 없다 */
   bgm?: BgmEstimate | null;
 }
 
 export interface BgmEstimate {
-  /** BGM 한 곡의 예상 비용(원). 계산할 수 없으면 null */
-  cost_krw: number | null;
-  /** 이미 만든 곡이라 새 비용이 없다 */
+  /** BGM 한 곡의 예상 사용량. 계산할 수 없으면 null */
+  usage: MediaUsage | null;
+  /** 이미 만든 곡이라 새 사용량이 없다 */
   settled: boolean;
   reason_code: string | null;
 }
@@ -37,7 +42,7 @@ export interface AudioDecision {
   decided_at: string | null;
   had_source_audio: boolean;
   confirmed_listened: boolean | null;
-  bgm_cost_krw?: number | null;
+  bgm_usage?: MediaUsage | null;
 }
 
 /** 만든 영상의 소리 상태. 이미지·옛 기록은 없다 */
@@ -61,11 +66,9 @@ export interface VideoEstimate {
   absolute_max_s: number;
   /** 지금 요청 초안의 길이(초) */
   current_s: number | null;
-  /** 길이(초) → 예상 비용(원). 서버가 단가표로 계산한 값이고, 만들 수 없는 길이는 없다 */
-  cost_by_duration: Record<string, number>;
   /** 이 길이(초)를 넘기면 시작 전에 경고창을 띄운다(서버 설정 MARKETING_VIDEO_WARN_DURATION_S). 화면 안내용이며 안전 관문이 아니다. 옛 서버는 없다 */
   warn_duration_s?: number;
-  /** 길이(초) → 이어 붙일 클립 수. 옛 서버는 없다 */
+  /** 길이(초) → 이어 붙일 클립 수. 만들 수 없는 길이는 없다. 옛 서버는 없다 */
   clips_by_duration?: Record<string, number>;
 }
 
@@ -77,7 +80,8 @@ export interface PreparedMedia {
   media_kind: string | null;
   asset_ref: string | null;
   asset_sha256: string | null;
-  cost_krw: number | null;
+  /** 만들 때 센 사용량. 옛 기록은 없다 */
+  usage?: MediaUsage | null;
   /** 파일 위에 입힌 AI 표시 문구 */
   label_text: string | null;
   check: { verdict: string | null; publishable: boolean | null; problems: string[] };
@@ -95,30 +99,42 @@ export interface BriefMediaOutput {
 }
 export interface BriefMediaAnswer { status: string; outcome: string | null; output: BriefMediaOutput | null }
 
-const won = (n: number) => `${n.toLocaleString("ko-KR")}원`;
+const UNIT_KO: Record<UsageUnit, string> = { seconds: "초", images: "장", tracks: "곡" };
+const amountText = (n: number, unit: UsageUnit) => `${n.toLocaleString("ko-KR")}${UNIT_KO[unit]}`;
 
-/** 만들 수 없는 이유(비용이 나기 전에 서버가 막은 것) */
+/** 사용량 한 줄: 15초, 1장. 토큰이 있으면(Gemini) 같이 보여 준다. 원화는 없다 */
+export function usageKo(u: MediaUsage | null | undefined): string {
+  if (!u) return "사용량을 읽을 수 없음";
+  const tokens = u.input_tokens != null || u.output_tokens != null
+    ? ` (토큰 입력 ${u.input_tokens?.toLocaleString("ko-KR") ?? "?"} · 출력 ${u.output_tokens?.toLocaleString("ko-KR") ?? "?"})`
+    : "";
+  return `${amountText(u.amount, u.unit)}${tokens}`;
+}
+
+/** 이번 달 예산 한 줄. 고객사 키면 예산을 안 건다고 밝히고, 예산이 없으면 비율을 지어내지 않는다 */
+export function quotaKo(q: MediaQuota | null | undefined): string {
+  if (!q) return "이번 달 사용량을 읽을 수 없음";
+  if (!q.applies) return `이번 달 사용량 ${amountText(q.used, q.unit)} (고객사 키라 예산을 걸지 않습니다)`;
+  if (q.limit === null) return `이번 달 사용량 ${amountText(q.used, q.unit)} / 월 예산 설정을 읽을 수 없음`;
+  return `이번 달 사용량 ${amountText(q.used, q.unit)} / 월 예산 ${amountText(q.limit, q.unit)}${q.remaining_pct !== null ? ` · 남은 사용량 ${q.remaining_pct}%` : ""}`;
+}
+
+/** 만들 수 없는 이유(공급자를 부르기 전에 서버가 막은 것) */
 const BLOCK_KO: Record<string, string> = {
   fields_missing: "미디어 요청에 미정 필드가 남아 있습니다. 받은 기획안 탭에서 필드를 정해 주세요.",
   carousel_items_undecided: "캐러셀은 장마다 무엇을 그릴지 정하는 단계가 아직 없어 여기서 만들 수 없습니다. 받은 기획안 탭에서 종류를 이미지나 영상으로 바꿔 주세요.",
   bgm_fields_required: "서버가 배경음 모드라 영상에 배경음 설정이 필요합니다. 이 화면에서는 아직 정할 수 없습니다.",
   unknown_media_kind: "미디어 종류를 알 수 없습니다. 받은 기획안 탭에서 종류를 다시 저장해 주세요.",
-  cost_over_single: "예상 비용이 건당 상한을 넘어 만들 수 없습니다.",
   video_max_duration_invalid: "서버의 영상 길이 상한 설정(MARKETING_VIDEO_MAX_DURATION_S)이 1~90초 숫자가 아니라 만들 수 없습니다. 운영자가 설정을 고쳐야 합니다.",
   duration_over_limit: "고른 길이가 운영자가 정한 영상 길이 상한을 넘어 만들 수 없습니다.",
   duration_under_min: "고른 길이가 공급자의 최소 길이보다 짧아 만들 수 없습니다.",
   long_video_unsupported: "이 영상 공급자는 한 번에 만들 수 있는 길이를 넘는 영상을 이어 붙일 수 없어 만들 수 없습니다. 더 짧은 길이를 고르세요.",
-  budget_exceeded: "이달 미디어 비용 상한을 넘게 되어 만들 수 없습니다.",
-  price_not_found: "단가표에 없는 조합이라 만들 수 없습니다.",
-  price_table_error: "단가표를 읽을 수 없어 만들 수 없습니다.",
+  quota_exceeded: "이달 사용량 예산(우리 키)을 넘게 되어 만들 수 없습니다.",
+  quota_not_configured: "서버에 이 종류의 월 사용량 예산이 설정되지 않아 만들 수 없습니다.",
   model_not_configured: "서버에 미디어 모델이 설정되지 않아 만들 수 없습니다.",
   provider_adapter_missing: "서버에 설정된 미디어 공급자를 쓸 수 없습니다.",
-  fx_not_configured: "서버에 환율이 설정되지 않아 비용을 계산할 수 없습니다.",
-  fx_max_age_not_configured: "서버에 환율 유효 기간이 설정되지 않아 비용을 계산할 수 없습니다.",
-  fx_stale: "서버의 환율 기준일이 오래되어 비용을 계산할 수 없습니다.",
-  cost_limit_not_configured: "서버에 비용 상한이 설정되지 않아 만들 수 없습니다.",
   prompt_rejected: "안전 규칙에 걸리는 필드 값이 있어 만들 수 없습니다. 받은 기획안 탭에서 필드를 바꿔 주세요.",
-  storage_error: "비용 장부를 읽을 수 없어 만들 수 없습니다.",
+  storage_error: "사용량 장부를 읽을 수 없어 만들 수 없습니다.",
 };
 
 /** 만들기를 눌렀는데 만들지 못한 이유 */
@@ -128,12 +144,12 @@ const FAIL_KO: Record<string, string> = {
   in_progress: "이미 만드는 중입니다. 잠시 뒤 새로고침해 주세요.",
   forbidden_phrase: "기획안 글에 참여를 조건으로 거는 말이 있어 초안을 만들 수 없습니다.",
   caption_too_long: "캡션이 너무 길어 초안을 만들 수 없습니다.",
-  post_tools_unavailable: "서버에 영상·이미지 처리 도구가 없어 만들지 않았습니다. 비용은 나지 않았습니다.",
-  ffmpeg_not_found: "서버에 영상 처리 도구가 없어 만들지 않았습니다. 비용은 나지 않았습니다.",
+  post_tools_unavailable: "서버에 영상·이미지 처리 도구가 없어 만들지 않았습니다. 공급자는 부르지 않았습니다.",
+  ffmpeg_not_found: "서버에 영상 처리 도구가 없어 만들지 않았습니다. 공급자는 부르지 않았습니다.",
   media_dir_not_configured: "서버에 미디어 폴더가 설정되지 않아 만들지 않았습니다.",
   media_dir_mismatch: "서버의 미디어 폴더 설정이 맞지 않아 만들지 않았습니다.",
-  convert_failed: "미디어는 만들었지만 게시 규격으로 바꾸지 못했습니다. 다시 누르면 새 비용 없이 이어서 시도합니다.",
-  label_failed: "미디어는 만들었지만 AI 표시를 입히지 못했습니다. 다시 누르면 새 비용 없이 이어서 시도합니다.",
+  convert_failed: "미디어는 만들었지만 게시 규격으로 바꾸지 못했습니다. 다시 누르면 새 사용량 없이 이어서 시도합니다.",
+  label_failed: "미디어는 만들었지만 AI 표시를 입히지 못했습니다. 다시 누르면 새 사용량 없이 이어서 시도합니다.",
   execute_rejected: "안전 장치가 이 요청을 거절했습니다.",
   execute_failed: "안전 장치에서 요청을 처리하지 못했습니다. 잠시 뒤 다시 시도해 주세요.",
   rejected_by_review: "검토에서 거절되어 만들지 않았습니다.",
@@ -145,29 +161,27 @@ export function estimateBlockKo(code: string | null): string {
 }
 
 const BASIS_KO: Record<string, string> = {
-  price_table: "단가표 기준 추정",
-  mock: "목 공급자 고정 비용(테스트 전용)",
-  ledger: "생성 장부의 확정액",
+  estimate: "요청한 만큼으로 센 예상",
+  mock: "목 공급자(테스트 전용)",
+  ledger: "생성 장부의 확정값",
 };
 
-/** 확인 단계에 보여 줄 비용 줄. 서버가 준 값만 쓰고 없는 값은 "읽을 수 없음"으로 둔다 */
+/** 확인 단계에 보여 줄 사용량 줄. 서버가 준 값만 쓰고 없는 값은 "읽을 수 없음"으로 둔다(원화 없음) */
 export function estimateLines(e: MediaEstimate, seconds?: number | null): string[] {
   const lines: string[] = [];
-  const chosen = e.video && seconds != null ? durationCostKrw(e.video, seconds) : null;
-  if (chosen != null && !e.settled) lines.push(`영상 ${seconds}초 예상 비용 ${won(chosen)}${e.basis ? ` (${BASIS_KO[e.basis] ?? e.basis})` : ""}`);
-  else if (e.cost_krw == null) lines.push("예상 비용을 계산할 수 없습니다.");
-  else if (e.settled) lines.push(`이미 만든 미디어가 있어 다시 만들어도 새 비용이 나지 않습니다 (만들 때 든 비용 ${won(e.cost_krw)}).`);
-  else lines.push(`예상 비용 ${won(e.cost_krw)}${e.basis ? ` (${BASIS_KO[e.basis] ?? e.basis})` : ""}`);
-  lines.push(e.per_item_limit_krw != null ? `건당 상한 ${won(e.per_item_limit_krw)}` : "건당 상한 설정을 읽을 수 없음");
-  const month = e.month_total_krw != null ? `이달 누적 ${won(e.month_total_krw)}` : "이달 누적을 읽을 수 없음";
-  lines.push(`${month} / ${e.monthly_budget_krw != null ? `월 상한 ${won(e.monthly_budget_krw)}` : "월 상한 설정을 읽을 수 없음"}`);
+  const basis = e.basis ? ` (${BASIS_KO[e.basis] ?? e.basis})` : "";
+  if (e.video && seconds != null && !e.settled && durationClips(e.video, seconds) != null) lines.push(`영상 ${seconds}초 사용 예정${basis}`);
+  else if (e.usage == null) lines.push("예상 사용량을 계산할 수 없습니다.");
+  else if (e.settled) lines.push(`이미 만든 미디어가 있어 다시 만들어도 사용량이 늘지 않습니다 (만들 때 ${usageKo(e.usage)}).`);
+  else lines.push(`예상 사용량 ${usageKo(e.usage)}${basis}`);
+  lines.push(quotaKo(e.quota));
   return lines;
 }
 
-/** 고른 길이의 예상 비용(원). 서버 표에 없으면(만들 수 없는 길이) null */
-export function durationCostKrw(v: VideoEstimate, seconds: number): number | null {
-  const cost = v.cost_by_duration[String(seconds)];
-  return typeof cost === "number" ? cost : null;
+/** 고른 길이로 이어 붙일 클립 수. 서버 표에 없으면(만들 수 없는 길이) null. 옛 서버는 표가 없어 null */
+export function durationClips(v: VideoEstimate, seconds: number): number | null {
+  const clips = v.clips_by_duration?.[String(seconds)];
+  return typeof clips === "number" ? clips : null;
 }
 
 /** 입력한 길이를 정수로 바꿔 서버가 알려 준 범위(최소~운영자 상한)로 맞춘다. 숫자가 아니면 null */
@@ -176,13 +190,14 @@ export function clampDuration(v: VideoEstimate, raw: number): number | null {
   return Math.min(v.max_s, Math.max(v.min_s, Math.round(raw)));
 }
 
-/** 이 길이로는 만들 수 없는 이유(서버가 준 비용·상한과 비교). 만들 수 있으면 null */
+/** 이 길이로는 만들 수 없는 이유(서버가 준 클립 표·월 예산과 비교). 만들 수 있으면 null */
 export function durationProblemKo(e: MediaEstimate, seconds: number): string | null {
   if (!e.video || e.settled) return null;
-  const cost = durationCostKrw(e.video, seconds);
-  if (cost == null) return `${seconds}초 길이는 이 공급자로 만들 수 없습니다. 다른 길이를 고르세요.`;
-  if (e.per_item_limit_krw != null && cost > e.per_item_limit_krw) return `${seconds}초는 예상 비용 ${won(cost)}이 건당 상한 ${won(e.per_item_limit_krw)}을 넘어 만들 수 없습니다.`;
-  if (e.monthly_budget_krw != null && e.month_total_krw != null && e.month_total_krw + cost > e.monthly_budget_krw) return `${seconds}초는 이달 비용 상한(${won(e.monthly_budget_krw)})을 넘게 되어 만들 수 없습니다.`;
+  if (e.video.clips_by_duration && durationClips(e.video, seconds) == null) return `${seconds}초 길이는 이 공급자로 만들 수 없습니다. 다른 길이를 고르세요.`;
+  const q = e.quota;
+  if (q && q.applies && q.limit !== null && q.used + seconds > q.limit) {
+    return `${seconds}초는 이달 영상 예산(${amountText(q.limit, q.unit)})을 넘게 되어 만들 수 없습니다. 남은 사용량은 ${amountText(Math.max(0, q.limit - q.used), q.unit)}입니다.`;
+  }
   return null;
 }
 
@@ -197,23 +212,20 @@ export interface LongWarning { title: string; lines: string[]; notes: string[]; 
 /** 경고창 문구. 숫자는 서버가 준 값만 쓰고, 없으면 읽을 수 없다고 적는다(지어내지 않는다) */
 export function longWarningKo(e: MediaEstimate, seconds: number): LongWarning {
   const v = e.video;
-  const cost = v ? durationCostKrw(v, seconds) : null;
   const clips = v?.clips_by_duration?.[String(seconds)];
   const lines = [
     `선택한 길이: ${seconds}초${typeof v?.warn_duration_s === "number" ? ` (경고 기준 ${v.warn_duration_s}초보다 깁니다)` : ""}`,
     typeof clips === "number" ? `이어 붙일 클립 수: ${clips}개` : "이어 붙일 클립 수를 읽을 수 없음",
-    cost != null ? `예상 비용: ${won(cost)}${e.basis ? ` (${BASIS_KO[e.basis] ?? e.basis})` : ""}` : "예상 비용을 계산할 수 없습니다.",
-    e.per_item_limit_krw != null ? `건당 상한: ${won(e.per_item_limit_krw)}` : "건당 상한 설정을 읽을 수 없음",
+    `사용 예정: ${amountText(seconds, "seconds")}${e.basis ? ` (${BASIS_KO[e.basis] ?? e.basis})` : ""}`,
+    quotaKo(e.quota),
   ];
-  const month = e.month_total_krw != null ? `이달 누적 ${won(e.month_total_krw)}` : "이달 누적을 읽을 수 없음";
-  lines.push(`${month} / ${e.monthly_budget_krw != null ? `월 상한 ${won(e.monthly_budget_krw)}` : "월 상한 설정을 읽을 수 없음"}`);
   return {
     title: "긴 영상을 만들까요?",
     lines,
     notes: [
       "길이가 길수록 장면이나 인물이 이어지지 않을 수 있습니다. 짧은 영상을 여러 개 만들어 이어 붙이기 때문입니다.",
-      "비용은 클립 수만큼 늘어납니다.",
-      "예상 비용이 건당 상한을 넘으면 만들기 전에 사람 승인 단계로 넘어갈 수 있습니다.",
+      "사용량은 길이만큼 늘어납니다.",
+      "우리 키로 만들 때 이달 영상 예산을 넘으면 만들기 전에 막힙니다.",
     ],
     confirmLabel: "계속",
     cancelLabel: "길이 줄이기",
@@ -221,7 +233,7 @@ export function longWarningKo(e: MediaEstimate, seconds: number): LongWarning {
 }
 
 /**
- * '시작'을 눌렀을 때의 관문(화면 안내일 뿐 안전 관문이 아니다: 서버가 상한·비용을 따로 막는다).
+ * '시작'을 눌렀을 때의 관문(화면 안내일 뿐 안전 관문이 아니다: 서버가 길이 상한·예산을 따로 막는다).
  * 경고 길이를 넘으면 `ask`로 사람 확인을 받고, 확인하지 않으면 `send`를 부르지 않는다.
  * 부른 쪽이 `send(confirmedLong)`으로 요청을 보낸다. 보냈으면 true.
  */
@@ -239,7 +251,7 @@ export async function gateLongStart(
 
 /** 길이 입력 옆 안내. 상한은 운영자가 정한 값이라는 점을 밝힌다 */
 export const durationNoteKo = (v: VideoEstimate): string =>
-  `영상 길이 상한 ${v.max_s}초는 운영자가 서버 설정(MARKETING_VIDEO_MAX_DURATION_S)으로 정한 값입니다(최대 ${v.absolute_max_s}초까지만 정할 수 있습니다). 공급자가 한 번에 만드는 길이보다 길면 여러 클립을 이어 붙여 만들고, 클립 수만큼 비용이 늘어납니다.`;
+  `영상 길이 상한 ${v.max_s}초는 운영자가 서버 설정(MARKETING_VIDEO_MAX_DURATION_S)으로 정한 값입니다(최대 ${v.absolute_max_s}초까지만 정할 수 있습니다). 공급자가 한 번에 만드는 길이보다 길면 여러 클립을 이어 붙여 만들고, 길이만큼 사용량이 늘어납니다.`;
 
 export const isReel = (kind: string | null | undefined) => kind === "video" || kind === "reel";
 /** 걸리는 시간 안내(영상은 생성이 길다) */
@@ -259,7 +271,7 @@ export function mediaResultKo(answer: BriefMediaAnswer): MediaResult {
     return { kind: "check_rejected", text: "미디어는 만들었지만 초안 검사에 걸렸습니다. 이 초안은 게시할 수 없습니다." };
   }
   if (answer.status === "input-required") {
-    return { kind: "held", text: "안전 장치가 이 생성을 사람 확인으로 보류했습니다. 아래 '사람 결정 대기' 목록에 나오며, 승인된 뒤 다시 눌러 주세요. 아직 비용은 나지 않았습니다." };
+    return { kind: "held", text: "안전 장치가 이 생성을 사람 확인으로 보류했습니다. 아래 '사람 결정 대기' 목록에 나오며, 승인된 뒤 다시 눌러 주세요. 아직 공급자는 부르지 않았습니다." };
   }
   if (answer.status === "working") return { kind: "working", text: "안전 장치가 확인하는 중입니다. 잠시 뒤 다시 눌러 주세요." };
   const code = answer.outcome ?? "";
@@ -506,20 +518,20 @@ export function audioIntroKo(a: AudioState): string[] {
   ];
 }
 
-/** "배경음악 따로 만들기" 추가 비용 안내. 서버가 준 값만 쓴다 */
-export function bgmCostKo(b: BgmEstimate | null | undefined): string {
-  if (!b) return "추가 비용을 서버가 알려 주지 않았습니다.";
-  if (b.settled) return "이미 만든 배경음악이 있어 새 비용이 나지 않습니다.";
-  if (b.cost_krw == null) return "추가 비용을 계산할 수 없습니다.";
-  return `추가 비용 약 ${won(b.cost_krw)}(곡 1개). 영상은 다시 만들지 않아 영상 비용은 다시 나지 않습니다.`;
+/** "배경음악 따로 만들기" 추가 사용량 안내. 서버가 준 값만 쓴다(원화 없음) */
+export function bgmUsageKo(b: BgmEstimate | null | undefined): string {
+  if (!b) return "추가 사용량을 서버가 알려 주지 않았습니다.";
+  if (b.settled) return "이미 만든 배경음악이 있어 사용량이 늘지 않습니다.";
+  if (b.usage == null) return "추가 사용량을 계산할 수 없습니다.";
+  return `추가 사용량 ${usageKo(b.usage)}. 영상은 다시 만들지 않아 영상 사용량은 늘지 않습니다.`;
 }
 
 /** 정해진 결정 한 줄(감사 기록을 화면에 보여 줄 때) */
 export function audioDecisionKo(d: AudioDecision): string {
   const when = d.decided_at ? ` (${d.decided_at.slice(0, 16).replace("T", " ")} UTC)` : "";
   if (d.choice === "keep") return `소리 선택: 이 영상 그대로 사용${when}`;
-  const cost = typeof d.bgm_cost_krw === "number" ? ` · 배경음악 비용 ${won(d.bgm_cost_krw)}` : "";
-  return `소리 선택: 배경음악을 따로 만들어 입힘${when}${cost}`;
+  const used = d.bgm_usage ? ` · 배경음악 ${usageKo(d.bgm_usage)}` : "";
+  return `소리 선택: 배경음악을 따로 만들어 입힘${when}${used}`;
 }
 
 const AUDIO_FAIL_KO: Record<string, string> = {
@@ -545,7 +557,7 @@ export function audioResultKo(answer: BriefMediaAnswer, choice: AudioChoice): Au
     return { kind: "check_rejected", text: "배경음악은 입혔지만 초안 검사에 걸렸습니다. 이 초안은 게시할 수 없습니다." };
   }
   if (answer.status === "input-required") {
-    return { kind: "held", text: "안전 장치가 배경음악 생성을 사람 확인으로 보류했습니다. 아래 '사람 결정 대기' 목록에서 승인된 뒤 다시 눌러 주세요. 영상은 그대로이고 아직 비용은 나지 않았습니다." };
+    return { kind: "held", text: "안전 장치가 배경음악 생성을 사람 확인으로 보류했습니다. 아래 '사람 결정 대기' 목록에서 승인된 뒤 다시 눌러 주세요. 영상은 그대로이고 아직 공급자는 부르지 않았습니다." };
   }
   if (answer.status === "working") return { kind: "working", text: "안전 장치가 확인하는 중입니다. 잠시 뒤 다시 눌러 주세요." };
   const code = answer.outcome ?? "";

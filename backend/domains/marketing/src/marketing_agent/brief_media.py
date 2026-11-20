@@ -4,8 +4,8 @@
 호출자가 보내지 않고 **보관된 요청 초안**(`handoff_brief_to_sns`가 만든 것)에서 읽는다.
 
 하는 일은 기존 `prepare_sns_post_from_media`를 그대로 부르는 것까지다:
-생성(`generate_media`: B등급 안전 관문·건당/월 상한·단가표 fail-closed) → 규격 변환 → AI 라벨 →
-`draft_sns_post` → `check_sns_post`. 상한·단가·안전 규칙은 여기서 바꾸지 않는다.
+생성(`generate_media`: B등급 안전 관문·우리 키 월 사용량 예산) → 규격 변환 → AI 라벨 →
+`draft_sns_post` → `check_sns_post`. 예산·안전 규칙은 여기서 바꾸지 않는다.
 
 하지 않는 일:
 - 게시(`publish_sns`, C등급 사람 승인)는 부르지 않는다. 승인으로 이어지는 경로도 만들지 않는다.
@@ -36,7 +36,7 @@
 소리가 있는 영상(`needs_decision`)은 결정이 있어야 게시 요청을 만들 수 있다(`brief_publish`).
 이미 게시 요청이 있으면 결정을 바꾸지 않는다(`publish_already_requested`).
 
-예상 비용(`estimate`)은 조회 때 `plan_cost`(=`generate_media`와 같은 단가표·환율·건당 상한 규칙)로
+예상 사용량(`estimate`)은 조회 때 `plan_cost`(=`generate_media`와 같은 모델 설정·월 예산 규칙)로
 계산한다. 값을 저장하거나 지어내지 않는다. 계산할 수 없으면 이유 코드만 돌려준다.
 """
 
@@ -54,6 +54,7 @@ from ax_contracts.schemas.common import AxModel
 from ax_contracts.schemas.planning import CampaignBriefInput
 from marketing_agent.brief_handoff import prepared_of, request_sha, state_of
 from marketing_agent.briefs import BriefStorageError, BriefStore, SnsHandoffRecord
+from marketing_agent.media import usage as usage_mod
 from marketing_agent.media.bgm_flow import BGM_FIELDS_KEY, BGM_TEMPLATE_KEY
 from marketing_agent.media.config import MOCK, MediaSettings
 from marketing_agent.media.ledger import LedgerError, MediaLedger
@@ -197,10 +198,13 @@ def estimate(
     context_id: str | None = None,
     plan_fields: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """지금 요청 초안으로 만들 때의 예상 비용과 상한. 외부 호출 없이 단가표·장부만 읽는다.
+    """지금 요청 초안으로 만들 때의 예상 사용량과 이번 달 예산. 외부 호출 없이 장부만 읽는다.
 
+    원화는 없다. `usage`는 공급자 단위 그대로(영상 초·이미지 장·BGM 곡), `quota`는 그 종류의
+    이번 달 사용량·예산·남은 %다(우리 키일 때만 예산이 있고, 고객사 키는 `applies`가 false).
     `status`: `ok`(만들 수 있음) | `blocked`(`reason_code`). `settled`면 이미 끝난 생성이라 다시
-    눌러도 비용이 나지 않는다. 모르는 값은 None으로 둔다. `context_id`는 장부 키를 만드는 사건 id를
+    눌러도 사용량이 늘지 않는다. 모르는 값은 None으로 둔다. `context_id`는 장부 키를 만드는
+    사건 id를
     기획안 말고 다른 출처(장애 초안)가 정할 때만 준다.
     """
     settings = settings or MediaSettings.from_env()
@@ -209,16 +213,17 @@ def estimate(
         "status": "blocked",
         "reason_code": None,
         "media_kind": kind,
-        "cost_krw": None,
+        "usage": None,
         "settled": False,
         "basis": None,
-        "per_item_limit_krw": settings.item_limit(kind),
-        "monthly_budget_krw": settings.monthly_budget_krw,
-        "month_total_krw": None,
+        "quota": None,
         "video": None,
     }
+    used = 0
     try:
-        out["month_total_krw"] = ledger.month_total(datetime.now(UTC).strftime("%Y-%m"))
+        if kind in usage_mod.UNITS:
+            used = ledger.month_usage(datetime.now(UTC).strftime("%Y-%m"), kind)
+            out["quota"] = _quota_view(settings, kind, used)
     except LedgerError:
         return out | {"reason_code": "storage_error"}
     reason = blocked_reason(media, settings)
@@ -242,25 +247,34 @@ def estimate(
             current = min(template_s, settings.video_max_duration_s) if template_s else None
         out["video"] = _video_info(current, settings, plan)
     if isinstance(plan, AgentResult):
-        cost = (plan.output or {}).get("cost_krw")
-        return out | {"reason_code": plan.outcome, "cost_krw": cost}
-    out["cost_krw"] = plan.krw_est
+        return out | {"reason_code": plan.outcome}
+    out["usage"] = plan.usage.as_dict()
     out["settled"] = plan.settled
     provider = settings.provider(kind)
-    out["basis"] = "ledger" if plan.settled else ("mock" if provider == MOCK else "price_table")
-    budget = settings.monthly_budget_krw
-    if not plan.settled and budget is not None and out["month_total_krw"] + plan.krw_est > budget:
-        return out | {"reason_code": "budget_exceeded"}
+    out["basis"] = "ledger" if plan.settled else ("mock" if provider == MOCK else "estimate")
+    cap = settings.quota(kind) if settings.quota_applies else None
+    if not plan.settled and cap is not None and used + plan.usage.amount > cap:
+        return out | {"reason_code": "quota_exceeded"}
     return out | {"status": "ok"}
+
+
+def _quota_view(settings: MediaSettings, kind: str, used: int) -> dict[str, Any]:
+    """그 종류의 이번 달 사용량·예산·남은 %. 고객사 키면 예산 없이 `applies`만 false."""
+    limit = settings.quota(kind) if settings.quota_applies else None
+    return {
+        "unit": usage_mod.UNITS[kind],
+        "used": used,
+        "limit": limit,
+        "remaining_pct": usage_mod.remaining_pct(used, limit),
+        "applies": settings.quota_applies,
+    }
 
 
 def _video_info(current: int | None, settings: MediaSettings, plan: Any) -> dict[str, Any]:
     """화면의 길이 입력용. 상한은 운영자가 정한 설정값이고 `absolute_max_s`는 코드 절대 상한이다."""
-    if isinstance(plan, AgentResult):  # 건당 상한 초과로 막혀도 다른 길이를 고를 수 있게 표는 준다
-        table = (plan.output or {}).get("by_duration")
+    if isinstance(plan, AgentResult):  # 막혀도 다른 길이를 고를 수 있게 표는 준다
         clips = (plan.output or {}).get("clips_by_duration")
     else:
-        table = plan.by_duration
         clips = plan.clips_by_duration
     return {
         "min_s": 1,
@@ -269,7 +283,6 @@ def _video_info(current: int | None, settings: MediaSettings, plan: Any) -> dict
         # 화면 경고창 기준(UX). 이 길이를 넘으면 화면이 시작 전에 확인을 받는다. 안전 관문이 아니다
         "warn_duration_s": settings.video_warn_duration_s,
         "current_s": current,
-        "cost_by_duration": {str(k): v for k, v in (table or {}).items()},
         "clips_by_duration": {str(k): v for k, v in (clips or {}).items()},
     }
 
@@ -314,7 +327,8 @@ def _prepared_record(
         "media_kind": output.get("media_kind"),
         "asset_ref": output.get("asset_ref"),
         "asset_sha256": output.get("asset_sha256"),
-        "cost_krw": generation.get("total_cost_krw", generation.get("cost_krw")),
+        # 사용량({unit, amount, input_tokens, output_tokens}). 옛 기록에는 없다
+        "usage": generation.get("usage"),
         # 기획 데이터를 반영했으면 쓴 필드 이름·길이·해시(값 전체 아님). 옛 기록에는 없다
         "plan_context": generation.get("plan_context"),
         "label_text": label.get("text"),
@@ -486,11 +500,12 @@ def bgm_estimate(
 ) -> dict[str, Any]:
     """ "배경음악 따로 만들기"의 추가 비용 조회(외부 호출 없음). 영상은 재생이라 BGM 값만 계산한다.
 
-    `cost_krw`는 BGM 한 곡의 예상 비용(원)이다. 계산할 수 없으면 None과 이유 코드(`reason_code`).
-    `settled`면 이미 만든 곡이라 새 비용이 없다. 별도 승인이 필요할 수 있다(안전 관문 판정).
+    `usage`는 BGM 한 곡의 예상 사용량(`{unit: "tracks", amount: 1, ...}`)이다. 계산할 수 없으면
+    None과 이유 코드(`reason_code`). `settled`면 이미 만든 곡이라 새 사용량이 없다.
+    별도 승인이 필요할 수 있다(안전 관문 판정).
     """
     settings = settings or MediaSettings.from_env()
-    out: dict[str, Any] = {"cost_krw": None, "settled": False, "reason_code": None}
+    out: dict[str, Any] = {"usage": None, "settled": False, "reason_code": None}
     if not media.get("media_ref"):
         return out | {"reason_code": "media_ref_missing"}
     gen_input = {
@@ -506,8 +521,8 @@ def bgm_estimate(
         allow_audio=True,
     )
     if isinstance(plan, AgentResult):
-        return out | {"reason_code": plan.outcome, "cost_krw": (plan.output or {}).get("cost_krw")}
-    return out | {"cost_krw": plan.krw_est, "settled": plan.settled}
+        return out | {"reason_code": plan.outcome}
+    return out | {"usage": plan.usage.as_dict(), "settled": plan.settled}
 
 
 def _decision_record(
@@ -619,7 +634,7 @@ async def choose_brief_audio(
             prepared,
             data,
             now,
-            bgm_cost_krw=bgm.get("cost_krw"),
+            bgm_usage=bgm.get("usage"),
             bgm_model_id=bgm.get("model_id"),
             bgm_execution_id=bgm.get("execution_id"),
             bgm_prompt_sha256=bgm.get("prompt_sha256"),

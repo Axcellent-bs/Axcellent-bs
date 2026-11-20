@@ -1,6 +1,6 @@
-// 영상 비용·정책 설정 호출(dashboard-api). 오류는 상태 코드만 담아 던진다.
+// 우리 키 사용량 예산 설정 호출(dashboard-api). 오류는 상태 코드만 담아 던진다.
 import { statusOnlyError } from "./apiError";
-import type { CostLimitsAnswer } from "./costLimits";
+import type { CostLimitsAnswer, LimitPayload } from "./costLimits";
 import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 
 const BASE = "/api/dashboard/marketing/cost-limits";
@@ -23,7 +23,8 @@ export async function getCostLimits(): Promise<CostLimitsAnswer> {
   return parse(await fetch(`${DASHBOARD_API_URL}${BASE}`, { cache: "no-store", headers: dashboardAuth() }));
 }
 
-export interface LimitValues { video_per_item_krw?: number; monthly_budget_krw?: number }
+/** 바꿀 칸(영상 초·이미지 장·BGM 곡). 원화 칸은 보내지 않는다 */
+export type LimitValues = LimitPayload;
 export const lowerCostLimits = (v: LimitValues, reason: string, confirmed: boolean) => post("/lower", { ...v, reason, confirmed });
 export const raiseCostLimits = (v: LimitValues, reason: string) => post("/raise", { ...v, reason });
 export const setLowerSelfApprove = (lower_self_approve: boolean, reason: string) => post("/option", { lower_self_approve, reason });

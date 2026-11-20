@@ -110,7 +110,7 @@ def test_read_needs_a_logged_in_operator_or_admin(client: TestClient, people: An
 def test_writes_need_limit_editor_and_use_the_token_name(
     client: TestClient, fake: Fake, people: Any
 ) -> None:
-    body = {"video_per_item_krw": 800, "reason": "축소", "confirmed": True, "updated_by": "남"}
+    body = {"video_seconds_monthly": 800, "reason": "축소", "confirmed": True, "updated_by": "남"}
     assert client.post(f"{BASE}/lower", json=body, headers=people["a-adm"]).status_code == 403
     assert client.post(f"{BASE}/lower", json=body, headers=people["a-mem"]).status_code == 403
     shared = {"Authorization": "Bearer shared-test-token"}
@@ -119,7 +119,7 @@ def test_writes_need_limit_editor_and_use_the_token_name(
     assert client.post(f"{BASE}/lower", json=body, headers=people["a-lim"]).status_code == 200
     res = client.post(
         f"{BASE}/raise",
-        json={"monthly_budget_krw": 90000, "reason": "증액"},
+        json={"image_count_monthly": 900, "reason": "증액"},
         headers=people["a-lim"],
     )
     assert res.status_code == 200
@@ -129,15 +129,19 @@ def test_writes_need_limit_editor_and_use_the_token_name(
 
 def test_skill_failures_pass_through_as_data(client: TestClient, fake: Fake, people: Any) -> None:
     fake.status = TaskStatus.FAILED
-    fake.outcome = "over_policy_ceiling"
+    fake.outcome = "over_absolute_max"
     res = client.post(
-        f"{BASE}/raise", json={"video_per_item_krw": 9000, "reason": "x"}, headers=people["a-lim"]
+        f"{BASE}/raise",
+        json={"video_seconds_monthly": 9000, "reason": "x"},
+        headers=people["a-lim"],
     )
     assert res.status_code == 200
-    assert res.json()["data"]["outcome"] == "over_policy_ceiling"
+    assert res.json()["data"]["outcome"] == "over_absolute_max"
     fake.outcome = "invalid_input"
     bad = client.post(
-        f"{BASE}/raise", json={"video_per_item_krw": 9000, "reason": "x"}, headers=people["a-lim"]
+        f"{BASE}/raise",
+        json={"video_seconds_monthly": 9000, "reason": "x"},
+        headers=people["a-lim"],
     )
     assert bad.status_code == 400
     assert (
@@ -215,3 +219,16 @@ def test_account_flags_are_limited_to_operators_and_admins(
     assert denied.status_code == 403
     granted = client.post(f"{url}/a-adm/update", json={"policy_editor": True}, headers=ops)
     assert granted.json()["data"]["policy_editor"] is True
+
+
+def test_old_krw_fields_are_still_accepted_and_forwarded_so_the_skill_can_refuse(
+    client: TestClient, fake: Fake, people: Any
+) -> None:
+    """입력 계약은 지우지 않는다. 원화 칸은 그대로 전달되고 마케팅이 거절한다(여기서 400 아님)."""
+    fake.status = TaskStatus.FAILED
+    fake.outcome = "deprecated_krw_limit"
+    res = client.post(
+        f"{BASE}/raise", json={"video_per_item_krw": 9000, "reason": "x"}, headers=people["a-lim"]
+    )
+    assert res.status_code == 200 and res.json()["data"]["outcome"] == "deprecated_krw_limit"
+    assert fake.calls[-1][1].input["video_per_item_krw"] == 9000

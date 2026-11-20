@@ -403,8 +403,8 @@ async def prepare_outage_sns_media(
             stage=error.stage,
             reason=error.code,
             media_id=gen["media_id"],
-            cost_krw=gen.get("total_cost_krw", gen["cost_krw"]),
-            note="생성 비용은 이미 장부에 남았다. 같은 입력으로 다시 부르면 생성은 재생된다",
+            usage=gen.get("usage"),
+            note="생성 사용량은 이미 장부에 남았다. 같은 입력으로 다시 부르면 생성은 재생된다",
         )
 
     # 4) 초안에 이미지 붙이기(캡션은 그대로, 사본 저장) → 점검
@@ -465,8 +465,7 @@ async def prepare_outage_sns_media(
             "provider": gen["provider"],
             "model_id": gen["model_id"],
             "resolution": gen["resolution"],
-            "cost_krw": gen["cost_krw"],
-            "total_cost_krw": gen.get("total_cost_krw", gen["cost_krw"]),
+            "usage": gen.get("usage"),
             "replayed": bool(gen.get("replayed")),
         },
         "label": {"text": label.text},

@@ -1,4 +1,4 @@
-"""영상 비용 상한·안전 정책 화면 경로.
+"""우리 키 사용량 예산·안전 정책 화면 경로(원화 단가표·금액 상한은 없다).
 
 - 권한은 로그인 세션 기준이다(`accounts.editor_flags`). 읽기는 로그인한 운영자·관리자 모두,
   상한 변경은 `limit_editor`, 하향 셀프 승인 스위치와 정책 변경은 `policy_editor`만 한다.
@@ -29,16 +29,26 @@ CONTEXT = "cost_limits"
 REASON = Field(min_length=1, max_length=200)
 
 
-class LowerBody(BaseModel):
+class _QuotaFields(BaseModel):
+    """종류별 월 사용량 예산(공급자 단위 그대로): 영상 초·이미지 장·BGM 곡.
+
+    예전 원화 칸(`video_per_item_krw`·`monthly_budget_krw`)은 입력 계약을 지우지 않으려고 남겼고,
+    보내면 마케팅이 `deprecated_krw_limit`로 거절한다.
+    """
+
+    video_seconds_monthly: int | None = Field(default=None, ge=0, le=100_000_000)
+    image_count_monthly: int | None = Field(default=None, ge=0, le=100_000_000)
+    audio_count_monthly: int | None = Field(default=None, ge=0, le=100_000_000)
     video_per_item_krw: int | None = Field(default=None, ge=0, le=10_000_000)
     monthly_budget_krw: int | None = Field(default=None, ge=0, le=100_000_000)
+
+
+class LowerBody(_QuotaFields):
     reason: str = REASON
     confirmed: bool = False
 
 
-class RaiseBody(BaseModel):
-    video_per_item_krw: int | None = Field(default=None, ge=0, le=10_000_000)
-    monthly_budget_krw: int | None = Field(default=None, ge=0, le=100_000_000)
+class RaiseBody(_QuotaFields):
     reason: str = REASON
 
 
@@ -69,7 +79,7 @@ def _need(flag: bool, code: str, message: str) -> None:
 
 @router.get("/marketing/cost-limits")
 async def get_cost_limits(authorization: str | None = Header(None)) -> dict:
-    """현재 비용 상한·정책 현황·대기 요청·이력. 로그인한 운영자·관리자만."""
+    """현재 사용량 예산·종류별 이번 달 사용량·정책 현황·대기 요청·이력. 로그인한 운영자·관리자만."""
     _, limit_editor, policy_editor = accounts.editor_flags(authorization)
     out = await _skill("get_media_cost_limits", {})
     output = dict(out.get("output") or {})
@@ -80,7 +90,7 @@ async def get_cost_limits(authorization: str | None = Header(None)) -> dict:
 @router.post("/marketing/cost-limits/lower")
 async def lower_cost_limits(body: LowerBody, authorization: str | None = Header(None)) -> dict:
     human, limit_editor, _ = accounts.editor_flags(authorization)
-    _need(limit_editor, "LIMIT_EDITOR_REQUIRED", "비용 상한 변경 권한이 있는 계정만 바꿀 수 있어요")
+    _need(limit_editor, "LIMIT_EDITOR_REQUIRED", "예산 변경 권한이 있는 계정만 바꿀 수 있어요")
     payload = {**body.model_dump(exclude_none=True), "updated_by": human.name}
     return ok(await _skill("lower_media_cost_limits", payload))
 
@@ -88,7 +98,7 @@ async def lower_cost_limits(body: LowerBody, authorization: str | None = Header(
 @router.post("/marketing/cost-limits/raise")
 async def raise_cost_limits(body: RaiseBody, authorization: str | None = Header(None)) -> dict:
     human, limit_editor, _ = accounts.editor_flags(authorization)
-    _need(limit_editor, "LIMIT_EDITOR_REQUIRED", "비용 상한 변경 권한이 있는 계정만 바꿀 수 있어요")
+    _need(limit_editor, "LIMIT_EDITOR_REQUIRED", "예산 변경 권한이 있는 계정만 바꿀 수 있어요")
     payload = {**body.model_dump(exclude_none=True), "updated_by": human.name}
     return ok(await _skill("raise_media_cost_limits", payload))
 
@@ -102,7 +112,7 @@ async def set_cost_limit_option(body: OptionBody, authorization: str | None = He
     return ok(await _skill("set_cost_limit_option", payload))
 
 
-# ---- 안전 정책(비용 임계값) 전용 화면: 안전 서버로 전달만 한다 ----
+# ---- 안전 정책(임계값) 전용 화면: 안전 서버로 전달만 한다 ----
 
 
 def _safety_url(path: str) -> str:

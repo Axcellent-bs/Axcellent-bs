@@ -17,7 +17,7 @@ from ax_agent_template import events
 from ax_contracts.schemas import AgentRequest, ExecuteDecision
 from ax_safety.rules import load_thresholds
 from marketing_agent import handlers
-from marketing_agent.media import pricing, registry, skill, video_chain
+from marketing_agent.media import registry, skill, video_chain
 from marketing_agent.media.base import MediaRequest, MediaResult, Usage
 from marketing_agent.media.config import MediaSettings
 from marketing_agent.media.gemini_video import CAPS as GEMINI_CAPS
@@ -428,22 +428,7 @@ def test_chain_reports_ffmpeg_failures_as_codes(tmp_path: Path) -> None:
         )
 
 
-def test_total_cost_is_the_sum_over_clips_and_counts_extension_input() -> None:
-    entry = pricing.PriceEntry(
-        provider="x", model="m", kind="video", resolution="720p", quality=None,
-        input_usd_per_mtok=pricing.Decimal("1.5"), output_usd_per_mtok=pricing.Decimal("12"),
-        output_tokens=None, output_tokens_per_second=5792, max_duration_s=15,
-        source="s", checked_on="2026-11-11",
-    )  # fmt: skip
-    clips = plan_clips(30, GEMINI_CAPS)
-    total = video_chain.estimate_chain_usd(entry, prompt="p", clips=clips)
-    naive = sum(pricing.estimate_usd(entry, prompt="p", duration_s=c.duration_s) for c in clips)
-    assert total > naive  # 연장은 앞 영상 입력 토큰이 더 든다
-    output_only = pricing.Decimal(30 * 5792) * pricing.Decimal("12") / pricing.PER_MTOK
-    assert output_only < total < output_only * pricing.Decimal("1.2")
-
-
-# ---- 스킬 수준: 상한 거부·전체 비용 가드·이어 붙이기 ----
+# ---- 스킬 수준: 길이 거부·전체 사용량 가드·이어 붙이기 ----
 
 PRICES = """
 version = 1
@@ -483,12 +468,7 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
         "MARKETING_MEDIA_DIR": str(tmp_path / "media"),
         "MARKETING_VIDEO_PROVIDER": "fakev",
         "MARKETING_VIDEO_MODEL": "fm",
-        "MARKETING_FX_USD_KRW": "1500",
-        "MARKETING_FX_AS_OF": datetime.now(UTC).date().isoformat(),
-        "MARKETING_FX_MAX_AGE_DAYS": "7",
-        "MARKETING_COST_SAFETY_MARGIN_PCT": "10",
-        "MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM": "100000",
-        "MARKETING_MEDIA_MONTHLY_BUDGET_KRW": "1000000",
+        "MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY": "100000",
         "MARKETING_FFMPEG_BIN": sys.executable,  # 존재 확인만 통과시킨다(실제로는 가짜 ffmpeg)
     }
     for name, value in values.items():
@@ -530,10 +510,10 @@ def _request(**over) -> AgentRequest:  # noqa: ANN003
     )
 
 
-async def _run(env: SimpleNamespace, **over):  # noqa: ANN003, ANN202
+async def _run(env: SimpleNamespace, ledger: MediaLedger | None = None, **over):  # noqa: ANN003, ANN202
     return await skill.generate_media(
         _request(**over),
-        ledger=MediaLedger(),
+        ledger=ledger or MediaLedger(),
         from_decision=handlers._from_decision,
         prices_path=env.prices,
     )
@@ -560,7 +540,7 @@ async def test_default_length_is_the_template_length_capped_by_the_setting(
 
 
 @pytest.mark.asyncio
-async def test_longer_than_a_clip_is_chained_and_cost_is_the_whole_estimate(
+async def test_longer_than_a_clip_is_chained_and_usage_is_the_whole_length(
     env,
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
@@ -571,10 +551,12 @@ async def test_longer_than_a_clip_is_chained_and_cost_is_the_whole_estimate(
     clips = plan_clips(40, GEMINI_CAPS)
     assert out["clip_count"] == len(clips) == 4 and out["duration_s"] == 40
     assert [c.duration_s for c in env.adapter.calls] == [c.duration_s for c in clips]
-    # 0.1 USD/초 × 40초 × 1500 × 1.1 = 6600원(클립 수만큼이 아니라 클립 길이 합 × 단가)
-    assert out["cost_est_krw"] == 6600
+    # 사용량은 클립 수가 아니라 클립 길이의 합(초). 원화는 계산하지 않는다
+    assert out["cost_est_krw"] == 0 and out["usage"]["unit"] == "seconds"
+    assert out["usage"]["amount"] == 40
     params = env.gate.seen[0]["params"]
-    assert (params["cost_krw"], params["duration_s"], params["clip_count"]) == (6600, 40, 4)
+    assert (params["usage_amount"], params["duration_s"], params["clip_count"]) == (40, 40, 4)
+    assert "cost_krw" not in params
     assert out["muted"] is True and out["ai_generated"] is True
     asset = Path(out["asset_ref"])
     assert hashlib.sha256(asset.read_bytes()).hexdigest() == out["sha256"]
@@ -613,30 +595,39 @@ async def test_request_over_ninety_seconds_is_invalid_input(
 
 
 @pytest.mark.asyncio
-async def test_whole_estimate_is_checked_against_the_single_item_limit_before_calls(
+async def test_whole_length_is_checked_against_the_monthly_quota_before_calls(
     env,
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
     monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "60")
-    monkeypatch.setenv("MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM", "5000")
-    ok = await _run(env, duration_s=15)  # 15초 = 2475원: 클립 하나 값은 상한 안
+    monkeypatch.setenv("MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY", "50")
+    ledger = MediaLedger()
+    ok = await _run(env, ledger, duration_s=15)  # 15초: 예산 안
     assert ok.outcome == "generated"
     env.adapter.calls.clear()
-    over = await _run(env, duration_s=40)  # 클립 하나는 5000원 안이어도 전체는 6600원
-    assert over.outcome == "cost_over_single"
-    assert over.output["cost_krw"] == 6600 and over.output["limit_krw"] == 5000  # type: ignore[index]
+    # 클립 하나는 예산 안이어도 전체 40초 + 이미 쓴 15초 > 50초
+    over = await _run(env, ledger, duration_s=40)
+    assert over.outcome == "quota_exceeded"
+    assert over.output == {  # type: ignore[comparison-overlap]
+        "media_kind": "video",
+        "unit": "seconds",
+        "requested": 40,
+        "month_used": 15,
+        "limit": 50,
+        "remaining_pct": 70,
+    }
     assert env.adapter.calls == []
 
 
 @pytest.mark.asyncio
-async def test_whole_estimate_is_checked_against_the_monthly_budget_before_calls(
+async def test_long_video_alone_over_the_quota_makes_no_call_and_no_gate_request(
     env,
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
     monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "60")
-    monkeypatch.setenv("MARKETING_MEDIA_MONTHLY_BUDGET_KRW", "6000")
+    monkeypatch.setenv("MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY", "39")
     result = await _run(env, duration_s=40)
-    assert result.outcome == "budget_exceeded"
+    assert result.outcome == "quota_exceeded"
     assert env.adapter.calls == [] and env.gate.seen == []
 
 
@@ -653,7 +644,7 @@ async def test_provider_that_cannot_chain_rejects_long_requests_before_any_call(
 
 
 @pytest.mark.asyncio
-async def test_plan_cost_matches_generation_estimate_and_gives_a_table(
+async def test_plan_cost_matches_generation_usage_and_gives_a_clip_table(
     env,
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
@@ -667,7 +658,8 @@ async def test_plan_cost_matches_generation_estimate_and_gives_a_table(
         with_table=True,
     )
     assert isinstance(plan, skill.CostPlan)
-    assert plan.krw_est == 6600
-    assert plan.by_duration is not None and plan.by_duration[40] == 6600
-    assert plan.by_duration[15] == 2475 and 2 not in plan.by_duration  # 3초 미만은 못 만든다
-    assert max(plan.by_duration) == 60
+    assert (plan.usage.unit, plan.usage.amount) == ("seconds", 40)
+    assert plan.clips_by_duration is not None and plan.clips_by_duration[40] == 4
+    assert plan.clips_by_duration[15] == 1
+    assert 2 not in plan.clips_by_duration  # 3초 미만은 못 만든다
+    assert max(plan.clips_by_duration) == 60

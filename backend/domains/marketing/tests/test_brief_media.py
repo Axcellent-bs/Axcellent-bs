@@ -1,4 +1,4 @@
-"""`prepare_brief_media`: 넘긴 기획안의 요청 초안으로 미디어 초안 만들기 + 예상 비용 조회.
+"""`prepare_brief_media`: 넘긴 기획안의 요청 초안으로 미디어 초안 만들기 + 예상 사용량 조회.
 
 외부 호출은 없다(공급자는 목, 관문은 가짜). 연결·거절·멱등 시험은 `prepare_sns_post_from_media`를
 가짜로 바꿔 ffmpeg 없이 돈다. 실제 변환까지 가는 시험은 도구가 없으면 건너뛴다.
@@ -37,15 +37,17 @@ MEDIA_ENV = (
     "MARKETING_VIDEO_PROVIDER",
     "MARKETING_VIDEO_MODEL",
     "MARKETING_AUDIO_MODE",
-    "MARKETING_FX_USD_KRW",
-    "MARKETING_FX_AS_OF",
-    "MARKETING_FX_MAX_AGE_DAYS",
-    "MARKETING_COST_SAFETY_MARGIN_PCT",
-    "MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM",
-    "MARKETING_MEDIA_MONTHLY_BUDGET_KRW",
+    "MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY",
+    "MARKETING_QUOTA_IMAGE_COUNT_MONTHLY",
+    "MARKETING_QUOTA_AUDIO_COUNT_MONTHLY",
+    "MARKETING_MEDIA_KEY_OWNER",
     sns_label.CONFIG_ENV,
     sns_label.FONT_ENV,
 )
+
+
+VIDEO_USAGE = {"unit": "seconds", "amount": 15, "input_tokens": None, "output_tokens": None}
+BGM_USAGE = {"unit": "tracks", "amount": 1, "input_tokens": None, "output_tokens": None}
 
 
 class Gate:
@@ -182,7 +184,7 @@ class FakePrepare:
                 "media_kind": draft.media_kind,
                 "asset_ref": draft.asset_ref,
                 "asset_sha256": draft.asset_sha256,
-                "generation": {"cost_krw": 1000, "total_cost_krw": 1000},
+                "generation": {"usage": VIDEO_USAGE},
                 "label": {"text": "AI 생성 영상"},
                 "check": {"verdict": "approved" if ready else "rejected", "publishable": ready},
                 "publish_input": {"post_draft_id": draft.post_draft_id},
@@ -255,7 +257,8 @@ def test_result_is_recorded_and_shown_in_the_view(fake_prepare: FakePrepare) -> 
     prepared = _view()["prepared"]
     assert prepared == out["output"]["sns_handoff"]["prepared"]
     assert prepared["stage"] == "draft_ready" and prepared["post_draft_id"] == "spd_fake0001"
-    assert prepared["media_kind"] == "reel" and prepared["cost_krw"] == 1000
+    assert prepared["media_kind"] == "reel" and prepared["usage"] == VIDEO_USAGE
+    assert "cost_krw" not in prepared  # 원화는 더 기록하지 않는다
     assert prepared["label_text"] == "AI 생성 영상" and prepared["check"]["publishable"] is True
     assert "request_sha" not in prepared
     assert _view()["draft_state"] == "caption_only"  # 넘길 때 만든 캡션 초안은 그대로다
@@ -355,89 +358,98 @@ def test_image_end_to_end_with_mock_provider(gate: Gate) -> None:
     assert after["media_estimate"]["basis"] == "ledger"
 
 
-# --- 예상 비용(조회 때 계산) -------------------------------------------------------------
+# --- 예상 사용량(조회 때 계산) -----------------------------------------------------------
 
 
-def test_estimate_for_mock_provider_reads_fixed_cost_and_month_total() -> None:
+def test_estimate_for_mock_provider_reads_usage_and_month_usage() -> None:
     estimate = _handed(fields={"category": "그림책"})["media_estimate"]
     video = estimate.pop("video")  # 길이 입력용 정보(상한은 설정값, 기본 15초)
     assert video["max_s"] == 15 and video["absolute_max_s"] == 90 and video["current_s"] == 15
     assert video["warn_duration_s"] == 15  # 기본 30이지만 운영 상한(15)을 넘지 않는다
     assert video["clips_by_duration"]["15"] == 1
-    assert video["cost_by_duration"]["15"] == skill.MOCK_COST_KRW["video"]
+    assert "cost_by_duration" not in video  # 길이별 원화 표는 없다
     assert estimate == {
         "status": "ok",
         "reason_code": None,
         "media_kind": "video",
-        "cost_krw": skill.MOCK_COST_KRW["video"],
+        "usage": VIDEO_USAGE,
         "settled": False,
         "basis": "mock",
-        "per_item_limit_krw": None,
-        "monthly_budget_krw": None,
-        "month_total_krw": 0,
+        "quota": {
+            "unit": "seconds",
+            "used": 0,
+            "limit": None,
+            "remaining_pct": None,
+            "applies": True,
+        },
     }
     assert {k: v for k, v in _view()["media_estimate"].items() if k != "video"} == estimate
 
 
-def test_estimate_reads_price_table_and_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_estimate_reads_usage_and_quota(monkeypatch: pytest.MonkeyPatch) -> None:
     _handed(fields={"category": "그림책"})
     settings = {
         "MARKETING_VIDEO_PROVIDER": "gemini",
         "MARKETING_VIDEO_MODEL": "gemini-omni-1.2-flash",
-        "MARKETING_FX_USD_KRW": "1400",
-        "MARKETING_FX_AS_OF": datetime.now(UTC).date().isoformat(),
-        "MARKETING_FX_MAX_AGE_DAYS": "7",
-        "MARKETING_COST_SAFETY_MARGIN_PCT": "5",
-        "MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM": "2000",
-        "MARKETING_MEDIA_MONTHLY_BUDGET_KRW": "30000",
+        "MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY": "40",
     }
     for name, value in settings.items():
         monkeypatch.setenv(name, value)
     estimate = _view()["media_estimate"]
-    assert estimate["status"] == "ok" and estimate["basis"] == "price_table", estimate
-    assert 0 < estimate["cost_krw"] <= 2000
-    assert estimate["per_item_limit_krw"] == 2000 and estimate["monthly_budget_krw"] == 30000
+    assert estimate["status"] == "ok" and estimate["basis"] == "estimate", estimate
+    assert estimate["usage"]["unit"] == "seconds" and estimate["usage"]["amount"] == 15
+    assert estimate["quota"] == {
+        "unit": "seconds",
+        "used": 0,
+        "limit": 40,
+        "remaining_pct": 100,
+        "applies": True,
+    }
 
-    monkeypatch.setenv("MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM", "100")
+    monkeypatch.setenv("MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY", "10")
     over = _view()["media_estimate"]
-    assert over["status"] == "blocked" and over["reason_code"] == "cost_over_single"
-    assert over["cost_krw"] == estimate["cost_krw"]
-    # 건당 상한에 걸려도 다른 길이를 고를 수 있게 길이별 비용 표는 준다(클립이 늘면 비용이 는다)
-    table = {int(k): v for k, v in over["video"]["cost_by_duration"].items()}
-    assert table[15] == estimate["cost_krw"] and table[3] < table[15]
-    assert over["video"]["clips_by_duration"]["15"] == 1  # 막혀도 클립 수 표는 준다
-    assert over["video"]["max_s"] == 15 and 16 not in table
+    assert over["status"] == "blocked" and over["reason_code"] == "quota_exceeded"
+    assert over["usage"]["amount"] == 15  # 막혀도 예상 사용량은 보여 준다
+    # 예산에 걸려도 다른 길이를 고를 수 있게 길이별 클립 수 표는 준다
+    assert over["video"]["clips_by_duration"]["15"] == 1
+    assert over["video"]["max_s"] == 15 and "16" not in over["video"]["clips_by_duration"]
+
+    monkeypatch.setenv("MARKETING_MEDIA_KEY_OWNER", "customer")  # 고객사 키는 예산이 없다
+    free = _view()["media_estimate"]
+    assert free["status"] == "ok" and free["quota"]["applies"] is False
+    assert free["quota"]["limit"] is None and free["quota"]["remaining_pct"] is None
+    monkeypatch.delenv("MARKETING_MEDIA_KEY_OWNER")
+    monkeypatch.setenv("MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY", "40")
 
     monkeypatch.setenv("MARKETING_VIDEO_MAX_DURATION_S", "90")
     video90 = _view()["media_estimate"]["video"]
-    longer = video90["cost_by_duration"]
-    # 경고창용 정보: 경고 길이(기본 30)와 길이별 클립 수(표와 같은 길이)
+    # 경고창용 정보: 경고 길이(기본 30)와 길이별 클립 수
     assert video90["warn_duration_s"] == 30
     clips = video90["clips_by_duration"]
-    assert set(clips) == set(longer) and clips["15"] == 1 and clips["90"] == 7
+    assert clips["15"] == 1 and clips["90"] == 7
     assert clips["30"] >= 2 and clips["90"] > clips["30"]
     monkeypatch.setenv("MARKETING_VIDEO_WARN_DURATION_S", "45")
     assert _view()["media_estimate"]["video"]["warn_duration_s"] == 45
     monkeypatch.setenv("MARKETING_VIDEO_WARN_DURATION_S", "100")  # 상한 밖 -> 기본값
     assert _view()["media_estimate"]["video"]["warn_duration_s"] == 30
     monkeypatch.delenv("MARKETING_VIDEO_WARN_DURATION_S")
-    assert int(longer["90"]) > int(longer["30"]) > int(longer["15"])  # 90초 = 클립 7개 이어 붙임
     monkeypatch.delenv("MARKETING_VIDEO_MAX_DURATION_S")
 
-    monkeypatch.setenv("MARKETING_MEDIA_MAX_COST_KRW_PER_ITEM", "2000")
-    monkeypatch.setenv("MARKETING_MEDIA_MONTHLY_BUDGET_KRW", "500")
-    assert _view()["media_estimate"]["reason_code"] == "budget_exceeded"
+    monkeypatch.delenv("MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY")  # 우리 키인데 예산이 없다
+    unset = _view()["media_estimate"]
+    assert unset["reason_code"] == "quota_not_configured" and unset["usage"] is None
 
-    monkeypatch.setenv("MARKETING_VIDEO_MODEL", "no-such-model")
-    unknown = _view()["media_estimate"]
-    assert unknown["reason_code"] == "price_not_found" and unknown["cost_krw"] is None
+    monkeypatch.setenv("MARKETING_QUOTA_VIDEO_SECONDS_MONTHLY", "40")
+    monkeypatch.setenv("MARKETING_VIDEO_MODEL", "")
+    missing = _view()["media_estimate"]
+    assert missing["reason_code"] == "model_not_configured" and missing["usage"] is None
 
 
 def test_estimate_is_blocked_for_missing_fields_and_carousel() -> None:
     assert _handed(brief=NO_CATEGORY)["media_estimate"]["reason_code"] == "fields_missing"
     carousel = _handed("carousel", "PROP-7", fields={"category": "그림책"})["media_estimate"]
     assert carousel["status"] == "blocked"
-    assert carousel["reason_code"] == "carousel_items_undecided" and carousel["cost_krw"] is None
+    assert carousel["reason_code"] == "carousel_items_undecided" and carousel["usage"] is None
     _receive("PROP-8")
     assert _view("PROP-8")["media_estimate"] is None  # 넘기지 않은 기획안에는 없다
 
@@ -539,8 +551,7 @@ class FakeAudioPrepare(FakePrepare):
         result = await super().__call__(request, **deps)
         output = dict(result.output or {})
         generation = {
-            "cost_krw": 1000,
-            "total_cost_krw": 1100 if bgm else 1000,
+            "usage": VIDEO_USAGE,
             "audio_mode": "bgm_overlay" if bgm else self.first_audio_mode,
             "has_audio": True if bgm else self.first_has_audio,
             "muted": False,
@@ -549,7 +560,7 @@ class FakeAudioPrepare(FakePrepare):
             generation["bgm"] = {
                 "provider": "mock",
                 "model_id": "mock-media",
-                "cost_krw": 100,
+                "usage": BGM_USAGE,
                 "execution_id": "exe_bgm",
                 "prompt_sha256": "p" * 64,
                 "media_id": "med_bgm",
@@ -586,7 +597,7 @@ def _ready_video() -> dict:
     return out["output"]["sns_handoff"]
 
 
-def test_provider_audio_video_waits_for_a_decision_and_shows_bgm_cost(
+def test_provider_audio_video_waits_for_a_decision_and_shows_bgm_usage(
     audio_prepare: FakeAudioPrepare,
 ) -> None:
     state = _ready_video()
@@ -598,7 +609,8 @@ def test_provider_audio_video_waits_for_a_decision_and_shows_bgm_cost(
         "needs_decision": True,
         "decision": None,
     }
-    assert state["media_estimate"]["bgm"]["cost_krw"] == skill.MOCK_COST_KRW["audio"]
+    assert state["media_estimate"]["bgm"]["usage"] == BGM_USAGE
+    assert "cost_krw" not in state["media_estimate"]["bgm"]
     # 듣고 정하기 전에는 게시 요청을 만들 수 없다
     assert state["publish"]["reason_code"] == "audio_decision_required"
     assert state["publish"]["can_request"] is False
@@ -618,7 +630,7 @@ def test_keep_records_the_decision_once_and_unlocks_publish_request(
     state = _view()
     assert state["prepared"]["audio"]["decision"] == decision
     assert state["publish"]["reason_code"] is None and state["publish"]["can_request"] is True
-    assert state["media_estimate"].get("bgm") is None  # 정한 뒤에는 BGM 비용 안내가 없다
+    assert state["media_estimate"].get("bgm") is None  # 정한 뒤에는 BGM 사용량 안내가 없다
     again = _choose("bgm")
     assert again["outcome"] == "audio_already_decided" and len(audio_prepare.requests) == 1
 
@@ -636,10 +648,10 @@ def test_bgm_choice_reruns_with_overlay_settings_and_records_audit(
     assert audio_prepare.requests[0].input["media_ref"] == sent.input["media_ref"]  # 영상은 재생
     prepared = _view()["prepared"]
     decision = prepared["audio"]["decision"]
-    assert decision["choice"] == "bgm" and decision["bgm_cost_krw"] == 100
+    assert decision["choice"] == "bgm" and decision["bgm_usage"] == BGM_USAGE
     assert decision["bgm_execution_id"] == "exe_bgm" and decision["bgm_prompt_sha256"] == "p" * 64
     assert decision["previous_asset_sha256"] == "a" * 64 and prepared["asset_sha256"] == "b" * 64
-    assert prepared["cost_krw"] == 1100 and prepared["audio"]["needs_decision"] is False
+    assert prepared["usage"] == VIDEO_USAGE and prepared["audio"]["needs_decision"] is False
     assert _view()["publish"]["reason_code"] is None  # 결정이 있으니 게시 요청 가능
 
 

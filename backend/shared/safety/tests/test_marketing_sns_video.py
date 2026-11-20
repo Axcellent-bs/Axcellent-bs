@@ -27,7 +27,6 @@ def _video(**over: Any) -> dict[str, Any]:
         "post_draft_id": "pd_1",
         "media_kind": "video",
         "duration_s": 8,
-        "cost_krw": 1200,
         **over,
     }
 
@@ -109,7 +108,7 @@ async def test_video_within_limits_passes_on_rules_without_a_verifier_agent(
 ) -> None:
     decision = await gate.execute(act("generate_media", "marketing", "v1", **_video()))
     assert (decision.grade, decision.status, decision.verifier) == ("B", "executed", "safety")
-    assert decision.computed_amount == 1200
+    assert decision.computed_amount is None  # 원화 금액은 보지 않는다(예산은 마케팅 코드가 건다)
     assert verifier.tasks == []
 
 
@@ -117,8 +116,6 @@ async def test_video_within_limits_passes_on_rules_without_a_verifier_agent(
 @pytest.mark.parametrize(
     ("over", "key"),
     [
-        ({"cost_krw": 2000}, "video_cost_single"),
-        ({"cost_krw": 0}, "media_cost_zero"),
         ({"duration_s": 91}, "video_duration"),
         ({"duration_s": None}, "video_duration"),
     ],
@@ -134,34 +131,18 @@ async def test_video_over_a_limit_is_held(gate: Gate, act, over: dict[str, Any],
 
 
 @pytest.mark.asyncio
-async def test_video_daily_total_holds_the_clip_that_reaches_the_limit(gate: Gate, act) -> None:
-    for n in range(5):
+async def test_video_has_no_money_rule_even_if_a_cost_is_sent(gate: Gate, act) -> None:
+    """원화 건당·하루 합계·0원 규칙은 없다. 예전 호출처럼 cost_krw를 보내도 보지 않는다."""
+    for n, cost in enumerate((0, 1900, 2000, 1_000_000)):
         ok = await gate.execute(
-            act("generate_media", "marketing", f"v{n}", **_video(cost_krw=1900))
+            act("generate_media", "marketing", f"v{n}", **_video(cost_krw=cost))
         )
-        assert ok.status == "executed"
-    held = await gate.execute(act("generate_media", "marketing", "v6", **_video(cost_krw=1900)))
-    assert held.status == "held"
-    assert _rule_keys(gate, held.review_id) == {"media_cost_daily"}
-
-
-@pytest.mark.asyncio
-async def test_video_cost_must_be_computed_and_match_the_claim(gate: Gate, act) -> None:
-    missing = await gate.execute(
-        act(
-            "generate_media",
-            "marketing",
-            "v1",
-            post_draft_id="pd_1",
-            media_kind="video",
-            duration_s=8,
-        )
+        assert (ok.grade, ok.status) == ("B", "executed")
+        assert ok.computed_amount is None
+    claim = await gate.execute(
+        act("generate_media", "marketing", "v9", **_video(claimed_cost_krw=900))
     )
-    assert (missing.status, missing.hold_reason) == ("held", HoldReason.SCHEMA_INVALID)
-    mismatch = await gate.execute(
-        act("generate_media", "marketing", "v2", **_video(claimed_cost_krw=900))
-    )
-    assert (mismatch.status, mismatch.hold_reason) == ("held", HoldReason.AMOUNT_MISMATCH)
+    assert claim.status == "executed"  # 요청 쪽이 적은 금액과 대조하지 않는다
 
 
 @pytest.mark.asyncio
@@ -179,19 +160,20 @@ async def test_notice_on_sns_channel_is_held_and_other_channels_stay_a(gate: Gat
 
 
 def _image(**over: Any) -> dict[str, Any]:
-    return {"post_draft_id": "pd_1", "media_kind": "image", "cost_krw": 90, **over}
+    return {"post_draft_id": "pd_1", "media_kind": "image", **over}
 
 
 @pytest.mark.asyncio
-async def test_image_has_no_length_and_its_own_cost_limit(gate: Gate, verifier: Any, act) -> None:
+async def test_image_has_no_length_and_no_cost_limit(gate: Gate, verifier: Any, act) -> None:
     ok = await gate.execute(act("generate_media", "marketing", "i1", **_image()))
     assert (ok.grade, ok.status, ok.verifier) == ("B", "executed", "safety")
     assert verifier.tasks == []
-    # 영상 상한(2,000원) 아래여도 이미지 상한(400원)을 넘으면 사람이 본다
-    held = await gate.execute(act("generate_media", "marketing", "i2", **_image(cost_krw=400)))
-    assert _rule_keys(gate, held.review_id) == {"image_cost_single"}
-    zero = await gate.execute(act("generate_media", "marketing", "i3", **_image(cost_krw=0)))
-    assert _rule_keys(gate, zero.review_id) == {"media_cost_zero"}
+    # 예전 금액 기준(400원·0원)은 없다
+    for n, cost in enumerate((0, 400, 100_000)):
+        again = await gate.execute(
+            act("generate_media", "marketing", f"i{n + 2}", **_image(cost_krw=cost))
+        )
+        assert (again.grade, again.status) == ("B", "executed")
 
 
 @pytest.mark.asyncio
@@ -200,20 +182,6 @@ async def test_unknown_media_kind_is_held(gate: Gate, act, kind: str | None) -> 
     held = await gate.execute(act("generate_media", "marketing", "m1", **_image(media_kind=kind)))
     assert held.status == "held"
     assert "media_kind_known" in _rule_keys(gate, held.review_id)
-
-
-@pytest.mark.asyncio
-async def test_daily_total_adds_images_and_videos(gate: Gate, act) -> None:
-    for n in range(5):
-        ok = await gate.execute(
-            act("generate_media", "marketing", f"v{n}", **_video(cost_krw=1900))
-        )
-        assert ok.status == "executed"
-    for n in range(1):
-        ok = await gate.execute(act("generate_media", "marketing", f"i{n}", **_image(cost_krw=300)))
-        assert ok.status == "executed"
-    held = await gate.execute(act("generate_media", "marketing", "i9", **_image(cost_krw=300)))
-    assert _rule_keys(gate, held.review_id) == {"media_cost_daily"}
 
 
 @pytest.mark.asyncio
@@ -226,17 +194,13 @@ async def test_marketing_chat_is_a_and_only_marketing_asks(gate: Gate, act, acti
 
 
 @pytest.mark.asyncio
-async def test_bgm_audio_has_its_own_cost_limit(gate: Gate, act) -> None:
-    """영상에 입히는 AI 연주곡 BGM(audio): 곡당 66·132원은 B로 실행, 200원 이상이면 사람이 본다."""
-    for n, cost in enumerate((66, 132)):
+async def test_bgm_audio_is_b_without_a_cost_limit(gate: Gate, act) -> None:
+    """영상에 입히는 AI 연주곡 BGM(audio)도 B로 실행된다. 곡당 금액 기준은 없다."""
+    for n in range(3):
         ok = await gate.execute(
-            act("generate_media", "marketing", f"a{n}", **_image(media_kind="audio", cost_krw=cost))
+            act("generate_media", "marketing", f"a{n}", **_image(media_kind="audio"))
         )
         assert (ok.grade, ok.status) == ("B", "executed")
-    held = await gate.execute(
-        act("generate_media", "marketing", "a9", **_image(media_kind="audio", cost_krw=200))
-    )
-    assert _rule_keys(gate, held.review_id) == {"audio_cost_single"}
 
 
 @pytest.mark.asyncio

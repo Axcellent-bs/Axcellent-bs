@@ -1,15 +1,19 @@
-"""미디어 비용 장부 (SQLite). 예약 → 확정으로 월 누적을 센다. `briefs.py`와 같은 방식이다.
+"""미디어 사용량 장부 (SQLite). 예약 → 확정으로 월 사용량을 센다. `briefs.py`와 같은 방식이다.
 
+- 센 것은 원화가 아니라 사용량이다(`usage.py`): 영상 초, 이미지 장, BGM 곡. 종류별로 따로 센다.
+  토큰이 응답에 있으면 입력·출력 토큰도 같이 남긴다. 예전 원화 칸(`krw_*`·`usd_*`·`fx*`)은
+  옛 장부 파일 호환용으로 남아 있고, 새 행에는 0·빈 값이 들어간다.
 - 파일은 환경변수 `MARKETING_MEDIA_LEDGER_DB`. 비어 있으면 메모리(`:memory:`)라
-  다시 시작하면 월 누적이 0으로 돌아간다(테스트·로컬 기본).
+  다시 시작하면 월 사용량이 0으로 돌아간다(테스트·로컬 기본).
   실제 공급자를 켤 때는 파일을 정해야 한다.
 - 열 수 없으면 `LedgerError`로 시작 때 실패한다(조용히 메모리로 넘어가지 않는다).
-- 행 상태: `reserved`(호출 전 예약, 추정액) → `settled`(확정, 실제 또는 추정 사용량 기준) |
-  `failed`(공급자 오류. 과금 여부를 모르므로 추정액을 그대로 센다) |
+- 행 상태: `reserved`(호출 전 예약, 추정 사용량) → `settled`(확정) |
+  `failed`(공급자 오류. 과금 여부를 모르므로 추정 사용량을 그대로 센다) |
   `released`(관문이 막아 호출하지 않음. 세지 않는다).
-- 월 누적 = 같은 달의 `settled`(확정액) + `reserved`·`failed`(추정액).
-- 호출 직전 예약은 잠금 안에서 월 누적을 보고 한 번에 넣는다(동시에 와도 상한을 넘기지 않는다).
-- 프로세스가 예약 뒤에 죽으면 `reserved` 행이 남아 월 누적을 계속 채운다(보수적).
+- 월 사용량 = 같은 달 같은 종류의 `settled`·`reserved`·`failed` 사용량 합.
+- 호출 직전 예약은 잠금 안에서 월 사용량을 보고 한 번에 넣는다(동시에 와도 예산을 넘기지 않는다).
+  예산은 우리 키(서버 키)에만 걸고, 고객사 키는 `monthly_cap=None`으로 부른다.
+- 프로세스가 예약 뒤에 죽으면 `reserved` 행이 남아 월 사용량을 계속 채운다(보수적).
   사람이 확인해 지운다.
 - 키·토큰은 저장하지 않는다.
 """
@@ -21,10 +25,10 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
 from typing import Literal
 
 from marketing_agent.media.config import LEDGER_DB_ENV
+from marketing_agent.media.usage import KINDS, UsageAmount
 
 UsageSource = Literal["actual", "estimate"]
 
@@ -52,6 +56,15 @@ CREATE INDEX IF NOT EXISTS media_ledger_key ON media_ledger (key);
 CREATE INDEX IF NOT EXISTS media_ledger_month ON media_ledger (month);
 """
 
+# 사용량 칸. 옛 장부 파일에는 없으니 열 때 한 번 더한다(없는 칸만)
+_USAGE_COLUMNS = (
+    ("usage_unit", "TEXT"),
+    ("usage_est", "INTEGER"),
+    ("usage_actual", "INTEGER"),
+    ("input_tokens", "INTEGER"),
+    ("output_tokens", "INTEGER"),
+)
+
 
 class LedgerError(Exception):
     """장부를 열거나 읽거나 쓰지 못했다(디스크·권한·잠금)."""
@@ -66,12 +79,11 @@ class LedgerRow:
     media_kind: str
     provider: str
     model_id: str
-    krw_est: int
-    usd_est: Decimal | None
-    usd_actual: Decimal | None
-    krw_actual: int | None
-    fx: Decimal | None
-    fx_as_of: str | None
+    usage_unit: str | None
+    usage_est: int | None
+    usage_actual: int | None
+    input_tokens: int | None
+    output_tokens: int | None
     usage_source: str | None
     result_json: str | None
 
@@ -81,26 +93,23 @@ class Reservation:
     outcome: Literal["reserved", "settled", "in_progress", "over_budget"]
     # reserved면 새 행, settled면 이전 확정 행, in_progress면 진행 중인 행
     row: LedgerRow | None = None
-    month_total: int = 0
+    # 같은 종류의 이번 달 사용량(예약한 건 제외). 단위는 종류의 사용량 단위
+    month_used: int = 0
 
 
 _COLUMNS = (
-    "seq, key, month, status, media_kind, provider, model_id, krw_est, usd_est, usd_actual,"
-    " krw_actual, fx, fx_as_of, usage_source, result_json"
+    "seq, key, month, status, media_kind, provider, model_id, usage_unit, usage_est,"
+    " usage_actual, input_tokens, output_tokens, usage_source, result_json"
+)
+_COUNTED = "status IN ('settled', 'reserved', 'failed')"
+_USED_SQL = (
+    "COALESCE(SUM(CASE WHEN status = 'settled' THEN COALESCE(usage_actual, usage_est, 0)"
+    " ELSE COALESCE(usage_est, 0) END), 0)"
 )
 
 
-def _dec(value: str | None) -> Decimal | None:
-    return Decimal(value) if value is not None else None
-
-
 def _row(values: tuple) -> LedgerRow:
-    seq, key, month, status, kind, provider, model_id, krw_est = values[:8]
-    return LedgerRow(
-        seq, key, month, status, kind, provider, model_id, krw_est,
-        _dec(values[8]), _dec(values[9]), values[10], _dec(values[11]), values[12],
-        values[13], values[14],
-    )  # fmt: skip
+    return LedgerRow(*values)
 
 
 class MediaLedger:
@@ -115,6 +124,10 @@ class MediaLedger:
             self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
             with self._lock, self._conn:
                 self._conn.executescript(_SCHEMA)
+                have = {r[1] for r in self._conn.execute("PRAGMA table_info(media_ledger)")}
+                for name, kind in _USAGE_COLUMNS:
+                    if name not in have:
+                        self._conn.execute(f"ALTER TABLE media_ledger ADD COLUMN {name} {kind}")  # noqa: S608
         except sqlite3.Error as error:
             raise LedgerError(f"미디어 장부를 열 수 없다: {type(error).__name__}") from error
 
@@ -128,15 +141,18 @@ class MediaLedger:
         except sqlite3.Error as error:
             raise LedgerError(f"미디어 장부를 읽을 수 없다: {type(error).__name__}") from error
 
-    def month_total(self, month: str) -> int:
-        """같은 달 확정액 + 예약·실패 추정액."""
+    def month_usage(self, month: str, kind: str) -> int:
+        """같은 달 같은 종류의 확정 사용량 + 예약·실패 추정 사용량(종류의 단위)."""
         rows = self._query(
-            "SELECT COALESCE(SUM(CASE WHEN status = 'settled' THEN COALESCE(krw_actual, krw_est)"
-            " ELSE krw_est END), 0) FROM media_ledger"
-            " WHERE month = ? AND status IN ('settled', 'reserved', 'failed')",
-            (month,),
+            f"SELECT {_USED_SQL} FROM media_ledger"  # noqa: S608
+            f" WHERE month = ? AND media_kind = ? AND {_COUNTED}",
+            (month, kind),
         )
         return int(rows[0][0])
+
+    def month_usage_all(self, month: str) -> dict[str, int]:
+        """종류별 월 사용량. 종류마다 단위가 달라 더하지 않는다."""
+        return {kind: self.month_usage(month, kind) for kind in KINDS}
 
     def settled_for(self, key: str) -> LedgerRow | None:
         rows = self._query(
@@ -154,14 +170,14 @@ class MediaLedger:
         media_kind: str,
         provider: str,
         model_id: str,
-        krw_est: int,
-        usd_est: Decimal | None,
+        usage: UsageAmount,
         monthly_cap: int | None,
         now: datetime,
     ) -> Reservation:
         """키별 1행 예약. 이미 확정된 키는 그 행을, 진행 중이면 `in_progress`를 돌려준다.
 
-        `monthly_cap`이 있고 (월 누적 + `krw_est`)가 넘으면 행을 만들지 않고 `over_budget`.
+        `monthly_cap`(그 종류의 월 예산)이 있고 (월 사용량 + 이번 예상 사용량)이 넘으면
+        행을 만들지 않고 `over_budget`. 없으면(고객사 키) 예산 검사를 하지 않는다.
         """
         try:
             with self._lock, self._conn:
@@ -179,31 +195,29 @@ class MediaLedger:
                 ).fetchall()
                 if running:
                     return Reservation("in_progress", _row(running[0]))
-                total = int(
+                used = int(
                     self._conn.execute(
-                        "SELECT COALESCE(SUM(CASE WHEN status = 'settled'"
-                        " THEN COALESCE(krw_actual, krw_est) ELSE krw_est END), 0)"
-                        " FROM media_ledger WHERE month = ?"
-                        " AND status IN ('settled', 'reserved', 'failed')",
-                        (month,),
+                        f"SELECT {_USED_SQL} FROM media_ledger"  # noqa: S608
+                        f" WHERE month = ? AND media_kind = ? AND {_COUNTED}",
+                        (month, media_kind),
                     ).fetchone()[0]
                 )
-                if monthly_cap is not None and total + krw_est > monthly_cap:
-                    return Reservation("over_budget", None, total)
+                if monthly_cap is not None and used + usage.amount > monthly_cap:
+                    return Reservation("over_budget", None, used)
                 cursor = self._conn.execute(
                     "INSERT INTO media_ledger (key, month, status, media_kind, provider, model_id,"
-                    " krw_est, usd_est, created_at) VALUES (?, ?, 'reserved', ?, ?, ?, ?, ?, ?)",
+                    " krw_est, usage_unit, usage_est, created_at)"
+                    " VALUES (?, ?, 'reserved', ?, ?, ?, 0, ?, ?, ?)",
                     (
-                        key, month, media_kind, provider, model_id, krw_est,
-                        str(usd_est) if usd_est is not None else None, now.isoformat(),
+                        key, month, media_kind, provider, model_id, usage.unit, usage.amount,
+                        now.isoformat(),
                     ),
                 )  # fmt: skip
-                seq = cursor.lastrowid
                 inserted = self._conn.execute(
                     f"SELECT {_COLUMNS} FROM media_ledger WHERE seq = ?",  # noqa: S608
-                    (seq,),
+                    (cursor.lastrowid,),
                 ).fetchall()
-            return Reservation("reserved", _row(inserted[0]), total)
+            return Reservation("reserved", _row(inserted[0]), used)
         except sqlite3.Error as error:
             raise LedgerError(f"미디어 장부에 예약할 수 없다: {type(error).__name__}") from error
 
@@ -215,11 +229,11 @@ class MediaLedger:
             raise LedgerError(f"미디어 장부를 고칠 수 없다: {type(error).__name__}") from error
 
     def release(self, seq: int) -> None:
-        """관문이 막아 호출하지 않은 예약을 푼다(월 누적에서 빠진다)."""
+        """관문이 막아 호출하지 않은 예약을 푼다(월 사용량에서 빠진다)."""
         self._finish(seq, "UPDATE media_ledger SET status = 'released' WHERE seq = ?", ())
 
     def mark_failed(self, seq: int, now: datetime) -> None:
-        """공급자 오류. 과금 여부를 모르므로 추정액을 계속 센다."""
+        """공급자 오류. 과금 여부를 모르므로 추정 사용량을 계속 센다."""
         self._finish(
             seq,
             "UPDATE media_ledger SET status = 'failed', settled_at = ? WHERE seq = ?",
@@ -231,26 +245,23 @@ class MediaLedger:
         seq: int,
         *,
         model_id: str,
-        usd_actual: Decimal | None,
-        krw_actual: int,
-        fx: Decimal | None,
-        fx_as_of: str | None,
+        usage: UsageAmount,
         usage_source: UsageSource,
         result_json: str,
         now: datetime,
     ) -> None:
-        """예약을 확정액으로 바꾼다. 사용량이 없으면 호출한 쪽이 추정액을 `krw_actual`로 넘긴다."""
+        """예약을 확정 사용량으로 바꾼다. 토큰은 응답에 있을 때만 들어간다."""
         self._finish(
             seq,
-            "UPDATE media_ledger SET status = 'settled', model_id = ?, usd_actual = ?,"
-            " krw_actual = ?, fx = ?, fx_as_of = ?, usage_source = ?, result_json = ?,"
-            " settled_at = ? WHERE seq = ?",
+            "UPDATE media_ledger SET status = 'settled', model_id = ?, usage_unit = ?,"
+            " usage_actual = ?, input_tokens = ?, output_tokens = ?, usage_source = ?,"
+            " result_json = ?, settled_at = ? WHERE seq = ?",
             (
                 model_id,
-                str(usd_actual) if usd_actual is not None else None,
-                krw_actual,
-                str(fx) if fx is not None else None,
-                fx_as_of,
+                usage.unit,
+                usage.amount,
+                usage.input_tokens,
+                usage.output_tokens,
                 usage_source,
                 result_json,
                 now.isoformat(),

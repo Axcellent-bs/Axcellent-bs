@@ -1,4 +1,4 @@
-"""비용 임계값 화면 변경: 승인 관문·요청자≠승인자·코드 상수 범위·mtime 재읽기·마케팅 불가."""
+"""안전 임계값(영상 길이) 화면 변경: 승인 관문·요청자≠승인자·상수 범위·mtime 재읽기·마케팅 불가."""
 
 from __future__ import annotations
 
@@ -61,10 +61,10 @@ def test_absolute_maxima_cover_the_defaults() -> None:
 def test_request_is_held_and_nothing_changes_until_approved_and_applied(
     client: Any, gate: Gate, _files: Path
 ) -> None:
-    held = _ask(client, "예진", "video_cost_single", 3000).json()["data"]
+    held = _ask(client, "예진", "video_duration", 30).json()["data"]
     assert held["status"] == "held"
-    rule = next(r for r in gate.thresholds.rules if r.key == "video_cost_single")
-    assert rule.value == 2000
+    rule = next(r for r in gate.thresholds.rules if r.key == "video_duration")
+    assert rule.value == 90
     assert not _files.exists()
     pending = client.get(BASE).json()["data"]["requests"]
     assert [(r["status"], r["requested_by"]) for r in pending] == [("pending", "예진")]
@@ -80,12 +80,13 @@ def test_request_is_held_and_nothing_changes_until_approved_and_applied(
         f"{BASE}/requests/{held['review_id']}/apply", headers=_bearer(_token("재현"))
     )
     assert applied.status_code == 200
-    assert applied.json()["data"]["new"] == 3000
+    assert applied.json()["data"]["new"] == 30
     # 재시작 없이 같은 관문이 새 값을 쓴다
-    assert next(r for r in gate.thresholds.rules if r.key == "video_cost_single").value == 3000
+    assert next(r for r in gate.thresholds.rules if r.key == "video_duration").value == 30
     view = client.get(BASE).json()["data"]
-    row = next(i for i in view["items"] if i["key"] == "video_cost_single")
-    assert (row["default"], row["value"], row["source"]) == (2000, 3000, "file")
+    row = next(i for i in view["items"] if i["key"] == "video_duration")
+    assert (row["default"], row["value"], row["source"]) == (90, 30, "file")
+    assert [i["key"] for i in view["items"]] == ["video_duration"]  # 원화 비용 규칙은 없다
     assert view["history"][0]["approved_by"] == "재현"
     again = client.post(
         f"{BASE}/requests/{held['review_id']}/apply", headers=_bearer(_token("재현"))
@@ -97,10 +98,11 @@ def test_out_of_range_and_unknown_rules_are_refused_before_a_review_exists(
     client: Any, gate: Gate
 ) -> None:
     for key, value in (
-        ("video_cost_single", 10_001),
-        ("video_cost_single", 99),
         ("video_duration", 91),
-        ("video_cost_single", 2000),
+        ("video_duration", 0),
+        ("video_duration", 90),
+        ("video_cost_single", 1000),  # 없앤 원화 규칙
+        ("media_cost_daily", 5000),
     ):
         assert _ask(client, "예진", key, value).status_code in (400, 409)
     assert _ask(client, "예진", "daily_count_x", 5).status_code == 400
@@ -108,8 +110,8 @@ def test_out_of_range_and_unknown_rules_are_refused_before_a_review_exists(
 
 
 def test_only_logged_in_operator_or_admin_may_ask(client: Any, monkeypatch: Any) -> None:
-    assert _ask(client, "회원", "video_cost_single", 3000, role="member").status_code == 403
-    body = {"rule_key": "video_cost_single", "requested_value": 3000, "reason": "x"}
+    assert _ask(client, "회원", "video_duration", 30, role="member").status_code == 403
+    body = {"rule_key": "video_duration", "requested_value": 30, "reason": "x"}
     assert client.post(f"{BASE}/requests", json=body).status_code == 403
     agent = {"Authorization": "Bearer mock:marketing"}
     assert client.post(f"{BASE}/requests", json=body, headers=agent).status_code == 403
@@ -125,7 +127,7 @@ async def test_agents_cannot_request_the_policy_action(gate: Gate) -> None:
         requester="marketing",
         context_id="ctx",
         idempotency_key="k1",
-        params={"rule_key": "video_cost_single", "requested_value": 9000},
+        params={"rule_key": "video_duration", "requested_value": 30},
     )
     decision = await gate.execute(request)
     assert decision.status == "held"  # 미등록 요청자는 보류되고 어떤 값도 적용되지 않는다
@@ -136,24 +138,25 @@ def test_file_values_are_reread_on_mtime_and_bad_values_are_ignored(_files: Path
     base = load_thresholds()
 
     def value() -> int:
-        return next(
-            r for r in cost_policy.effective(base).rules if r.key == "video_cost_single"
-        ).value
+        return next(r for r in cost_policy.effective(base).rules if r.key == "video_duration").value
 
-    assert value() == 2000
-    _files.write_text(json.dumps({"values": {"video_cost_single": {"value": 2500}}}))
+    assert value() == 90
+    _files.write_text(json.dumps({"values": {"video_duration": {"value": 45}}}))
     os.utime(_files, ns=(1, 1))
-    assert value() == 2500
-    _files.write_text(json.dumps({"values": {"video_cost_single": {"value": 99999}}}))
+    assert value() == 45
+    _files.write_text(json.dumps({"values": {"video_duration": {"value": 99999}}}))
     os.utime(_files, ns=(2, 2))
-    assert value() == 2000  # 절대 상한 밖은 기본값
-    _files.write_text("깨짐")
+    assert value() == 90  # 절대 상한 밖은 기본값
+    _files.write_text(json.dumps({"values": {"video_cost_single": {"value": 2500}}}))
     os.utime(_files, ns=(3, 3))
-    assert value() == 2000
+    assert value() == 90  # 없앤 규칙 값은 무시
+    _files.write_text("깨짐")
+    os.utime(_files, ns=(4, 4))
+    assert value() == 90
 
 
 def test_without_a_policy_file_changes_are_refused(client: Any, monkeypatch: Any) -> None:
     monkeypatch.delenv(cost_policy.FILE_ENV)
     monkeypatch.delenv("SAFETY_STATE_DB", raising=False)
-    assert _ask(client, "예진", "video_cost_single", 3000).status_code == 400
+    assert _ask(client, "예진", "video_duration", 30).status_code == 400
     assert client.get(BASE).json()["data"]["editable"] is False
