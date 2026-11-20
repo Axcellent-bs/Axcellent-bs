@@ -44,7 +44,7 @@ export interface OfficeTalk {
   /** 그 방에서 답을 기다리는 부서 */
   busyIn: (room: string) => string[];
   /** 보내기. 성공하면 true (실패면 입력창에 글을 되돌린다). room을 안 주면 전체 대화방 */
-  send: (key: string, message: string, room?: string) => Promise<boolean>;
+  send: (key: string, message: string, room?: string, recordId?: string) => Promise<boolean>;
   /** 섞을 사람 대화·시스템 줄 (시각순, 모든 방. 방은 item.room) */
   items: ChatItem[];
   /** 처음 불러온 지난 대화 id (말풍선 애니메이션 없이 보인다) */
@@ -176,7 +176,8 @@ export function useOfficeTalk(): OfficeTalk {
     return best?.thread ?? null;
   }, [account, loaded]);
 
-  const send = useCallback(async (key: string, message: string, room: string = ALL_ROOM) => {
+  // recordId: 마케팅에 올린 캐릭터 이미지로 먼저 만든 이미지 시트 기록(CR-…). 마케팅 대화가 시트·스토리보드로 답한다
+  const send = useCallback(async (key: string, message: string, room: string = ALL_ROOM, recordId?: string) => {
     const a = agents.find((x) => x.key === key);
     const sk = sendKey(key, room);
     if (!account || !a?.talk || sending[sk]) return false;
@@ -186,7 +187,8 @@ export function useOfficeTalk(): OfficeTalk {
     setSending((s) => ({ ...s, [sk]: { text: message, at: new Date().toISOString(), room } }));
     try {
       // safety·hr·archive만 body에 room_id (단톡방 대화라 모두가 원문을 본다). 중계 8곳은 body를 바꾸지 않는다
-      const next = await a.talk.send(officeSendBody({ agent: key, room, threadId: keep ? cur.id : null, message }));
+      const body = officeSendBody({ agent: key, room, threadId: keep ? cur.id : null, message });
+      const next = await a.talk.send(recordId ? { ...body, record_id: recordId } : body);
       if (!keep) saveOwner(next.id, account.id);
       const k = keyOf(key, next.id);
       const fallback: OfficeEntry = { agent: key, threadId: next.id, fromId: account.id, fromName: account.name || "나", createdAt: next.createdAt, updatedAt: new Date().toISOString(), roomId: room };
@@ -256,7 +258,8 @@ export function useOfficeTalk(): OfficeTalk {
         const at = m.at || t.updatedAt;
         const id = `direct:${a.key}:${m.id}`;
         if (m.role === "user") {
-          out.push({ kind: "msg", id, at, room, from: who, to: a.name, fromKey: "human", central: false, human: mine, text: m.text, tone: "request", facts: [] });
+          out.push({ kind: "msg", id, at, room, from: who, to: a.name, fromKey: "human", central: false, human: mine, text: m.text, tone: "request", facts: [],
+            ...(m.card?.kind === "creative" ? { creative: m.card } : {}) });
           continue;
         }
         out.push({
@@ -264,6 +267,7 @@ export function useOfficeTalk(): OfficeTalk {
           ...(m.plan ? { plan: { title: m.plan.title, done: m.plan.done } } : {}),
           ...(m.kind === "handoff" ? { handoff: { requestId: t.requestId ?? null } } : {}),
           ...(m.id === goId ? { goKey: a.key } : {}),
+          ...(m.card?.kind === "creative" ? { creative: m.card } : {}),
         });
       }
     }
