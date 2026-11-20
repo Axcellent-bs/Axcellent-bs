@@ -3,6 +3,11 @@
 `INFRA_CHAT_DB`(파일 경로)가 있으면 거기에, 없으면 프로세스 메모리에 둔다(테스트).
 표는 처음 쓸 때 만든다.
 
+회사 칸(여러 회사 설계 1-6, 2026-11-20): 줄마다 `tenant_id`(회사 ID). 옛 DB는 켤 때
+`ALTER TABLE ... DEFAULT 'catbooks'`로 칸을 붙여 기존 줄은 캣북스가 된다. 새 대화는 요청 메타의
+회사(별칭은 정식 id로, 맞지 않으면 캣북스). 읽기는 아직 회사로 거르지 않는다(회사가 캣북스 하나,
+회사 확인 강제는 4단계).
+
 status: `talking`(말 걸 수 있음) · `answering`(AI 답을 만드는 중) · `closed`(끝남, 더는 못 보냄).
 기획·마케팅·고객지원 직접 대화와 같다. 30분 동안 말이 없으면 자동으로 끝낸다.
 """
@@ -16,6 +21,9 @@ import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
+
+from ax_agent_template.companies import canonical_company_id
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
 SUMMARY_CHARS = 200
@@ -38,7 +46,8 @@ CREATE TABLE IF NOT EXISTS infra_chat_threads (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   removed_at TEXT,
-  removed_by TEXT
+  removed_by TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'catbooks'
 )
 """
 # 숨김 처리(소프트 삭제): 행은 지우지 않고 removed_at·removed_by만 적는다.
@@ -65,6 +74,11 @@ class ChatStore:
             for col in _REMOVED_COLUMNS:
                 if col not in have:
                     self._db.execute(f"ALTER TABLE infra_chat_threads ADD COLUMN {col} TEXT")
+            if "tenant_id" not in have:  # 옛 DB: 기존 줄은 캣북스로 채운다
+                self._db.execute(
+                    "ALTER TABLE infra_chat_threads"
+                    f" ADD COLUMN tenant_id TEXT NOT NULL DEFAULT '{TENANT_ID_CATBOOKS}'"
+                )
             self._db.commit()
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
@@ -101,7 +115,9 @@ class ChatStore:
         )
         return [self._view(r) for r in rows]
 
-    def create(self, title: str, who: str | None) -> dict[str, Any]:
+    def create(self, title: str, who: str | None, tenant_id: str | None = None) -> dict[str, Any]:
+        """새 대화. `tenant_id`는 정식 회사 ID로 바꿔 적고, 없거나 맞지 않으면 캣북스."""
+        tenant = canonical_company_id(tenant_id) or TENANT_ID_CATBOOKS
         now = self.clock().isoformat()
         with self._lock:
             row = self._db.execute(
@@ -111,9 +127,9 @@ class ChatStore:
             thread_id = f"infrachat-{seq}"
             self._db.execute(
                 "INSERT INTO infra_chat_threads"
-                "(id, seq, title, status, who, summary, messages, created_at, updated_at)"
-                " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?)",
-                (thread_id, seq, title, who, now, now),
+                "(id, seq, title, status, who, summary, messages, created_at, updated_at,"
+                " tenant_id) VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?, ?)",
+                (thread_id, seq, title, who, now, now, tenant),
             )
             self._db.commit()
         return self.get(thread_id) or {}

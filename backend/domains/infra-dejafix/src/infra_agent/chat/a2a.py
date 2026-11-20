@@ -59,7 +59,9 @@ async def infra_chat_send(request: AgentRequest) -> AgentResult:
     except ValidationError as exc:
         return _invalid(request, exc)
     try:
-        thread = get_chat_service().send(inp.who, inp.thread_id, inp.message)
+        thread = get_chat_service().send(
+            inp.who, inp.thread_id, inp.message, request.meta.tenant_id
+        )
     except ChatRefused as exc:
         return _refused(request, exc)
     return _done(request, "infra_chat_send", {"thread": thread})
