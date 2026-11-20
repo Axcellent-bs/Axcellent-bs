@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { handoffRequests, requestHandoffs } from "./requestHandoffs.ts";
+import { handoffRequests, requestHandoffs, requestTitle, shortNo } from "./requestHandoffs.ts";
 import type { WorkRequestRow, WorkRequestStep } from "./workRequests.ts";
 
 const step = (status: WorkRequestStep["status"], note = ""): WorkRequestStep => ({
@@ -40,4 +40,16 @@ test("넘김이 없는 의뢰는 빠지고 최근 것이 먼저 온다", () => {
   const empty = row({ request_id: "REQ-0", plan: [], steps: {} });
   const newer = row({ request_id: "REQ-2", created_at: "2026-11-20T02:00:00Z" });
   assert.deepEqual(handoffRequests([empty, row(), newer]).map((x) => x.row.request_id), ["REQ-2", "REQ-1"]);
+});
+
+test("의뢰 이름은 총괄이 고른 일 이름표이고 못 고른 의뢰는 '의뢰'다", () => {
+  const tasks = [{ name: "promo_video", label: "홍보 영상 만들기" }];
+  assert.equal(requestTitle({ task: "promo_video" }, tasks), "홍보 영상 만들기");
+  assert.equal(requestTitle({ task: null }, tasks), "의뢰");
+  assert.equal(requestTitle({ task: "unknown" }, tasks), "의뢰");
+});
+
+test("의뢰 번호는 wr_ 를 떼고 네 자만 보여 준다", () => {
+  assert.equal(shortNo("wr_7545c235ef"), "#7545");
+  assert.equal(shortNo("REQ-1"), "#REQ-");
 });
