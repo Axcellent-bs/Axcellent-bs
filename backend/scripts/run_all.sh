@@ -259,13 +259,18 @@ if [ -z "${AX_ENABLED_SERVICES:-}" ] && [ -f .env ]; then
   AX_ENABLED_SERVICES=$(tr -d '\r' < .env | sed -n 's/^AX_ENABLED_SERVICES=//p' | tail -n 1 | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/')
 fi
 export AX_ENABLED_SERVICES="${AX_ENABLED_SERVICES:-}"
+# 회사 폴더(여러 회사 설계 1-4). 회사 연결·도구 연결·켠 서비스·변환기·비용 정책은
+# $DATA/companies/catbooks/ 아래에 둔다. 옛 자리($DATA/<이름>)에 있으면 처음 읽을 때 옮기고
+# 옛 파일은 <이름>.moved로 남긴다 (ax_agent_template.company_files). 끄기: .env에 AX_COMPANY_FOLDERS=off
+export AX_COMPANIES_DIR="${AX_COMPANIES_DIR:-$PWD/$DATA/companies}"
 # 켠 서비스 파일 ({"enabled": [...], "updated_at", "updated_by"}). 있으면 위 환경변수보다 먼저 쓰고,
 # 바꾸면 재시작 없이 반영된다. 없거나 깨졌으면 환경변수를 쓴다 (ax_agent_template.routing)
-export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_services.json}"
+# 기본은 회사 폴더의 enabled_services.json. AX_ENABLED_SERVICES_FILE을 정했으면(셸·.env) 그 경로
 # 회사 연결(시스템 관리 > 회사 연결에서 정한 고객사 판매 서버 주소). 있으면 AX_SHOP_API_URL보다 먼저, 재시작 없이 반영
+# 이 경로는 설치 기준 자리다(계정·연결 키·설치 기록이 옆에 있다). 연결 파일 자체는 회사 폴더로 옮긴다
 export AX_COMPANY_CONNECTION_FILE="${AX_COMPANY_CONNECTION_FILE:-$PWD/$DATA/company_connection.json}"
 # 도구 연결 보관함(시스템 관리 > 도구 연결: GitHub 앱·배포 도구·DejaFix). 재시작 없이 반영
-export AX_TOOL_CONNECTIONS_FILE="${AX_TOOL_CONNECTIONS_FILE:-$PWD/$DATA/tool_connections.json}"
+# 기본은 회사 폴더의 tool_connections.json. AX_TOOL_CONNECTIONS_FILE을 정했으면(셸·.env) 그 경로
 # 사람 할 일함 저장 파일 (dashboard-api)
 export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
 # 오피스 단톡방 대화 목록 (dashboard-api). 다시 켜도 단톡방 대화가 이어진다
@@ -296,6 +301,58 @@ if [ -f .env ]; then
   . <(tr -d '\r' < .env)
   set +a
 fi
+# 켠 서비스·회사 연결 파일 자리 (경로를 정하지 않았으면 회사 폴더, 옮기기 전이면 옛 자리)
+_company_file() {
+  if [ -n "$1" ]; then echo "$1"; return; fi
+  case "${AX_COMPANY_FOLDERS:-}" in off|0|false|no) echo "$PWD/$DATA/$2"; return ;; esac
+  if [ -f "$AX_COMPANIES_DIR/catbooks/$2" ] || [ ! -f "$PWD/$DATA/$2" ]; then
+    echo "$AX_COMPANIES_DIR/catbooks/$2"
+  else
+    echo "$PWD/$DATA/$2"
+  fi
+}
+ENABLED_FILE_SHOWN=$(_company_file "${AX_ENABLED_SERVICES_FILE:-}" enabled_services.json)
+CONNECTION_FILE_SHOWN=$(_company_file "" company_connection.json)
+# 회사 폴더로 옮기기 전 백업: 아직 안 옮긴 옛 자리 파일을 묶어
+# $DATA/backup-before-companies-<시각>-<내용 확인값>.tgz로 둔다 (만든 사용자만 읽게 umask 077).
+# 옮길 옛 파일이 없으면 만들지 않고, 같은 내용의 묶음이 이미 있으면 건너뛰고, 최근 5개만 남긴다.
+# (옮긴 뒤에도 옛 파일은 .moved로 남는다. 이 묶음은 한 번 더 둔 것)
+# 회사 폴더를 껐으면(되돌리기) 켠 서비스·도구 연결도 예전 기본 자리로 정한다. 옛 자리가 비어 있으면
+# 각 서버가 켤 때 회사 폴더 값으로 되살린다 (ax_agent_template.company_files.restore_old)
+case "${AX_COMPANY_FOLDERS:-}" in
+off|0|false|no)
+  export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_services.json}"
+  export AX_TOOL_CONNECTIONS_FILE="${AX_TOOL_CONNECTIONS_FILE:-$PWD/$DATA/tool_connections.json}"
+  ;;
+*)
+  _old=""
+  for _f in company_connection.json company_connection.json.history.jsonl tool_connections.json \
+    tool_connections.json.history.jsonl enabled_services.json site_adapter cost_policy.json \
+    cost_policy.json.history.jsonl; do
+    if [ -e "$PWD/$DATA/$_f" ] && [ ! -e "$AX_COMPANIES_DIR/catbooks/$_f" ]; then _old="$_old $_f"; fi
+  done
+  if [ -n "$_old" ]; then
+    # 내용 확인값: 묶을 파일들의 이름·크기·cksum (시각이 달라도 내용이 같으면 같은 값)
+    # shellcheck disable=SC2086
+    _sum=$(cd "$PWD/$DATA" && find $_old -type f | LC_ALL=C sort | while IFS= read -r _p; do cksum "$_p"; done | cksum | cut -d' ' -f1)
+    if ls "$PWD/$DATA"/backup-before-companies-*-"$_sum".tgz >/dev/null 2>&1; then
+      echo "회사 폴더로 옮기기 전 백업: 같은 내용의 묶음이 이미 있어 건너뜁니다 ($_sum)"
+    else
+      _bk="$PWD/$DATA/backup-before-companies-$(date +%Y%m%d%H%M%S)-$_sum.tgz"
+      # shellcheck disable=SC2086
+      if ( umask 077; tar czf "$_bk" -C "$PWD/$DATA" $_old ); then
+        echo "회사 폴더로 옮기기 전 백업: $_bk ($_old )"
+      else
+        rm -f "$_bk"
+        echo "경고: 회사 폴더로 옮기기 전 백업을 만들지 못했습니다 ($_bk). 옛 파일은 옮긴 뒤에도 .moved로 남습니다" >&2
+      fi
+    fi
+    # 최근 5개만 남긴다
+    # shellcheck disable=SC2012
+    ls -1t "$PWD/$DATA"/backup-before-companies-*.tgz 2>/dev/null | tail -n +6 | while IFS= read -r _p; do rm -f "$_p"; done
+  fi
+  ;;
+esac
 # backend/.env 에 없으면 레포 맨 위 .env 에서 LLM·임베딩 설정 6개만 읽는다 (DejaFix 형식 .env 를 같이 쓰는 경우).
 # 다른 값(메일·Zabbix 등)은 서버에 넘기지 않고, 줄 끝 주석(공백 뒤 #)은 뗀다
 if [ -f ../.env ]; then
@@ -344,8 +401,8 @@ if [ -n "$ONLY" ] || [ -n "$FOLDED" ]; then
   # 비어 있으면 "전부 켬"이 되므로, 켤 서비스가 하나도 없으면 어느 서비스와도 맞지 않는 값을 둔다
   export AX_ENABLED_SERVICES="${enabled:-none}"
   # 켠 서비스 파일이 있으면 라우터는 파일을 먼저 본다. 안 띄운 서비스가 파일에서 켜져 있으면 A2A가 실패한다
-  if [ -f "$AX_ENABLED_SERVICES_FILE" ]; then
-    echo "경고: 켠 서비스 파일($AX_ENABLED_SERVICES_FILE)이 있어 run_all.sh가 정한 켠 서비스($AX_ENABLED_SERVICES)보다 먼저 쓰입니다. 안 띄운 서비스가 파일에 있으면 그 파일을 고치거나 지우세요." >&2
+  if [ -f "$ENABLED_FILE_SHOWN" ]; then
+    echo "경고: 켠 서비스 파일($ENABLED_FILE_SHOWN)이 있어 run_all.sh가 정한 켠 서비스($AX_ENABLED_SERVICES)보다 먼저 쓰입니다. 안 띄운 서비스가 파일에 있으면 그 파일을 고치거나 지우세요." >&2
   fi
 fi
 
@@ -491,13 +548,13 @@ fi
 
 sleep 8
 echo "모드: 실제"
-if [ -f "$AX_ENABLED_SERVICES_FILE" ]; then
-  echo "켠 서비스: 파일 $AX_ENABLED_SERVICES_FILE (바꾸면 재시작 없이 반영)  조직도: ${AX_ORG_CONFIG:-없음 (꺼진 서비스로 가는 일은 no_assignee로 실패)}"
+if [ -f "$ENABLED_FILE_SHOWN" ]; then
+  echo "켠 서비스: 파일 $ENABLED_FILE_SHOWN (바꾸면 재시작 없이 반영)  조직도: ${AX_ORG_CONFIG:-없음 (꺼진 서비스로 가는 일은 no_assignee로 실패)}"
 else
   echo "켠 서비스: ${AX_ENABLED_SERVICES:-전부}  조직도: ${AX_ORG_CONFIG:-없음 (꺼진 서비스로 가는 일은 no_assignee로 실패)}"
 fi
-if [ -f "$AX_COMPANY_CONNECTION_FILE" ]; then
-  echo "회사 연결: 파일 $AX_COMPANY_CONNECTION_FILE 의 판매 서버 주소를 씁니다 (시스템 관리 > 회사 연결에서 해제)"
+if [ -f "$CONNECTION_FILE_SHOWN" ]; then
+  echo "회사 연결: 파일 $CONNECTION_FILE_SHOWN 의 판매 서버 주소를 씁니다 (시스템 관리 > 회사 연결에서 해제)"
 fi
 while read -r name port _; do
   [ -n "$name" ] || continue

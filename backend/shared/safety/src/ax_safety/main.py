@@ -127,6 +127,9 @@ def create_app(
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         refuse_mock_outside_tests("safety")  # 실제 서버에 목 스위치가 남아 있으면 뜨지 않는다
+        # 비용 정책 파일: 회사 폴더로 옮기기(또는 off면 옛 경로 되살리기)는 켤 때 한 번만.
+        # 판정 경로(`effective`)는 경로만 읽어 잠금을 기다리지 않는다 (여러 회사 1-4)
+        cost_policy.prepare()
         task = asyncio.create_task(_expire_loop(gate, expire_interval)) if expire_interval else None
         yield
         if task:

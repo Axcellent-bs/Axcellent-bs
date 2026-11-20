@@ -245,6 +245,28 @@ assignments:
 - 회사 폴더가 없거나 틀리면(카탈로그 없음, 커넥터가 카탈로그와 다름) 서버를 켜지 않고 이유를 알려 준다.
 - 조직도를 찾지 못하면 켜면서 분명히 알린다: `조직도 없음: 꺼진 서비스로 가는 일은 no_assignee로 실패합니다`
 
+## 회사 폴더 (여러 회사 1-4)
+
+회사마다 다른 공통층 파일은 `.data/companies/<회사 ID>/` 아래에 둔다. 지금은 캣북스 하나(`catbooks`).
+
+| 무엇 | 예전 자리 | 회사 폴더 | 경로 환경변수(정했으면 그 경로 그대로) |
+| --- | --- | --- | --- |
+| 회사 연결 + 기록 | `.data/company_connection.json` | `companies/catbooks/company_connection.json` | 없음. `AX_COMPANY_CONNECTION_FILE`은 설치 기준 자리(계정·연결 키 옆)로 남는다 |
+| 도구 연결 + 기록 | `.data/tool_connections.json` | `companies/catbooks/tool_connections.json` | `AX_TOOL_CONNECTIONS_FILE` |
+| 켠 서비스 | `.data/enabled_services.json` | `companies/catbooks/enabled_services.json` | `AX_ENABLED_SERVICES_FILE` |
+| 변환기 폴더 | `.data/site_adapter/` | `companies/catbooks/site_adapter/` | `AX_SITE_ADAPTER_DIR` |
+| 비용 정책 + 기록 | `SAFETY_STATE_DB` 옆 `cost_policy.json` | `companies/catbooks/cost_policy.json` | `SAFETY_COST_POLICY_FILE` |
+
+- 켜는 값은 `AX_COMPANIES_DIR`(run_all.sh 기본 `.data/companies`). 안 정하면 모두 예전 자리다
+- 옮기기(`ax_agent_template.company_files`): 예전 자리에 있고 회사 폴더에 없으면 처음 읽을 때 한 번 옮긴다.
+  잠금(`.migrate.lock`) → 임시 이름 복사 → `os.replace`. 예전 파일은 지우지 않고 `<이름>.moved`로 둔다.
+  실패하면 예전 자리를 계속 읽는다. 비용 정책은 안전 서버가 켤 때 옮긴다(판정 중에는 잠금을 기다리지 않는다)
+- 백업: run_all.sh가 옮기기 전에 `.data/backup-before-companies-<시각>-<확인값>.tgz`(0600)를 만든다.
+  옮길 파일이 없거나 같은 내용이면 건너뛰고 최근 5개만 남긴다
+- **되돌리기**: `.env`에 `AX_COMPANY_FOLDERS=off`를 넣고 다시 켠다. 예전 자리가 비어 있으면 각 서버가
+  회사 폴더 값으로 예전 자리를 되살린다(옮긴 뒤 화면에서 바꾼 값까지 살아 있다). 회사 폴더 파일은 지우지 않는다.
+  비용 정책을 되살리지 못하면 경고 로그 한 번 + 현황 API(`GET /api/safety/cost-policy`)의 `moved_unrestored: true`
+
 ## 알아 둘 것
 
 - 실제 모드에서 아직 출처가 없는 화면 데이터(지식 조각·후기)는 지어내지 않고 빈 목록이다.
