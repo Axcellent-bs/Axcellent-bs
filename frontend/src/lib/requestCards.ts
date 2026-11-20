@@ -2,6 +2,9 @@
 // 전체 대화방·이슈 방(useOfficeTalk)과 총괄 1:1(DirectChat)은 총괄 글 한 줄("의뢰를 접수했어요 (번호 wr_…)" · "[의뢰 wr_…] …")만 보였다.
 // 의뢰 번호가 처음 나온 총괄 말풍선 아래에 카드 하나를 붙이고, 같은 의뢰의 다음 알림 줄("[의뢰 wr_…] …")은 그 방에서 숨긴다(원본 대화는 그대로).
 import { STEP_STATUS, canDecide, type StepStatus, type WorkRequestPlanStep, type WorkRequestRow, type WorkRequestStep } from "./workRequests.ts";
+import { planId } from "./format.ts";
+import { planDocPath } from "./planDoc.ts";
+import { videoPlanSummary, type VideoPlanView } from "./videoPlan.ts";
 
 const ID = "wr_[0-9a-f]{10}";
 /** 총괄 코드가 만드는 문장 형식만: "(번호 wr_…)" · "[의뢰 wr_…]" */
@@ -115,3 +118,41 @@ export function proposalOfRequest(
   if (!rep) return null;
   return (proposals ?? []).find((x) => x.insightId === `trend_report:${rep}`)?.id ?? null;
 }
+
+// ---- 기획 단계 칸 (영상 제작안 요약 · 기획서 열기 · PDF로 저장)
+
+/** 기획 기록에서 읽은 제안 하나 (카드가 쓰는 칸만) */
+export interface PlanLookup {
+  id: string;
+  insightId?: string;
+  spec?: string;
+  title: string;
+  idea: string;
+  videoPlan?: Pick<VideoPlanView, "concept" | "durationS" | "aspect" | "scenes">;
+}
+
+export interface PlanCardView {
+  /** 단계 칩: 기획서가 있으면 "기획서 N", 없으면 "제안 N" (idText 규칙) */
+  chip: string;
+  /** "영상 제작안 · 15초 · 9:16 · 장면 4" · 영상 제작안이 없으면 "기획 제안" */
+  head: string;
+  /** 콘셉트 한 줄 · 없으면 할 일(idea) */
+  line: string;
+  openPath: string;
+  printPath: string;
+}
+
+export function planCard(p: PlanLookup): PlanCardView {
+  const v = p.videoPlan;
+  return {
+    chip: planId(p.spec || p.id),
+    head: v ? videoPlanSummary(v) : "기획 제안",
+    line: (v ? v.concept : p.idea) || p.title,
+    openPath: planDocPath({ id: p.id, spec: p.spec }),
+    printPath: planDocPath({ id: p.id, spec: p.spec }, true),
+  };
+}
+
+/** 기획 기록을 다시 읽어도 되나: 처음이거나 마지막 읽기에서 1분이 지났을 때만 */
+export const PLAN_LOOKUP_MIN_MS = 60_000;
+export const planLookupDue = (lastAt: number | null, now: number) => lastAt === null || now - lastAt >= PLAN_LOOKUP_MIN_MS;

@@ -11,6 +11,9 @@ import { PROPOSAL_ORIGIN, handoffFailed, handoffRetrying, proposalReady, type Pr
 import { TEMPLATES, TEMPLATE_NAME, templateOf, type Section } from '@/lib/specTemplate'
 import { notionApi, previewFill, previewSuggest, useAllReleaseChecks, useReleaseChecks, type NotionHit, type ReleaseCheck } from '@/lib/planning'
 import { humanizePlanIds } from '@/lib/format'
+import { printDoc, useAutoPrintQuery } from '@/lib/print'
+import { planPrintHeader, specCreatedAt } from '@/lib/planDoc'
+import { useCompany } from '@/demo/company'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -444,6 +447,8 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
   const toast = useToast()
   const locked = spec.status === '확정' // 확정되면 요구사항·완료 기준은 작업이 나가 잠긴다
   const tpl = templateOf(spec.origin) // 기획 제안에서 온 기획서는 제안서 양식 (배경·타깃·핵심 메시지·성공 지표…)
+  const company = useCompany()
+  useAutoPrintQuery(true) // 대화 카드 "PDF로 저장"(?print=1)으로 열었으면 그린 뒤 한 번 인쇄
   const sections = TEMPLATES[tpl]
   const [leftOpen, setLeftOpen] = useStoredOpen('ax.spec.left')
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -665,8 +670,9 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
         </nav>
       </aside>}
 
-      <section className="col-doc">
-        <div className="doc-actions spec-actions">
+      <section className="col-doc doc-print">
+        <p className="print-only doc-print-head">{planPrintHeader({ id: spec.id, company: company?.name, at: specCreatedAt(s.activity, spec.id), status: spec.status })}</p>
+        <div className="doc-actions spec-actions print-hide">
           {editing ? (
             <>
               {dirty && <span className="spec-dirty">저장 안 됨</span>}
@@ -678,6 +684,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
               <Button size="small" variant="primary" onClick={startEdit}>수정</Button>
               <Button size="small" onClick={() => { setHistoryOpen(!historyOpen) }} aria-pressed={historyOpen}>수정 이력</Button>
               <Button size="small" onClick={removeSpec} disabled={!deletable} title={deletable ? '기획서 초안 지우기' : '확정됐거나 작업이 나간 기획서는 지울 수 없어요'}>삭제</Button>
+              <Button size="small" onClick={printDoc} title="기획서 본문만 인쇄해요 (PDF로 저장 가능)">PDF로 저장</Button>
             </>
           )}
         </div>
@@ -689,12 +696,14 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
           {spec.confirmedBy && <Tag>{CONFIRMED_BY[spec.confirmedBy]}</Tag>}
           <span className="muted small"><Ref s={s} id={spec.request} className="sp-ref" /> · <a href={toPath(`projects/${spec.request}`)}>프로젝트 보기</a></span>
         </div>
-        {xr && <ReviewDecide d={d} spec={spec} xr={xr} />}
-        <PlanHandoff s={s} d={d} spec={spec} />
-        {spec.status === '확정' && <ReleaseCheckBox d={d} spec={spec.id} />}
+        <div className="print-hide">
+          {xr && <ReviewDecide d={d} spec={spec} xr={xr} />}
+          <PlanHandoff s={s} d={d} spec={spec} />
+          {spec.status === '확정' && <ReleaseCheckBox d={d} spec={spec.id} />}
+        </div>
         <FreeCanvas value={cur.bodyMd} editing={editing} onChange={(bodyMd) => set({ bodyMd })} />
         {spec.question && (
-          <div className="question" id="sec-question">
+          <div className="question print-hide" id="sec-question">
             <b className="question-label">답할 질문</b>
             <p className="question-text">{humanizePlanIds(spec.question)}</p>
             <form className="spec-answer" onSubmit={(e) => { e.preventDefault(); if (!answer.trim()) return; d({ type: 'answerQuestion', spec: spec.id, text: answer.trim() }); setAnswer(''); toast.show(`${idText(spec.id)} 질문에 답함`) }}>

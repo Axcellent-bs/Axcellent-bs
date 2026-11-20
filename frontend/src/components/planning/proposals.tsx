@@ -10,6 +10,10 @@ import { LinkedLines, go, idText, toPath } from '@/components/planning-common/li
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { Markdown } from '@/components/planning-common/markdown'
 import { humanizePlanIds } from '@/lib/format'
+import { printDoc, useAutoPrintQuery } from '@/lib/print'
+import { planPrintHeader } from '@/lib/planDoc'
+import { useCompany } from '@/demo/company'
+import { VideoPlanSection } from '@/components/planning/videoPlan'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -30,7 +34,9 @@ export function ProposalActions({ s, d, item }: P & { item?: string }) {
   const reqSpec = s.requests.find((r) => r.id === p.request)?.spec
   // 다른 부서로 넘어간 제안은 지우지 않는다: 마케팅 전달 성공 · 개발 작업이 나감 (서버도 막는다)
   const deletable = !p.handoff?.ok && !s.tasks.some((t) => t.spec === p.spec || (!!reqSpec && t.spec === reqSpec))
-  if (!proposalOpen(p)) return deletable ? <Button onClick={remove}>삭제</Button> : null
+  // PDF로 저장: 제안 본문(1 인사이트 · 2 기획 판단 · 3 영상 제작안)만 인쇄 (lib/print.ts printDoc)
+  const pdf = <Button onClick={printDoc}>PDF로 저장</Button>
+  if (!proposalOpen(p)) return <>{pdf}{deletable && <Button onClick={remove}>삭제</Button>}</>
   const nextSpec = `SPEC-${Math.max(0, ...s.specs.map((x) => Number(x.id.split('-')[1]) || 0)) + 1}`
   if (reason !== null) {
     return (
@@ -45,6 +51,7 @@ export function ProposalActions({ s, d, item }: P & { item?: string }) {
     <>
       <Button variant="primary" onClick={() => { d({ type: 'makePlan', proposal: p.id }); toast.show(`${idText(p.id)} 기획안으로 만듦`); go(toPath(`work/specs/${nextSpec}`)) }}>기획안으로 만들기</Button>
       <Button onClick={() => setReason('')}>폐기</Button>
+      {pdf}
     </>
   )
 }
@@ -219,7 +226,7 @@ function AngleChoice({ p, d, open }: { p: Proposal; d: Dispatch<Action>; open: b
       {p.contentCategory
         ? <div className="muted small">콘텐츠 카테고리: {p.contentCategory}{p.contentFormat ? ` · ${p.contentFormat}` : ''}</div>
         : open && (
-          <div className="pp-angle-cat">
+          <div className="pp-angle-cat print-hide">
             <label>콘텐츠 카테고리(선택)
               <input className="field" list="pp-category-hints" placeholder="예: 아재개그" maxLength={40} value={cat} onChange={(e) => setCat(e.target.value)} />
             </label>
@@ -267,10 +274,13 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
   const jk = judgmentKey(p)
   const saveTarget = () => { if (tLabel.trim() && tValue.trim() && (tLabel.trim() !== p.target?.label || tValue.trim() !== p.target?.value)) d({ type: 'editProposal', proposal: p.id, targetLabel: tLabel.trim(), targetValue: tValue.trim() }) }
   const req = p.request ? s.requests.find((r) => r.id === p.request) : undefined
+  const company = useCompany()
+  useAutoPrintQuery(true) // 대화 카드 "PDF로 저장"(?print=1)으로 열었으면 그린 뒤 한 번 인쇄
   return (
     <div className={`pp-view${open ? " solo" : ""}`}>
-      <div className="pp-main">
-        <a className="plain-link proj-back" href={toPath('proposals')} onClick={(e) => { e.preventDefault(); go(toPath('proposals')) }}>‹ 제안 목록</a>
+      <div className="pp-main doc-print">
+        <p className="print-only doc-print-head">{planPrintHeader({ id: p.id, company: company?.name, at: p.created, status: p.status })}</p>
+        <a className="plain-link proj-back print-hide" href={toPath('proposals')} onClick={(e) => { e.preventDefault(); go(toPath('proposals')) }}>‹ 제안 목록</a>
         <div className="pp-head">
           <span className={`rq-dept d-${p.from}`}>{DEPT_NAME[p.from]}</span>
           <Tag>{PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill}</Tag>
@@ -282,7 +292,7 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
         {open
           ? <input key={`t-${p.id}`} className="doc-title-input" defaultValue={p.title} onBlur={(e) => save('title', e.target.value)} aria-label="제목" />
           : <h2 className="pp-title">{p.title}</h2>}
-        <Steps p={p} />
+        <div className="print-hide"><Steps p={p} /></div>
 
         <section className="pp-part">
           <h3 className="pp-part-h"><span className="pp-no">1</span>{DEPT_NAME[p.from]} 인사이트</h3>
@@ -304,7 +314,7 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
         </section>
 
         {(p.past?.length ?? 0) > 0 && (
-          <section className="pp-part pp-past">
+          <section className="pp-part pp-past print-hide">
             <h3 className="pp-part-h">지난 캠페인 결과{p.followOf && <span className="pp-by">후속 기획 · <a href={toPath(`proposals/${p.followOf}`)} className="mono idc" title={p.followOf}>{idText(p.followOf)}</a> 이어 감</span>}</h3>
             <ul className="pp-past-list">
               {(p.past ?? []).map((x) => (
@@ -324,16 +334,19 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
           <AngleChoice p={p} d={d} open={open} />
           <dl className="pp-fields">
             <dt>할 일</dt>
-            <dd>{open ? <textarea key={`i-${jk}`} className="blk-p" rows={2} defaultValue={p.idea} onBlur={(e) => save('idea', e.target.value)} aria-label="할 일" /> : p.idea}</dd>
+            <dd>{open ? <><textarea key={`i-${jk}`} className="blk-p print-hide" rows={2} defaultValue={p.idea} onBlur={(e) => save('idea', e.target.value)} aria-label="할 일" /><span className="print-only">{p.idea}</span></> : p.idea}</dd>
             <dt>왜</dt>
-            <dd>{open ? <textarea key={`w-${jk}`} className="blk-p" rows={2} defaultValue={p.why} onBlur={(e) => save('why', e.target.value)} aria-label="왜" /> : p.why}</dd>
+            <dd>{open ? <><textarea key={`w-${jk}`} className="blk-p print-hide" rows={2} defaultValue={p.why} onBlur={(e) => save('why', e.target.value)} aria-label="왜" /><span className="print-only">{p.why}</span></> : p.why}</dd>
             <dt>목표</dt>
             <dd>
               {open ? (
-                <span className="pp-target-edit">
-                  <input className="blk-p" value={tLabel} placeholder="무엇을" onChange={(e) => setTLabel(e.target.value)} onBlur={saveTarget} aria-label="목표 항목" />
-                  <input className="blk-p pp-target-val" value={tValue} placeholder="얼마나" onChange={(e) => setTValue(e.target.value)} onBlur={saveTarget} aria-label="목표치" />
-                </span>
+                <>
+                  <span className="print-only">{tValue.trim() ? <><b>{tValue}</b> {tLabel}</> : '없음'}</span>
+                  <span className="pp-target-edit print-hide">
+                    <input className="blk-p" value={tLabel} placeholder="무엇을" onChange={(e) => setTLabel(e.target.value)} onBlur={saveTarget} aria-label="목표 항목" />
+                    <input className="blk-p pp-target-val" value={tValue} placeholder="얼마나" onChange={(e) => setTValue(e.target.value)} onBlur={saveTarget} aria-label="목표치" />
+                  </span>
+                </>
               ) : p.target ? <><b>{p.target.value}</b> {p.target.label}</> : <span className="muted">없음</span>}
               {p.target?.measure && <span className="mono muted small"> · {p.target.measure}</span>}
             </dd>
@@ -341,6 +354,8 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
           </dl>
           {p.warnings.length > 0 && <ul className="pp-warn">{p.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
         </section>
+
+        {p.videoPlan && <VideoPlanSection v={p.videoPlan} />}
       </div>
 
       {!open && (
