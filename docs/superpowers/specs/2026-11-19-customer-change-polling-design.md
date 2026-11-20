@@ -117,7 +117,7 @@
 
 ### 추천: A
 
-소비처를 덜 바꾸고(재무 0줄), 규칙(도메인끼리 import 금지, 계약은 추가만)을 그대로 지켜요. 위치는 **dashboard-api**를 추천해요(**결정 대기**). 이유: 이미 변환기·회사 연결·`POST /events`·주기 작업(`main.py` `_retention_loop`)이 여기 있고, 컨테이너를 늘리지 않아요(11/17 멘토링 "컨테이너 줄이기").
+소비처를 덜 바꾸고(재무 0줄), 규칙(도메인끼리 import 금지, 계약은 추가만)을 그대로 지켜요. 위치는 **dashboard-api**로 정했어요(11/20 예진 결정). 이유: 이미 변환기·회사 연결·`POST /events`·주기 작업(`main.py` `_retention_loop`)이 여기 있고, 컨테이너를 늘리지 않아요(11/17 멘토링 "컨테이너 줄이기").
 
 ## 감지기 설계 (A)
 
@@ -220,7 +220,4 @@
 
 1. **감지할 변화**: `payment.refunded` + `order.cancelled`. 주문 취소 사유(`reason_code`)는 판매 기록에 없어서 `SalesOrderRow`에 `cancel_reason_code` 칸을 **추가**해 채우고, 비어 있으면 이벤트를 만들지 않아요(위 "`order.cancelled` 필수 칸 채우기").
 2. **쇼핑몰 복구 신호**: DejaFix 감시(`dejafix_watch`)가 장애가 닫히면 복구 알림(`infra.recovered`, 계약 추가)을 보내요(PR 6). 그때까지 캣북스의 `shop.degraded`·`shop.recovered` 전송은 남겨요.
-
-## 결정 대기
-
-1. **감지기 위치**: 추천은 dashboard-api 안(컨테이너 안 늘림, 변환기·회사 연결과 같은 곳)이에요. 데이터 수집기와 같은 `sales-export`를 따로 읽게 되지만 분당 1~3번이라 한도 안이에요.
+3. **감지기 위치**: dashboard-api 안(11/20 확정. 컨테이너 안 늘림, 변환기·회사 연결과 같은 곳). 데이터 수집기와 같은 `sales-export`를 따로 읽게 되지만 분당 1~3번이라 한도 안이에요.
