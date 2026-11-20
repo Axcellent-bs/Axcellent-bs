@@ -141,9 +141,14 @@ async def test_completed_event_continues_to_the_next_step_with_the_number() -> N
     fake.answers["trend_report_insight"] = [
         result(TaskStatus.COMPLETED, output={"report_id": "rep_1", "insight": INSIGHT})
     ]
+    fake.answers["receive_insight"] = [result(TaskStatus.COMPLETED, output={"proposal_id": "p"})]
     r.receive_async("completed", "data", done(report_id="rep_1"), ctx)
     await r.wait_idle()
-    assert [c[1].skill for c in fake.calls] == ["trend_report_create", "trend_report_insight"]
+    assert [c[1].skill for c in fake.calls] == [
+        "trend_report_create",
+        "trend_report_insight",
+        "receive_insight",
+    ]
     assert fake.calls[1][1].input == {"report_id": "rep_1"}  # 번호만 넘어간다
 
 
@@ -231,25 +236,18 @@ async def promo_until_plan(answers_insight, escalated=None):
 
 
 @pytest.mark.asyncio
-async def test_insight_goes_whole_to_the_plan_after_approval_and_is_then_dropped() -> None:
+async def test_insight_goes_whole_to_the_plan_without_asking_a_person_and_is_then_dropped() -> None:
     insight = result(TaskStatus.COMPLETED, output={"report_id": "rep_1", "insight": INSIGHT})
     reqs, rid, fake, r = await promo_until_plan(insight)
     row = reqs.get(rid)
     assert row["steps"]["insight"]["status"] == "completed"
-    assert row["steps"]["plan"]["status"] == "waiting_human"  # 상태를 바꾸는 일이라 승인을 기다린다
-    assert row["steps"]["plan"]["reason_code"] == "needs_approval"
-    assert reqs.get_carry(rid, "insight") == INSIGHT
-    assert all(c[1].skill != "receive_insight" for c in fake.calls)  # 승인 전에는 시키지 않는다
-
-    assert r.decide(rid, "plan", True, "준하") == "ok"
-    await r.wait_idle()
+    # 입력이 앞 부서 결과에서 오는 A 단계라 총괄은 막지 않는다(부서의 안전 관문이 등급대로 처리)
+    assert row["steps"]["plan"]["status"] == "completed"
+    assert row["steps"]["confirm"]["status"] == "waiting_human"  # 사람 확인 단계에서 멈춘다
     plan_call = next(c[1] for c in fake.calls if c[1].skill == "receive_insight")
     assert plan_call.input == INSIGHT  # 기획 입력을 그대로
     assert plan_call.meta.idempotency_key == f"{rid}:receive_insight:plan"  # A 등급이라 필수
     assert reqs.get_carry(rid, "insight") is None  # 쓰고 나면 지운다
-    row = reqs.get(rid)
-    assert row["steps"]["plan"]["status"] == "completed"
-    assert row["steps"]["confirm"]["status"] == "waiting_human"
 
 
 @pytest.mark.asyncio

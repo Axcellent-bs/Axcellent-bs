@@ -241,6 +241,45 @@ class WorkRequests:
         value = ((row or {}).get("carry") or {}).get(step_id)
         return copy.deepcopy(value) if isinstance(value, dict) and value else None
 
+    @staticmethod
+    def _plan_view(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {k: v for k, v in spec.items() if k != "grade"}
+            | {"after": list(spec.get("after") or [])}
+            for spec in plan
+        ]
+
+    def plan_differs(self, request_id: str, plan: list[dict[str, Any]]) -> bool:
+        """저장된 계획(단계·부서·입력 규칙·등급)이 `plan`과 다른가."""
+        row = self._rows.get(request_id)
+        if row is None:
+            return False
+        if row["plan"] != self._plan_view(plan):
+            return True
+        return any(
+            (row["steps"].get(spec["step_id"]) or {}).get("grade") != spec.get("grade")
+            for spec in plan
+        )
+
+    def refresh_plan(self, request_id: str, plan: list[dict[str, Any]]) -> dict[str, Any]:
+        """시작 전 의뢰의 계획을 새 계획으로 바꾼다 (일·확신도·이유는 그대로)."""
+        row = self._row(request_id)
+        row["plan"] = self._plan_view(plan)
+        row["steps"] = {}
+        row["carry"] = {}
+        for spec in plan:
+            step = _blank_step()
+            step["grade"] = spec.get("grade")
+            row["steps"][spec["step_id"]] = step
+        row["log"].append(
+            {
+                "at": now().isoformat(),
+                "message": "일 목록이 바뀌어 계획을 지금 기준으로 다시 만들었다",
+            }
+        )
+        self._save(row)
+        return copy.deepcopy(row)
+
     def link_thread(self, request_id: str, thread_id: str | None) -> None:
         """의뢰를 접수한 대화를 적는다 (진행 알림을 그 대화로 보낸다)."""
         row = self._row(request_id)

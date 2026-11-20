@@ -38,7 +38,6 @@ function Row({ row, tasks, onChanged }: { row: WorkRequestRow; tasks: WorkReques
   };
 
   const alternatives = row.alternatives.map((a) => tasks.find((t) => t.name === a)?.label ?? a);
-  const others = tasks.filter((t) => t.name !== row.task);
 
   return (
     <li className="space-y-2 px-4 py-3 text-sm">
@@ -104,7 +103,7 @@ function Row({ row, tasks, onChanged }: { row: WorkRequestRow; tasks: WorkReques
               <div className="flex flex-wrap items-center gap-2">
                 <select className="field text-xs" value={pick} onChange={(e) => setPick(e.target.value)} aria-label="바꿀 일">
                   <option value="">바꿀 일 고르기</option>
-                  {others.map((t) => <option key={t.name} value={t.name}>{t.label}</option>)}
+                  {tasks.map((t) => <option key={t.name} value={t.name}>{t.name === row.task ? `${t.label} (지금 일, 처음부터 다시)` : t.label}</option>)}
                 </select>
                 <button type="button" className="btn-ghost text-xs" disabled={busy || !pick || !SAFETY_HUMAN_TOKEN}
                   title={SAFETY_HUMAN_TOKEN ? undefined : "사람 권한 토큰이 없어 다시 돌릴 수 없어요"}

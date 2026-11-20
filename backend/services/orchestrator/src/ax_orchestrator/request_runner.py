@@ -8,8 +8,11 @@
   먼저고, 앞 단계가 실패하면 뒤 단계는 시키지 않고 건너뜀으로 닫는다.
 - LLM은 부르지 않는다. 순서·부서·skill은 일 목록이 정한 대로다.
 - 고객 글은 부서에 `untrusted` 칸(데이터)으로만 간다. 지시문으로 넣지 않는다.
-- 읽기(`read`) 단계만 스스로 시킨다. 상태를 바꾸는 단계(A·B·C)와 사람 확인 단계는 승인·확인이
-  필요해서 여기서 멈추고 `waiting_human`으로 둔다(승인 이어가기는 9단계).
+- 읽기(`read`)와 상태를 바꾸는 A·B 단계는 스스로 시킨다. A(자동)·B(교차검증)는 부서가 안전 관문
+  (`execute()`)으로 등급대로 처리하므로 총괄이 한 번 더 막지 않는다. 다만 고객 문장에서 입력이
+  나오는 상태 변경(`human_gate`: 기능 개발 요청·환불 접수)과 C 등급, 사람 확인 단계는 여기서
+  멈추고 `waiting_human`으로 둔다. 분류 LLM이 고객 글에 속아도 사람 승인 없이는 실행되지
+  않게 하는 방어다.
 - 부서가 받아 간 긴 작업(`working`)은 `waiting_async`로 두고 작업 번호를 적는다. 부서가 보내는
   `task.progress`·`task.completed`를 `receive_async`로 받아 단계를 끝내고 다음 단계를 이어 시킨다.
   알림이 `ASYNC_SILENCE`초 넘게 없으면 응답 끊김으로 그 단계를 실패로 닫는다(`expire_silent`).
@@ -41,7 +44,9 @@ from ax_contracts.schemas import (
 from ax_orchestrator import request_inputs, request_tasks
 from ax_orchestrator.engine import TRANSFER_CODES, Engine
 from ax_orchestrator.models import now
-from ax_orchestrator.work_requests import OPEN_STATES, READ_GRADE, WorkRequests, ready_steps
+from ax_orchestrator.work_requests import OPEN_STATES, WorkRequests, ready_steps
+
+HUMAN_GRADE = request_tasks.HUMAN_GRADE
 
 log = logging.getLogger("orchestrator.request_runner")
 
@@ -155,6 +160,9 @@ class RequestRunner:
         if row is None or row["status"] not in OPEN_STATES or not row["plan"]:
             return
         task = request_tasks.get(row["task"]) if row.get("task") else None
+        if task is not None and self._stale(row, task):  # 일 목록이 바뀐 뒤 시작하는 의뢰
+            self._requests.refresh_plan(request_id, request_tasks.plan_of(task))
+            row = self._requests.get(request_id) or row
         if task is not None and task.blocked_by:
             self._requests.set_status(
                 request_id, "needs_human", f"아직 자동으로 진행할 수 없는 일: {task.blocked_by}"
@@ -170,6 +178,12 @@ class RequestRunner:
                 break
             await asyncio.gather(*(self._step(row, sid) for sid in ready))
         self._finish(request_id)
+
+    def _stale(self, row: dict[str, Any], task: request_tasks.TaskDef) -> bool:
+        """시작 전인데 저장된 계획이 지금 일 목록과 다른가 (옛 계획으로 돌지 않게)."""
+        if any(s["status"] != "pending" for s in row["steps"].values()):
+            return False
+        return self._requests.plan_differs(row["request_id"], request_tasks.plan_of(task))
 
     async def _step(self, row: dict[str, Any], step_id: str) -> None:
         """단계 하나를 시킨다. 어떤 일이 있어도 이 단계는 `pending`을 벗어난다 (무한 반복 방지)."""
@@ -258,14 +272,15 @@ class RequestRunner:
                 return
         step = row["steps"][step_id]
         grade = entry.grade or step.get("grade")
-        if grade != READ_GRADE and step.get("reason_code") != APPROVED:  # 승인 없이는 시키지 않는다
+        gated = bool(spec.get("human_gate")) or grade == HUMAN_GRADE
+        if gated and step.get("reason_code") != APPROVED:  # 사람 승인 없이는 시키지 않는다
             self._update(
                 rid,
                 step_id,
                 status="waiting_human",
                 grade=grade,
                 reason_code=NEEDS_APPROVAL,
-                note="상태를 바꾸는 일이라 승인을 기다린다",
+                note="상태를 바꾸는 일이라 사람 승인을 기다린다",
                 started_at=stamp(),
             )
             return

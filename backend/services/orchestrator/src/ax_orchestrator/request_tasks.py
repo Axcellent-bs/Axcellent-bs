@@ -29,6 +29,7 @@ DEPT_LABEL = {
     "archive": "아카이브",
 }
 READ_GRADE = "read"
+HUMAN_GRADE = "C"  # 총괄이 사람 승인을 먼저 받는 등급(`human_gate`가 있는 단계도 같다)
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,10 @@ class TaskStep:
     takes_carry: bool = False
     # 고객 문장에서 부서 입력 칸을 채우는 규칙 이름 (`request_inputs.RULES`)
     fill: str | None = None
+    # 고객 문장에서 입력이 나오는 상태 변경이라 총괄이 사람 승인을 먼저 받는 단계다. 분류 LLM이
+    # 고객 글에 속아도 승인 없이는 실행되지 않게 한다. 입력이 앞 부서 결과에서만 오는 단계는
+    # 부서의 안전 관문에 맡긴다
+    human_gate: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,6 +74,11 @@ class TaskDef:
         return first.dept
 
     @property
+    def needs_human_approval(self) -> bool:
+        """총괄이 부서에 보내기 전에 사람 승인을 받는 일. 나머지 A·B는 부서의 안전 관문이 정한다."""
+        return any(s.human_gate or s.grade == HUMAN_GRADE for s in self.steps)
+
+    @property
     def changes_state(self) -> bool:
         return any(s.grade not in (READ_GRADE, None) for s in self.steps)
 
@@ -83,8 +93,9 @@ def _one(
     grade: str = READ_GRADE,
     blocked_by: str | None = None,
     fill: str | None = None,
+    human_gate: bool = False,
 ) -> TaskDef:
-    step = TaskStep("run", dept, skill, label, grade, fill=fill)
+    step = TaskStep("run", dept, skill, label, grade, fill=fill, human_gate=human_gate)
     return TaskDef(name, label, description, examples, (step,), blocked_by)
 
 
@@ -274,6 +285,7 @@ TASKS: tuple[TaskDef, ...] = (
         "planning",
         "create_ticket",
         grade="A",
+        human_gate=True,
     ),
     _one(
         "claim_register",
@@ -283,6 +295,7 @@ TASKS: tuple[TaskDef, ...] = (
         "support",
         "create_claim",
         grade="A",
+        human_gate=True,
     ),
 )
 
@@ -315,6 +328,7 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "carries": s.carries,
             "takes_carry": s.takes_carry,
             "fill": s.fill,
+            "human_gate": s.human_gate,
         }
         for s in task.steps
     ]
