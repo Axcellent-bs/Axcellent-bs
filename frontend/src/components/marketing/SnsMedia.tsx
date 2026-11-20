@@ -19,8 +19,8 @@ import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, dr
 // 이미지 시트 · 스토리보드 카드 위에 Higgsfield 연결 상태를 30초마다 보여 준다.
 
 const REFRESH_MS = 15_000;
-const SNS_ACTIONS = ["publish_sns", "generate_media"] as const;
-const ACTION_NAME: Record<string, string> = { publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기" };
+const SNS_ACTIONS = ["publish_sns", "generate_media", "generate_creative_video"] as const;
+const ACTION_NAME: Record<string, string> = { publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", generate_creative_video: "스토리보드 영상 만들기" };
 // 캐러셀 게시 요청의 요약("SNS 캐러셀 게시 요청(N장): ...")에서 장수만 읽는다. 다른 요청이면 null이다.
 const carouselCount = (summary?: string): number | null => {
   const m = /^SNS 캐러셀 게시 요청\((\d+)장\)/.exec(summary ?? "");

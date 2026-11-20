@@ -37,7 +37,7 @@ export default function InstagramRadarSetup() {
     <section className="card space-y-4 p-6" aria-label="인스타 레이더 계정">
       <SectionHead as="h3" title="인스타 레이더 계정" right={status}
         desc="위 레이더가 반응을 지켜볼 인스타 계정이에요(업계·경쟁·참고 계정). 한 줄에 하나씩 넣어요." />
-      {!HUMAN_TOKEN_SET && <Notice>사람 토큰이 없어 저장이 꺼져 있어요.</Notice>}
+      {!HUMAN_TOKEN_SET && <Notice>로그인이 필요해요. 로그인하면 저장할 수 있어요.</Notice>}
       {state && !state.editable && <Notice>서버에 회사 연결 파일 설정이 없어 저장할 수 없어요.</Notice>}
       <label className="block space-y-1 text-sm">
         <span className="text-ink-700">계정 이름 (최대 {state?.max ?? 200}곳, @는 빼도 돼요)</span>

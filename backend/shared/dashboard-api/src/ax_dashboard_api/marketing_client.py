@@ -719,6 +719,10 @@ async def _creative_read(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
     if result.outcome == "not_found":
         raise ApiError(404, "NOT_FOUND", "제작 기록이 없다")
+    if result.outcome in VIDEO_REFUSALS:
+        status, code = VIDEO_REFUSALS[result.outcome]
+        message = str((result.output or {}).get("message") or result.outcome)
+        raise ApiError(status, code, message)
     raise ApiError(502, "UPSTREAM_FAILED", f"마케팅이 요청을 처리하지 못했다 ({result.outcome})")
 
 
@@ -730,3 +734,51 @@ async def creative_records_call(limit: int) -> dict[str, Any]:
 async def creative_record_call(record_id: str) -> dict[str, Any]:
     """제작 기록 하나(read)."""
     return await _creative_read("creative_record_get", {"record_id": record_id})
+
+
+# 영상 요청 거절 outcome → (HTTP 상태, 오류 코드)
+VIDEO_REFUSALS = {
+    "board_image_not_ready": (409, "BOARD_IMAGE_NOT_READY"),
+    "model_not_configured": (409, "MODEL_NOT_CONFIGURED"),
+    "higgsfield_key_missing": (409, "HIGGSFIELD_KEY_MISSING"),
+    "quota_exceeded": (409, "QUOTA_EXCEEDED"),
+    "quota_not_configured": (409, "QUOTA_NOT_CONFIGURED"),
+    "in_progress": (409, "IN_PROGRESS"),
+    "storage_error": (500, "STORAGE_ERROR"),
+}
+CREATIVE_FILES = {
+    "sheet_image": ("sheet.jpg", "image/jpeg"),
+    "board_image": ("board.jpg", "image/jpeg"),
+    "video": ("video.mp4", "video/mp4"),
+}
+
+
+async def creative_video_call(record_id: str, who: str | None) -> dict[str, Any]:
+    """스토리보드 영상 만들기를 사람 승인에 올린다(마케팅 `creative_video_request`)."""
+    payload: dict[str, Any] = {"record_id": record_id}
+    if who:
+        payload["who"] = who
+    return await _creative_read("creative_video_request", payload)
+
+
+async def creative_asset(record_id: str, part: str) -> tuple[Path, str]:
+    """제작 기록의 Higgsfield 결과 파일(경로, Content-Type). 기록된 sha256과 같은 파일만 내준다."""
+    missing = ApiError(404, "NOT_FOUND", "결과 파일이 없다")
+    rec = await creative_record_call(record_id)
+    item = ((rec.get("render") or {}).get(part)) or {}
+    name, sha = item.get("asset"), item.get("sha256")
+    raw_root = (os.getenv(MEDIA_DIR_ENV) or "").strip()
+    expected = CREATIVE_FILES.get(part)
+    if not (expected and name == expected[0] and isinstance(sha, str) and raw_root):
+        raise missing
+    root = Path(raw_root).resolve()
+    path = (root / "creative" / record_id / name).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise missing
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != sha:
+        raise missing
+    return path, expected[1]

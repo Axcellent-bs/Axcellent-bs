@@ -98,7 +98,7 @@ const RECORD_FAIL_KO: Record<string, string> = {
 export function manualRecordErrorKo(status: number | undefined, code?: string | null): string {
   if (code === NGINX_BLOCKED_CODE) return NGINX_BLOCKED_MESSAGE;
   if (code && RECORD_FAIL_KO[code]) return RECORD_FAIL_KO[code];
-  if (status === 401 || status === 403) return "기록할 권한이 없습니다. 사람 토큰 설정(또는 서버의 이 경로 허용)을 확인해 주세요.";
+  if (status === 401 || status === 403) return "기록할 권한이 없습니다. 로그인이 끝났을 수 있으니 다시 로그인해 주세요(그래도 안 되면 서버의 이 경로 허용을 확인해 주세요).";
   if (status === 404) return "수동 게시 건을 찾을 수 없거나 서버가 아직 이 기능을 지원하지 않습니다.";
   if (status === 400 || status === 422) return "입력을 서버가 받아들이지 않았습니다. 링크와 AI 표시 확인을 다시 봐 주세요.";
   return "게시 완료를 기록하지 못했습니다. 잠시 뒤 다시 시도해 주세요. 기록되지 않았습니다.";

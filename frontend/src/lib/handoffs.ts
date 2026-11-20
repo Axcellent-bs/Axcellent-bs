@@ -50,7 +50,7 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const msg =
       res.status === 401 || res.status === 403
-        ? "사람 권한이 없어 처리하지 못했어요. VITE_SAFETY_HUMAN_TOKEN을 확인하세요."
+        ? "권한이 없어 처리하지 못했어요. 로그인이 끝났을 수 있으니 다시 로그인해 주세요."
         : body?.error?.message ?? `요청 실패 (${res.status})`;
     throw new ApiError(msg, res.status);
   }

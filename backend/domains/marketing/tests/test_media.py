@@ -632,7 +632,9 @@ def test_card_lists_generate_media_and_a2a_runs_it(monkeypatch: pytest.MonkeyPat
         },
     }
     out = client.post("/a2a", json=body).json()
-    assert out["outcome"] == "generated" and out["output"]["ai_generated"] is True
+    # 총괄이 부르면 긴 작업: 접수 즉시 WORKING + task_id (결과는 task.completed)
+    assert out["outcome"] == "accepted_async" and out["status"] == "working"
+    assert out["output"]["task_id"].startswith("tsk_")
 
 
 @pytest.mark.asyncio

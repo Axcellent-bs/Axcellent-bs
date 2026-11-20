@@ -71,7 +71,7 @@ export default function Integrations({ onState, embedded = false, tenant }: { on
         desc="부서 AI가 주문·상품·구매자를 읽는 곳이에요. 바꾸면 다시 켜지 않아도 모든 부서 AI가 바로 따라가요."
         right={status} />
 
-      {!HUMAN_TOKEN_SET && <Notice>사람 토큰이 없어 확인·저장이 꺼져 있어요. run_web.sh로 화면을 켜면 들어가요.</Notice>}
+      {!HUMAN_TOKEN_SET && <Notice>로그인이 필요해요. 로그인하면 확인·저장할 수 있어요.</Notice>}
       {state && !state.editable && <Notice>서버에 회사 연결 파일 설정(AX_COMPANY_CONNECTION_FILE)이 없어 저장할 수 없어요. run_all.sh로 서버를 켜면 생겨요.</Notice>}
       {loadError && <Notice tone="bad">연결 상태를 읽지 못했어요: {loadError}</Notice>}
 

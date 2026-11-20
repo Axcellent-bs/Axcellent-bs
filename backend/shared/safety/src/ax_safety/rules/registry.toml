@@ -142,6 +142,14 @@ owner = "marketing"
 base_grade = "B"
 verifier = "safety"
 
+# 제작 기록(이미지 시트·스토리보드)의 스토리보드 그림으로 Higgsfield 영상 만들기(2026-11-20).
+# 영상은 크레딧이 크고 공개될 수 있는 결과물이라 항상 사람이 승인한다(C). 마케팅은 영상 월 사용량 예산을
+# 먼저 예약하고, 승인 뒤 같은 멱등 키로 다시 물어 executed일 때만 Higgsfield를 부른다
+[[actions]]
+action = "generate_creative_video"
+owner = "marketing"
+base_grade = "C"
+
 # 사람과 마케팅 AI의 직접 대화. 대화 글을 저장하고 닫을 뿐 쿠폰·공지·게시는 건드리지 않는다
 # (그런 일은 기존 skill로 execute()와 안전 관문을 거친다). 고객지원·기획 대화와 같은 A
 [[actions]]

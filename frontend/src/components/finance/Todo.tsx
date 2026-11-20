@@ -31,7 +31,7 @@ const ITEM_ACTION = {
 } as const;
 type ItemActionType = keyof typeof ITEM_ACTION;
 
-const NO_TOKEN = "사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 없어 결정 버튼이 꺼져 있습니다. bash scripts/run_web.sh로 화면을 띄우면 켜집니다.";
+const NO_TOKEN = "로그인이 필요해요. 로그인하면 결정 버튼이 켜져요.";
 
 export function TodoCard({ todo, onDone, onOpen }: {
   todo: FinanceTodo;
@@ -42,7 +42,7 @@ export function TodoCard({ todo, onDone, onOpen }: {
   const [problem, setProblem] = useState<string | null>(null);
   const kind = KIND[todo.kind] ?? { label: "할 일", tone: TONE.muted };
   const action = todo.action;
-  // 고객지원 화면으로 잇기만 하는 할 일은 사람 권한이 필요 없다
+  // 고객지원 화면으로 잇기만 하는 할 일은 로그인(사람 토큰)이 필요 없다
   const needsToken = !!action && !["open_tab", "settlement_request", "review_decision"].includes(action.type);
 
   async function run(fn: () => Promise<unknown>) {

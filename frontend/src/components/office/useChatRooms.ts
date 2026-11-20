@@ -41,7 +41,7 @@ export interface ChatRooms {
 }
 
 /**
- * `enabled`가 false면(오피스 리플레이) 서버를 읽지 않는다.
+ * `enabled`가 false면 서버를 읽지 않는다(기본 true, AI 대화방·AI 오피스는 늘 읽는다).
  * `rooms`는 지금 화면에 보이는 방들(나눠 보기면 칸마다 하나). 이 방들만 읽음으로 센다
  */
 export function useChatRooms({ enabled = true, rooms }: { enabled?: boolean; rooms: readonly string[] }): ChatRooms {

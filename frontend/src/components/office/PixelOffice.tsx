@@ -178,12 +178,12 @@ export function PixelOffice({ view, label, onPick }: { view: OfficeView; label: 
     let last = performance.now();
     let raf = 0;
     const frame = (now: number) => {
-      // 프레임이 드물게 오거나 멈췄다 와도(가려진 창·느린 기기) 걷기는 실제 지난 시간대로 (리플레이 시계와 맞춘다)
+      // 프레임이 드물게 오거나 멈췄다 와도(가려진 창·느린 기기) 걷기는 실제 지난 시간대로
       const dt = Math.min(10, (now - last) / 1000);
       last = now;
       const v = viewRef.current;
       const wall = Date.now();
-      // 새로 들어온 걸어가기 (같은 기록은 한 번만. 리플레이를 다시 보면 처음 본 시각이 달라 다시 걷는다)
+      // 새로 들어온 걸어가기 (같은 기록은 한 번만)
       for (const visit of v.visits) {
         const key = `${visit.id}@${visit.at}`;
         if (handled.has(key)) continue;
@@ -299,8 +299,6 @@ function draw(ctx: CanvasRenderingContext2D, px: { w: number; h: number }, art: 
     const baseY = sit && SEATS[pop.desk].bubble === "down" ? p.y + 24 : (tops.get(pop.desk) ?? p.y - SH - 8) - 8;
     floatText(ctx, pop.text, p.x, baseY - (reduced ? 0 : 22 * k), k < 0.6 ? 1 : (1 - k) / 0.4, !!pop.human);
   }
-
-  if (v.overlay) later(ctx, v.overlay.text, v.overlay.progress);
 }
 
 function poseOf(mode: Mode, state: string, t: number, seed: number, dir: Pt, back = false, side = false): Pose {
@@ -401,35 +399,13 @@ function floatText(ctx: CanvasRenderingContext2D, text: string, cx: number, y: n
   ctx.restore();
 }
 
-/** 화면 전환 ("7일 뒤"): 어둡게 했다가 걷힌다 */
-function later(ctx: CanvasRenderingContext2D, text: string, k: number) {
-  const a = k < 0.2 ? k / 0.2 : k > 0.8 ? (1 - k) / 0.2 : 1;
-  ctx.save();
-  ctx.fillStyle = `rgba(8,10,20,${(0.78 * a).toFixed(3)})`;
-  ctx.fillRect(0, 0, W, H);
-  ctx.globalAlpha = a;
-  ctx.font = `800 56px ${FONT}`;
-  ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(text, W / 2, H / 2);
-  ctx.restore();
-}
-
-/** 라운지 위 화이트보드에 사건 진행 카드를 붙인다 (캠페인 리플레이는 캠페인 단계) */
+/** 라운지 위 화이트보드에 사건 진행 카드를 붙인다 (실시간 총괄 사건) */
 function boardCard(ctx: CanvasRenderingContext2D, v: OfficeView) {
   const a = toC(BOARD[0], BOARD[1]), b = toC(BOARD[2], BOARD[3]);
   const x = a.x, y = a.y, w = b.x - a.x, h = b.y - a.y;
   ctx.fillStyle = "#fffffc"; rr(ctx, x, y, w, h, 6); ctx.fill();
   ctx.strokeStyle = "#8e959e"; ctx.lineWidth = 2; ctx.stroke();
   ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
-  if (v.board) {
-    const { title, value, done, total } = v.board;
-    ctx.font = `600 14px ${FONT}`; ctx.fillStyle = "#64748b";
-    ctx.fillText(title, x + 12, y + 24);
-    ctx.font = `800 21px ${FONT}`; ctx.fillStyle = done >= total ? "#16a34a" : "#d97706";
-    ctx.fillText(value, x + 12, y + 54);
-    progressBar(ctx, x, y, w, h, done, total, done >= total ? "#16a34a" : "#f59e0b");
-    return;
-  }
   const { done, total } = v.progress;
   ctx.font = `600 14px ${FONT}`; ctx.fillStyle = "#64748b";
   const title = total ? "사건 진행" : "총괄 AI 사건";

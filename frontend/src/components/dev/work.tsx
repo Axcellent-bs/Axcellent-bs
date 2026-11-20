@@ -1,10 +1,11 @@
 // 개발 작업·PR과 AI 교차검증. 프로젝트 탭과 같은 틀(왼쪽 목록 / 가운데 세로 흐름 / 오른쪽 곁 블록)
-import { useEffect, useState, type Dispatch, type ReactNode } from 'react'
+import { useEffect, useState, type Dispatch } from 'react'
 import { Button, useToast } from '@dejafix/common-frontend'
-import { CROSS_CHECK_TIMEOUT_MIN, EVIDENCE_SOURCE, TARGET_LABEL, OBSERVE_MIN, type Action, type CrossEvidence, type CrossReview, type PR, type State as S } from '@/lib/planningData'
+import { CROSS_CHECK_TIMEOUT_MIN, EVIDENCE_SOURCE, TARGET_LABEL, type Action, type CrossEvidence, type CrossReview, type PR, type State as S } from '@/lib/planningData'
 import { codeOf, traceOf, type CodeLine } from '@/components/dev/trace'
 import { DiffFiles } from '@/components/dev/diff'
-import { DEV_API, repoApi, type RepoFile } from '@/lib/planning'
+import { DEV_API, repoApi, type RepoFile, type SendAction } from '@/lib/planning'
+import { reviewStage } from '@/lib/devView'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Linked, Ref, convoHref, hrefOf, prFromSlug, prName, prSlug, repoPrHref, reviewOf, toPath, idText } from '@/components/planning-common/links'
 import { Flow, Head, Layout, ListPane, Pairs, Side, Step, mergedLabel } from '@/components/planning-common/flow'
@@ -78,26 +79,36 @@ function EvidenceList({ lines }: { lines: CrossEvidence[] }) {
   )
 }
 
-// 판단 전: 무엇을 기다리는지 · 얼마나 · 언제 사람에게 넘어가는지 · 지금 사람이 할 수 있는 것
-function Waiting({ s, d, r, listed }: P & { r: CrossReview; listed?: boolean }) {
+// 판단 전: 지금 어디에 있는지 · 얼마나 · 사람이 할 수 있는 것.
+// 근거는 머지를 시도할 때 이미 다 모였고, 그 뒤에 따로 판정하는 AI 검증자는 없다 (결정은 사람 버튼 → 안전 관문)
+function Waiting({ s, d, r, listed }: { s: S; d: SendAction; r: CrossReview; listed?: boolean }) {
   const toast = useToast()
   const now = useNow()
+  const [busy, setBusy] = useState(false)
   const waited = waitedMin(r, now)
   const left = waited === undefined ? undefined : CROSS_CHECK_TIMEOUT_MIN - waited
-  const open = r.checks.filter((c) => c.result !== '통과').map((c) => c.label)
+  const stage = reviewStage(r)
   const prHref = r.target === 'merge_pr' ? toPath(`work/prs/${prSlug(r.ref)}`) : hrefOf(s, r.ref)
+  // 성공 토스트는 서버가 받은 뒤에만 (실패는 화면이 오류 토스트로 알린다)
+  const go = async () => {
+    setBusy(true)
+    const ok = await d({ type: 'humanDecide', review: r.id, ok: true })
+    setBusy(false)
+    if (ok) toast.show(`${idText(r.ref)} 진행`)
+  }
   return (
     <>
       <Pairs items={[
-        ['기다리는 판정', r.lane === 'ai' ? `${r.verifier} 판정` : r.irreversible ? `사람 확인 · ${r.irreversible}` : '사람 확인'],
+        ['지금', r.lane === 'human' && r.irreversible ? `${stage.label} · ${r.irreversible}` : stage.label],
         ['대기', waited === undefined ? r.t : `${r.t}부터 · ${waited}분`],
-        ...(r.lane === 'ai' ? [['사람에게 넘어감', left === undefined ? `${CROSS_CHECK_TIMEOUT_MIN}분 뒤 자동` : left > 0 ? `${left}분 뒤 자동` : '곧 넘어감'] as [string, string]] : []),
-        ...(listed ? [] : open.length ? [['확인할 항목', open.join(' · ')] as [string, string]] : r.routeWhy.length ? [['확인할 항목', r.routeWhy.join(' · ')] as [string, string]] : []),
+        // 서버는 화면(SSE)이 열려 있을 때만 오래된 교차검증 대기를 사람 확인으로 바꾼다
+        ...(stage.timeout ? [['사람 확인 표시', left === undefined || left > 0 ? `화면이 열려 있으면 ${left ?? CROSS_CHECK_TIMEOUT_MIN}분 뒤` : '곧 바뀜'] as [string, string]] : []),
+        ...(listed || !r.routeWhy.length ? [] : [['확인할 항목', r.routeWhy.join(' · ')] as [string, string]]),
       ]} />
       {!!r.evidence?.length && <EvidenceList lines={r.evidence} />}
       <div className="actions">
-        <Button variant="primary" onClick={() => { d({ type: 'humanDecide', review: r.id, ok: true }); toast.show(`${idText(r.ref)} 진행`) }}>확인하고 진행</Button>
-        {r.lane === 'human' && <Button onClick={() => { d({ type: 'humanDecide', review: r.id, ok: false }); toast.show(`${idText(r.ref)} 보류`) }}>보류</Button>}
+        <Button variant="primary" disabled={busy} onClick={() => void go()}>{busy ? '보내는 중' : '확인하고 진행'}</Button>
+        {/* 보류는 서버가 아직 받지 않아 버튼을 두지 않는다. 그대로 두면 대기열에 남는다 */}
         {prHref && <a href={prHref} className="btn-quiet px-3 py-1">{r.target === 'merge_pr' ? 'PR에서 수정 요청' : '기획서 보기'}</a>}
       </div>
     </>
@@ -237,30 +248,31 @@ function Trace({ s, pr, line: picked, setLine }: { s: S; pr: PR; line?: CodeLine
 }
 
 // ---------------------------------------------------------------- AI 교차검증 대기열 + 사람 확인 (되돌릴 수 없는 일)
-export function Reviews({ s, d, item }: P & { item?: string }) {
+// 대기열(GET /review-queue)은 아직 판단하지 않은 건만 준다. 처리된 건은 PR·기획서 화면에 남는다
+export function Reviews({ s, d, item }: { s: S; d: SendAction; item?: string }) {
   const all = s.reviews.slice().reverse()
   const r = s.reviews.find((x) => x.id === item) ?? all.find((x) => !x.result) ?? all[0]
-  const row = (x: CrossReview) => ({ key: x.id, href: toPath(`work/reviews/${x.id}`), on: x.id === r?.id, title: `${TARGET_LABEL[x.target]} · ${x.title}`, meta: <><span className="mono idc" title={x.id}>{idText(x.id)}</span> <span className="mono idc" title={x.ref}>{idText(x.ref)}</span> <State v={x.result ?? waitLabel(x)} /></> })
+  const label = (x: CrossReview) => x.result ?? reviewStage(x).label
+  const row = (x: CrossReview) => ({ key: x.id, href: toPath(`work/reviews/${x.id}`), on: x.id === r?.id, title: `${TARGET_LABEL[x.target]} · ${x.title}`, meta: <><span className="mono idc" title={x.id}>{idText(x.id)}</span> <span className="mono idc" title={x.ref}>{idText(x.ref)}</span> <State v={label(x)} /></> })
   const list = <ListPane empty="대기 없음" groups={[
     { label: '교차검증 대기', rows: all.filter((x) => !x.result && x.lane === 'ai').map(row) },
     { label: '사람 확인 대기', rows: all.filter((x) => !x.result && x.lane === 'human').map(row) },
-    { label: '처리됨', rows: all.filter((x) => x.result).map(row) },
   ]} />
   if (!r) return <Layout list={list}><div className="empty"><b>대기 없음</b></div></Layout>
-  const cnt = (k: CrossReview['checks'][number]['result']) => r.checks.filter((c) => c.result === k).length
   const look = r.checks.filter((c) => c.result !== '통과')
   const passed = r.checks.filter((c) => c.result === '통과')
   const check = (c: CrossReview['checks'][number]) => <li key={c.label}><State v={c.result} tone={c.result === '확인 필요' ? 'amber' : c.result === '통과' ? 'green' : undefined} /> <b>{c.label}</b> <span className="muted"><Linked s={s} text={c.detail} /></span></li>
+  const ev = r.evidence ?? []
   return (
     <Layout
       list={list}
-      head={<Head kicker={<><span className="mono idc" title={r.id}>{idText(r.id)}</span> {TARGET_LABEL[r.target]} · <Ref s={s} id={r.ref} /> · {r.t}</>} title={r.title} side={<State v={r.result ?? waitLabel(r)} />} />}
+      head={<Head kicker={<><span className="mono idc" title={r.id}>{idText(r.id)}</span> {TARGET_LABEL[r.target]} · <Ref s={s} id={r.ref} /> · {r.t}</>} title={r.title} side={<State v={label(r)} />} />}
       side={
         <>
           <Side title="판단하는 쪽">
             <Pairs items={[
-              ['검증자', r.verifier],
-              ['만든 쪽이 승인', r.lane === 'ai' ? '아님 · 다른 부서 AI' : '해당 없음'],
+              ['결정', '사람 (확인하고 진행) → 안전 관문'],
+              ['근거', r.verifier],
               ...(r.irreversible ? [['되돌릴 수 없음', r.irreversible] as [string, string]] : []),
             ]} />
           </Side>
@@ -271,8 +283,8 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
       {!r.result && (
         <section className="dev-decide" aria-label="판단">
           <div className="dev-decide-h">
-            <b>{look.length ? `확인할 것 ${look.length}개` : '판단 대기'}</b>
-            <span>{r.recommend ? `AI 추천: ${r.recommend}` : 'AI 추천 없음'}</span>
+            <b>{look.length ? `확인할 것 ${look.length}개` : reviewStage(r).label}</b>
+            {r.recommend && <span>AI 추천: {r.recommend}</span>}
           </div>
           {look.length > 0 && (
             <ul className="look">
@@ -284,19 +296,29 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
       )}
       <Flow>
         <Step name="검토로 온 이유" on title={r.routeWhy.join(', ') || '-'} />
-        <Step name="AI 요약" on title={r.recommend ? `추천 ${r.recommend}` : '추천 없음'}>
-          <p><Linked s={s} text={r.summary} /></p>
-          {r.recommendWhy && <p className="muted">{r.recommendWhy}</p>}
-        </Step>
-        <Step name="규칙 점검" on title={`통과 ${cnt('통과')} · 확인 필요 ${cnt('확인 필요')} · 걸림 ${cnt('걸림')}`}>
-          <ul className="dev-checks">{look.map(check)}</ul>
-          {passed.length > 0 && (
-            <details className="dev-pass">
-              <summary>통과 {passed.length}개 보기</summary>
-              <ul>{passed.map(check)}</ul>
-            </details>
-          )}
-        </Step>
+        {/* 판정에 쓴 값 (코드 계산). AI 요약·추천은 서버가 아직 만들지 않는다 */}
+        {(r.summary || r.recommend) && (
+          <Step name="판정에 쓴 값" on title={r.recommend ? `추천 ${r.recommend}` : r.summary}>
+            {r.recommend && <p><Linked s={s} text={r.summary} /></p>}
+            {r.recommendWhy && <p className="muted">{r.recommendWhy}</p>}
+          </Step>
+        )}
+        {ev.length > 0 && (
+          <Step name="교차검증 근거" on title={`근거 ${ev.length}건 · ${ev.some((e) => !e.ok) ? `확인 필요 ${ev.filter((e) => !e.ok).length}` : '모두 통과'}`}>
+            <EvidenceList lines={ev} />
+          </Step>
+        )}
+        {r.checks.length > 0 && (
+          <Step name="규칙 점검" on title={`통과 ${passed.length} · 확인 필요 ${r.checks.filter((c) => c.result === '확인 필요').length} · 걸림 ${r.checks.filter((c) => c.result === '걸림').length}`}>
+            <ul className="dev-checks">{look.map(check)}</ul>
+            {passed.length > 0 && (
+              <details className="dev-pass">
+                <summary>통과 {passed.length}개 보기</summary>
+                <ul>{passed.map(check)}</ul>
+              </details>
+            )}
+          </Step>
+        )}
         {r.target === 'merge_pr' && (() => {
           const pr = s.prs.find((p) => p.id === r.ref)
           return pr ? (
@@ -305,24 +327,10 @@ export function Reviews({ s, d, item }: P & { item?: string }) {
             </Step>
           ) : null
         })()}
-        <Step name="결정" on={!!r.result} title={r.result ? `${r.result} · ${r.decidedAt}` : <State v={waitLabel(r)} live />}>
+        <Step name="결정" on={!!r.result} title={r.result ? `${r.result} · ${r.decidedAt}` : <State v={label(r)} live />}>
           {r.result ? r.resultWhy && <p className="muted">{r.resultWhy}</p> : <p className="dev-done-note">맨 위 판단 상자에서 정해요</p>}
         </Step>
-        {r.target === 'merge_pr' && r.lane === 'ai' && (() => {
-          const o = s.autoPolicy.observing.find((x) => x.pr === r.ref)
-          const rule = s.autoPolicy.rules.find((x) => x.basis.includes(r.ref))
-          return (
-            <Step name="머지 뒤 지켜보기" on={o?.result === '정상'} href={rule ? hrefOf(s, rule.id) : undefined} title={!o ? '-' : rule ? `${idText(rule.id)} ${rule.status}` : o.result}>
-              {o && (
-                <Pairs items={[
-                  ['머지', o.mergedAt],
-                  ['지켜본 시간', `${OBSERVE_MIN}분 · ${humanizePlanIds(o.result)}`],
-                  ...(rule ? [['기준', <Ref key="r" s={s} id={rule.id} />] as [string, ReactNode]] : []),
-                ]} />
-              )}
-            </Step>
-          )
-        })()}
+        {/* 머지 뒤 지켜보기(관찰 기반 학습)는 백엔드에 아직 없어 단계를 그리지 않는다 */}
       </Flow>
     </Layout>
   )

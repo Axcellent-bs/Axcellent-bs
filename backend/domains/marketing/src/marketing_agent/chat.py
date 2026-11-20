@@ -88,6 +88,25 @@ SHEET_ONLY = (
 NO_RECORD = "올린 이미지의 이미지 시트 기록을 찾지 못했어요. 이미지를 다시 올려 주세요."
 
 
+_VIDEO = re.compile(r"영상|동영상|비디오")
+VIDEO_REPLIES = {
+    "awaiting_approval": (
+        "영상 만들기를 사람 승인에 올렸어요. 안전 처리 로그에서 승인되면 스토리보드 그림으로 "
+        "Higgsfield 영상을 만들어 이 카드와 제작 기록에 붙여요."
+    ),
+    "running": "승인된 영상이라 지금 Higgsfield로 만들고 있어요. 끝나면 이 카드에 나와요.",
+    "done": "이 스토리보드의 영상은 이미 만들어져 있어요. 아래 카드에서 볼 수 있어요.",
+    "blocked": "안전 관문이 영상 요청을 막았어요. 안전 처리 로그에서 이유를 볼 수 있어요.",
+}
+VIDEO_REASONS = {
+    "board_image_not_ready": "스토리보드 그림이 아직 없어요. 그림이 끝난 뒤 다시 말해 주세요.",
+    "model_not_configured": "Higgsfield 영상 모델 경로가 설정되지 않았어요.",
+    "higgsfield_key_missing": "Higgsfield 키가 설정되지 않았어요.",
+    "quota_exceeded": "이번 달 영상 사용량 예산을 넘었어요.",
+    "quota_not_configured": "영상 월 사용량 예산이 설정되지 않았어요.",
+}
+
+
 class StoryAsk(BaseModel):
     story: str = ""
     shots: int | None = None
@@ -155,6 +174,9 @@ class ChatService:
         self._facts = facts
         self._llm = llm
         self._pending: set[asyncio.Task[None]] = set()
+        # handlers가 채운다: 스토리보드가 붙으면 그림을, '영상' 요청이면 사람 승인 요청을
+        self.on_board: Callable[[Any, str], None] | None = None
+        self.on_video: Callable[[Any, str, str | None], Any] | None = None
 
     # ---- 읽기 ----------------------------------------------------------------
 
@@ -193,7 +215,13 @@ class ChatService:
             raise ChatRefused("not_found", f"대화 {thread_id}가 없다")
 
     def send(
-        self, who: str, thread_id: str | None, message: str, record_id: str | None = None
+        self,
+        who: str,
+        thread_id: str | None,
+        message: str,
+        record_id: str | None = None,
+        *,
+        meta: Any = None,
     ) -> dict[str, Any]:
         """글을 저장하고 `answering`으로 돌려준다. 답은 백그라운드에서 붙는다."""
         message = message.strip()
@@ -213,7 +241,7 @@ class ChatService:
             raise ChatRefused("thread_closed", "끝난 대화에는 보낼 수 없다. 새 대화를 시작한다")
         if outcome == "busy":
             raise ChatRefused("thread_busy", "AI가 아직 답하는 중이다")
-        task = asyncio.get_running_loop().create_task(self._answer(th["id"], llm))
+        task = asyncio.get_running_loop().create_task(self._answer(th["id"], llm, meta, who))
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
         return visible(th, who)
@@ -223,11 +251,15 @@ class ChatService:
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
 
-    async def _answer(self, thread_id: str, llm: Any) -> None:
+    async def _answer(
+        self, thread_id: str, llm: Any, meta: Any = None, who: str | None = None
+    ) -> None:
         th = self.store.get(thread_id)
         if th is None:
             return
-        if await self._creative_turn(th, llm):  # 이미지 시트·스토리보드
+        if await self._video_turn(th, meta, who):  # 스토리보드 영상(사람 승인)
+            return
+        if await self._creative_turn(th, llm, meta):  # 이미지 시트·스토리보드
             return
         last = th["messages"][-1]["text"] if th["messages"] else ""
         if _ACTION.search(last):  # 상태 변경 요청: LLM 없이 안내만 한다
@@ -251,7 +283,34 @@ class ChatService:
             pass
         self.store.finish_turn(thread_id, LLM_FAILED, kind="error")
 
-    async def _creative_turn(self, th: dict[str, Any], llm: Any) -> bool:
+    async def _video_turn(self, th: dict[str, Any], meta: Any, who: str | None) -> bool:
+        """'영상'을 말하면 대화의 최근 기록으로 영상 만들기를 사람 승인에 올린다."""
+        msgs = th["messages"]
+        text = str((msgs[-1] if msgs else {}).get("text") or "")
+        if not _VIDEO.search(text) or self.on_video is None or meta is None:
+            return False
+        rid = next(
+            (
+                m["card"]["record_id"]
+                for m in reversed(msgs)
+                if (m.get("card") or {}).get("kind") == "creative"
+            ),
+            None,
+        )
+        if not rid:
+            return False
+        try:
+            video = await self.on_video(meta, rid, who)
+        except Exception as error:  # noqa: BLE001 - 이유 코드만 알린다
+            reason = VIDEO_REASONS.get(str(error), str(error)[:80])
+            self.store.finish_turn(th["id"], f"영상을 요청하지 못했어요. {reason}", kind="error")
+            return True
+        status = (video or {}).get("status")
+        reply = VIDEO_REPLIES.get(str(status), "영상 요청을 받았어요.")
+        self.store.finish_turn(th["id"], reply, card=_card(rid, "result", storyboard=True))
+        return True
+
+    async def _creative_turn(self, th: dict[str, Any], llm: Any, meta: Any = None) -> bool:
         """이미지 시트 기록이 걸린 말이면 스토리보드까지 처리하고 True. 아니면 False(일반 대화)."""
         msgs = th["messages"]
         last = msgs[-1] if msgs else {}
@@ -311,6 +370,11 @@ class ChatService:
             )
         except Exception:  # noqa: BLE001 - 기록은 부가 기능이라 답을 막지 않는다
             _creative.logger.exception("제작 기록: 대화의 스토리보드를 붙이지 못함")
+        if self.on_board is not None and meta is not None:
+            try:
+                self.on_board(meta, rid)
+            except Exception:  # noqa: BLE001 - 그림 시작 실패는 답을 막지 않는다
+                _creative.logger.exception("대화의 스토리보드 그림을 시작하지 못함")
         reply = (
             f"스토리보드 {len(board.shots)}칸을 만들었어요 — {board.title_ko}. "
             "이 캐릭터의 이미지 시트와 함께 아래에서 볼 수 있어요."

@@ -130,7 +130,7 @@ export function PublishControlCard() {
           <button className={state.paused ? "btn-primary text-xs" : "btn-ghost text-xs"} disabled={!HUMAN_TOKEN_SET || busy} onClick={() => void toggle()}>
             {busy ? "처리 중" : state.paused ? "자동 게시 켜기" : "자동 게시 끄기"}
           </button>
-          {!HUMAN_TOKEN_SET && <p className="w-full text-xs text-ink-500">사람 토큰이 설정되지 않아 바꿀 수 없습니다.</p>}
+          {!HUMAN_TOKEN_SET && <p className="w-full text-xs text-ink-500">로그인이 필요해요. 로그인하면 바꿀 수 있어요.</p>}
         </div>
       )}
       {result && (

@@ -4,11 +4,11 @@
 // 공통 화면 컴포넌트(@dejafix/common-frontend)의 스타일은 .planning-scope 안에만 적용된다 (postcss.config.js).
 import '@dejafix/common-frontend/styles.css'
 import '@/components/planning-common/planning.css'
-import { useEffect, useRef, useState, type Dispatch, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { Chip, ToastOutlet, ToastProvider, useToast, type NavItem } from '@dejafix/common-frontend'
-import { ACTION_ERROR_EVENT, useSharedStore, apiBase } from '@/lib/planning'
-import { type Action, type State } from '@/lib/planningData'
+import { ACTION_ERROR_EVENT, useSharedStore, apiBase, type SendAction } from '@/lib/planning'
+import { type State } from '@/lib/planningData'
 import { Dep, Point } from '@/components/planning-common/parts'
 import { convoHref, go, setPlanningNav, toPath } from '@/components/planning-common/links'
 import { humanizePlanIds } from '@/lib/format'
@@ -23,7 +23,7 @@ export type PlanningPart = 'planning' | 'dev'
 /** 각 페이지가 화면을 그릴 때 받는 값 */
 export interface View {
   state: State
-  dispatch: Dispatch<Action>
+  dispatch: SendAction // 성공하면 true (Dispatch<Action>로도 넘길 수 있다)
   connected: boolean
   section: string
   /** 메뉴 바로 다음 칸 (가로탭이 없는 메뉴에서는 필터·항목) */

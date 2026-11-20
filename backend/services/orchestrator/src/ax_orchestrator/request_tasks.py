@@ -29,6 +29,9 @@ DEPT_LABEL = {
     "archive": "아카이브",
 }
 READ_GRADE = "read"
+MEDIA_TIMEOUT_S = (
+    300.0  # 영상 제작은 공급자가 몇십 초~몇 분 걸린다(마케팅이 긴 작업으로 바뀌기 전까지)
+)
 HUMAN_GRADE = "C"  # 총괄이 사람 승인을 먼저 받는 등급(`human_gate`가 있는 단계도 같다)
 
 
@@ -63,6 +66,8 @@ class TaskStep:
     carry_keys: tuple[str, ...] = ()
     carry_from: str | None = None
     on_missing: str = "skip"
+    # 이 단계 호출에 기다리는 시간(초). 없으면 실행기 기본값(30초). 영상 제작처럼 오래 걸리는 일용
+    timeout_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -175,6 +180,7 @@ PROMO_VIDEO = TaskDef(
             after=("prepare",),
             takes_carry=True,
             on_missing="fail",
+            timeout_s=MEDIA_TIMEOUT_S,
         ),
     ),
 )
@@ -387,6 +393,7 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "carry_keys": list(s.carry_keys),
             "carry_from": s.carry_from,
             "on_missing": s.on_missing,
+            "timeout_s": s.timeout_s,
         }
         for s in task.steps
     ]

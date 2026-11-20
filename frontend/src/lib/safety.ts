@@ -1,4 +1,6 @@
+import { tokenFree } from "./apiDirect";
 import { SAFETY_API_URL } from "./env";
+import { sessionAuth } from "./humanToken";
 import type { ExecutionRecord, Review } from "./finance";
 
 // 안전 처리 로그(safety, 8001) 읽기 전용 클라이언트. 모든 AI의 상태 변경(돈·게시·배포)은 execute()로
@@ -42,7 +44,8 @@ export class SafetyApiError extends Error {}
 async function get<T>(path: string): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${SAFETY_API_URL}${path}`, { cache: "no-store" });
+    // 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이). 토큰을 안 보는 읽기는 싣지 않는다
+    res = await fetch(`${SAFETY_API_URL}${path}`, { cache: "no-store", headers: tokenFree("safety", path) ? {} : sessionAuth() });
   } catch {
     throw new SafetyApiError("안전 처리 로그 서버에 연결하지 못했습니다. 서버가 켜져 있는지 확인하세요.");
   }

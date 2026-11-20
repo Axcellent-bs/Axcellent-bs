@@ -852,7 +852,7 @@ class DevService(PlanningCore):
         coder.clear_drafts(self)
         super().reset()
         self._release_base = self._done_specs(self.state)
-        get_deploy_store().reset()  # 배포 기록도 시드로
+        get_deploy_store().reset()  # 배포 기록도 처음으로 (목 모드만 시드, 실제 모드는 빈 목록)
 
     async def _send_hr(
         self,

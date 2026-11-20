@@ -194,9 +194,11 @@ def test_check_evidence_has_no_cause_wording() -> None:
 # ---------------------------------------------------------------- 배포 만들기
 
 
-def test_build_deployment_dev_succeeds_prod_waits() -> None:
+def test_build_deployment_dev_approved_prod_waits() -> None:
     dev = build_deployment(1, [_pr(28, ["shop-api/payment/config.py"])], "dev", T0)
-    assert dev.status == "succeeded"
+    # 배포 도구가 없어 실제로 배포하지 않는다: 승인 이유가 없어도 '배포됨'이 아니다
+    assert dev.status == "approved"
+    assert dev.executed is False
     assert dev.approval_reasons == []
     prod = build_deployment(2, [_pr(28, ["shop-api/payment/config.py"])], "prod", T0)
     assert prod.status == "requested"
@@ -391,35 +393,38 @@ def test_rest_prod_needs_approval_then_check(client, service) -> None:
 
     res = client.post(f"{BASE}/deployments/DEP-2/approve", json={"approved_by": "김팀장"})
     assert res.status_code == 200
-    assert res.json()["data"]["status"] == "succeeded"
+    # 승인했지만 배포 도구가 없어 실제 배포는 하지 않았다
+    assert res.json()["data"]["status"] == "approved"
+    assert res.json()["data"]["executed"] is False
     assert res.json()["data"]["approved_by"] == "김팀장"
     assert service.gate_calls[-1].action == "approve_deploy"
 
-    again = client.post(f"{BASE}/deployments/DEP-2/approve")
+    again = client.post(f"{BASE}/deployments/DEP-2/approve", json={"approved_by": "김팀장"})
     assert again.status_code == 409
 
+    # 실행되지 않은 배포는 배포 후 확인을 하지 않는다
     res = client.post(f"{BASE}/deployments/DEP-2/check", json={"window_minutes": 60})
-    assert res.status_code == 200
+    assert res.status_code == 409
+    assert res.json()["error"]["code"] == "NOT_DEPLOYED"
     detail = client.get(f"{BASE}/deployments/DEP-2").json()["data"]
-    assert len(detail["checks"]) == 1
-    # 목 시드 사건(10-21)은 새 배포 시각 뒤가 아니므로 장애 없음, 이상 지표도 구간 밖
-    assert detail["check"]["verdict"] == "ok"
-    # 배포 후 확인은 read: 관문을 거치지 않는다
+    assert detail["checks"] == []
     assert [c.action for c in service.gate_calls] == ["request_deploy", "approve_deploy"]
 
 
-def test_rest_dev_deploy_succeeds(client) -> None:
+def test_rest_dev_deploy_recorded_not_executed(client) -> None:
     body = client.post(f"{BASE}/deployments", json={"pr_numbers": [28]}).json()
-    assert body["data"]["status"] == "succeeded"
+    assert body["data"]["status"] == "approved"
     assert body["meta"]["needs_approval"] is False
 
 
-def test_rest_recheck_seed(client) -> None:
+def test_rest_recheck_seed(client, service) -> None:
     res = client.post(f"{BASE}/deployments/DEP-1/check")
     assert res.status_code == 200
     assert res.json()["data"]["check"]["verdict"] == "suspect"
     detail = client.get(f"{BASE}/deployments/DEP-1").json()["data"]
     assert len(detail["checks"]) == 2
+    # 배포 후 확인은 read: 관문을 거치지 않는다
+    assert service.gate_calls == []
 
 
 @pytest.mark.parametrize(
@@ -512,3 +517,143 @@ def test_store_picks_up_dejafix_connected_after_startup(
     after = late_store.source
     assert isinstance(after, CombinedSource)
     assert isinstance(after._sources[0][1], DejaFixIncidentSource)
+
+
+# ---------------------------------------------------------------- 실제 모드·정직한 상태
+
+
+def _real_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "0")
+    for name in ("PLANNING_MOCK", "DEV_MOCK"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_real_mode_has_no_seed_deployment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """실제 모드에서는 시드(DEP-1·PR #28·payment_fail_rate)를 배포 기록에 넣지 않는다."""
+    monkeypatch.delenv("PLANNING_STATE_DIR", raising=False)
+    _real_mode(monkeypatch)
+    real = DeployStore()
+    assert real.deployments == []
+    assert real.checks == {}
+    real.reset()
+    assert real.deployments == []
+
+
+def test_mock_mode_keeps_seed_deployment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PLANNING_STATE_DIR", raising=False)
+    assert [d.id for d in DeployStore().deployments] == ["DEP-1"]
+
+
+def test_deploy_without_tool_is_not_succeeded(client) -> None:
+    """배포 도구가 없으니 승인이 필요 없는 배포도 '배포됨'으로 두지 않는다."""
+    dep = client.post(f"{BASE}/deployments", json={"pr_numbers": [28]}).json()["data"]
+    assert dep["status"] == "approved"
+    assert dep["executed"] is False
+    assert "배포 도구 미연결" in dep["note"]
+    # 실행되지 않은 배포는 배포 후 확인을 하지 않는다 (없는 배포의 '정상'을 지어내지 않는다)
+    res = client.post(f"{BASE}/deployments/{dep['id']}/check")
+    assert res.status_code == 409
+    assert res.json()["error"]["code"] == "NOT_DEPLOYED"
+
+
+def test_approve_requires_approver_name(client, service) -> None:
+    client.post(f"{BASE}/deployments", json={"pr_numbers": [28], "env": "prod"})
+    for body in ({}, {"approved_by": ""}, {"approved_by": "   "}, {"approved_by": 3}):
+        res = client.post(f"{BASE}/deployments/DEP-2/approve", json=body)
+        assert res.status_code == 400, body
+        assert res.json()["error"]["code"] == "APPROVER_REQUIRED"
+    # 이름이 없으면 관문에도 가지 않는다 (기본 승인자를 지어내지 않는다)
+    assert [c.action for c in service.gate_calls] == ["request_deploy"]
+    res = client.post(f"{BASE}/deployments/DEP-2/approve", json={"approved_by": " 병환 "})
+    assert res.status_code == 200
+    assert res.json()["data"]["approved_by"] == "병환"
+    assert res.json()["data"]["status"] == "approved"
+    assert res.json()["data"]["executed"] is False
+
+
+def test_deployments_survive_restart(tmp_path, monkeypatch: pytest.MonkeyPatch, service) -> None:
+    """PLANNING_STATE_DIR가 있으면 배포 기록을 파일에 남겨 다시 켜도 그대로다."""
+    monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path))
+    first = DeployStore()
+    dep = asyncio.run(first.request(service, [28], "prod"))
+    asyncio.run(first.approve(service, dep.id, "병환"))
+    again = DeployStore()
+    assert [d.id for d in again.deployments] == [d.id for d in first.deployments]
+    got = again.get(dep.id)
+    assert got is not None and (got.status, got.approved_by) == ("approved", "병환")
+    assert again.latest_check("DEP-1") is not None  # 확인 기록도 남는다
+    # 번호가 이어진다 (재시작 뒤 같은 DEP 번호를 다시 쓰지 않는다)
+    nxt = asyncio.run(again.request(service, [28], "dev"))
+    assert nxt.id == f"DEP-{len(first.deployments) + 1}"
+
+
+def test_deployments_file_broken_starts_clean(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path))
+    _real_mode(monkeypatch)
+    (tmp_path / "deploy_state_dev.json").write_text("{broken", encoding="utf-8")
+    assert DeployStore().deployments == []
+
+
+def test_unavailable_reason_is_shown_without_signal_title() -> None:
+    """신호원이 없으면 '연결 없음'을 근거에 쓴다. 신호원이 준 글(title)은 근거에 옮기지 않는다."""
+    missing = Signal(kind="unavailable", source="dejafix", title="원인 X", reason="not_connected")
+    res = evaluate_check(_dep(), [missing], at=T0)
+    assert res.evidence == ["dejafix 연결 없음 → 신호를 읽지 못함 (도구 연결 필요)"]
+    failed = Signal(kind="unavailable", source="data", title="원인 X", reason="error")
+    assert evaluate_check(_dep(), [failed], at=T0).evidence == ["data 신호를 읽지 못함 (응답 오류)"]
+
+
+def test_missing_dejafix_source_marks_not_connected(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev_agent import deploy_signals
+
+    src = CombinedSource([("dejafix", deploy_signals._Missing("주소 없음"))])
+    rows = asyncio.run(src.signals(_dep(), T0, T0))
+    assert [(r.kind, r.reason) for r in rows] == [("unavailable", "not_connected")]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    async def run() -> list[Signal]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            both = CombinedSource([("dejafix", DejaFixIncidentSource("http://d", client=http))])
+            return await both.signals(_dep(), T0, T0)
+
+    assert [r.reason for r in asyncio.run(run())] == ["error"]
+
+
+def test_undated_anomaly_is_listed_apart() -> None:
+    """시각 없는 이상 지표(data)는 '배포 후 N분'처럼 보이지 않게 따로 적는다."""
+    dated = Signal(kind="anomaly", source="mock", ref="a", at=T0 + timedelta(minutes=3))
+    undated = Signal(kind="anomaly", source="data", ref="payment_fail_rate")
+    res = evaluate_check(_dep(), [dated, undated], at=T0)
+    assert res.verdict == "watch"
+    assert res.evidence == [
+        "배포 후 3분 이상 지표 a",
+        "시각을 모르는 이상 지표 payment_fail_rate (확인 구간 30분 안 어딘가)",
+    ]
+
+
+def test_save_failure_does_not_break_store_or_api(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, client
+) -> None:
+    """저장 폴더에 쓸 수 없어도 저장소는 만들어지고 배포 API는 동작한다 (저장만 건너뜀)."""
+    blocker = tmp_path / "not_a_dir"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("PLANNING_STATE_DIR", str(blocker))  # 파일이라 폴더를 만들 수 없다
+    set_deploy_store(DeployStore())
+    res = client.post(f"{BASE}/deployments", json={"pr_numbers": [28], "env": "prod"})
+    assert res.status_code == 200
+    dep_id = res.json()["data"]["id"]
+    res = client.post(f"{BASE}/deployments/{dep_id}/approve", json={"approved_by": "병환"})
+    assert res.status_code == 200
+    assert client.post(f"{BASE}/deployments/DEP-1/check").status_code == 200
+
+
+def test_file_from_other_mode_is_dropped(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """목 모드가 남긴 파일(시드 DEP-1)을 실제 모드가 읽지 않는다. 반대도 같다."""
+    monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path))
+    assert [d.id for d in DeployStore().deployments] == ["DEP-1"]  # 목 모드가 파일을 씀
+    _real_mode(monkeypatch)
+    assert DeployStore().deployments == []  # 실제 모드: 버리고 새로 시작
+    monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
+    assert [d.id for d in DeployStore().deployments] == ["DEP-1"]  # 목 모드: 다시 시드

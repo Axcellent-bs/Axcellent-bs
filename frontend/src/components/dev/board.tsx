@@ -8,6 +8,7 @@ import { prName, prSlug, reviewOf, toPath, idText } from '@/components/planning-
 import { duration, shortTime, toMin, type Cell } from '@/components/planning/requests'
 import { OriginTag, UsageBar, codingState, originLabel, pctOf, tokens } from '@/components/dev/coding'
 import { useCodingLimits } from '@/lib/planning'
+import { isStoppedTask } from '@/lib/devView'
 import './hier.css'
 
 // ---------------------------------------------------------------- 필터
@@ -37,8 +38,8 @@ export function taskRow(s: S, t: Task, runTokens = 600_000): TaskRow {
   const c = t.coding
   const xr = pr && !pr.merged ? reviewOf(s, pr.id) : undefined
   const merged = !!pr?.merged || t.state === '완료'
-  // 중단·기획에 돌려보냄·폐기는 멈춘 작업 (돌려보낸 일은 기획이 받은 요청에서 다시 정한다)
-  const canceled = c?.status === 'canceled' || c?.status === 'returned' || !!t.discarded
+  // 중단·기획에 돌려보냄·폐기, 코딩 기록 없이 PR이 닫혀 '중단'된 작업은 멈춘 작업 (돌려보낸 일은 기획이 받은 요청에서 다시 정한다)
+  const canceled = isStoppedTask(t)
   const held = c?.status === 'waiting_human' || c?.status === 'failed' || t.state === 'C 보류'
   const lastReview = pr?.reviews[pr.reviews.length - 1]
   const group: Group = merged ? 'done' : canceled ? 'stopped' : held || xr || pr?.target?.status === 'proposed' || lastReview === '불일치' ? 'stuck' : 'running'

@@ -7,6 +7,9 @@
   B/C는 safety 기준표(thresholds.toml rollback_*)와 같은 기준으로 미리 계산해 보여 준다.
   판정은 safety가 다시 한다. 값이 없거나 정수가 아니면 C (fail-closed).
 - 롤백 실행은 infra가 한다. 이 모듈은 제안만 만든다.
+- 배포 실행기(배포 도구 연결)가 아직 없다. 그래서 요청·승인한 배포는 `approved`(실행 안 함)로
+  남기고 `succeeded`(배포됨)로 바꾸지 않는다. `succeeded`는 실행기가 실제로 배포했을 때만 쓴다
+  (지금은 목 시드 DEP-1뿐).
 """
 
 from __future__ import annotations
@@ -22,9 +25,15 @@ from ax_workflow.autocheck import irreversible_paths, merge_risk_paths
 from ax_workflow.models import PR, DomainModel
 
 DeployEnv = Literal["dev", "prod"]
-DeployStatus = Literal["requested", "running", "succeeded", "failed", "rolled_back"]
+# approved: 배포 허가됨(사람 승인 또는 승인 불필요). 배포 도구가 없어 실제 배포는 하지 않았다
+DeployStatus = Literal["requested", "approved", "running", "succeeded", "failed", "rolled_back"]
+# 실행되지 않은 배포. 배포 후 확인을 하지 않는다 (없는 배포의 "정상"을 만들지 않는다)
+NOT_DEPLOYED: tuple[str, ...] = ("requested", "approved", "running")
+NO_EXECUTOR_NOTE = "배포 도구 미연결 — 실제 배포는 안 함"
 Verdict = Literal["ok", "watch", "suspect"]
 SignalKind = Literal["incident", "anomaly", "unavailable"]
+# unavailable 신호의 이유: 연결이 없음 · 읽다가 오류
+UnavailableReason = Literal["not_connected", "error"]
 
 DEFAULT_WINDOW_MINUTES = 30
 # 배포 후 이 시간 안에 장애가 열리고 후보 PR이 하나면 확신도 high로 본다
@@ -58,6 +67,9 @@ class Deployment(DomainModel):
     # 사람 승인이 필요한 이유 키: "prod", "protected_path"
     approval_reasons: list[str] = Field(default_factory=list)
     protected_paths: list[str] = Field(default_factory=list)
+    # 배포 실행기가 실제로 배포했나. 실행기가 없으면 늘 False (status도 succeeded가 되지 않는다)
+    executed: bool = False
+    note: str | None = None  # 실행하지 않은 이유 등 사람이 읽는 한 줄
 
 
 class Signal(DomainModel):
@@ -67,6 +79,7 @@ class Signal(DomainModel):
     title: str = ""
     at: UtcDatetime | None = None
     severity: Literal["low", "mid", "high"] | None = None
+    reason: UnavailableReason | None = None  # kind == "unavailable"일 때만
 
 
 class RollbackSuggestion(DomainModel):
@@ -115,10 +128,9 @@ def approval_reasons(env: str, paths: Iterable[str]) -> tuple[list[str], list[st
 def build_deployment(
     seq: int, prs: list[PR], env: DeployEnv, at: datetime, version: str | None = None
 ) -> Deployment:
-    """머지된 PR로 배포 기록을 만든다. 승인 이유가 있으면 `requested`, 없으면 `succeeded`.
+    """머지된 PR로 배포 기록을 만든다. 승인 이유가 있으면 `requested`, 없으면 `approved`.
 
-    목 모드에는 실제 배포 실행기가 없다. 승인이 필요 없는 배포는 바로 `succeeded`로 둔다
-    (데모: 머지 = dev 배포).
+    배포 실행기가 없으니 어느 쪽도 `succeeded`(배포됨)로 두지 않는다.
     """
     if not prs:
         raise DeployError("INVALID_DEPLOY", "배포할 PR이 없다")
@@ -138,10 +150,11 @@ def build_deployment(
         version=version,
         env=env,
         at=at,
-        status="requested" if reasons else "succeeded",
+        status="requested" if reasons else "approved",
         changed_paths=paths,
         approval_reasons=reasons,
         protected_paths=protected,
+        note=None if reasons else NO_EXECUTOR_NOTE,
     )
 
 
@@ -215,11 +228,21 @@ def evaluate_check(
         evidence.append(f"배포 후 {_minutes(sig.at - start)}분에 장애 1건 열림{ref}")
     if undated:
         evidence.append(f"열린 시각을 모르는 장애 {len(undated)}건")
-    for sig in anomalies:
-        when = f"배포 후 {_minutes(sig.at - start)}분 " if sig.at else ""
-        evidence.append(f"{when}이상 지표 {sig.ref or sig.title}".strip())
+    for sig in sorted(anomalies, key=lambda x: x.at is None):
+        name = sig.ref or sig.title
+        if sig.at is not None:
+            evidence.append(f"배포 후 {_minutes(sig.at - start)}분 이상 지표 {name}")
+        else:  # data 이상 지표는 구간 전체 판정이라 시각이 없다
+            where = f"확인 구간 {window_minutes}분 안 어딘가"
+            evidence.append(f"시각을 모르는 이상 지표 {name} ({where})")
     for sig in unavailable:
-        evidence.append(f"{sig.source} 신호를 읽지 못함")
+        # 신호원이 준 글(title)은 옮기지 않는다 (원인처럼 읽힐 수 있다). 이유 종류만 쓴다
+        if sig.reason == "not_connected":
+            evidence.append(f"{sig.source} 연결 없음 → 신호를 읽지 못함 (도구 연결 필요)")
+        elif sig.reason == "error":
+            evidence.append(f"{sig.source} 신호를 읽지 못함 (응답 오류)")
+        else:
+            evidence.append(f"{sig.source} 신호를 읽지 못함")
     if not evidence:
         evidence.append(f"배포 후 {window_minutes}분 안에 열린 장애·이상 지표 없음")
 

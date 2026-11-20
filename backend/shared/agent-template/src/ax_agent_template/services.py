@@ -171,6 +171,7 @@ SERVICES: tuple[Service, ...] = (
             "higgsfield_status",
             "creative_records_list",
             "creative_record_get",
+            "creative_video_request",
             "receive_campaign_brief",
             "list_campaign_briefs",
             "get_campaign_brief",

@@ -351,7 +351,8 @@ async def generate_media(
     if reservation.outcome == "settled" and reservation.row and reservation.row.result_json:
         return _completed(request, json.loads(reservation.row.result_json), replayed=True)
     if reservation.outcome == "in_progress" or reservation.row is None:
-        return _fail(request, "in_progress")
+        # 같은 열쇠가 이미 도는 중이다. 다시 불러도 같은 답이니 재시도하지 말라고 알린다
+        return _fail(request, "in_progress", retryable=False)
     seq = reservation.row.seq
 
     # --- 안전 관문 ---

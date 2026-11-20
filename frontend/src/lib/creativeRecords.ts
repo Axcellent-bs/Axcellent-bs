@@ -17,6 +17,19 @@ export interface CreativeRecordSummary {
   storyboard_title_ko?: string | null;
   shot_count: number;
   storyboard_at?: string | null;
+  /** 단계별 Higgsfield 상태(sheet_image·board_image·video) */
+  render?: Record<string, string>;
+}
+
+export type RenderPartKey = "sheet_image" | "board_image" | "video";
+export interface RenderPart {
+  status?: string;
+  error?: string | null;
+  asset?: string;
+  sha256?: string;
+  review_id?: string | null;
+  request_id?: string;
+  at?: string;
 }
 
 export interface CreativeRecord {
@@ -29,6 +42,8 @@ export interface CreativeRecord {
   sheet: CharacterSheetResult;
   storyboard?: StoryboardResult | null;
   storyboard_at?: string | null;
+  /** Higgsfield 그림·영상 */
+  render?: Partial<Record<RenderPartKey, RenderPart>>;
 }
 
 const PATH = "/api/dashboard/marketing/creative-records";
@@ -46,3 +61,20 @@ export const listCreativeRecords = (limit = 50) =>
   get<{ items: CreativeRecordSummary[] }>(`${PATH}?limit=${limit}`, "제작 기록을 읽지 못했어요").then((d) => d.items);
 
 export const getCreativeRecord = (id: string) => get<CreativeRecord>(`${PATH}/${encodeURIComponent(id)}`, "제작 기록을 읽지 못했어요");
+
+/** Higgsfield 결과 파일 주소(사람 토큰이 필요해 useAuthedMedia로 읽는다). `version`은 sha256 앞자리 */
+export const assetUrl = (id: string, part: RenderPartKey, version: string | null) =>
+  `${DASHBOARD_API_URL}${PATH}/${encodeURIComponent(id)}/asset/${part}${version ? `?v=${encodeURIComponent(version.slice(0, 12))}` : ""}`;
+
+/** 스토리보드 그림으로 영상 만들기를 사람 승인에 올린다(POST, C 등급). 승인 전에는 만들지 않는다 */
+export async function requestCreativeVideo(id: string): Promise<{ record_id: string; video: RenderPart }> {
+  const res = await fetch(`${DASHBOARD_API_URL}${PATH}/${encodeURIComponent(id)}/video`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
+    body: "{}",
+    cache: "no-store",
+  });
+  const parsed: unknown = await res.json().catch(() => undefined);
+  if (!res.ok) throw failureError(parsed, res.status, "영상 요청을 보내지 못했어요");
+  return (parsed as { data: { record_id: string; video: RenderPart } }).data;
+}

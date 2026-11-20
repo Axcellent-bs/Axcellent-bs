@@ -1,12 +1,15 @@
 // 기획(planning 8101)·개발(dev 8111) 백엔드 REST·SSE와 화면 상태(State)를 잇는다.
 // 백엔드는 snake_case·ISO 시각, 화면은 camelCase·KST "MM-DD HH:mm"이라 여기서 한 번만 바꾼다.
-// 백엔드에 없는 값(학습 기준·감사 목록)은 빈 값으로 두고 지어내지 않는다.
+// 백엔드에 없는 값(학습 기준)은 빈 값으로 두고 지어내지 않는다. 감사 목록은 서버가 남긴 활동에서 센다.
 import type { Proposal } from './proposals'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useVisibleInterval } from './visibleInterval'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import { isNginxBlocked, NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from '@/lib/apiError'
-import { RULE_LABEL, type Action, type FillPreview, type Activity, type AuditItem, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
+import { tokenFree } from '@/lib/apiDirect'
+import { sessionAuth } from '@/lib/humanToken'
+import { auditOf, paramLines, routeAction, routeWhyOf, tokenFor } from '@/lib/devView'
+import { type Action, type FillPreview, type Activity, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
 
 export const PLANNING_API = (import.meta.env.VITE_PLANNING_API_URL as string | undefined) ?? 'http://localhost:8101'
 /** 개발·배포 서비스 에이전트(dev, 8111). 업무 로직은 기획과 같은 planning 도메인이라 같은 REST(`/api/planning`)를 쓴다 */
@@ -65,6 +68,7 @@ export interface QueueItem {
   at?: string
   decide_with?: Action
   evidence?: CrossEvidence[] // 교차검증 근거 (merge_pr, 총괄 AI·데이터분석에 물은 결과)
+  gate_status?: string | null // 규칙 없이 안전 관문이 보류·거절했을 때
 }
 
 const VERIFIER: Record<QueueItem['action'], string> = { confirm_spec: '인사 check_plan', merge_pr: '총괄 AI · 데이터분석 근거 → 안전 관문' }
@@ -79,8 +83,8 @@ function toReview(q: QueueItem, ctxOf: (ref: string) => string): CrossReview & {
     ref: q.id,
     title: q.title,
     lane: Number(q.params.irreversible_count ?? 0) > 0 || q.state.includes('사람') ? 'human' : 'ai',
-    routeWhy: q.rules.map((k) => RULE_LABEL[k] ?? k),
-    summary: Object.entries(q.params).map(([k, v]) => `${k} ${v}`).join(' · '),
+    routeWhy: routeWhyOf(q.rules, q.gate_status),
+    summary: paramLines(q.params).join(' · '), // 판정에 쓴 값을 사람 말로 (AI 요약이 아니다)
     evidence: q.evidence ?? [],
     checks: [],
     verifier: VERIFIER[q.action],
@@ -107,6 +111,18 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
     return requests.find((r) => r.id === req)?.ctx ?? ''
   }
   const policy = (s.autoPolicy ?? {}) as Json
+  const activity = list<Json>('activity').map((a) => ({ ...a, t: kst(a.at), ctx: a.contextId ?? '', seq: a.seq ?? undefined, grade: a.grade ?? undefined }) as unknown as Activity)
+  const proposal = policy.proposal as Json | null | undefined
+  const autoPolicy: State['autoPolicy'] = {
+    rules: [], // 경로별 학습 기준은 백엔드에 아직 없다 (FR-ATL-007~009). 화면은 준비 중
+    observing: [],
+    history: ((policy.history as Json[]) ?? []).map((h) => ({ ...h, t: kst(h.at) || (h.t as string) || '' })) as unknown as State['autoPolicy']['history'],
+    log: ((policy.log as Json[]) ?? []).map((l) => ({ ...l, t: kst(l.at) })) as unknown as State['autoPolicy']['log'],
+    level: typeof policy.level === 'number' ? policy.level : undefined,
+    paths: typeof policy.paths === 'string' ? policy.paths : undefined,
+    streak: typeof policy.streak === 'number' ? policy.streak : undefined,
+    proposal: proposal ? { to: Number(proposal.to), t: kst(proposal.at), why: String(proposal.why ?? '') } : null,
+  }
   return {
     ...EMPTY_STATE,
     seq: typeof s.seq === 'number' ? s.seq : 0,
@@ -122,9 +138,9 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
     docs: list<Json>('docs').map((d) => ({ ...d, updated: kst(d.updatedAt), created: kst(d.createdAt) || undefined, about: d.about ?? undefined }) as unknown as Doc),
     decisions: list('decisions'),
     incidents: list<Json>('incidents').map((i) => ({ ...i, ctx: i.contextId ?? '', at: kst(i.openedAt) }) as unknown as Incident),
-    activity: list<Json>('activity').map((a) => ({ ...a, t: kst(a.at), ctx: a.contextId ?? '', seq: a.seq ?? undefined, grade: a.grade ?? undefined }) as unknown as Activity),
+    activity,
     reviews: queue.map((q) => toReview(q, ctxOf)),
-    audit: [] as AuditItem[], // 백엔드에 감사 목록 API가 아직 없다
+    audit: auditOf({ prs, activity, autoPolicy }), // 감사 목록 API는 없어 서버가 남긴 활동·자동 범위 기록에서 센다
     draftsIn: Number(s.draftsIn ?? 0),
     draftsAccepted: Number(s.draftsAccepted ?? 0),
     warnings: Number(s.warnings ?? 0),
@@ -150,12 +166,7 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
         })),
       } as unknown as Proposal
     }),
-    autoPolicy: {
-      rules: [], // 관찰 기반 학습 기준은 백엔드에 아직 없다 (FR-ATL-007~009)
-      observing: [],
-      history: ((policy.history as Json[]) ?? []).map((h) => ({ ...h, t: kst(h.at) || (h.t as string) || '' })) as unknown as State['autoPolicy']['history'],
-      log: ((policy.log as Json[]) ?? []).map((l) => ({ ...l, t: kst(l.at) })) as unknown as State['autoPolicy']['log'],
-    },
+    autoPolicy,
   }
 }
 
@@ -183,7 +194,10 @@ export async function approveReview(reviewId: string, note = '교차검증 대�
 }
 
 async function call<T>(base: string, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init })
+  // 머리 없는 읽기(GET)는 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이). 토큰을 안 보는 읽기(state)는 싣지 않는다
+  const read = (init?.method ?? 'GET').toUpperCase() === 'GET' && !new Headers(init?.headers).has('authorization')
+    && !tokenFree(base === DEV_API ? 'dev' : 'planning', `/api/planning${path}`)
+  const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init, ...(read ? { headers: { ...Object.fromEntries(new Headers(init?.headers)), ...sessionAuth() } } : {}) })
   const parsed: unknown = await res.json().catch(() => undefined)
   const body = parsed ?? {}
   if (!res.ok) {
@@ -231,8 +245,15 @@ export interface NotionHit { id: string; title: string; url: string; edited: str
 export const planningApi = (base: string) => ({
   state: () => call<Json>(base, '/state'),
   reviewQueue: () => call<QueueItem[]>(base, '/review-queue'),
-  action: (a: Action) => call<Json>(base, '/actions', post(a)),
+  action: (a: Action) => call<Json>(base, '/actions', post(a, tokenFor(a))),
   eventsUrl: () => `${base}/api/planning/events`,
+})
+
+// ---- 자동 처리 범위 (`GET /api/planning/auto-policy`): 단계표·지금 한도·승급 기준. 상태(SSE)의 autoPolicy에 없는 단계표를 읽는다
+export interface AutoLevel { level: number; name: string; lines: number; files: number }
+export interface AutoPolicyInfo { level: number; paths: string; streak: number; limit: { level: number; lines: number; files: number; paths: string }; levels: AutoLevel[]; promote_after: number; linked_incidents: number }
+export const autoPolicyApi = (base: string) => ({
+  get: () => call<AutoPolicyInfo>(base, '/auto-policy').then((d) => (d && Array.isArray(d.levels) ? d : Promise.reject(new PlanningApiError('NO_POLICY', '자동 처리 범위를 읽지 못했어요')))),
 })
 
 // ---- 배포 전 기획서 대조 (planning `/api/planning/release-checks`). SSE 상태와 따로 읽는다
@@ -260,16 +281,22 @@ export function useAllReleaseChecks(): ReleaseCheck[] {
 
 // ---- 배포 기록·배포 후 확인 (dev 서비스 `/api/planning/deployments`). SSE 상태와 따로 읽는다
 export interface RollbackSuggestion { suspect_count: number; low_confidence: number; irreversible_count: number; prior_rollbacks: number; grade: 'B' | 'C'; rules: string[] }
-export interface DeployCheck { deployment: string; at: string; window_minutes: number; verdict: 'ok' | 'watch' | 'suspect'; evidence: string[]; candidate_prs: string[]; rollback: RollbackSuggestion | null }
+// 배포 후 확인에 쓴 신호. unavailable이면 reason: 연결 없음(not_connected) · 읽다가 오류(error)
+export interface DeploySignal { kind: 'incident' | 'anomaly' | 'unavailable'; source: string; ref: string | null; title: string; at: string | null; reason?: 'not_connected' | 'error' | null }
+export interface DeployCheck { deployment: string; at: string; window_minutes: number; verdict: 'ok' | 'watch' | 'suspect'; evidence: string[]; candidate_prs: string[]; rollback: RollbackSuggestion | null; signals?: DeploySignal[] }
 export interface Deployment {
   id: string; pr_numbers: number[]; version: string | null; env: 'dev' | 'prod'; at: string
-  status: 'requested' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
+  // approved: 배포 허가됨. 배포 도구가 연결되지 않아 실제 배포는 하지 않았다 (executed false)
+  status: 'requested' | 'approved' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
   approved_by: string | null; approval_reasons: string[]; protected_paths: string[]; check: DeployCheck | null
+  /** 배포 도구가 실제로 배포했나. 예전 서버 응답에는 없을 수 있다 (없으면 status로 본다) */
+  executed?: boolean; note?: string | null
 }
 
 export const deployApi = (base: string) => ({
   list: () => call<unknown>(base, '/deployments').then((d) => (Array.isArray(d) ? (d as Deployment[]).filter((x) => x && typeof x.id === 'string') : [])),
-  approve: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, post()),
+  /** 승인자 이름이 꼭 있어야 한다 (서버가 없으면 400 APPROVER_REQUIRED) */
+  approve: (id: string, approvedBy: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, post({ approved_by: approvedBy })),
   check: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/check`, post()),
 })
 
@@ -522,7 +549,10 @@ export const repoApi = (base: string, connection?: string) => {
 export const ACTION_ERROR_EVENT = 'planning:action-error'
 const report = (message: string) => window.dispatchEvent(new CustomEvent(ACTION_ERROR_EVENT, { detail: message }))
 
-export function useSharedStore(base: string): [State, (a: Action) => void, boolean] {
+/** 사람 버튼 → 서버 액션. 성공하면 true (실패는 토스트로 이미 알림) */
+export type SendAction = (a: Action) => Promise<boolean>
+
+export function useSharedStore(base: string): [State, SendAction, boolean] {
   const [state, setState] = useState<State>(EMPTY_STATE)
   const [connected, setConnected] = useState(false)
   const api = planningApi(base)
@@ -548,19 +578,17 @@ export function useSharedStore(base: string): [State, (a: Action) => void, boole
     }
   }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dispatch = useCallback((a: Action) => {
-    let send: Action | undefined = a
-    // 교차검증 대기열의 "승인"은 백엔드가 알려 준 확정·머지 액션(decide_with)으로 보낸다
-    if (a.type === 'decideReview' || (a.type === 'humanDecide' && a.ok)) {
-      const r = reviews.current.find((x) => x.id === a.review) as { decideWith?: Action } | undefined
-      send = r?.decideWith
-      if (!send) return report('이 검증 건을 처리할 서버 액션이 없습니다')
-    } else if (a.type === 'humanDecide') {
-      return report('보류는 아직 서버에서 받지 않습니다. 기다리면 대기열에 남습니다')
-    }
-    const human = a.type === 'humanDecide' || a.type === 'decideReview'
-    const action = send
-    api.action(action).catch(async (e: unknown) => {
+  // 성공하면 true. 실패는 여기서 토스트로 알리고 false (부른 쪽은 성공 토스트를 성공 뒤에만 띄운다)
+  const dispatch = useCallback(async (a: Action): Promise<boolean> => {
+    // 교차검증 대기열의 "승인"은 백엔드가 알려 준 확정·머지 액션(decide_with)으로 보낸다. 보류는 서버가 받지 않는다
+    const routed = routeAction(a, reviews.current as (CrossReview & { decideWith?: Action })[])
+    if ('error' in routed) { report(routed.error); return false }
+    const { send: action, human } = routed
+    try {
+      await api.action(action)
+      return true
+    } catch (first: unknown) {
+      let e = first
       // 사람이 "확인하고 진행"을 눌렀는데 관문이 사람 승인(C)으로 보류하면, 그 보류 건을 사람 토큰으로
       // 승인하고 같은 액션을 다시 보낸다 (같은 멱등성 키라 관문은 승인된 결정을 돌려준다)
       const held = e instanceof PlanningApiError && e.code === 'GATE_REJECTED' && e.details?.status === 'held' && e.details.review_id
@@ -568,7 +596,7 @@ export function useSharedStore(base: string): [State, (a: Action) => void, boole
         try {
           await approveReview(String((e as PlanningApiError).details?.review_id))
           await api.action(action)
-          return
+          return true
         } catch (again) {
           e = again
         }
@@ -576,7 +604,8 @@ export function useSharedStore(base: string): [State, (a: Action) => void, boole
       if (e instanceof PlanningApiError && e.code === 'UNKNOWN_ACTION') report(`이 기능은 아직 ${base === DEV_API ? '개발' : '기획'} 서버에 연결되지 않았습니다`)
       else if (e instanceof PlanningApiError) report(e.message)
       else report(`${base === DEV_API ? '개발' : '기획'} 서버에 연결할 수 없습니다`)
-    })
+      return false
+    }
   }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return [state, dispatch, connected]

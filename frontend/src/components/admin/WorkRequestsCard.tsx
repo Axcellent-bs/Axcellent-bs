@@ -84,7 +84,7 @@ function Row({ row, tasks, onChanged }: { row: WorkRequestRow; tasks: WorkReques
                       {s && canDecide(s) && (
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           <button type="button" className="btn-primary text-xs" disabled={busy || !SAFETY_HUMAN_TOKEN}
-                            title={SAFETY_HUMAN_TOKEN ? undefined : "사람 권한 토큰이 없어 결정할 수 없어요"}
+                            title={SAFETY_HUMAN_TOKEN ? undefined : "로그인이 필요해요"}
                             onClick={() => void run(() => orchestrator.decideRequestStep(row.request_id, p.step_id, true))}>승인</button>
                           <button type="button" className="btn-ghost text-xs" disabled={busy || !SAFETY_HUMAN_TOKEN}
                             onClick={() => void run(() => orchestrator.decideRequestStep(row.request_id, p.step_id, false))}>거절</button>
@@ -106,7 +106,7 @@ function Row({ row, tasks, onChanged }: { row: WorkRequestRow; tasks: WorkReques
                   {tasks.map((t) => <option key={t.name} value={t.name}>{t.name === row.task ? `${t.label} (지금 일, 처음부터 다시)` : t.label}</option>)}
                 </select>
                 <button type="button" className="btn-ghost text-xs" disabled={busy || !pick || !SAFETY_HUMAN_TOKEN}
-                  title={SAFETY_HUMAN_TOKEN ? undefined : "사람 권한 토큰이 없어 다시 돌릴 수 없어요"}
+                  title={SAFETY_HUMAN_TOKEN ? undefined : "로그인이 필요해요"}
                   onClick={() => void run(() => orchestrator.rerunRequest(row.request_id, pick))}>이 일로 다시 돌리기</button>
               </div>
               <p className="text-ink-500">처음 고른 일은 기록에 남아 분류 정확도를 잴 때 쓰여요. 상태를 바꾸는 일은 이번에도 승인을 거쳐요.</p>

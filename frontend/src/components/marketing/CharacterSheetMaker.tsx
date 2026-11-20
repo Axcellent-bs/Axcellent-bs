@@ -4,6 +4,7 @@ import { MAX_STORY, SHOT_COUNTS, makeStoryboard, type ShotCount, type Storyboard
 import { Link } from "react-router";
 import { PromptBox } from "./PromptParts";
 import { SheetBoard } from "./SheetBoard";
+import { RenderPanel } from "./RenderPanel";
 import { StoryboardView } from "./StoryboardMaker";
 
 // 마케팅 › SNS·미디어 › 이미지 시트 · 스토리보드 만들기.
@@ -169,6 +170,7 @@ export function CharacterSheetMaker() {
             <StoryboardView r={board} />
           </div>
         )}
+        {result?.record_id && !busy && <RenderPanel key={`${result.record_id}:${board ? 1 : 0}`} recordId={result.record_id} />}
         {result?.record_id && (
           <p className="text-xs text-ink-500">제작 기록 <Link className="underline" to={`/marketing/records?id=${result.record_id}`}>{result.record_id}</Link>에 남겼어요.</p>
         )}

@@ -2,7 +2,7 @@
 // 포트는 backend/infra/README.md 포트 표 기준이고, 바꿀 때는 frontend/.env.example 을 보고 .env 에 적는다.
 // 토큰은 backend/scripts/run_web.sh가 켤 때마다 만든 값(backend/.data/web.env)을 넣는다. 기본값은 비어 있고,
 // 비어 있으면 그 토큰이 필요한 버튼·조회를 끄고 안내한다.
-import { getSession, onSessionChange, pickHumanToken } from './humanSession'
+import { SAFETY_HUMAN_TOKEN, setSharedHumanToken } from './humanToken'
 
 /** 고객지원·인사·AI 대화방 공통 로그: dashboard-api(8020) */
 export const DASHBOARD_API_URL = import.meta.env.VITE_DASHBOARD_API_URL ?? 'http://localhost:8020'
@@ -11,17 +11,15 @@ export const SAFETY_API_URL = import.meta.env.VITE_SAFETY_API_URL ?? 'http://loc
 export const FINANCE_AGENT_URL = import.meta.env.VITE_FINANCE_AGENT_URL ?? 'http://localhost:8105'
 /** 회사 쇼핑몰 화면 주소. 재무 판매자 정산의 상품을 쇼핑몰 상품 화면(`/products/<번호>`)으로 잇는다. 비어 있으면 링크 없이 번호만 */
 export const SHOP_WEB_URL = (import.meta.env.VITE_SHOP_WEB_URL ?? '').trim().replace(/\/+$/, '')
-/** 공용 사람 토큰(번들 값, 공유 서버에서는 nginx가 바꿔 붙이는 자리표시자). 로그인 세션이 없을 때 쓴다 */
-const SHARED_HUMAN_TOKEN = import.meta.env.VITE_SAFETY_HUMAN_TOKEN ?? ''
+/** 공용 사람 토큰(번들 값, 공유 서버에서는 nginx가 바꿔 붙이는 자리표시자). 로그인 세션이 없을 때만 쓴다. 비워도 로그인하면 쓰기가 켜진다 */
+setSharedHumanToken(import.meta.env.VITE_SAFETY_HUMAN_TOKEN ?? '')
 /**
- * C 보류 결정·할 일함 완료 등 쓰기에 쓰는 사람 토큰. 비어 있으면 쓰기 버튼을 끈다.
+ * C 보류 결정·할 일함 완료 등 쓰기에 쓰는 사람 토큰(SAFETY_HUMAN_TOKEN)과 쓰기 버튼을 켤지(HUMAN_TOKEN_SET).
  * 서버 로그인 세션이 있으면 세션 토큰, 없으면 공용 토큰이다(humanSession.ts, 사람별 토큰 설계 2단계).
- * 토큰을 붙이는 곳은 모두 이 값을 읽으므로 로그인·로그아웃하면 여기서 한 번에 바뀐다(ES 모듈의 살아 있는 바인딩).
+ * 둘 다 humanToken.ts의 살아 있는 바인딩이라 로그인·로그아웃하면 읽는 곳 모두 한 번에 바뀐다.
+ * 화면을 다시 그리는 것은 useHumanTokenSet()(App.tsx Guarded가 켜짐·꺼짐이 바뀌면 업무 화면을 새로 그린다).
  */
-export let SAFETY_HUMAN_TOKEN = pickHumanToken(getSession(), SHARED_HUMAN_TOKEN)
-onSessionChange(() => {
-  SAFETY_HUMAN_TOKEN = pickHumanToken(getSession(), SHARED_HUMAN_TOKEN)
-})
+export { HUMAN_TOKEN_SET, SAFETY_HUMAN_TOKEN } from './humanToken'
 /** 총괄(orchestrator, 8000). 총괄은 CORS가 없어 기본값은 Vite 개발 프록시(/orch → vite.config.ts) */
 export const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL ?? '/orch'
 /**
@@ -39,8 +37,6 @@ export const DATA_A2A_TOKEN = (import.meta.env.VITE_DATA_A2A_TOKEN ?? '').trim()
  * 실제 토큰은 nginx가 `Authorization: Bearer <토큰>` 헤더로 넣고, 데이터 서버가 그 헤더로 검증한다.
  */
 export const DATA_A2A_PLACEHOLDER = 'data-via-nginx'
-/** 사람 토큰이 설정돼 있는지. 없으면 쓰기 버튼을 끄고 안내한다 */
-export const HUMAN_TOKEN_SET = SAFETY_HUMAN_TOKEN.length > 0
 /**
  * dashboard-api에 보내는 모든 요청(GET 포함)에 사람 토큰을 붙인다. 서버는 `/health` 말고는 읽기에도
  * 토큰을 요구해서 없으면 401로 거절한다(ax-backend #295, 보안 점검 2차). dashboard-api를 부르는 곳은 모두 이 함수를 쓴다.

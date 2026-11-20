@@ -169,7 +169,7 @@ export default function CostPolicyPage() {
           {rule && <p className="text-xs text-ink-500">범위: {valueKo(rule.min, rule.unit)}~{valueKo(rule.absolute_max, rule.unit)}, 지금 {valueKo(rule.value, rule.unit)}</p>}
           {canEdit && (valueText || reason) && problem && <p className={`rounded-xl px-3 py-2 text-xs ${TONE.warn}`}>{problem}</p>}
           {!state.viewer.can_edit_policy && <p className="text-xs text-ink-500">정책 변경 권한이 없는 계정이에요. 운영자나 정책 담당 관리자가 회원·서버 관리에서 권한을 켜야 해요.</p>}
-          {!HUMAN_TOKEN_SET && <p className="text-xs text-ink-500">사람 토큰이 설정되지 않아 바꿀 수 없어요.</p>}
+          {!HUMAN_TOKEN_SET && <p className="text-xs text-ink-500">로그인이 필요해요. 로그인하면 바꿀 수 있어요.</p>}
           {shown && (
             <p className={`rounded-xl px-3 py-2 text-sm ${shown.kind === 'done' ? TONE.ok : shown.kind === 'held' ? TONE.warn : TONE.bad}`} role="status">
               {shown.text}
