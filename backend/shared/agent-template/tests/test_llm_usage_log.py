@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from ax_agent_template import llm_usage
 from ax_agent_template.llm import LLMClient, LLMResponseError, LLMSettings, MockLLMClient
 from ax_agent_template.llm_usage import SqliteUsageStore
-from ax_contracts.data_access.llm_usage import LlmUsageQuery
+from ax_contracts.data_access.llm_usage import LlmCallRecord, LlmUsageQuery
 
 
 @pytest.fixture
@@ -199,3 +200,66 @@ async def test_structured_failures_record_each_request(
             "질문", _Answer, context_id="ctx-i"
         )
     assert limited.value.status_code == 429
+
+
+def _rec(log_id: str, account_id: str | None = None) -> LlmCallRecord:
+    return LlmCallRecord(
+        log_id=log_id,
+        tenant_id="catbooks",
+        occurred_at=datetime.now(UTC),
+        source="planning",
+        department="planning",
+        model="m",
+        input_tokens=3,
+        output_tokens=4,
+        success=True,
+        account_id=account_id,
+    )
+
+
+def test_account_id_is_stored_and_can_be_filtered(store: SqliteUsageStore) -> None:
+    """개인 키 호출의 계정 칸(11/20). 계정을 주면 그 계정 호출만, 안 주면 모두."""
+    store.write(_rec("a"))
+    store.write(_rec("b", "acc-1"))
+    store.write(_rec("c", "acc-2"))
+    every = _all(store, tenant_id="catbooks")
+    assert [(r.log_id, r.account_id) for r in every] == [
+        ("a", None), ("b", "acc-1"), ("c", "acc-2"),
+    ]
+    mine = _all(store, tenant_id="catbooks", account_id="acc-1")
+    assert [r.log_id for r in mine] == ["b"]
+
+
+def test_old_db_without_account_column_gets_it_once(tmp_path) -> None:
+    """옛 DB(계정 칸 없음)는 열 때 칸을 한 번 더한다. 옛 기록은 None이라 회사 합계 그대로."""
+    path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE llm_calls (seq INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " log_id TEXT NOT NULL UNIQUE, tenant_id TEXT NOT NULL, context_id TEXT,"
+        " occurred_at TEXT NOT NULL, source TEXT NOT NULL, department TEXT NOT NULL,"
+        " model TEXT, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,"
+        " success INTEGER NOT NULL);"
+        "INSERT INTO llm_calls (log_id, tenant_id, occurred_at, source, department, model,"
+        " input_tokens, output_tokens, success) VALUES"
+        " ('old', 'catbooks', '2026-11-01T00:00:00.000000Z', 'data', 'data', 'm', 1, 2, 1);"
+    )
+    conn.commit()
+    conn.close()
+    for _ in range(2):  # 두 번 열어도 칸이 한 번만 생긴다
+        s = SqliteUsageStore(path)
+        s.close()
+    s = SqliteUsageStore(path)
+    s.write(_rec("new", "acc-1"))
+    rows = s.query(LlmUsageQuery(tenant_id="catbooks")).records
+    assert [(r.log_id, r.account_id) for r in rows] == [("old", None), ("new", "acc-1")]
+    s.close()
+
+
+def test_record_call_takes_an_account_id(store: SqliteUsageStore) -> None:
+    llm_usage.record_call(
+        source="dev", department="dev", model="m", input_tokens=1, output_tokens=1,
+        success=True, tenant_id="catbooks", account_id="acc-1",
+    )
+    [record] = _all(store, tenant_id="catbooks")
+    assert record.account_id == "acc-1"

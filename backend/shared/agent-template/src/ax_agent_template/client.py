@@ -3,7 +3,9 @@
 `call_agent(target, req)`:
 
 1. 호출 전에 `path`에 자기 이름을 붙이고, 토큰은 자기 에이전트 토큰으로 바꾼다
-   (받는 쪽은 토큰에서 요청자를 꺼낸다).
+   (받는 쪽은 토큰에서 요청자를 꺼낸다). 나머지 메타(`on_behalf_of` 포함)는 그대로 복사한다.
+   문맥에 사람 계정이 묶여 있으면(dashboard-api, `on_behalf.py`) `on_behalf_of`를
+   그 값으로 덮어쓴다.
 2. `deadline`이 이미 지났으면 호출하지 않고 `canceled`(`TIMEOUT`)를 돌려준다.
 3. 마감까지 응답이 없으면 포기하고 `canceled`(`TIMEOUT`), 연결·응답 오류는 `failed`로 돌려준다.
 4. 받는 서비스가 켜져 있지 않으면(`routing.py`, `AX_ENABLED_SERVICES`) A2A 대신
@@ -23,7 +25,7 @@ from datetime import UTC, datetime
 import httpx
 from pydantic import ValidationError
 
-from ax_agent_template import routing
+from ax_agent_template import on_behalf, routing
 from ax_agent_template.config import agent_token, agent_url, get_agent_name
 from ax_agent_template.logging import log_event
 from ax_agent_template.server import error_result
@@ -67,7 +69,11 @@ async def call_agent(
     if not routing.is_enabled(service):
         return await _hand_off(name, target, service, req, remaining, http_client)
 
-    meta = req.meta.model_copy(update={"path": [*req.meta.path, name], "token": agent_token(name)})
+    update: dict[str, object] = {"path": [*req.meta.path, name], "token": agent_token(name)}
+    is_bound, person = on_behalf.bound()
+    if is_bound:  # dashboard-api: 세션 계정(세션이 아니면 None)으로 덮어쓴다
+        update["on_behalf_of"] = person
+    meta = req.meta.model_copy(update=update)
     sent = req.model_copy(update={"meta": meta})
     url = f"{agent_url(service)}/a2a"
 

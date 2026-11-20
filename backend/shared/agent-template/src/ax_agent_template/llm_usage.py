@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     model         TEXT,
     input_tokens  INTEGER NOT NULL,
     output_tokens INTEGER NOT NULL,
-    success       INTEGER NOT NULL
+    success       INTEGER NOT NULL,
+    account_id    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_llm_calls_context ON llm_calls (context_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_time ON llm_calls (occurred_at);
@@ -64,6 +65,14 @@ class SqliteUsageStore:
         if path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        self._add_account_column()
+
+    def _add_account_column(self) -> None:
+        """옛 DB(계정 칸 없음)에 `account_id`를 한 번 더한다. 옛 기록은 NULL(회사 사용량)."""
+        with self._lock, self._conn:
+            cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(llm_calls)")}
+            if "account_id" not in cols:
+                self._conn.execute("ALTER TABLE llm_calls ADD COLUMN account_id TEXT")
 
     def write(self, record: LlmCallRecord) -> None:
         row = (
@@ -77,12 +86,13 @@ class SqliteUsageStore:
             record.input_tokens,
             record.output_tokens,
             int(record.success),
+            record.account_id,
         )
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR IGNORE INTO llm_calls (log_id, tenant_id, context_id, occurred_at,"
-                " source, department, model, input_tokens, output_tokens, success)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                " source, department, model, input_tokens, output_tokens, success, account_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 row,
             )
 
@@ -95,6 +105,9 @@ class SqliteUsageStore:
         if query.departments:
             where.append(f"department IN ({','.join('?' * len(query.departments))})")
             args += query.departments
+        if query.account_id is not None:
+            where.append("account_id = ?")
+            args.append(query.account_id)
         if query.from_ is not None:
             where.append("occurred_at >= ?")
             args.append(_iso(query.from_))
@@ -166,8 +179,12 @@ def record_call(
     success: bool,
     context_id: str | None = None,
     tenant_id: str | None = None,
+    account_id: str | None = None,
 ) -> None:
-    """호출 1회의 사용량을 저장소에 남긴다. 실패해도 예외를 밖으로 내지 않는다."""
+    """호출 1회의 사용량을 저장소에 남긴다. 실패해도 예외를 밖으로 내지 않는다.
+
+    `account_id`는 개인 키로 부른 호출일 때만 넘긴다(공통 LLM 호출부 몫, 11/20).
+    """
     try:
         fields = {
             "log_id": f"llm_{uuid.uuid4().hex[:16]}",
@@ -179,6 +196,7 @@ def record_call(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "success": success,
+            "account_id": account_id,
         }
         if tenant_id is not None:
             fields["tenant_id"] = tenant_id

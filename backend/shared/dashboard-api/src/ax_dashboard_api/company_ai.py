@@ -22,7 +22,8 @@
 저장 위치: `AX_COMPANY_AI_DIR` → 회사 연결 파일 옆 `company_ai/`, 그 아래 `<회사 ID>/`.
 
 사용량은 LLM 사용량 저장소(`llm_usage`, `AX_LLM_USAGE_DB`)를 계약 조회(`LlmUsageQuery`)로
-읽기만 한다. 비용(원)은 보이지 않는다. 토큰과 %만. "월"은 회사 시간대(`DATA_TENANT_TIMEZONE`,
+읽기만 한다. 개인 키 호출(`account_id`가 있는 기록, 개인 AI 연결)은 회사 사용량·예산에
+세지 않는다. 비용(원)은 보이지 않는다. 토큰과 %만. "월"은 회사 시간대(`DATA_TENANT_TIMEZONE`,
 없으면 UTC) 1일 0시부터.
 
 체험 키(설치 운영자가 `.env`에 넣은 `LLM_TRIAL_API_KEY`, 한도 `LLM_TRIAL_TOKENS` 토큰)
@@ -386,7 +387,9 @@ def _records(
                 partial = True
                 break
             to = res.records[0].occurred_at
-    return list(seen.values()), True, partial
+    # 개인 키 호출(`account_id`가 있는 기록)은 회사 예산·사용량에 세지 않는다(개인 한도로만, 11/20)
+    company = [r for r in seen.values() if r.account_id is None]
+    return company, True, partial
 
 
 def _tokens(records: list[LlmCallRecord]) -> int:

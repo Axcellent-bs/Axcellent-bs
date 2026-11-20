@@ -78,3 +78,14 @@ def test_round_trip_without_notices_key_defaults_to_empty() -> None:
     assert again == _result(queries=["q"])
     with_notes = _result(notices=["a"])
     assert AgentResult.model_validate(with_notes.model_dump(mode="json")) == with_notes
+
+
+def test_empty_on_behalf_of_is_omitted_so_old_meta_copies_still_accept() -> None:
+    """`on_behalf_of`(11/20)는 비어 있으면 직렬화에서 뺀다(옛 계약 사본의 extra=forbid 호환)."""
+    meta = RequestMeta(context_id="ctx_1", token="t", deadline=datetime(2026, 11, 18, tzinfo=UTC))
+    assert "on_behalf_of" not in meta.model_dump(mode="json")
+    assert "on_behalf_of" not in json.loads(meta.model_dump_json())
+    _OldMeta.model_validate(meta.model_dump(mode="json"))
+    with_person = meta.model_copy(update={"on_behalf_of": "acc-1"})
+    assert with_person.model_dump(mode="json")["on_behalf_of"] == "acc-1"
+    assert RequestMeta.model_validate(with_person.model_dump(mode="json")) == with_person

@@ -67,6 +67,13 @@ class RequestMeta(AxModel):
     - `deadline`: 응답 마감. 넘으면 실행하지 않고 보고한다.
     - `idempotency_key`: `context_id + 액션 + 대상`. 상태 변경 요청이면 필수다.
     - `requester`: 토큰에서 채워지는 값이다. 요청 본문에 적힌 값은 믿지 않고 무시한다.
+    - `on_behalf_of`: 이 일을 시킨 사람의 계정 ID(개인 AI 연결, 11/20). dashboard-api가 사람 로그인
+      세션 요청일 때만 세션의 계정으로 채운다. 요청 본문·다른 출처의 값은 버리고 덮어쓰며,
+      에이전트 토큰·공용 토큰으로 온 요청이면 비운다(`requester`와 같은 방식).
+      `call_agent`는 메타를 복사하므로 총괄 → 부서로 그대로 이어진다.
+      **이 칸은 dashboard-api 토큰으로 시작한 요청에서만 믿는다.** 에이전트가 이 칸을 적어 남의
+      개인 키를 쓰지 못하게, 읽는 쪽(공통 LLM 호출부)은 dashboard-api에서 시작한 요청인지 확인한 뒤
+      쓰고, 그렇지 않으면 없는 값으로 본다. 개인 키를 고를 때 말고는 쓰지 않는다.
     """
 
     context_id: str
@@ -76,6 +83,16 @@ class RequestMeta(AxModel):
     deadline: UtcDatetime
     idempotency_key: str | None = None
     requester: str | None = None
+    on_behalf_of: str | None = None
+
+    # 호환: 비어 있는 `on_behalf_of`는 직렬화에서 키째 뺀다(Evidence.notices와 같은 이유).
+    # 판매서버(shop-api)의 옛 계약 사본은 extra="forbid"라 `"on_behalf_of": null`만 실려도 거부한다.
+    @model_serializer(mode="wrap")
+    def _omit_empty_on_behalf_of(self, handler: SerializerFunctionWrapHandler):  # noqa: ANN202
+        data = handler(self)
+        if isinstance(data, dict) and data.get("on_behalf_of") is None:
+            data.pop("on_behalf_of", None)
+        return data
 
 
 class Evidence(AxModel):

@@ -152,8 +152,53 @@
 - 모델·예산 변경도 같은 규칙인지 → 열린 질문 2
 - 상태 변경은 agent-template `execute()`로만(규칙). 이력에는 지문·끝 4자리만
 
-## 9. 개인 연결 토큰 (내 연결)
+## 9. 개인 AI 연결 (내 연결) — 11/20 예진 결정으로 고침
 
+시스템 관리 › 도구 연결 › 내 연결 › "내 AI 도구로 AXcellent 쓰기". **연결을 간단하게** 한다.
+
+화면
+- 입력은 네 가지: API 키, 모델, 주소(목록에 없는 모델·OpenAI 호환일 때만), 월 한도(토큰)
+- "내 키로 부를 AI 직원" 고르기: 총괄·고객지원·재무·데이터분석·인사·마케팅·기획·개발·인프라·아카이브
+  (계약 `PERSONAL_AI_AGENTS`, 서비스 목록·LLM 부서 이름과 같다). 고른 직원에게 **내가** 일을 시킬 때만 회사 키 대신 내 키로 부른다
+- 상태: 연결됨(끝 4자리)·이번 달 내 키 사용량/한도 %·고른 직원 칩. 저장·키 지우기. 키는 저장 뒤 끝 4자리만
+- 나만 보이고 나만 바꾼다(관리자도 남의 개인 키·설정을 못 본다). 고객사 관리자·일반회원 모두 쓴다(운영자는 아님)
+
+저장 (dashboard-api `personal_ai.py`, 계약 `ax_contracts.schemas.personal_ai`)
+- 키: 키 저장소(`ax-secret-store`) 이름 `PERSONAL_LLM_API_KEY`, tenant = `p-` + `sha256("<회사 ID>
+<계정 ID>")` 앞 38자.
+  회사 ID와 계정 ID **둘 다**로 나눈다 → 회사 키(tenant=회사 ID)·같은 회사 다른 계정·다른 회사 같은 계정과 섞이지 않는다(시험).
+  키 관리 화면은 담당 고객사 tenant만 보이므로 여기에도 안 나온다. 나만 쓰는 키라 승인 없이 바로 적용
+- 설정: 회사 AI 설정 폴더 `<회사 ID>/personal/<sha256(계정 ID) 앞 32자>.json`(계약 `PersonalAiSettings`:
+  model·provider·base_url·monthly_limit_tokens·agents). 이력은 같은 이름 `.history.jsonl`, 키는 끝 4자리만
+- 키 저장소가 꺼져 있으면 키·설정 저장을 막고 이유(409 `SECRET_STORE_DISABLED`)
+
+API (로그인 세션만, 본인만. 에이전트·공용 토큰 403. 경로·본문에 계정 자리 없음. nginx: GET·HEAD·POST만)
+
+| 메서드 | 경로 | 하는 일 |
+|---|---|---|
+| GET | `/api/dashboard/me/ai-connection` | 내 상태·설정·이번 달 사용량·고를 수 있는 직원 |
+| POST | `/api/dashboard/me/ai-connection/settings` | 모델·주소·월 한도·고른 직원(전체 저장) |
+| POST | `/api/dashboard/me/ai-connection/key` | 키 넣기·바꾸기 |
+| POST | `/api/dashboard/me/ai-connection/key/delete` | 키 지우기 |
+
+누가 시켰나 (`RequestMeta.on_behalf_of`, 계약 추가)
+- dashboard-api가 사람 로그인 세션 요청일 때만 세션 계정으로 채운다(미들웨어 → `call_agent`가 덮어씀). 본문·다른 출처 값은 버린다. 에이전트·공용 토큰 요청은 비운다
+- `call_agent`는 메타를 복사하므로 총괄 → 부서로 이어진다(시험). 다만 총괄이 새 `RequestMeta`를 만드는 경로(요청 작업 `request_runner`, 사건 단계 `engine` 등)는 아직 안 이어진다 → 후속
+- **dashboard-api에서 시작한 요청에서만 믿는다.** 에이전트가 적어 넣어 남의 개인 키를 쓰지 못하게, 읽는 쪽이 확인한다
+
+사용량·한도
+- `llm_calls`에 `account_id` 칸(계약 `LlmCallRecord.account_id`, 옛 DB는 시작 때 한 번 `ALTER TABLE`). 개인 키로 부른 호출에만 채운다(공통 LLM 호출부 몫)
+- **개인 키 호출은 회사 월 예산·회사 사용량에 세지 않고 개인 한도로만 센다**(제안, 예진 확인 중). 회사 쪽 합계는 `account_id`가 빈 기록만
+- 개인 사용량 % = 이번 달(회사 시간대) 이 회사·이 계정 기록 합 / `monthly_limit_tokens`
+
+공통 LLM 호출부(`settings_for`, 준하 님 몫)가 고를 순서 — 제안
+1. 요청이 dashboard-api 사람 세션에서 시작했고(`on_behalf_of`가 있고 믿을 수 있음) 그 사람이 이 직원을 `agents`에 골랐고 개인 키가 있으면 → **개인 키**(개인 모델·주소, 개인 한도 검사, 기록에 `account_id`)
+2. 아니면 → 회사 키(4장)
+3. 회사 키도 없으면 → 체험 키(4장)
+- 개인 한도를 다 쓰면 `PERSONAL_LIMIT_EXHAUSTED`로 멈춘다. **개인 키 호출이 실패해도 회사 키로 자동 전환하지 않고 멈춘다**(내 키 문제를 회사 비용으로 덮지 않는다)
+
+### 9.1 개발자 PC MCP 연결 (예전 개인 연결 토큰 안)
+화면에서는 내 연결 › "고급 · 개발자 PC 연결" 접기 안에 있다(요청 작업 코딩 방식 + Claude Code·Codex·Cursor MCP 안내).
 - 각자 화면에서 만든다. 만들 때 한 번만 원문을 보여 주고 이후엔 이름·끝 4자리·만든 날·마지막 사용
 - 저장은 해시만(dashboard-api 계정 저장소, 회사 ID·사람 ID 붙임). 만료 기본 90일, 언제든 끊기
 - 권한은 지금 `DEV_WORK_TOKENS`와 같은 **좁은 권한**(작업 대기열·읽기). 관문 승인·머지·재무 같은 사람 결정은 못 한다
@@ -176,7 +221,9 @@
 | 4 | 화면: 공통 AI 도구 연결 탭, AI 연결 탭 | frontend | 예진 |
 | 5 | dev BYOK 이전·체험 한도 합치기·코딩 분리 | dev | 예진 |
 | 6 | 마케팅 영상 키 화면 이전·예산 표시 맞추기(#1490과 맞춤) | marketing | **재헌 님** |
-| 7 | 개인 연결 토큰 + `work_auth` | dashboard-api, dev | 예진 |
+| 7 | 개인 AI 연결(9장: 키·설정·`on_behalf_of`·사용량 계정 칸) | contracts, agent-template, dashboard-api, frontend | 예진 |
+| 7-2 | `settings_for` 개인 키 고르기(9장 순서) | agent-template | **준하 님** |
+| 7-3 | 개발자 PC MCP 토큰 + `work_auth`(9.1) | dashboard-api, dev | 예진 |
 
 순서: 1 → 2 → (3, 5, 6 나란히) → 4 → 7. 1·3은 예진이 한 PR로 묶어 먼저 진행(계약 `CompanyAiSettings` 포함, 회사 ID는 지금 있는 `tenant.current()`). 2(준하 님)는 1과 회사 공간 1단계(`meta.tenant_id` 채우기) 머지 뒤 시작. 번호는 이 표를 기준으로 부른다.
 
@@ -192,4 +239,5 @@
 2. 모델·예산 변경도 다른 관리자 승인을 받을지(추천: 예산을 **올리는** 것만 승인, 모델 변경·예산 내리기는 바로 + 알림)
 3. 체험 키를 둘지, 회사 공간 설계대로 "키 없으면 멈춤"만 할지(추천: 체험 키는 회사별 토큰 한도로 두고 사용량을 그 회사로 센다)
 4. 월 예산의 "월" 기준(추천: 회사 시간대 1일 0시)
-5. 개인 연결 토큰 만료 기본값(추천: 90일)
+5. 개발자 PC MCP 토큰 만료 기본값(추천: 90일)
+6. 개인 키 호출을 회사 예산에서 빼는 것 확정(9장 제안, 예진 확인 중)

@@ -58,3 +58,11 @@ def test_query_from_alias_and_limit():
 def test_result_default_not_truncated():
     r = LlmCallRecord.model_validate(_record())
     assert LlmUsageResult(records=[r]).truncated is False
+
+
+def test_account_id_is_optional_and_old_records_stay_company_usage():
+    """개인 키 호출만 계정 ID가 붙는다(개인 AI 연결, 11/20). 옛 기록은 None."""
+    assert LlmCallRecord.model_validate(_record()).account_id is None
+    assert LlmCallRecord.model_validate(_record(account_id="acc-1")).account_id == "acc-1"
+    assert LlmUsageQuery().account_id is None
+    assert LlmUsageQuery(account_id="acc-1").account_id == "acc-1"

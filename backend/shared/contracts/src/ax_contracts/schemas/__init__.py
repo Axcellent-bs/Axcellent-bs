@@ -398,6 +398,13 @@ from ax_contracts.schemas.message import (
     RequestMeta,
     TaskStatus,
 )
+from ax_contracts.schemas.personal_ai import (
+    PERSONAL_AI_AGENTS,
+    PERSONAL_AI_KEY_NAME,
+    PERSONAL_AI_TENANT_PREFIX,
+    PersonalAiAgent,
+    PersonalAiSettings,
+)
 from ax_contracts.schemas.planning import (
     AnswerPlanningQuestionInput,
     AnswerPlanningQuestionOutput,
@@ -476,6 +483,11 @@ __all__ = [
     "CompanyAiCoderMode",
     "CompanyAiSettings",
     "CompanyAiVideo",
+    "PERSONAL_AI_AGENTS",
+    "PERSONAL_AI_KEY_NAME",
+    "PERSONAL_AI_TENANT_PREFIX",
+    "PersonalAiAgent",
+    "PersonalAiSettings",
     "ActionReviewInput",
     "ActionReviewOutput",
     "AgentCard",
