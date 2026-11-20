@@ -43,6 +43,33 @@
   4. **같은 부위로 잇기**: 복구 신호에 장애 신호와 같은 `component`(그리고 `source_ref`)를 실어, 총괄이 열린 장애와 이어 붙이게 해요.
 - 그 전까지 캣북스의 `shop.degraded`·`shop.recovered` 전송은 **그대로 둬요**(시연 장애 주입 흐름 `fault_released`가 여기에 걸려 있어요). 이 문서의 "outbox 제거"는 주문·결제·환불·반품·판매자 7종만이에요.
 
+## 이벤트 말고 남은 위반 둘: 캣북스 관리 화면 중계 (11/20 예진·태윤 합의)
+
+원칙 "고객사는 AXcellent를 먼저 부르지 않는다"를 어기는 곳이 outbox 9종 말고 둘 더 있어요(catbooks-demo `origin/dev` `backend/shop-api/src/ax_shop_api/` 확인). 이 문서 범위에 넣어요.
+
+| 캣북스 파일 | 캣북스 주소 | AXcellent를 어떻게 부르나 |
+|---|---|---|
+| `marketing_client.py` | `/api/shop/admin/marketing/briefs`, `briefs/{id}`, `outage-sns-drafts` | 마케팅 AI 읽기 skill을 A2A로 불러요 |
+| `orchestrator_relay.py` | `/api/shop/admin/orchestrator/*` (`incidents`, `incidents/{context_id}`, `departments`) | 총괄에 HTTP GET(`SHOP_ORCHESTRATOR_URL`): `/api/incidents`, `/api/incidents/{context_id}`, `/api/departments` |
+
+- `support_client.py`는 죽은 코드예요(캣북스가 지움). 손댈 것 없어요.
+- **결정**: 두 중계가 보여 주던 화면은 AXcellent 대시보드로 옮기고, 캣북스는 두 중계를 지워요.
+
+### AXcellent 화면에 이미 있는지 (11/20 dev 기준)
+
+조사하다 보니 **AXcellent 화면이 이 정보를 이미 그리지만, 상당수가 캣북스를 거쳐 돌아와요.** dashboard-api `shop_relay.py`(`/api/dashboard/shop/*`)가 캣북스 `/api/shop/admin/orchestrator/*`·`/api/shop/admin/marketing/*`를 부르고, 캣북스가 다시 AXcellent 총괄·마케팅을 불러요(AXcellent → 캣북스 → AXcellent). 캣북스가 중계를 지우면 이 화면들이 끊기니, 화면 이전은 "**AXcellent 안에서 바로 읽는 길로 바꾸기**"예요.
+
+| 정보 | 화면 | 지금 읽는 길 | 판정 |
+|---|---|---|---|
+| 마케팅 브리프 목록 | 있음: `/marketing/*` `components/marketing/ReceivedBriefs.tsx` (`lib/briefs.ts` `briefs.list`) | `/api/dashboard/shop/marketing/briefs` → 캣북스 → 마케팅 | 화면 있음 / **읽는 길 새로**: dashboard-api가 마케팅 읽기 skill을 A2A로 바로 부르는 `GET /api/dashboard/marketing/briefs` 추가 |
+| 마케팅 브리프 상세 (`briefs/{id}`) | 없음 (목록 카드만, 상세 읽기 함수 없음) | — | **새로 만들 것**: 상세 주소 `GET /api/dashboard/marketing/briefs/{id}` + 상세 보기(필요하면 목록 펼치기) |
+| 장애 SNS 초안 | 있음: `components/marketing/OutageDrafts.tsx` (`briefs.outageSnsDrafts`). 합치기·미디어·게시 요청은 이미 `/api/dashboard/marketing/outage-sns-drafts/...` 직결 | 목록만 `/api/dashboard/shop/marketing/outage-sns-drafts` → 캣북스 → 마케팅 | 화면 있음 / **읽는 길 새로**: `GET /api/dashboard/marketing/outage-sns-drafts` 직결 추가 |
+| 총괄 사건 목록·상세 (`/api/incidents`, `/api/incidents/{id}`) | 있음: `/orchestrator`, `pages/Data.tsx`, `finance/OrchestratorRequests.tsx`가 `lib/orchestrator.ts`로 총괄을 **직접** 읽어요 | 직결 | 이미 있음. 단 `support/IncidentResponse.tsx`·`lib/navCounts.ts`는 `lib/adminRelay.ts` `adminRelay.incidents()`(`/api/dashboard/shop/orchestrator/incidents`, 캣북스 경유) → **`orchestrator.incidents()`로 바꾸기** |
+| 총괄 부서 현황 (`/api/departments`) | 있음: `components/admin/DeptUsage.tsx` | `adminRelay.departments()` → 캣북스 → 총괄 | 화면 있음 / **읽는 길 새로**: `lib/orchestrator.ts`에 `departments()`(총괄 `/api/departments` 직결) 추가해 바꾸기 |
+
+- 다 옮기면 `shop_relay.py`의 `orchestrator_*`·`marketing_*` 4줄과 `lib/adminRelay.ts`의 해당 함수는 쓰는 곳이 없어져요. 지우는 건 화면 이전 PR에서 같이 해요(계약이 아닌 내부 중계라 삭제 가능). `banners`·`faults` 중계는 캣북스 자기 데이터라 남겨요.
+- `site_adapter/router.py`의 `/api/shop/admin/orchestrator/{rest:path}`·`/api/shop/admin/marketing/{rest:path}` 경로 줄도 같이 확인해 정리해요.
+
 ## 읽기 경로 조사
 
 | 필요한 변화 | 읽을 곳 | 증분 읽기 | 캣북스(shop-api 직결) | 변환기 고객사(누비투어·스터디온) |
@@ -159,8 +186,10 @@
 1. **감지기 켜기 (캣북스 먼저)**: 캣북스 outbox 웹훅이 살아 있는 동안 감지기를 같이 켜요. 같은 환불이 두 길로 오지만 `event_id`가 달라서 재무 장부에 두 번 쌓일 수 있어요 → 이 기간에는 감지기를 **그림자 모드**(`AX_CHANGE_DETECTOR_PUBLISH=0`: 버스에 안 넣고 "내보냈을 이벤트"만 상태 파일·로그에 남기기)로 돌려 웹훅으로 온 이벤트와 하루 이상 맞춰 봐요.
 2. **소비처 확인**: 재무 `GET /api/finance/ledger` 환불 목록·AI 대화방 "환불 기록" 줄이 그림자 기록과 같은지 봐요. 같으면 `AX_COMPANY_KEYS`에서 캣북스 키를 빼고(웹훅이 403으로 막혀요) 그림자 모드를 꺼요. 이 순서면 같은 환불이 두 번 쌓이는 때가 없어요.
 3. **변환기 고객사 켜기**: 변환기 보완(커서·`updated_since`·환불 줄)이 들어간 뒤 누비투어에서 감지기를 켜고, 환불 하나를 만들어 재무 장부에 들어오는지 봐요(251 실연결은 catbooks-demo 세션 몫과 같이).
-4. **캣북스 outbox 전송 제거 (catbooks-demo 세션 몫)**: 주문·결제·환불·반품·판매자 7종 웹훅 전송을 끄거나 지워요. `shop.degraded`·`shop.recovered`는 위 "장애 신호 대체"의 복구 신호가 들어갈 때까지 남겨요. 이 레포에서는 다른 레포를 고치지 않으니 인계 글로 넘겨요.
-5. **`POST /api/dashboard/events` 정리**: 계약은 **삭제·이름 변경 금지, 추가만**이에요.
+4. **대시보드 화면 이전 확인**: 위 "AXcellent 화면에 이미 있는지" 표의 화면이 모두 AXcellent 안 직결 길(마케팅 A2A·총괄 직결)로 읽는지, `/api/dashboard/shop/orchestrator/*`·`/api/dashboard/shop/marketing/*`를 부르는 화면이 0개인지 봐요. 감지기(1~2단계)와 이 확인이 **둘 다** 끝나야 다음으로 가요.
+5. **catbooks-demo 세션에 알림**: 감지기 켜짐 + 화면 이전 끝을 인계 글로 알려요(이 레포에서는 다른 레포를 고치지 않아요).
+6. **캣북스가 한 PR로 제거 (catbooks-demo 세션 몫)**: 주문·결제·환불·반품·판매자 outbox 7종 웹훅 전송, `marketing_client.py`(관리 화면 `marketing/*` 중계), `orchestrator_relay.py`(관리 화면 `orchestrator/*` 중계, `SHOP_ORCHESTRATOR_URL`)를 **한 PR로** 지워요. `shop.degraded`·`shop.recovered`는 위 "장애 신호 대체"의 복구 신호가 들어갈 때까지 남겨요.
+7. **`POST /api/dashboard/events` 정리**: 계약은 **삭제·이름 변경 금지, 추가만**이에요.
    - 주소·`EventType` 값·`EVENT_DATA_MODELS`는 **남겨요**(지우면 계약 삭제예요).
    - `dashboard-api.json` 스냅숏의 이 주소에 `deprecated: true`와 설명 "고객사 이벤트 받기는 쓰지 않아요. 변화 감지기가 읽어서 만들어요"를 **추가**해요.
    - 동작은 이미 fail-closed예요: `AX_COMPANY_KEYS`가 비면 모두 401/403이에요. 기본 설정·`.env.example`에서 이 값을 빼고, 고객사 연결 안내 문서에서 "이벤트 보내기"를 지워요.
@@ -175,7 +204,8 @@
 | 2 | 변환기 `sales-export` 보완: `(updated_at, order_id)` 커서, `updated_since` 넘기기, 환불 줄, 결제 실패 상태 값 | dashboard-api 변환기(사이트 변환기 작업자와 맞추기), 데이터(같은 주소를 5분마다 읽는 수집기 확인: 예진) |
 | 3 | 화면: 회사 연결 연결 지도에 "변화 감지" 상태, 출처 이름표 추가 | 프론트 |
 | 4 | 전환: 그림자 모드 끄기, `POST /events` `deprecated` 표시 추가, `AX_COMPANY_KEYS` 기본값·안내 정리, `agent-common.md` 카탈로그 정리 | dashboard-api, 재무 |
-| 5 (catbooks-demo) | 캣북스 outbox 7종 전송 제거 | 캣북스 판매 서버(재헌) |
+| 3b | 화면 이전: (마케팅) dashboard-api에 `GET /api/dashboard/marketing/briefs`·`briefs/{id}`·`outage-sns-drafts` 직결(마케팅 읽기 skill A2A) 추가, `lib/briefs.ts`를 직결로, 브리프 상세 보기 새로 / (총괄) `lib/orchestrator.ts`에 `departments()` 추가, `DeptUsage`·`IncidentResponse`·`navCounts`를 `adminRelay`에서 `orchestrator`로. 끝나면 `shop_relay.py` `orchestrator_*`·`marketing_*` 중계와 `adminRelay` 해당 함수 정리 | 마케팅 화면(**재헌**), 총괄 화면(**준하**), dashboard-api(공용) |
+| 5 (catbooks-demo) | 캣북스 outbox 7종 전송 + `marketing_client.py`·`orchestrator_relay.py` 두 중계를 한 PR로 제거(PR 1·3b 끝난 뒤) | 캣북스 판매 서버(재헌) |
 | 6 (따로) | 장애 복구 신호(11/20 결정): `infra.recovered` 계약 추가, `dejafix_watch`가 장애가 닫히면(성공한 조회에서 연속 두 번 빠지면) 복구 알림(`recovery`·`recovered_at`=DejaFix 해소 시각·같은 `component`). 총괄이 `infra.recovered`를 `SHOP_RECOVERED`와 같은 길로 받는 건 **준하 님 담당** | 인프라, 총괄(준하) |
 
 ## 하지 않을 것 (이번)
@@ -184,6 +214,7 @@
 - `return.received`·`seller.registered` 감지(소비처 없음)
 - 계약 값 삭제·이름 변경
 - 고객사 사이트에 무언가 설치하게 하기(고객사는 가만히 있어요)
+- `support_client.py`(캣북스가 이미 지운 죽은 코드)
 
 ## 정한 것 (예진 님 11/20)
 
