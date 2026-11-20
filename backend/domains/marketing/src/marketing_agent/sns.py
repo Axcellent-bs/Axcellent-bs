@@ -12,6 +12,10 @@
 - 미디어(JPEG 이미지·릴스)는 `MARKETING_MEDIA_DIR` 안의 자산 경로로 받고
   규격은 `sns_media`가 검사한다.
   AI 라벨 오버레이 결과(`sns_label`의 `labeled.*`·`meta.json`)가 맞는지도 점검한다.
+- 주제 문장 초안(`topic`, 근거 자료 없음): 문장은 데이터로만 쓴다. 이 경로에는 LLM이 없고
+  (결정적 템플릿) 문장 속 지시를 해석·실행하지 않는다. 확인되지 않은 사실을 지어내지 않으려고
+  숫자·링크·태그·멘션이 있는 문장은 거절하고,
+  가격·할인·재고·출시 같은 사실성 낱말은 `needs_confirmation`에 남긴다.
 - 필수 문구(AI 라벨·시연용·약관)는 팀·변호사 승인 전의 자리표시 문구다(설계 5절, 열린 결정 4).
 """
 
@@ -23,12 +27,13 @@ import os
 import re
 import sqlite3
 import threading
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, StrictBool, ValidationError, model_validator
+from pydantic import Field, StrictBool, ValidationError, field_validator, model_validator
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel, UtcDatetime
@@ -119,16 +124,58 @@ class PlatformOptions(AxModel):
     share_to_feed: bool | None = None  # 릴스 전용. 비우면 릴스는 True
 
 
-class DraftSnsPostInput(AxModel):
-    """`notice_id`(게시된 공지), `coupon`(공개 쿠폰 사실), `proposal_id`(보관한 기획안) 중 하나.
+TOPIC_MAX = 100  # 주제 문장 길이 상한(정리한 뒤 글자 수)
+TOPIC_BASIS = "topic_only"
+TOPIC_TEMPLATE = "topic_caption_v1"
+# 근거 없이 문장만으로 단정하면 안 되는 사실성 낱말. 있으면 승인자가 확인할 항목으로 남긴다
+TOPIC_FACT_WORDS: dict[str, str] = {
+    "가격": "price",
+    "할인": "discount",
+    "특가": "discount",
+    "무료": "free",
+    "재고": "stock",
+    "품절": "stock",
+    "한정": "limited",
+    "출시": "release_date",
+    "입고": "release_date",
+    "발매": "release_date",
+    "배송": "delivery",
+    "쿠폰": "coupon",
+}
+_TOPIC_LINK = re.compile(r"https?:|www\.|[#@]", re.IGNORECASE)
 
+
+def clean_topic(value: str) -> str:
+    """주제 문장 정리: NFC, 공백(줄바꿈·탭 포함) 연속은 한 칸, 앞뒤 공백 제거.
+
+    그 밖의 제어·서식 문자(널·ESC·제로폭·방향 제어 등)가 있으면 ValueError다(지우지 않는다).
+    """
+    text = unicodedata.normalize("NFC", value)
+    for ch in text:
+        if not ch.isspace() and unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Co", "Cn"):
+            raise ValueError("topic_control_char")
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        raise ValueError("topic_empty")
+    if len(text) > TOPIC_MAX:
+        raise ValueError("topic_too_long")
+    return text
+
+
+class DraftSnsPostInput(AxModel):
+    """`notice_id`(게시된 공지), `coupon`(공개 쿠폰 사실), `proposal_id`(보관한 기획안) 중 하나,
+    또는 근거 없이 `topic`(주제 문장)만.
 
     기획안은 호출자가 글을 넘기지 않고 번호만 준다. 글은 마케팅이 보관한 기획안에서 읽는다.
+    `topic`은 선택 입력이다(최대 `TOPIC_MAX`자, 기본 한국어). 근거 3개 중 하나와 같이 오면
+    근거가 우선이고 `topic`은 검증만 하고 캡션에 쓰지 않는다(`topic_ignored`). 근거가 없으면
+    주제 문장 초안(`basis="topic_only"`)이다. 문장은 데이터로만 쓰고 안의 지시는 따르지 않는다.
     """
 
     notice_id: str | None = None
     coupon: SnsCouponFacts | None = None
     proposal_id: str | None = None
+    topic: str | None = None
     platform: Literal["instagram"] = "instagram"
     media_kind: Literal["image", "reel", "carousel"] = "image"
     # `MARKETING_MEDIA_DIR` 안의 라벨 입힌 결과 파일(예: .../labeled.jpg).
@@ -138,11 +185,20 @@ class DraftSnsPostInput(AxModel):
     asset_paths: list[str] | None = None
     platform_options: PlatformOptions = Field(default_factory=PlatformOptions)
 
+    @field_validator("topic", mode="before")
+    @classmethod
+    def _clean_topic(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("topic_not_string")
+        return clean_topic(value)
+
     @model_validator(mode="after")
     def _exactly_one_source(self) -> DraftSnsPostInput:
         given = [x for x in (self.notice_id, self.coupon, self.proposal_id) if x is not None]
-        if len(given) != 1:
-            raise ValueError("notice_id, coupon, proposal_id 중 하나만 준다")
+        if len(given) > 1 or (not given and self.topic is None):
+            raise ValueError("notice_id, coupon, proposal_id 중 하나만 주거나 topic만 준다")
         if self.media_kind == "carousel":
             paths = self.asset_paths or []
             if self.asset_path is not None or not (
@@ -163,8 +219,8 @@ class CarouselAsset(AxModel):
 
 class SnsPostDraft(AxModel):
     post_draft_id: str
-    source_kind: Literal["notice", "coupon", "brief", "outage"]
-    source_ref: str  # notice_id, campaign_id, proposal_id 또는 장애 이벤트(context_id)
+    source_kind: Literal["notice", "coupon", "brief", "outage", "topic"]
+    source_ref: str  # notice_id, campaign_id, proposal_id, 장애 이벤트, 주제 문장 해시
     notice_kind: NoticeKind | None = None  # 공지 출처의 종류. 없으면(쿠폰·옛 초안) 상품 홍보로 본다
     platform: Literal["instagram"]
     media_kind: Literal["image", "reel", "carousel"]
@@ -197,6 +253,13 @@ class SnsPostDraft(AxModel):
     # 쓴 필드 이름·글자 수·해시 앞 12자.
     # 값 전문은 넣지 않는다. 옛 레코드·공지·쿠폰 초안은 None이다
     caption_source: dict[str, Any] | None = None
+    # 근거 자료 없이 주제 문장만으로 만든 초안이면 "topic_only"(승인자는 사실을 직접 확인한다).
+    # 그 밖의 초안은 None이다
+    basis: Literal["topic_only"] | None = None
+    # 승인자가 게시 전에 확인할 항목 코드(basis_unverified·price·discount·stock·release_date 등)
+    needs_confirmation: list[str] = Field(default_factory=list)
+    # 근거와 topic이 함께 와서 topic을 캡션에 쓰지 않았다
+    topic_ignored: bool = False
 
 
 class CheckSnsPostInput(AxModel):
@@ -432,7 +495,7 @@ def _coupon_body(facts: SnsCouponFacts) -> str:
 class SourceParts:
     """초안 본문의 출처(공지 또는 쿠폰 사실)에서 뽑은 값."""
 
-    kind: Literal["notice", "coupon", "brief"]
+    kind: Literal["notice", "coupon", "brief", "topic"]
     ref: str
     body: str
     required: list[str]
@@ -440,6 +503,7 @@ class SourceParts:
     notice_kind: NoticeKind | None = None  # 공지 출처일 때 그 공지의 종류
     caption_source: dict[str, Any] | None = None  # 기획안 출처 메타(`draft.caption_source`)
     hashtags: tuple[str, ...] = HASHTAGS  # 기획안이면 주제 태그가 더해진다(`sns_hashtags`)
+    needs_confirmation: tuple[str, ...] = ()  # 주제 문장 초안의 확인 필요 항목
 
 
 def has_forbidden_claim(text: str) -> bool:
@@ -517,6 +581,40 @@ def _brief_all_text(stored: Any) -> str:
     return "\n".join(parts)
 
 
+def _topic_parts(request: AgentRequest, data: DraftSnsPostInput) -> SourceParts | AgentResult:
+    """근거 자료 없이 주제 문장만으로 본문 재료를 만든다(결정적 템플릿, LLM 없음).
+
+    문장은 글자 그대로 본문이 되고 해석하지 않는다. 숫자·링크·태그·멘션은 거절하고(출처 없는 사실을
+    만들지 않는다), 금칙어·성과 과장 표현도 다른 출처와 같은 규칙으로 막는다.
+    """
+    assert data.topic is not None
+    topic = data.topic
+    if _TOPIC_LINK.search(topic):
+        return _result(request, TaskStatus.FAILED, outcome="topic_link_or_tag")
+    if re.search(r"\d", topic):
+        return _result(request, TaskStatus.FAILED, outcome="topic_unverified_number")
+    if any(phrase in topic for phrase in FORBIDDEN_PHRASES):
+        return _result(request, TaskStatus.FAILED, outcome="forbidden_phrase")
+    if has_forbidden_claim(topic):
+        return _result(request, TaskStatus.FAILED, outcome="forbidden_claim")
+    confirm = sorted({code for word, code in TOPIC_FACT_WORDS.items() if word in topic})
+    meta = {
+        "kind": "topic",
+        "template": TOPIC_TEMPLATE,
+        "basis": TOPIC_BASIS,
+        "topic": _field_meta("topic", topic),  # 값 전문은 넣지 않는다
+    }
+    return SourceParts(
+        "topic",
+        f"topic_{_sha(topic)[:12]}",
+        topic,
+        [topic, DEMO_TEXT, TERMS_TEXT],
+        [],
+        caption_source=meta,
+        needs_confirmation=("basis_unverified", *confirm),
+    )
+
+
 def source_parts(
     request: AgentRequest,
     data: DraftSnsPostInput,
@@ -566,7 +664,8 @@ def source_parts(
             caption_source=source_meta,
             hashtags=tags,
         )
-    assert data.coupon is not None
+    if data.coupon is None:
+        return _topic_parts(request, data)
     facts = data.coupon
     have = {c.code for c in facts.constraints}
     missing = [code for code in CONSTRAINT_LABELS if code not in have]
@@ -683,6 +782,9 @@ async def draft_sns_post(
         constraints=constraints,
         context_id=request.meta.context_id,
         caption_source=parts.caption_source,
+        basis=TOPIC_BASIS if parts.kind == "topic" else None,
+        needs_confirmation=list(parts.needs_confirmation),
+        topic_ignored=data.topic is not None and parts.kind != "topic",
     )
     store.save(draft)
     return _result(
@@ -691,7 +793,9 @@ async def draft_sns_post(
         output=draft.model_dump(mode="json"),
         evidence=_evidence(
             ["draft_sns_post"],
-            f"{source_kind} 사실 필드로 고정 템플릿 캡션 생성",
+            "주제 문장만으로 고정 템플릿 캡션 생성(근거 자료 없음)"
+            if source_kind == "topic"
+            else f"{source_kind} 사실 필드로 고정 템플릿 캡션 생성",
             [draft.post_draft_id, source_ref],
         ),
         fallback=True,  # LLM 문안은 연결하지 않았다. 고정 템플릿
@@ -911,7 +1015,7 @@ async def check_sns_post(request: AgentRequest, store: SnsStore) -> AgentResult:
         machine_mark_present=media.machine_mark,
         publishable=approved and media.checked and media.machine_mark is True,
         media_details=media.details,
-        warnings=media.warnings,
+        warnings=[*media.warnings, *(["topic_only_basis"] if draft.basis == "topic_only" else [])],
         problems=problems,
     )
     summary = "필수 항목 모두 확인" if approved else f"필수 항목 누락·위반 {len(problems)}건"
