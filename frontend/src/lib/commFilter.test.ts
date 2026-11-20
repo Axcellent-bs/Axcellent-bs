@@ -1,7 +1,10 @@
 // node --test로 돈다 (npm test). 사건이 닫힌 뒤의 조회 줄만 숨기는지.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { closedTimes, isBackgroundRead } from "./commFilter.ts";
+import { closedTimes, isBackgroundRead, LEGACY_SCREEN_CONTEXTS } from "./commFilter.ts";
+
+// lib/data.ts UI_CONTEXT와 같은 값 (data.ts는 env를 읽어 node --test로 바로 가져오지 않는다)
+const UI_CONTEXT_FOR_TEST = "ctx_ui_dashboard";
 import type { CommLine } from "./types";
 
 const CTX = "ctx_inc_3fc735633641";
@@ -53,4 +56,32 @@ test("사건·요청 밖 조회는 예전처럼 숨긴다 (team_headcount 등)",
 
 test("닫힌 시각 목록이 없으면 사건 안 조회는 보인다 (예전 동작)", () => {
   assert.equal(isBackgroundRead(line({})), false);
+});
+
+// 11/20 12:08: 트렌드 화면(ctx_req_dashboard)이 부른 브리프 때문에 data → 고객지원 book_issue_stats 줄이
+// 전체 대화방 의뢰 아래에 끼었다. 화면 고정 context는 사건·요청 밖으로 본다
+const bookStats = (over: Partial<CommLine>) =>
+  line({ from_agent: "data", to_agent: "claims", skill: "book_issue_stats", context_id: "ctx_req_dashboard", ...over });
+
+test("화면이 쓰던 ctx_req_dashboard의 data → 고객지원 조회 완료 줄은 숨긴다", () => {
+  assert.equal(isBackgroundRead(bookStats({})), true);
+  assert.equal(isBackgroundRead(bookStats({ from_agent: "claims", to_agent: "data" })), true); // 답도
+  assert.ok(LEGACY_SCREEN_CONTEXTS.has("ctx_req_dashboard"));
+});
+
+test("지금 화면 context(ctx_ui_dashboard)의 조회 줄도 숨긴다", () => {
+  assert.equal(UI_CONTEXT_FOR_TEST, "ctx_ui_dashboard");
+  assert.equal(isBackgroundRead(bookStats({ context_id: UI_CONTEXT_FOR_TEST })), true);
+});
+
+test("진짜 변경 요청(ctx_req_…) 안의 조회 줄은 남긴다", () => {
+  assert.equal(isBackgroundRead(bookStats({ context_id: "ctx_req_7f3a91c2" })), false);
+});
+
+// 공통 로그 소통 줄의 실패는 rejected로 온다 (CommOutcome에 failed는 없다)
+test("ctx_req_dashboard라도 실패(거절)·보류·사람 확인 줄과 쓰기 줄은 남긴다", () => {
+  for (const outcome of ["rejected", "held", "needs_human"] as const) {
+    assert.equal(isBackgroundRead(bookStats({ outcome })), false, outcome);
+  }
+  assert.equal(isBackgroundRead(bookStats({ grade: "A", skill: "send_event_proposal" })), false);
 });

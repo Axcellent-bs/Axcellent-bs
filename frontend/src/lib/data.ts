@@ -2770,9 +2770,14 @@ function askData<T>(skill: string, what: string, input: Record<string, unknown> 
   return p;
 }
 
+/** 데이터 화면이 data A2A를 부를 때의 고정 context (다른 화면 호출의 ctx_ui_ 접두사와 같다) */
+export const UI_CONTEXT = "ctx_ui_dashboard";
+
 async function sendData<T>(skill: string, what: string, input: Record<string, unknown>, deadlineMs: number): Promise<A2AResult<T>> {
   const body = {
-    meta: { context_id: "ctx_req_dashboard", token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + deadlineMs).toISOString() },
+    // 화면 조회는 사건·요청 밖(ctx_ui_). 예전 "ctx_req_dashboard"는 AI 대화방이 변경 요청 안의 일로 봐서
+    // data가 같은 context로 부른 부서 조회 줄(고객지원 book_issue_stats 등)이 의뢰 옆에 끼었다 (11/20)
+    meta: { context_id: UI_CONTEXT, token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + deadlineMs).toISOString() },
     skill,
     input,
   };
