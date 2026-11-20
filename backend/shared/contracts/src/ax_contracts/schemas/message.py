@@ -52,6 +52,10 @@ class ErrorCode(StrEnum):
     INVALID_INPUT = "INVALID_INPUT"  # 입력이 계약 형식과 다르다(형식 위반은 rejected)
     # 받는 서비스가 꺼져 있고 그 skill이 목록·조회(read, handoff=false)라 사람에게도 넘기지 않았다
     SERVICE_DISABLED = "service_disabled"
+    # 여러 회사 (4단계부터 씀): 요청에 회사 ID가 없거나 모르는 회사다
+    TENANT_REQUIRED = "TENANT_REQUIRED"
+    # 여러 회사 (4단계부터 씀): 사람 토큰의 회사와 요청의 회사가 다르다
+    TENANT_MISMATCH = "TENANT_MISMATCH"
 
 
 class RequestMeta(AxModel):

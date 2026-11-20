@@ -5,7 +5,16 @@
 
 from ax_contracts.schemas.agent_card import AgentCard, Capabilities, Skill
 from ax_contracts.schemas.async_task import ACCEPTED_ASYNC, AsyncAcceptedOutput
-from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
+from ax_contracts.schemas.common import (
+    TENANT_ID_ALIASES,
+    TENANT_ID_CATBOOKS,
+    TENANT_ID_DEFAULT,
+    TENANT_ID_PATTERN,
+    AxModel,
+    TenantId,
+    UtcDatetime,
+)
+from ax_contracts.schemas.company import Company, CompanyRole, Membership
 from ax_contracts.schemas.data import (
     AccuracyMiss,
     AccuracyReportInput,
@@ -447,6 +456,13 @@ __all__ = [
     "NO_ASSIGNEE",
     "UNASSIGNED_UNIT",
     "TENANT_ID_DEFAULT",
+    "TENANT_ID_ALIASES",
+    "TENANT_ID_CATBOOKS",
+    "TENANT_ID_PATTERN",
+    "TenantId",
+    "Company",
+    "CompanyRole",
+    "Membership",
     "ActionReviewInput",
     "ActionReviewOutput",
     "AgentCard",
