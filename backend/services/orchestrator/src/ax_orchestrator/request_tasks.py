@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 DEPT_LABEL = {
@@ -44,6 +44,12 @@ class TaskStep:
     # 그리고 이 단계가 앞 단계 번호를 받을 입력 칸 이름. 큰 결과는 부서 저장소에 두고 번호만 넘긴다
     ref_key: str | None = None
     takes_ref: str | None = None
+    # 부서가 요구하는 고정 입력(예: 긴 작업으로 받기 `caller`), 고객 문장을 넣을 입력 칸 이름
+    fixed_input: tuple[tuple[str, str], ...] = ()
+    text_key: str | None = None
+    # 이 단계 결과에서 다음 단계가 그대로 받을 값의 칸 이름 / 앞 단계가 둔 값을 입력으로 받는다
+    carries: str | None = None
+    takes_carry: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,6 +85,19 @@ def _one(
     return TaskDef(name, label, description, examples, (step,), blocked_by)
 
 
+# 트렌드 보고서는 몇 분 걸리는 긴 작업이다: `caller=orchestrator`로 불러야 부서가 `WORKING`으로 받고
+# 진행·완료를 알린다. 부서는 고객 문장을 `input.request_text`로만 읽는다(`untrusted`는 읽지 않는다).
+TREND_STEP = TaskStep(
+    "trend",
+    "data",
+    "trend_report_create",
+    "트렌드 분석 보고서",
+    READ_GRADE,
+    ref_key="report_id",
+    fixed_input=(("caller", "orchestrator"),),
+    text_key="request_text",
+)
+
 PROMO_VIDEO = TaskDef(
     "promo_video",
     "홍보 영상 만들기",
@@ -90,31 +109,39 @@ PROMO_VIDEO = TaskDef(
         "우리 브랜드 광고 영상이 필요해요",
     ),
     (
+        TREND_STEP,
         TaskStep(
-            "trend",
+            "insight",
             "data",
-            "trend_report_create",
-            "트렌드 분석 보고서",
+            "trend_report_insight",
+            "기획에 넘길 인사이트",
             READ_GRADE,
-            ref_key="report_id",
+            after=("trend",),
+            takes_ref="report_id",
+            carries="insight",
         ),
-        TaskStep("plan", "planning", "receive_insight", "영상 제작안", "A", after=("trend",)),
+        TaskStep(
+            "plan",
+            "planning",
+            "receive_insight",
+            "영상 제작안",
+            "A",
+            after=("insight",),
+            takes_carry=True,
+        ),
         TaskStep("confirm", None, "human_check", "사람 확인", None, after=("plan",), kind="human"),
         TaskStep("make", "marketing", "generate_media", "영상 제작", "B", after=("confirm",)),
     ),
-    blocked_by="데이터분석 긴 작업 연결(receive_insight)과 기획 영상 제작안(VideoPlan) 연결 대기",
 )
 
 TASKS: tuple[TaskDef, ...] = (
     PROMO_VIDEO,
-    _one(
+    TaskDef(
         "trend_report",
         "트렌드·경쟁사 분석 보고서",
         "시장 트렌드, 경쟁사, 타깃 선호를 분석한 보고서를 만들어 달라는 의뢰(몇 분 걸린다).",
         ("경쟁사 대비 트렌드 보고서 만들어 주세요", "20대 여성 타깃 화장품 트렌드 분석해 줘"),
-        "data",
-        "trend_report_create",
-        blocked_by="데이터분석 긴 작업 연결 대기",
+        (replace(TREND_STEP, step_id="run", label="트렌드·경쟁사 분석 보고서"),),
     ),
     _one(
         "campaign_performance",
@@ -272,6 +299,10 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "kind": s.kind,
             "ref_key": s.ref_key,
             "takes_ref": s.takes_ref,
+            "fixed_input": dict(s.fixed_input),
+            "text_key": s.text_key,
+            "carries": s.carries,
+            "takes_carry": s.takes_carry,
         }
         for s in task.steps
     ]

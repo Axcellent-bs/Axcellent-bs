@@ -1,8 +1,11 @@
 """의뢰 접수: 분류해서 기록하고, 질문은 기록하지 않고, 대화에서 접수 안내로 답한다."""
 
+from dataclasses import replace
+
 import pytest
 
 from ax_agent_template.config import set_agent_name
+from ax_orchestrator import request_intake, request_tasks
 from ax_orchestrator.chat import threads
 from ax_orchestrator.chat.turn import ChatOut, ChatService, set_chat_service
 from ax_orchestrator.manager import IncidentManager
@@ -46,7 +49,7 @@ async def test_request_is_recorded_with_plan_and_customer_gets_a_receipt() -> No
     assert row["text"] == "홍보 영상 만들어 주세요"
     assert row["status"] == "classified"
     assert row["task"] == "promo_video"
-    assert [s["step_id"] for s in row["plan"]] == ["trend", "plan", "confirm", "make"]
+    assert [s["step_id"] for s in row["plan"]] == ["trend", "insight", "plan", "confirm", "make"]
     assert row["classification"]["prompt_version"] == "v1"
     assert row["classification"]["confidence"] == 0.9
 
@@ -190,7 +193,18 @@ async def test_manager_owns_an_intake_and_chat_service_reaches_it(_chat) -> None
 
 
 @pytest.mark.asyncio
-async def test_runner_is_started_only_for_runnable_tasks_and_reply_says_so() -> None:
+async def test_runner_is_started_only_for_runnable_tasks_and_reply_says_so(monkeypatch) -> None:
+    # 준비가 안 된 일(`blocked_by`)이 목록에 있는 경우를 만든다
+    tasks = tuple(
+        replace(t, blocked_by="다른 팀 작업 대기") if t.name == "promo_video" else t
+        for t in request_tasks.TASKS
+    )
+    real = request_intake.classify
+
+    async def classify(llm, text, **kw):
+        return await real(llm, text, tasks=tasks, **kw)
+
+    monkeypatch.setattr(request_intake, "classify", classify)
     started: list[str] = []
     reqs = WorkRequests()
     intake = RequestIntake(reqs)

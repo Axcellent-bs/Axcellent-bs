@@ -10,8 +10,12 @@
 - 고객 글은 부서에 `untrusted` 칸(데이터)으로만 간다. 지시문으로 넣지 않는다.
 - 읽기(`read`) 단계만 스스로 시킨다. 상태를 바꾸는 단계(A·B·C)와 사람 확인 단계는 승인·확인이
   필요해서 여기서 멈추고 `waiting_human`으로 둔다(승인 이어가기는 9단계).
-- 부서가 받아 간 긴 작업(`working`)과 사람 승인·할 일함 대기는 번호만 적고 `held`·`waiting_async`·
-  `waiting_human`으로 둔다(이어 받기는 이후 단계).
+- 부서가 받아 간 긴 작업(`working`)은 `waiting_async`로 두고 작업 번호를 적는다. 부서가 보내는
+  `task.progress`·`task.completed`를 `receive_async`로 받아 단계를 끝내고 다음 단계를 이어 시킨다.
+  알림이 `ASYNC_SILENCE`초 넘게 없으면 응답 끊김으로 그 단계를 실패로 닫는다(`expire_silent`).
+- 사람 승인·할 일함 대기는 번호만 적고 `held`·`waiting_human`으로 둔다.
+- 앞 단계 결과 중 다음 단계가 통째로 받는 값(홍보 영상의 기획 입력)만 의뢰 기록 안 `carry`에 두고
+  쓰고 나면 지운다. 화면·조회에는 내지 않는다.
 - 끝나지 않은 일이 있어도 서버는 멈추지 않는다. 실행 중 예외는 그 단계를 실패로 닫고 의뢰를
   사람 확인(`needs_human`)으로 돌린다.
 """
@@ -22,7 +26,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from ax_contracts.schemas import (
@@ -52,6 +56,12 @@ HUMAN_CHECK = "human_check"
 NO_AGENT = "no_agent"
 NO_REF = "no_ref"
 APPROVED = "approved"
+NO_INSIGHT = "no_insight"  # 기획에 넘길 근거(facts)가 없어 영상 제작안을 건너뜀
+ASYNC_SILENT = "async_silent"
+ASYNC_SILENCE = 300.0  # 긴 작업 알림이 이만큼(초) 없으면 응답 끊김 (엔진의 기준과 같다)
+WATCH_INTERVAL = 60.0
+MAX_EARLY_KEYS = 100
+MAX_EARLY_EACH = 20
 REF_PATTERN = re.compile(r"[\w:.\-]{1,80}")  # 부서가 정한 결과 번호 모양 (문장은 받지 않는다)
 Notifier = Callable[[str, str], None]
 Escalator = Callable[[str, str, str | None], None]
@@ -91,6 +101,8 @@ class RequestRunner:
         self._scope_check = scope_check
         self._running: set[str] = set()
         self._tasks: set[asyncio.Task[None]] = set()
+        # 접수 응답보다 먼저 온 긴 작업 알림: (context_id, 작업 번호) → [(종류, 보낸 곳, 데이터)]
+        self._early: dict[tuple[str, str], list[tuple[str, str, dict[str, Any]]]] = {}
 
     # ---- 시작 ------------------------------------------------------------------
     def start(self, request_id: str) -> None:
@@ -103,6 +115,9 @@ class RequestRunner:
         """다시 켠 뒤 시킬 단계가 남은 열린 의뢰를 이어서 시킨다. 이어 받은 수를 돌려준다."""
         count = 0
         for row in self._requests.open_requests():
+            for sid, step in row["steps"].items():  # 꺼져 있던 동안의 침묵은 세지 않는다
+                if step["status"] == "waiting_async":
+                    self._update(row["request_id"], sid, last_signal_at=now().isoformat())
             if row["status"] in ("classified", "running", "waiting") and ready_steps(row):
                 self.start(row["request_id"])
                 count += 1
@@ -208,6 +223,20 @@ class RequestRunner:
                 finished_at=stamp(),
             )
             return
+        carried = None
+        if spec.get("takes_carry"):  # 넘길 값이 없으면 승인도 묻지 않고 이 단계를 건너뛴다
+            carried = self._carried(row, spec)
+            if carried is None:
+                self._update(
+                    rid,
+                    step_id,
+                    status="skipped",
+                    reason_code=NO_INSIGHT,
+                    note="기획에 넘길 근거(facts)가 없어 이 단계를 건너뛰었다",
+                    started_at=stamp(),
+                    finished_at=stamp(),
+                )
+                return
         step = row["steps"][step_id]
         grade = entry.grade or step.get("grade")
         if grade != READ_GRADE and step.get("reason_code") != APPROVED:  # 승인 없이는 시키지 않는다
@@ -221,7 +250,7 @@ class RequestRunner:
                 started_at=stamp(),
             )
             return
-        payload = self._input_of(row, spec)
+        payload = carried if carried is not None else self._input_of(row, spec)
         if payload is None:
             self._update(
                 rid,
@@ -240,14 +269,22 @@ class RequestRunner:
     # ---- 부서 호출 ----------------------------------------------------------------
     @staticmethod
     def _input_of(row: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any] | None:
-        """부서에 보낼 입력. 앞 단계 결과는 번호(`result_ref`)만 넘긴다. 필요한데 없으면 None."""
+        """부서에 보낼 입력: 일 목록의 고정 입력, 고객 문장 칸(있으면), 앞 단계 결과 번호.
+
+        앞 단계 결과는 번호(`result_ref`)만 넘긴다. 필요한데 없으면 None.
+        """
+        payload: dict[str, Any] = dict(spec.get("fixed_input") or {})
+        text_key = spec.get("text_key")
+        if text_key:  # 부서가 문장을 `input` 칸으로만 읽는 일이다 (문장은 데이터로만 쓰인다)
+            payload[text_key] = row["text"]
         key = spec.get("takes_ref")
         if not key:
-            return {}
+            return payload
         for before in spec.get("after") or []:
             ref = row["steps"][before].get("result_ref")
             if ref:
-                return {key: ref}
+                payload[key] = ref
+                return payload
         return None
 
     async def _call(
@@ -305,10 +342,7 @@ class RequestRunner:
         status, outcome = result.status, result.outcome or ""
         out = result.output or {}
         if status == TaskStatus.COMPLETED and outcome not in TRANSFER_CODES:
-            ref = self._ref_of(out, spec)
-            self._update(
-                rid, step_id, status="completed", note=outcome, result_ref=ref, finished_at=done
-            )
+            self._complete(rid, step_id, spec, out, outcome)
         elif status == TaskStatus.INPUT_REQUIRED:
             self._wait(rid, step_id, result, out)
         elif status == TaskStatus.WORKING:
@@ -319,8 +353,10 @@ class RequestRunner:
                     step_id,
                     status="waiting_async",
                     async_task_id=task_id,
+                    last_signal_at=done,
                     note="부서가 긴 작업으로 받아 진행 중",
                 )
+                self._drain_early(rid, step_id, spec, task_id)
             else:
                 self._update(
                     rid,
@@ -388,6 +424,156 @@ class RequestRunner:
                 note="부서가 더 필요한 입력을 기다린다",
             )
 
+    # ---- 긴 작업 알림 ---------------------------------------------------------------
+    def _carried(self, row: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any] | None:
+        """앞 단계가 다음 단계로 넘기려고 둔 값. 없으면 None."""
+        for before in spec.get("after") or []:
+            value = self._requests.get_carry(row["request_id"], before)
+            if value:
+                return value
+        return None
+
+    def _complete(
+        self, rid: str, step_id: str, spec: dict[str, Any], out: dict[str, Any], outcome: str
+    ) -> None:
+        """단계를 완료로 닫는다. 결과 번호를 읽고, 다음 단계가 통째로 받을 값(`carries`)을 둔다."""
+        key = spec.get("carries")
+        if key:
+            value = out.get(key)
+            # 기획 입력은 근거(facts)가 있어야 쓸 수 있다. 없으면 넘기지 않고 다음 단계가 건너뛴다
+            ok = isinstance(value, dict) and bool(value.get("facts"))
+            self._requests.set_carry(rid, step_id, value if ok else None)
+        if spec.get("takes_carry"):  # 넘겨받은 값은 쓰고 나면 지운다
+            for before in spec.get("after") or []:
+                self._requests.set_carry(rid, before, None)
+        self._update(
+            rid,
+            step_id,
+            status="completed",
+            note=outcome,
+            result_ref=self._ref_of(out, spec),
+            finished_at=now().isoformat(),
+        )
+
+    def _context_of(self, row: dict[str, Any]) -> str:
+        return row.get("context_id") or f"ctx_{row['request_id']}"
+
+    def receive_async(
+        self, kind: str, source: str, data: dict[str, Any], context_id: str | None
+    ) -> str:
+        """부서의 `task.progress`·`task.completed`를 기다리는 단계에 반영한다.
+
+        돌려주는 값: progressed · resumed(완료를 반영하고 다음 단계를 이어 시킴) ·
+        ignored(보낸 곳이나 skill이 맡긴 부서와 다름: 위조 방지) · kept(단계가 아직 대기에 안 올라
+        보관) · unmatched(이미 끝났거나 맞는 의뢰·단계가 없음).
+        """
+        task_id = data.get("task_id")
+        if not isinstance(task_id, str) or not context_id:
+            return "unmatched"
+        row = next(
+            (r for r in self._requests.open_requests() if self._context_of(r) == context_id), None
+        )
+        if row is None:
+            return "unmatched"
+        steps = row["steps"]
+        for sid, step in steps.items():
+            if step["status"] == "waiting_async" and step.get("async_task_id") == task_id:
+                spec = next(s for s in row["plan"] if s["step_id"] == sid)
+                return self._apply_async(row["request_id"], sid, spec, kind, source, data)
+        if any(s.get("async_task_id") == task_id for s in steps.values()):
+            return "unmatched"  # 이미 끝난 작업의 되풀이
+        if not any(s["status"] in ("pending", "running") for s in steps.values()):
+            return "unmatched"
+        key = (context_id, task_id)
+        if key not in self._early and len(self._early) >= MAX_EARLY_KEYS:
+            return "unmatched"
+        kept = self._early.setdefault(key, [])
+        if len(kept) >= MAX_EARLY_EACH:
+            return "unmatched"
+        kept.append((kind, source, data))
+        return "kept"
+
+    def _drain_early(self, rid: str, step_id: str, spec: dict[str, Any], task_id: str) -> None:
+        """접수 응답보다 먼저 온 알림이 있으면 대기에 오른 단계에 이어서 반영한다."""
+        row = self._requests.get(rid)
+        if row is None:
+            return
+        for kind, source, data in self._early.pop((self._context_of(row), task_id), []):
+            step = (self._requests.get(rid) or row)["steps"][step_id]
+            if step["status"] != "waiting_async":
+                break
+            self._apply_async(rid, step_id, spec, kind, source, data)
+
+    def _apply_async(
+        self,
+        rid: str,
+        step_id: str,
+        spec: dict[str, Any],
+        kind: str,
+        source: str,
+        data: dict[str, Any],
+    ) -> str:
+        if source != spec.get("dept") or data.get("skill") != spec.get("skill"):
+            log.warning("긴 작업 알림의 보낸 곳·skill이 맡긴 부서와 달라 무시: %s/%s", rid, step_id)
+            return "ignored"
+        stamp = now().isoformat()
+        if kind == "progress":  # 부서가 쓴 문장은 옮기지 않고 진행률만 둔다
+            percent = data.get("percent")
+            note = "부서가 긴 작업으로 받아 진행 중"
+            if isinstance(percent, int):
+                note += f" ({percent}%)"
+            self._update(rid, step_id, last_signal_at=stamp, note=note)
+            return "progressed"
+        if data.get("status") == "done":
+            out = data.get("output")
+            self._complete(rid, step_id, spec, out if isinstance(out, dict) else {}, "긴 작업 완료")
+        else:
+            self._update(
+                rid,
+                step_id,
+                status="failed",
+                note="긴 작업이 끝나지 못했다",
+                finished_at=stamp,
+            )
+        self.start(rid)
+        return "resumed"
+
+    def expire_silent(self, max_silence: float = ASYNC_SILENCE) -> list[str]:
+        """알림이 `max_silence`초 넘게 없는 긴 작업 단계를 응답 끊김으로 실패로 닫고 마무리한다."""
+        expired: list[str] = []
+        for row in self._requests.open_requests():
+            rid = row["request_id"]
+            for sid, step in row["steps"].items():
+                last = step.get("last_signal_at") or step.get("started_at")
+                if step["status"] != "waiting_async" or not last:
+                    continue
+                if (now() - datetime.fromisoformat(last)).total_seconds() < max_silence:
+                    continue
+                self._update(
+                    rid,
+                    sid,
+                    status="failed",
+                    reason_code=ASYNC_SILENT,
+                    note=f"긴 작업 알림이 {max_silence:.0f}초 넘게 없어 끝내지 못했다",
+                    finished_at=now().isoformat(),
+                )
+                if rid not in expired:
+                    expired.append(rid)
+        for rid in expired:
+            self.start(rid)
+        return expired
+
+    async def watch_async(
+        self, interval: float = WATCH_INTERVAL, max_silence: float = ASYNC_SILENCE
+    ) -> None:
+        """긴 작업 알림이 끊긴 단계를 주기적으로 닫는다 (서버가 도는 동안 계속)."""
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                self.expire_silent(max_silence)
+            except Exception:  # noqa: BLE001 - 점검 실패가 서버를 멈추지 않게 한다
+                log.exception("긴 작업 응답 끊김 점검 실패")
+
     # ---- 마무리 ------------------------------------------------------------------
     def _finish(self, rid: str) -> None:
         """남은 단계를 정리하고 의뢰 상태를 정한다 (끝남·실패·기다림)."""
@@ -399,15 +585,26 @@ class RequestRunner:
         if row is None:
             return
         states = [s["status"] for s in row["steps"].values()]
-        if any(s in WAITING for s in states):
+        if any(s in ("held", "waiting_human") for s in states):
             self._requests.set_status(rid, "waiting", "승인이나 사람 확인을 기다린다")
             self._tell(row, "확인이 필요한 단계가 있어 담당자의 확인을 기다리고 있어요.")
+        elif "waiting_async" in states:  # 부서가 긴 작업을 하는 중: 알림이 오면 이어 간다
+            self._requests.set_status(rid, "running", "부서의 긴 작업이 끝나기를 기다린다")
+            self._tell(row, "부서가 분석을 진행 중이에요. 끝나면 이어서 진행할게요.")
         elif "failed" in states:  # 재시도 뒤에도 끝내지 못했다: 멈추지 않고 사람에게 넘긴다
             self._requests.set_status(rid, "needs_human", "단계가 끝나지 못해 사람에게 넘겼다")
             self._tell(row, "일부 단계를 끝내지 못했어요. 담당자가 확인할 거예요.")
             failed = next(k for k, v in row["steps"].items() if v["status"] == "failed")
             if self.escalate is not None:
                 self.escalate(rid, "step_failed", failed)
+        elif any(v["reason_code"] == NO_INSIGHT for v in row["steps"].values()):
+            self._requests.set_status(
+                rid, "needs_human", "기획에 넘길 근거가 없어 영상 제작안을 만들지 못했다"
+            )
+            self._tell(row, "영상 제작안을 만들 근거가 부족해 담당자가 확인할 거예요.")
+            skipped = next(k for k, v in row["steps"].items() if v["reason_code"] == NO_INSIGHT)
+            if self.escalate is not None:
+                self.escalate(rid, "step_failed", skipped)
         elif any(s in NOT_OK for s in states):  # 사람이 거절했거나 앞 단계 때문에 건너뜀
             self._requests.set_status(rid, "failed", "사람이 거절했거나 앞 단계가 끝나지 못했다")
             self._tell(row, "의뢰를 진행하지 않기로 했어요.")

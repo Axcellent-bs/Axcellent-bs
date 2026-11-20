@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -179,11 +180,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # (실제 모드, 또는 저장 파일을 준 목 모드)
     if state.manager is None and (not state.mock or os.getenv(DB_ENV)):
         await state.build()
+    watcher: asyncio.Task[None] | None = None
     if state.manager is not None:  # 다시 켠 뒤 시킬 단계가 남은 의뢰를 이어서 시킨다
         await state.manager.request_runner.resume_open()
+        # 부서의 긴 작업 알림이 끊긴 의뢰 단계를 주기적으로 닫는다
+        watcher = asyncio.create_task(state.manager.request_runner.watch_async())
     try:
         yield
     finally:
+        if watcher is not None:
+            watcher.cancel()
         await events.stop_consumer()
 
 
@@ -399,10 +405,16 @@ async def decide_request_step(
     return {"data": {"ok": True}, "meta": {}}
 
 
+def _public(row: dict) -> dict:
+    """조회에 내는 의뢰 한 줄. 다음 단계로 넘길 부서 결과(`carry`)는 내지 않는다."""
+    return {k: v for k, v in row.items() if k != "carry"}
+
+
 @app.get("/api/requests")
 async def list_requests(status: str | None = None, _: str = Depends(require_human)) -> dict:
     """접수된 고객 의뢰 (최근 것부터, 최대 100건). 고객 글이 들어 있어 사람 토큰만 본다."""
     rows = state.manager.work_requests.list(status=status) if state.manager else []
+    rows = [_public(r) for r in rows]
     tasks = [{"name": t.name, "label": t.label} for t in request_tasks.TASKS]
     return {"data": list(reversed(rows))[:100], "meta": {"tasks": tasks}}
 
@@ -412,7 +424,7 @@ async def get_request(request_id: str, _: str = Depends(require_human)) -> dict:
     row = state.manager.work_requests.get(request_id) if state.manager else None
     if row is None:
         raise HTTPException(404, "없는 의뢰")
-    return {"data": row, "meta": {}}
+    return {"data": _public(row), "meta": {}}
 
 
 class RerunBody(BaseModel):

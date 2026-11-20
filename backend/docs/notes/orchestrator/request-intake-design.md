@@ -125,3 +125,31 @@
   나눈다(대화방 알림으로는 본인 의뢰 진행을 이미 받는다).
 - 14번(대화방·AI 오피스 확인) 결과: 두 화면은 장애 이슈(`incidents`)만 그린다. 의뢰의 부서 간
   넘김은 보이지 않는다. 의뢰를 이슈에 섞으면 장애 통계가 오염돼 이번에는 고치지 않고 따로 설계한다.
+
+## 5단계(일부): 긴 작업 이어받기와 홍보 영상 3단계 (15-2·15-3)
+
+데이터분석의 트렌드 보고서(#1466)는 몇 분 걸리는 긴 작업이다. 총괄이 이어 받는 방법과 홍보 영상 흐름을 맞췄다.
+
+- **긴 작업으로 부르기:** 일 목록의 `trend_report_create` 단계는 입력에 `caller="orchestrator"`와 고객 문장
+  (`request_text`)을 넣어 보낸다. `caller`가 `human`(기본)이면 부서가 동기로 끝내 알림이 오지 않는다. 이 부서는
+  문장을 `input.request_text`로만 읽는다(`untrusted`는 읽지 않는다). 단계의 `fixed_input`·`text_key`가 이 값이다.
+- **알림 받기:** 부서가 `WORKING` + `task_id`로 받으면 단계는 `waiting_async`가 된다. 이벤트 `task.progress`·
+  `task.completed`(`context_id`는 의뢰의 `ctx_<의뢰번호>`)가 오면 `manager`가 장애 이벤트가 아닌 것을 의뢰 실행기
+  (`RequestRunner.receive_async`)로 넘긴다. 보낸 부서·skill이 맡긴 곳과 다르면 무시한다(위조 방지).
+  - 진행: 진행률(%)만 기록하고 부서가 쓴 문장은 옮기지 않는다.
+  - 완료(`done`): `output.report_id`를 결과 번호로 읽어 단계를 끝내고 다음 단계를 이어 시킨다. `failed`면 단계 실패.
+  - 접수 응답보다 먼저 온 알림은 보관했다가 대기에 오르면 반영한다. 끝난 작업의 되풀이는 반영하지 않는다.
+  - 알림이 300초 넘게 없으면(`ASYNC_SILENCE`, 엔진의 기준과 같다) 응답 끊김으로 단계를 실패로 닫고 사람에게 넘긴다.
+    서버가 도는 동안 60초마다 점검하고, 다시 켤 때는 침묵 시간을 새로 센다.
+  - 다시 켜도 `waiting_async`와 작업 번호가 남아 있어 늦게 온 알림으로 이어 간다.
+- **의뢰 상태:** 부서의 긴 작업만 기다릴 때는 `running`(확인 대기가 아니다), 사람 확인·승인을 기다릴 때만 `waiting`.
+- **홍보 영상 흐름:** `trend_report_create` → `trend_report_insight`(번호 `report_id`만 받음) → `receive_insight`(A,
+  승인) → 사람 확인 → `generate_media`(B). `trend_report_insight`의 결과 중 `insight`만 통째로 다음 단계의 입력이
+  된다(그 밖의 결과는 번호만 넘어간다). 이 값은 의뢰 기록의 `carry`에 두었다가 쓰고 나면 지우며, 조회 API에는
+  내지 않는다. `receive_insight`가 A 등급이라 `idempotency_key`가 필요하다(`의뢰번호:skill:단계` 그대로).
+- **근거가 없을 때:** `insight`가 `null`이거나 `facts`가 비면(기획은 1~12개를 요구) 기획 단계는 승인도 묻지 않고
+  `skipped`(`no_insight`)로 닫고, 뒤 단계도 건너뛰며 의뢰는 `needs_human`이 되어 사람 받은 요청에 올라간다. 부서가
+  쓴 이유 문장은 옮기지 않는다.
+- `blocked_by`를 홍보 영상과 트렌드 보고서에서 뗐다(장치는 남아 있다).
+- **아직 안 된 것:** 마지막 `generate_media`는 입력(`post_draft_id`, `scene_template_id` 등)을 만들어 줄 곳이 없어
+  승인 뒤 부서가 입력 오류로 돌려준다. 입력 채우기(19번)에서 이어서 한다.
