@@ -156,3 +156,15 @@ export function planCard(p: PlanLookup): PlanCardView {
 /** 기획 기록을 다시 읽어도 되나: 처음이거나 마지막 읽기에서 1분이 지났을 때만 */
 export const PLAN_LOOKUP_MIN_MS = 60_000;
 export const planLookupDue = (lastAt: number | null, now: number) => lastAt === null || now - lastAt >= PLAN_LOOKUP_MIN_MS;
+
+// ---- 버튼 실패 문구 (사람 확인 결정 · 다시 돌리기)
+// 11/20 15:21: decideRequestStep이 nginx 403으로 실패했는데 `.catch(() => {})`로 넘겨 버튼이 먹통처럼 보였다
+
+/** 의뢰 버튼 실패 → 버튼 아래 한 줄. reload: 목록을 다시 읽어야 하는지 (이미 처리됨) */
+export function requestActionError(e: unknown): { text: string; reload: boolean } {
+  const status = typeof (e as { status?: unknown } | null)?.status === "number" ? (e as { status: number }).status : null;
+  if (status === 403) return { text: "서버가 막았어요 (403) · 관리자에게 이 경로 허용을 요청해 주세요", reload: false };
+  if (status === 409) return { text: "이미 다른 사람이 처리했어요", reload: true };
+  if (status === 404) return { text: "의뢰나 단계를 찾지 못했어요", reload: false };
+  return { text: status === null ? "처리하지 못했어요" : `처리하지 못했어요 (${status})`, reload: false };
+}

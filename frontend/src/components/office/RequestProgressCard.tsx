@@ -5,9 +5,10 @@ import { orchestrator } from "@/lib/orchestrator";
 import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestTitle } from "@/lib/requestHandoffs";
 import { REQUEST_STATUS, type WorkRequestRow } from "@/lib/workRequests";
-import { planCard, planLookupDue, proposalOfRequest, reportIdOfRequest, showRequestCard, stepRows, type PlanCardView, type PlanLookup, type StepDot } from "@/lib/requestCards";
+import { planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, showRequestCard, stepRows, type PlanCardView, type PlanLookup, type StepDot } from "@/lib/requestCards";
 import { planDocPath } from "@/lib/planDoc";
 import { planId } from "@/lib/format";
+import { STALE_HOURS, staleHours } from "@/lib/officeRequests";
 import { keyEvidence, reportHash, sortBeats } from "@/lib/trendReportView";
 import type { TrendReportDoneCard } from "@/lib/planningData";
 import type { TrendReport as Report } from "@/lib/data";
@@ -20,7 +21,9 @@ import { refreshWorkRequests, useWorkRequests } from "@/components/office/useWor
 // - 데이터 trend_report_create 단계에 보고서(tr_)가 있으면: 진행 중 = 진행 카드(5초 폴링, 끝나면 멈춤), 끝남 = 완료 카드 (ChatCards 그대로)
 // - 기획 receive_insight가 끝나면 기획 기록을 읽어(1분에 한 번까지) 칩 "기획서 N"/"제안 N" + 작은 칸(영상 제작안 요약·콘셉트 · [기획서 열기] [PDF로 저장]).
 //   제안은 result_ref 또는 기획 기록의 insightId "trend_report:<보고서>". PDF로 저장은 그 화면을 ?print=1로 연다(그린 뒤 한 번 인쇄)
-// - 사람 확인 단계: "<다음 단계> 진행"·"여기서 멈추기" → decideRequestStep. 누른 뒤 끄고 결과는 다음 읽기에 반영
+// - 사람 확인 단계: "<다음 단계> 진행"·"여기서 멈추기" → decideRequestStep. 누른 뒤 끄고 결과는 다음 읽기에 반영.
+//   실패하면 버튼 아래 한 줄(403 서버 차단·409 이미 처리·404·상태 코드, requestActionError)을 보이고 버튼을 다시 켠다
+// - 열린 채 6시간(STALE_HOURS) 넘게 그대로면 "오래 멈춤 · N시간" 회색 칩 (AI 오피스 자리 상태에는 쓰지 않는다)
 // - 실패·건너뜀: 회색 + 의뢰 note(코드 문장). 고객 글·부서 문장은 옮기지 않는다. 계산은 lib/requestCards.ts
 
 const DOT: Record<StepDot, string> = {
@@ -101,6 +104,8 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   const { row, hasToken, tasks } = useRequest(requestId);
   const [deciding, setDeciding] = useState<string | null>(null);
   const [decided, setDecided] = useState<Set<string>>(() => new Set());
+  // 결정 실패: 단계 id → 버튼 아래 한 줄 (lib/requestCards.ts requestActionError). 버튼은 다시 켠다
+  const [failed, setFailed] = useState<Record<string, string>>({});
   const rows = useMemo(() => (row ? stepRows(row) : []), [row]);
   const insightStep = row?.plan.find((p) => p.skill === "receive_insight");
   const insightDone = !!(insightStep && row?.steps[insightStep.step_id]?.status === "completed");
@@ -110,12 +115,18 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   const found = proposal ? proposals?.find((p) => p.id === proposal) : undefined;
   const plan = found ? planCard(found) : null;
   const st = REQUEST_STATUS[row.status];
+  const stale = staleHours(row, Date.now());
 
   const decide = (stepId: string, approved: boolean) => {
     setDeciding(stepId);
+    setFailed(({ [stepId]: _gone, ...rest }) => rest);
     orchestrator.decideRequestStep(row.request_id, stepId, approved)
       .then(() => { setDecided((s) => new Set(s).add(stepId)); void refreshWorkRequests(); })
-      .catch(() => { /* 다음 읽기에 상태가 그대로면 다시 누를 수 있다 */ })
+      .catch((e: unknown) => {
+        const err = requestActionError(e);
+        setFailed((f) => ({ ...f, [stepId]: err.text }));
+        if (err.reload) void refreshWorkRequests();
+      })
       .finally(() => setDeciding(null));
   };
 
@@ -125,6 +136,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
         <b className="text-[13.5px] text-ink-900">의뢰 진행 · {requestTitle(row, tasks)}</b>
         <span className={`chip text-[11px] ${st.tone}`}>{st.label}</span>
         <span className="chip bg-ink-100 text-[11px] tabular-nums text-ink-500">{row.request_id}</span>
+        {stale !== null && <span className="chip bg-ink-100 text-[11px] text-ink-500" title={`${STALE_HOURS}시간 넘게 바뀌지 않아 AI 오피스 자리 상태에는 쓰지 않아요`}>오래 멈춤 · {stale}시간</span>}
       </p>
       <ol className="space-y-2">
         {rows.map((s, i) => {
@@ -152,6 +164,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                     <button type="button" className="btn-ghost px-2.5 py-1 text-xs" disabled={deciding !== null} onClick={() => decide(s.stepId, false)}>{s.decide.stop}</button>
                   </span>
                 )}
+                {s.decide && failed[s.stepId] && <p role="alert" className="mt-1 text-xs text-red-700">{failed[s.stepId]}</p>}
               </div>
             </li>
           );

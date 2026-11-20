@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { HandoffLine, PlanCard } from "@/components/office/DevCards";
 import { RequestProgressCard } from "@/components/office/RequestProgressCard";
 import { CreativeChatCard } from "@/components/office/CreativeChatCard";
@@ -6,6 +6,9 @@ import { TALK_LABEL, proceed, type OfficeTalk } from "@/components/office/useOff
 import { INCIDENT_STATUS_KO, type ChatItem, type OrchIncident, type Tone } from "@/lib/agentChat";
 import { clock, detectorName, impactOf, num, rootCauseOf } from "@/lib/data";
 import { humanizePlanIds } from "@/lib/format";
+import { humanizeSkills } from "@/lib/skillNames";
+import { messageWidth } from "@/lib/chatView";
+import type { FoldLine } from "@/lib/safetyFold";
 import { Link } from "@/lib/nav";
 
 // 메신저형 대화 그리기. 대화 기록(/agents/chat)과 AI 오피스 단톡방이 같이 쓴다.
@@ -13,6 +16,10 @@ import { Link } from "@/lib/nav";
 // - 나(내가 단톡방에서 건 말): 오른쪽 보라 말풍선, 시각은 말풍선 옆 아래
 // - 날짜가 바뀌는 곳에 날짜 줄, 시스템 알림(사건 열림·종료 등)은 가운데 회색 알약
 // - 숫자 묶음(facts)은 카드 말풍선, 사람 승인 대기는 카드 말풍선(결정 경로는 예전 HoldBanner 그대로)
+// - 글자: 말풍선 본문 13.5px, 이름·시각 11.5px. 한 칸 보기면 대화 줄을 가운데 최대 880px (lib/chatView.ts messageWidth)
+// - 통과한 안전 확인 줄은 요청 말풍선 아래 "🛡 안전 확인 통과" 칩 하나 (lib/safetyFold.ts, 눌러서 펼침)
+// - 문장 속 영어 skill id는 이름으로 (lib/skillNames.ts humanizeSkills, 매핑 없는 id만 원문)
+// - 줄마다 data-chat-id: 위로 올려 보던 중 새 줄이 와도 보던 줄을 그대로 두는 기준 (components/office/useScrollAnchor.ts)
 // 문장은 lib/agentChat.ts가 기록된 값으로만 만든다. 이 파일은 모양만 맡는다.
 
 const GROUP_MS = 3 * 60_000;
@@ -32,6 +39,8 @@ const TONE_ICON: Record<Tone, string> = { request: "", ok: "✓ ", warn: "⏸ ",
 const hhmm = (iso: string) => (iso ? new Date(iso).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "");
 const dayKey = (iso: string) => (iso ? new Date(iso).toLocaleDateString("sv-SE") : "");
 const dayText = (iso: string) => new Date(iso).toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+/** 말풍선 문장: 기획·개발 번호와 skill id를 사람이 읽는 말로 */
+const say = (t: string) => humanizePlanIds(humanizeSkills(t));
 /** 받는 쪽 표시: "개발 AI" → "@개발" */
 const atName = (to: string) => `@${TALK_LABEL[to] ?? to.replace(/\s*AI$/, "")}`;
 
@@ -53,10 +62,10 @@ export function StatusChip({ status }: { status?: string }) {
 }
 
 /** 시스템 알림·날짜 줄: 가운데 회색 알약 */
-function Pill({ children, title }: { children: ReactNode; title?: string }) {
+function Pill({ children, title, id }: { children: ReactNode; title?: string; id?: string }) {
   return (
-    <li className="flex justify-center">
-      <p title={title} className="chat-pill max-w-[85%] bg-ink-900/[.07] px-3 py-1 text-center text-[11px] text-ink-700">{children}</p>
+    <li className="flex justify-center" data-chat-id={id}>
+      <p title={title} className="chat-pill max-w-[85%] bg-ink-900/[.07] px-3 py-1 text-center text-[11.5px] text-ink-700">{children}</p>
     </li>
   );
 }
@@ -124,10 +133,10 @@ function Bubble({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: Off
   // 출처(공통 로그·안전 관문 기록 등)와 코드 정보는 툴팁으로만
   const tip = [m.tag, m.raw].filter(Boolean).join(" · ") || undefined;
   return (
-    <div title={tip} className={`min-w-0 px-3 py-2 text-[13px] leading-relaxed ${look} ${shape}`}>
+    <div title={tip} className={`min-w-0 px-3 py-2 text-[13.5px] leading-relaxed ${look} ${shape}`}>
       <p className={direct ? "whitespace-pre-wrap break-words" : "break-words"}>
         {showTo && <span className={`mr-1 text-[11px] font-bold ${mine ? "text-white/80" : "text-brand-700"}`}>{atName(m.to)}</span>}
-        {mine ? "" : TONE_ICON[m.tone]}{humanizePlanIds(m.text)}
+        {mine ? "" : TONE_ICON[m.tone]}{say(m.text)}
       </p>
       {cardLike && (
         <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 border-t border-ink-100 pt-1.5 text-xs">
@@ -149,9 +158,29 @@ function Bubble({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: Off
   );
 }
 
+/** 합친 안전 확인 통과 줄: 칩 하나, 누르면 펼친다 */
+function SafetyChip({ lines }: { lines: FoldLine[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} title="안전 관문이 확인하고 통과시킨 줄"
+        className="chip bg-emerald-50 py-0.5 text-[11.5px] text-emerald-800 ring-1 ring-emerald-100 hover:bg-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+        <span aria-hidden="true">🛡</span> 안전 확인 통과{lines.length > 1 ? ` · ${lines.length}` : ""} <span aria-hidden="true">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <ul className="space-y-0.5 pl-1 text-[11.5px] text-ink-700">
+          {lines.map((l, i) => <li key={i}><b className="font-medium">{l.from}</b> · {say(l.text)}<time dateTime={l.at} className="ml-1 tabular-nums text-ink-500">{hhmm(l.at)}</time></li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /** 대화 목록. 날짜 줄은 여기서 다시 만든다(기록의 날짜 구분선은 쓰지 않는다) */
-export function MessengerLog({ items, talk, hold = {}, fresh, label }: {
+export function MessengerLog({ items, talk, hold = {}, fresh, label, panes = 1 }: {
   items: ChatItem[]; talk?: OfficeTalk; hold?: HoldProps; fresh?: ReadonlySet<string>; label: string;
+  /** 보이는 칸 수 (한 칸이면 가운데 최대 880px) */
+  panes?: number;
 }) {
   const rows: ReactNode[] = [];
   let lastDay = "";
@@ -168,8 +197,8 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label }: {
     if (it.kind === "system" || it.kind === "separator") {
       prev = null;
       rows.push(
-        <Pill key={it.id} title={it.kind === "separator" ? it.raw : undefined}>
-          {humanizePlanIds(it.text)}{it.at && <time dateTime={it.at} className="ml-1.5 tabular-nums opacity-70">{hhmm(it.at)}</time>}
+        <Pill key={it.id} id={it.id} title={it.kind === "separator" ? it.raw : undefined}>
+          {say(it.text)}{it.at && <time dateTime={it.at} className="ml-1.5 tabular-nums opacity-70">{hhmm(it.at)}</time>}
         </Pill>,
       );
       continue;
@@ -177,13 +206,13 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label }: {
     if (it.kind === "hold") {
       prev = null;
       rows.push(
-        <li key={it.id} className={`flex max-w-[85%] items-start gap-2 ${pop}`}>
+        <li key={it.id} data-chat-id={it.id} className={`flex max-w-[85%] items-start gap-2 ${pop}`}>
           <Avatar name="안전 처리 로그" k="safety" />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="text-xs text-ink-700">안전 처리 로그</span>
+            <span className="text-[11.5px] text-ink-700">안전 처리 로그</span>
             <div className="flex flex-wrap items-end gap-x-1.5 gap-y-0.5">
               <HoldCard h={it} hold={hold} />
-              <time dateTime={it.at} className="shrink-0 pb-0.5 text-[10px] tabular-nums text-ink-500">{hhmm(it.at)}</time>
+              <time dateTime={it.at} className="shrink-0 pb-0.5 text-[11.5px] tabular-nums text-ink-500">{hhmm(it.at)}</time>
             </div>
           </div>
         </li>,
@@ -195,12 +224,12 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label }: {
     const who = `${it.fromKey}|${it.from}`;
     const cont = !!prev && prev.who === who && at - prev.at <= GROUP_MS;
     prev = { who, at };
-    const time = <time dateTime={it.at} className="shrink-0 pb-0.5 text-[10px] tabular-nums text-ink-500">{hhmm(it.at)}{it.repeat && it.lastAt ? ` ~ ${hhmm(it.lastAt)}` : ""}</time>;
-    const repeat = it.repeat ? <span className="shrink-0 pb-0.5 text-[10px] font-semibold text-brand-700" title="같은 내용을 여러 번 주고받아 하나로 묶었습니다">×{it.repeat}</span> : null;
+    const time = <time dateTime={it.at} className="shrink-0 pb-0.5 text-[11.5px] tabular-nums text-ink-500">{hhmm(it.at)}{it.repeat && it.lastAt ? ` ~ ${hhmm(it.lastAt)}` : ""}</time>;
+    const repeat = it.repeat ? <span className="shrink-0 pb-0.5 text-[11.5px] font-semibold text-brand-700" title="같은 내용을 여러 번 주고받아 하나로 묶었습니다">×{it.repeat}</span> : null;
     if (mine) {
       rows.push(
         // 칸이 좁으면(나눠 보기) 시각·×N이 말풍선을 누르지 않고 아래 줄로 내려간다 (flex-wrap)
-        <li key={it.id} className={`flex max-w-[85%] flex-row-reverse flex-wrap items-end gap-x-1.5 gap-y-0.5 self-end ${cont ? "-mt-1.5" : ""} ${pop}`}>
+        <li key={it.id} data-chat-id={it.id} className={`flex max-w-[85%] flex-row-reverse flex-wrap items-end gap-x-1.5 gap-y-0.5 self-end ${cont ? "-mt-1.5" : ""} ${pop}`}>
           <Bubble m={it} talk={talk} />
           {repeat}{time}
         </li>,
@@ -208,21 +237,22 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label }: {
       continue;
     }
     rows.push(
-      <li key={it.id} className={`flex max-w-[85%] items-start gap-2 ${cont ? "-mt-1.5" : ""} ${pop}`}>
+      <li key={it.id} data-chat-id={it.id} className={`flex max-w-[85%] items-start gap-2 ${cont ? "-mt-1.5" : ""} ${pop}`}>
         {cont ? <span className="w-9 shrink-0" aria-hidden="true" /> : <Avatar name={it.from} k={it.fromKey} />}
         <div className="flex min-w-0 flex-col gap-0.5">
-          {!cont && <span className="text-xs text-ink-700">{it.from}</span>}
+          {!cont && <span className="text-[11.5px] text-ink-700">{it.from}</span>}
           <div className="flex flex-wrap items-end gap-x-1.5 gap-y-0.5">
             <Bubble m={it} talk={talk} />
             {repeat}{time}
           </div>
+          {it.safety && it.safety.length > 0 && <SafetyChip lines={it.safety} />}
           {/* 총괄에게 맡긴 고객 의뢰: 번호가 처음 나온 총괄 말풍선 아래 진행 카드 (useOfficeTalk withRequestCards) */}
           {it.requestCard && <RequestProgressCard requestId={it.requestCard} />}
         </div>
       </li>,
     );
   }
-  return <ol role="log" aria-live="polite" aria-relevant="additions" aria-label={label} className="flex flex-col gap-2.5">{rows}</ol>;
+  return <ol role="log" aria-live="polite" aria-relevant="additions" aria-label={label} className={`flex flex-col gap-2.5 ${messageWidth(panes)}`}>{rows}</ol>;
 }
 
 /** 답을 쓰는 중인 부서: "개발 AI가 답을 쓰는 중…" */
@@ -235,7 +265,7 @@ export function TypingLines({ names }: { names: { key: string; name: string; wha
           <span className="flex gap-0.5" aria-hidden="true">
             {[0, 1, 2].map((i) => <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-500" style={{ animationDelay: `${i * 120}ms` }} />)}
           </span>
-          <span className="truncate">{a.what ? <><b className="font-semibold">{a.name}</b> {humanizePlanIds(a.what)} 중…</> : <>{a.name}가 답을 쓰는 중…</>}</span>
+          <span className="truncate">{a.what ? <><b className="font-semibold">{a.name}</b> {say(a.what)} 중…</> : <>{a.name}가 답을 쓰는 중…</>}</span>
         </li>
       ))}
     </ul>
