@@ -48,7 +48,7 @@ export function OfficeChat({ items, typing, freshIds, title, sub, longTitle, sta
 
   return (
     // chat-round: 이 안의 말풍선·알약·아바타·배지만 둥글게 (styles.css)
-    <section aria-label="부서 단톡방" className="chat-round card flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden bg-chat xl:w-[580px] xl:flex-none">
+    <section aria-label="부서 단톡방" className="chat-round card flex min-h-[460px] min-w-0 xl:min-h-0 flex-1 flex-col overflow-hidden bg-chat xl:w-[580px] xl:flex-none">
       {tabs}
       <header className="flex flex-wrap items-center gap-2 border-b border-ink-900/[.07] px-4 py-2.5">
         <div className="min-w-0">

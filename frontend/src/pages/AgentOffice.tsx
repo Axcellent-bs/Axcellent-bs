@@ -198,7 +198,7 @@ export default function AgentOffice() {
   ) : undefined;
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 lg:p-6">
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 xl:overflow-hidden lg:p-6">
       <style>{"@keyframes officePop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}"}</style>
       <header className="flex flex-wrap items-start gap-x-6 gap-y-3">
         <div className="min-w-0 flex-1">
@@ -254,7 +254,7 @@ export default function AgentOffice() {
       {mode === "live" && <RequestHandoffCard />}
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 xl:flex-row">
-        <section aria-label="부서 AI 사무실" className="card flex min-w-0 shrink-0 flex-col gap-3 p-4 xl:flex-1">
+        <section aria-label="부서 AI 사무실" className="card flex min-w-0 shrink-0 flex-col gap-3 p-4 xl:min-h-0 xl:flex-1 xl:shrink xl:overflow-y-auto">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="card-title">부서 AI 사무실</h2>
             <span className="text-xs text-ink-500">{DESKS.length}자리 · 총괄 AI·안전 처리 로그 포함</span>
@@ -285,7 +285,7 @@ export default function AgentOffice() {
         </section>
 
         {direct ? (
-          <div className="chat-round card flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden xl:w-[580px] xl:flex-none">
+          <div className="chat-round card flex min-h-[460px] min-w-0 xl:min-h-0 flex-1 flex-col overflow-hidden xl:w-[580px] xl:flex-none">
             {tabs}
             <DirectChat agent={direct} narrow />
           </div>
