@@ -140,10 +140,53 @@ def test_tool_call_runs_on_behalf_of_the_token_owner(svc, adapter, dash, monkeyp
     }
     res = client.post("/api/planning/mcp", json=msg, headers=ME)
     assert res.status_code == 200 and res.json()["result"]["isError"] is False
-    assert seen == [("회원", (True, "a-3"), "a-3")]
+    assert seen == [("acct:a-3", (True, "a-3"), "a-3")]
     seen.clear()
     client.post("/api/planning/mcp", json=msg, headers={"Authorization": "Bearer human:tester"})
     assert seen == [("tester", (False, None), None)]  # 사람·작업 토큰은 계정을 싣지 않는다
+
+
+def test_personal_token_cannot_act_as_a_worker_with_the_same_display_name(
+    svc, adapter, dash, monkeypatch
+) -> None:
+    """작업 대기열의 "누구"는 표시 이름이 아니라 계정 ID다(11/20 태윤 님 리뷰).
+
+    표시 이름이 작업 토큰 이름(kim)과 같아도 kim이 가져간 작업을 진행·완료·내려놓을 수 없다.
+    """
+    monkeypatch.setenv("DEV_WORK_TOKENS", "kim:work-test-token")
+    dash.out = _out(name="kim")
+    out = asyncio.run(
+        svc.create_dev_task(
+            title="kim 작업",
+            plan="배너 문구를 바꾼다.",
+            done="배너 문구가 바뀐다",
+            paths=["shop-web/src/components"],
+            mode="subscription",
+        )
+    )
+    task_id = out.output["task_id"]
+    client = TestClient(app)
+    kim = {"Authorization": "Bearer work-test-token"}
+    res = client.post(f"/api/planning/work/tasks/{task_id}/claim", headers=kim)
+    assert res.status_code == 200, res.text
+    base = f"/api/planning/work/tasks/{task_id}"
+
+    def coding():
+        task = next(t for t in svc.state.tasks if t.id == task_id)
+        assert task.coding is not None
+        return task.coding
+
+    res = client.post(f"{base}/progress", headers=ME, json={"text": "가로채기"})
+    assert res.status_code >= 400 and coding().progress != "가로채기", res.text
+    res = client.post(f"{base}/release", headers=ME, json={"reason": "가로채기"})
+    assert res.status_code >= 400 and coding().claimed_by == "kim", res.text
+
+
+def test_personal_token_without_account_is_401_not_assert(svc, adapter, dash) -> None:
+    """검사 결과에 계정이 없으면 assert(-O에서 빠짐)가 아니라 명시적 401."""
+    dash.out = _out(account_id=None)
+    res = TestClient(app).post("/api/planning/mcp", json=LIST, headers=ME)
+    assert res.status_code == 401
 
 
 def test_check_calls_the_dashboard_with_the_dev_agent_token(monkeypatch) -> None:

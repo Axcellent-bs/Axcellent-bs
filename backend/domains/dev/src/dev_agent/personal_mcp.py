@@ -84,7 +84,9 @@ async def verify(token: str) -> PersonalMcpCheckOutput:
         ) from None
     except ValidationError:
         raise Refused(401, "TOKEN_UNKNOWN", "연결 토큰 형식이 아니다") from None
-    if not out.allowed or not out.account_id:
+    if not out.allowed:
         status = STATUS.get(out.code, 403)
         raise Refused(status, out.code, out.message or "개인 연결 토큰을 쓸 수 없다")
+    if not out.account_id:
+        raise Refused(401, "ACCOUNT_GONE", "개인 연결 토큰의 주인 계정을 알 수 없다")
     return out

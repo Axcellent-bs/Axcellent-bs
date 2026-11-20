@@ -10,7 +10,7 @@
 - 토큰 이름이 가져간 사람이 된다 (사람 토큰과 같은 이름을 쓰면 화면의 "내 Claude"와 이어진다).
 - 예전처럼 사람 토큰도 한동안 받는다. `DEV_WORK_ALLOW_HUMAN=0`이면 작업 토큰만 받는다.
 - 개인 MCP 연결 토큰(`axm_…`, 내 연결에서 회원이 발급, 11/20)도 받는다. dashboard-api에 물어
-  주인 계정을 받는다(personal_mcp.py). 이름은 계정 이름, `account_id`는 그 계정(`Caller`).
+  주인 계정을 받는다(personal_mcp.py). 이름은 `acct:<계정 ID>`, `account_id`는 그 계정(`Caller`).
 """
 
 from __future__ import annotations
@@ -70,6 +70,10 @@ async def require_caller(authorization: str | None = Header(default=None)) -> Ca
     token = token.strip()
     if scheme.lower() == "bearer" and personal_mcp.is_personal(token):
         out = await personal_mcp.verify(token)
-        assert out.account_id  # verify가 확인했다
-        return Caller(name=out.name or out.account_id, account_id=out.account_id)
+        if not out.account_id:
+            raise AuthError(401, "개인 MCP 연결 토큰의 주인 계정을 알 수 없다")
+        # 작업 대기열의 "누구"(claimed_by 비교)는 계정 ID로. 표시 이름이 작업 토큰 이름과 같아도
+        # 그 사람 작업을 가져가거나 진행·내려놓을 수 없게 한다(11/20 태윤 님 리뷰). 작업·사람 토큰
+        # 이름은 `이름:토큰` 형식이라 `:`을 못 써서 `acct:`와 겹치지 않는다.
+        return Caller(name=f"acct:{out.account_id}", account_id=out.account_id)
     return Caller(check_worker(authorization))
