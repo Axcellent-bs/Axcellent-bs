@@ -1,9 +1,9 @@
-import { ALL_ROOM, deptOf, skillKo, speaker, type ChatItem, type OrchIncident, type OrchStep } from "./agentChat";
+import { deptOf, skillKo, type ChatItem, type OrchIncident } from "./agentChat";
 import { applyRequestDesks, requestDesks } from "./officeRequests";
 import type { WorkRequestRow } from "./workRequests";
 
 // AI 오피스: AI 대화방과 같은 기록(총괄 사건·안전 관문·공통 로그)을 픽셀 사무실 상태로 바꾼다.
-// 상태는 기록된 값(단계 status·말풍선 문장·facts)으로만 정하고, 화면 없는 순수 함수만 둔다.
+// 상태는 기록된 값(단계 status·말풍선 문장·facts)으로만 정하고, 화면 없는 순수 함수만 둔다. 실시간 기록만 쓴다.
 
 // ---------------------------------------------------------------- 자리
 export type DeskKey = "infra" | "data" | "support" | "finance" | "planning" | "marketing" | "hr" | "archive" | "dev" | "orchestrator" | "safety";
@@ -52,8 +52,6 @@ export type OfficeStatus = "ok" | "alert" | "resolved" | "degraded";
 export interface Visit { id: string; who: DeskKey; to: DeskKey; at: number; say?: string }
 /** 일이 끝났을 때 머리 위로 떠오르는 글 ("✓ 결과", 사람 승인은 "👤 승인") */
 export interface Pop { id: string; desk: DeskKey; text: string; at: number; human?: boolean }
-/** 보드 카드를 사건 진행 대신 다른 글로 (캠페인 리플레이) */
-export interface BoardText { title: string; value: string; done: number; total: number }
 
 export interface OfficeView {
   desks: Record<DeskKey, DeskView>;
@@ -62,10 +60,8 @@ export interface OfficeView {
   pops: Pop[];
   status: OfficeStatus;
   incident: OrchIncident | null;
+  /** 라운지 화이트보드 "사건 진행" 카드 (PixelOffice boardCard) */
   progress: { done: number; total: number };
-  board?: BoardText;
-  /** 화면 전체를 잠깐 어둡게 하고 가운데 띄우는 글 ("7일 뒤"). progress 0~1 */
-  overlay?: { text: string; progress: number } | null;
 }
 
 /** 말풍선은 처음 본 뒤 이만큼만 보인다 */
@@ -111,15 +107,12 @@ export function focusIncident(incidents: OrchIncident[]): OrchIncident | null {
 export function deriveOffice(
   incidents: OrchIncident[], items: ChatItem[], seen: ReadonlyMap<string, number>, now: number,
   opts: {
-    desks?: Partial<Record<DeskKey, Omit<DeskView, "bubble"> & { bubble?: Bubble | null }>>; board?: BoardText; overlay?: OfficeView["overlay"];
     /** 고객 의뢰(GET /api/requests). 사람 토큰이 없으면 넘기지 않는다(지금 화면 그대로) */
     requests?: WorkRequestRow[] | null;
   } = {},
 ): OfficeView {
   const desks = Object.fromEntries(DESKS.map((d) => [d.key, { state: "idle", bubble: null, skill: null } as DeskView])) as Record<DeskKey, DeskView>;
   const inc = focusIncident(incidents);
-  // 사건 없이 상태를 정하는 화면(캠페인 리플레이)은 자리 상태를 바로 준다
-  for (const [k, d] of Object.entries(opts.desks ?? {})) if (d) desks[k as DeskKey] = { ...d, bubble: d.bubble ?? null };
   const visits: Visit[] = [];
   const pops: Pop[] = [];
 
@@ -193,153 +186,5 @@ export function deriveOffice(
   const status: OfficeStatus = !inc ? "ok" : inc.status === "open" ? "alert" : inc.status === "degraded" ? "degraded" : "resolved";
   const counted = inc ? inc.steps.filter((s) => s.dept) : [];
   const done = counted.filter((s) => ["completed", "skipped", "failed", "rejected_by_human"].includes(s.status)).length;
-  return { desks, visits, pops, status, incident: inc, progress: { done, total: counted.length }, board: opts.board, overlay: opts.overlay ?? null };
-}
-
-// ---------------------------------------------------------------- SCN-A 리플레이
-// 총괄이 결제 장애(시나리오 A, 롤백 C 등급 보류)를 처리하는 흐름을 총괄 응답 모양(OrchIncident) 그대로 만든다.
-// 문장은 AI 대화방과 같은 buildTimeline이 만든다. 숫자는 시연용 예시 값이다.
-
-interface ReplayStep { id: string; skill: string; label: string; dept: string; grade: string | null; start: number; end: number; output: Record<string, unknown>; hold?: { at: number; approve: number } }
-
-const SCN_A: ReplayStep[] = [
-  { id: "s1", skill: "diagnose_incident", label: "원인 진단 (infra)", dept: "infra", grade: null, start: 1.4, end: 3.6, output: { severity: "critical", impact_scope: "payment" } },
-  { id: "s2", skill: "anomaly_detection", label: "이상 탐지 (data)", dept: "data", grade: null, start: 4.0, end: 6.6, output: { failed_order_count: 1284, affected_customer_count: 412 } },
-  { id: "s3", skill: "impact_analysis", label: "영향 분석 (data)", dept: "data", grade: null, start: 7.0, end: 8.8, output: { damage_amount: 38420000, impact_scope: "payment" } },
-  { id: "s4", skill: "find_related_prs", label: "관련 코드 변경 찾기 (dev)", dept: "dev", grade: null, start: 9.2, end: 11.0, output: { candidates: [{ number: 231 }] } },
-  { id: "s5", skill: "rollback_deployment", label: "배포 되돌리기 (infra)", dept: "infra", grade: "C", start: 11.4, end: 17.6, output: { rolled_back_to: "v2.4.1", status: "rolled_back" }, hold: { at: 12.2, approve: 15.8 } },
-  { id: "s6", skill: "verify_recovery", label: "복구 확인 (infra)", dept: "infra", grade: null, start: 18.0, end: 19.6, output: { recovered: true, infra_metrics_ok: true } },
-  { id: "s7", skill: "draft_notice", label: "공지 초안 작성 (marketing)", dept: "marketing", grade: "A", start: 20.0, end: 21.4, output: { state: "draft" } },
-  { id: "s8", skill: "publish_notice", label: "공지 게시 (marketing)", dept: "marketing", grade: "B", start: 21.8, end: 23.2, output: { channel_code: "banner", state: "published" } },
-  { id: "s9", skill: "issue_coupon", label: "보상 쿠폰 지급 (support)", dept: "support", grade: "B", start: 23.6, end: 25.4, output: { issued: 412, amount_per_customer: 3000, total_amount: 1236000 } },
-  { id: "s10", skill: "loss_aggregation", label: "손실 리포트 (finance)", dept: "finance", grade: null, start: 25.8, end: 27.6, output: { lost_amount: 38420000, compensation_total: 1236000 } },
-  { id: "s11", skill: "check_plan", label: "예전 결정과 비교 (hr)", dept: "hr", grade: null, start: 28.0, end: 29.4, output: { status: "pass" } },
-  { id: "s12", skill: "record_case", label: "사건 기록 (memory)", dept: "memory", grade: "A", start: 29.8, end: 31.2, output: { severity: "critical" } },
-];
-export const REPLAY_END = 33.5;
-const REPLAY_CLOSE = 32.0;
-
-/** 리플레이 `t`초 시점의 사건. `base`는 리플레이를 시작한 시각(ms) */
-export function replayIncident(t: number, base: number): OrchIncident {
-  const iso = (s: number) => new Date(base + s * 1000).toISOString();
-  const events: OrchIncident["events"] = [];
-  const pending: OrchIncident["pending_holds"] = [];
-  const steps: OrchStep[] = SCN_A.map((r) => {
-    const s: OrchStep = {
-      step_id: r.id, skill: r.skill, label: r.label, dept: r.dept, status: "pending", attempts: 0, note: "", grade: r.grade,
-      started_at: null, finished_at: null, transferred_to: null, reason_code: null, output: {},
-    };
-    if (t < r.start) return s;
-    s.started_at = iso(r.start);
-    s.attempts = 1;
-    s.status = "running";
-    if (r.hold && t >= r.hold.at) {
-      s.reason_code = "human_input";
-      events.push({ at: iso(r.hold.at), message: `${r.label}: C 등급 보류 — 승인 대기열에 올림` });
-      if (t < r.hold.approve) {
-        s.status = "held";
-        pending.push({ step_id: r.id, skill: r.skill, label: r.label });
-        return s;
-      }
-      s.attempts = 2;
-      events.push({ at: iso(r.hold.approve), message: `${r.label}: 사람이 승인 — 재개` });
-    }
-    if (t >= r.end) { s.status = "completed"; s.finished_at = iso(r.end); s.output = r.output; }
-    return s;
-  });
-  const closed = t >= REPLAY_CLOSE;
-  return {
-    context_id: "replay-scn-a",
-    kind: "payment_outage",
-    title: "payment 장애 감지 (payment_fail_rate)",
-    component: "payment",
-    status: closed ? "resolved" : "open",
-    opened_at: iso(0.6),
-    closed_at: closed ? iso(REPLAY_CLOSE) : null,
-    steps: t < 0.6 ? [] : steps,
-    events,
-    summary: [],
-    metrics: closed ? { steps_total: SCN_A.length, steps_completed: SCN_A.length, held: 1, mttr_seconds: Math.round(REPLAY_CLOSE - 0.6) } : {},
-    pending_holds: pending,
-  };
-}
-
-// ---------------------------------------------------------------- 캠페인 리플레이
-// 데이터 → 기획 → 사람 확인 → 마케팅 → 재무 → 데이터 → 기획 → 재무로 이어지는 캠페인 흐름을 공통 로그 줄(ChatItem) 모양으로 만든다.
-// 화면 안에서만 만드는 예시다(저장소·공통 로그에 넣지 않는다). 숫자는 시연용 값이다.
-// skill 이름은 실제 코드의 것을 쓴다: 기획 receive_insight·receive_campaign_update, 마케팅 receive_campaign_brief·start_campaign,
-// 재무 review_campaign_budget·record_campaign_result, 데이터 trend_scan·campaign_result. 기획의 "제안 작성"은 해당 skill이 없어 예시 문장으로만 둔다.
-
-export const CAMPAIGN_END = 46;
-export const CAMPAIGN_STEPS = 10;
-const CAMPAIGN_ID = "replay-campaign";
-
-type CampaignDesk = Omit<DeskView, "bubble"> & { bubble?: Bubble | null };
-interface CampaignMsg { at: number; id: string; from: DeskKey; to: DeskKey; skill: string; text: string; tone: "request" | "ok"; fact?: { label: string; value: string } }
-interface CampaignWork { from: number; to: number; desk: DeskKey; label: string; state?: "working" | "waiting" }
-
-/** 단계가 시작하는 시각 (보드 카드 "단계 n/10") */
-const CAMPAIGN_STEP_AT = [1.0, 5.0, 8.2, 11.4, 15.0, 18.6, 24.0, 28.4, 30.4, 37.4];
-const CAMPAIGN_MSGS: CampaignMsg[] = [
-  { at: 5.0, id: "c2a", from: "data", to: "planning", skill: "receive_insight", text: "인사이트 전달 부탁해요", tone: "request", fact: { label: "주제", value: "책추천 숏츠" } },
-  { at: 7.6, id: "c2b", from: "planning", to: "data", skill: "receive_insight", text: "인사이트 받기 끝났어요", tone: "ok" },
-  { at: 15.0, id: "c5a", from: "planning", to: "marketing", skill: "receive_campaign_brief", text: "캠페인 실행 부탁해요", tone: "request", fact: { label: "캠페인", value: "책추천 숏츠" } },
-  { at: 17.8, id: "c5b", from: "marketing", to: "planning", skill: "receive_campaign_brief", text: "캠페인 브리프 받기 끝났어요", tone: "ok" },
-  { at: 18.6, id: "c6a", from: "marketing", to: "finance", skill: "review_campaign_budget", text: "예산 의견 부탁해요", tone: "request", fact: { label: "요청", value: "30만 원" } },
-  { at: 23.0, id: "c6b", from: "finance", to: "marketing", skill: "review_campaign_budget", text: "예산 의견 끝났어요", tone: "ok", fact: { label: "예산", value: "권장 · 30만 원" } },
-  { at: 27.4, id: "c7b", from: "marketing", to: "planning", skill: "start_campaign", text: "캠페인 시작 끝났어요", tone: "ok" },
-  { at: 33.6, id: "c9a", from: "data", to: "planning", skill: "receive_campaign_update", text: "캠페인 결과 전달 부탁해요", tone: "request", fact: { label: "결과", value: "더 팔림" } },
-  { at: 36.4, id: "c9b", from: "planning", to: "data", skill: "receive_campaign_update", text: "캠페인 결과 받기 끝났어요", tone: "ok" },
-  { at: 37.4, id: "c10a", from: "marketing", to: "finance", skill: "record_campaign_result", text: "결과 기록 부탁해요", tone: "request" },
-  { at: 42.0, id: "c10b", from: "finance", to: "marketing", skill: "record_campaign_result", text: "결과 기록 끝났어요", tone: "ok", fact: { label: "손익", value: "+42만 원 · 줄일 곳 1개" } },
-];
-const CAMPAIGN_WORK: CampaignWork[] = [
-  { from: 1.0, to: 5.0, desk: "data", label: "트렌드 감지" },
-  { from: 8.2, to: 11.4, desk: "planning", label: "제안 작성(예시)" },
-  { from: 11.4, to: 14.4, desk: "planning", label: "사람 확인 기다림", state: "waiting" },
-  { from: 19.6, to: 23.0, desk: "finance", label: "예산 의견" },
-  { from: 24.0, to: 27.4, desk: "marketing", label: "캠페인 시작" },
-  { from: 30.4, to: 33.6, desk: "data", label: "성과 측정" },
-  { from: 38.6, to: 42.0, desk: "finance", label: "결과 기록" },
-];
-const CAMPAIGN_HOLD = { at: 11.4, approve: 14.4 };
-const CAMPAIGN_LATER = { from: 28.4, to: 30.0, text: "7일 뒤" };
-
-/** 캠페인 리플레이 `t`초 시점. `base`는 리플레이를 시작한 시각(ms) */
-export function replayCampaign(t: number, base: number): { items: ChatItem[]; desks: Partial<Record<DeskKey, CampaignDesk>>; board: BoardText; overlay: OfficeView["overlay"] } {
-  const iso = (s: number) => new Date(base + s * 1000).toISOString();
-  const items: ChatItem[] = [];
-  const push = (at: number, it: ChatItem) => { if (t >= at) items.push(it); };
-  push(0.6, { kind: "separator", id: `${CAMPAIGN_ID}:start`, at: iso(0.6), room: ALL_ROOM, text: "캠페인 리플레이 · 책추천 숏츠 (예시)", variant: "topic" });
-  push(1.0, { kind: "system", id: `${CAMPAIGN_ID}:scan`, at: iso(1.0), room: ALL_ROOM, text: "데이터분석 AI가 트렌드를 살펴봐요 (trend_scan, 예시)" });
-  push(8.2, { kind: "system", id: `${CAMPAIGN_ID}:draft`, at: iso(8.2), room: ALL_ROOM, text: "기획 AI가 캠페인 제안을 써요 (예시)" });
-  if (t >= CAMPAIGN_HOLD.at) {
-    items.push({
-      kind: "hold", id: `${CAMPAIGN_ID}:hold`, at: iso(CAMPAIGN_HOLD.at), room: ALL_ROOM, title: "캠페인 제안 확인", detail: "기획 AI · 마케팅 실행 전에 사람이 확인해요 (예시)",
-      state: t >= CAMPAIGN_HOLD.approve ? "approved" : "pending", contextId: CAMPAIGN_ID, dept: "planning",
-    });
-  }
-  push(24.0, { kind: "system", id: `${CAMPAIGN_ID}:start-campaign`, at: iso(24.0), room: ALL_ROOM, text: "마케팅 AI가 캠페인을 시작해요 (start_campaign, 예시)" });
-  push(CAMPAIGN_LATER.from, { kind: "separator", id: `${CAMPAIGN_ID}:later`, at: iso(CAMPAIGN_LATER.from), room: ALL_ROOM, text: "7일 뒤", variant: "topic" });
-  push(30.4, { kind: "system", id: `${CAMPAIGN_ID}:measure`, at: iso(30.4), room: ALL_ROOM, text: "데이터분석 AI가 캠페인 성과를 재요 (campaign_result, 예시)" });
-  for (const m of CAMPAIGN_MSGS) {
-    push(m.at, {
-      kind: "msg", id: `log:${CAMPAIGN_ID}:${m.id}`, at: iso(m.at), room: ALL_ROOM, from: speaker(m.from), to: speaker(m.to), fromKey: m.from, toKey: m.to, central: false,
-      text: m.text, tag: "캠페인 리플레이 · 예시", raw: `skill: ${m.skill}`, tone: m.tone, facts: m.fact ? [m.fact] : [],
-    });
-  }
-  items.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-
-  const desks: Partial<Record<DeskKey, CampaignDesk>> = {};
-  for (const w of CAMPAIGN_WORK) {
-    if (t < w.from || t >= w.to) continue;
-    desks[w.desk] = { state: w.state ?? "working", skill: w.label, bubble: w.state === "waiting" ? null : { text: short(w.label), kind: "think" } };
-  }
-  const step = CAMPAIGN_STEP_AT.filter((s) => t >= s).length;
-  const later = t >= CAMPAIGN_LATER.from && t < CAMPAIGN_LATER.to ? (t - CAMPAIGN_LATER.from) / (CAMPAIGN_LATER.to - CAMPAIGN_LATER.from) : null;
-  return {
-    items, desks,
-    board: { title: "책추천 숏츠 캠페인", value: `단계 ${step}/${CAMPAIGN_STEPS}`, done: step, total: CAMPAIGN_STEPS },
-    overlay: later === null ? null : { text: CAMPAIGN_LATER.text, progress: later },
-  };
+  return { desks, visits, pops, status, incident: inc, progress: { done, total: counted.length } };
 }

@@ -38,8 +38,8 @@ const ERR: Record<string, string> = {
   VCS_FORBIDDEN: '레포 토큰 권한이 부족해요',
   VCS_RATE_LIMITED: '요청 한도에 걸렸어요. 잠시 뒤 다시 해 주세요',
   VCS_UNAVAILABLE: '레포 서버에 연결하지 못했어요',
-  UNAUTHORIZED: '사람 토큰이 필요해요',
-  FORBIDDEN: '사람 토큰이 필요해요',
+  UNAUTHORIZED: '로그인이 필요해요',
+  FORBIDDEN: '권한이 없어요. 다시 로그인해 주세요',
 }
 const errText = (e: unknown) => (e instanceof PlanningApiError ? ERR[e.code] ?? `처리하지 못했어요 (${e.code})` : '개발·배포 서버에 연결하지 못했어요')
 

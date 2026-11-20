@@ -93,7 +93,7 @@ export function AudioChoice({ proposalId, prepared, estimate, publishStatus, onD
             <button
               className="btn-primary text-xs"
               disabled={!HUMAN_TOKEN_SET || keepBlocked}
-              title={!HUMAN_TOKEN_SET ? "사람 토큰이 없어 쓸 수 없습니다" : keepBlocked ? "소리를 들어 보고 체크해 주세요" : undefined}
+              title={!HUMAN_TOKEN_SET ? "로그인이 필요해요" : keepBlocked ? "소리를 들어 보고 체크해 주세요" : undefined}
               onClick={() => { setChoice("keep"); setResult(null); setStep("confirm"); }}
             >
               이 영상 그대로 사용
@@ -101,7 +101,7 @@ export function AudioChoice({ proposalId, prepared, estimate, publishStatus, onD
             <button
               className="btn-ghost text-xs"
               disabled={!HUMAN_TOKEN_SET}
-              title={!HUMAN_TOKEN_SET ? "사람 토큰이 없어 쓸 수 없습니다" : undefined}
+              title={!HUMAN_TOKEN_SET ? "로그인이 필요해요" : undefined}
               onClick={() => { setChoice("bgm"); setResult(null); setStep("confirm"); }}
             >
               배경음악 따로 만들기

@@ -183,6 +183,7 @@ export interface Incident {
   at: string
   candidates: { pr: string; spec: string; para: string; mergedAt: string }[]
   rollbackCheck?: { target: string; result: '승인' | '거절'; why: string }
+  /** PR·문단에 연결함(link_incident). 장애 복구와는 상관없다 */
   linked: boolean
   followUp?: string
 }
@@ -264,6 +265,7 @@ export const RULE_LABEL: Record<string, string> = {
   spec_no_basis: '근거 없음',
   spec_open_conflict: '충돌하는 요청 진행 중',
   spec_hr_unchecked: '인사 기록 확인 못 함',
+  request_paused: '요청이 사람 중단 중', // 개발 서버가 중단 중인 요청의 PR 자동 머지를 멈출 때 (dev service _try_auto_merge)
 }
 
 // 교차검증 대기를 사람 확인으로 넘기기까지 (분). 백엔드 PLANNING_CROSS_CHECK_TIMEOUT_MIN 기본값과 같다
@@ -300,11 +302,18 @@ export const protectedOf = (path: string) => PROTECTED_PATHS.find((x) => path.st
 export interface Observation { pr: string; req: string; path: string; lines: number; files: number; mergedAt: string; untilMs: number; result: '관찰 중' | '정상' | '장애 연결' }
 export interface AutoRun { pr: string; req: string; t: string; lines: number; files: number; result: '정상' | '장애 연결'; rule?: string }
 export interface AutoPolicy {
-  rules: AutoRule[]
-  observing: Observation[] // 교차검증 뒤 머지된 PR의 관찰 (학습 근거 후보)
+  rules: AutoRule[] // 경로별 학습 기준: 백엔드에 아직 없어 늘 비어 있다 (화면은 준비 중)
+  observing: Observation[] // 교차검증 뒤 머지된 PR의 관찰 (학습 근거 후보). 백엔드에 아직 없다
   history: AutoRun[]
   log: { t: string; text: string; by: '사람' | '자동' | '안전 관문' }[]
+  // 백엔드 AutoPolicy (workflow-core models.py): 단계·허용 경로·연속 정상·승급 제안
+  level?: number
+  paths?: string
+  streak?: number
+  proposal?: AutoProposal | null
 }
+/** 연속 정상이 기준에 닿아 서버가 낸 한 단계 승급 제안 (승인은 운영자, approve_promotion) */
+export interface AutoProposal { to: number; t: string; why: string }
 
 // ---- 사후 감사: AI가 스스로 승인·자동 처리한 건 (사람이 나중에 본다)
 export type AuditKind = '자동 확정' | '자동 머지' | '교차검증 승인' | '교차검증 거절' | '관찰 통과' | '기준 제안' | '학습 거부' | '기준 정식' | '기준 해제'
@@ -473,6 +482,8 @@ export type Action =
   | { type: 'humanDecide'; review: string; ok: boolean } // 되돌릴 수 없는 일만
   | { type: 'disableRule'; rule: string } // 기준 끄기 (승인 없이 바로)
   | { type: 'decideRule'; rule: string; ok: boolean } // 기준 넓히기 판단 (안전 관문 또는 사람)
+  | { type: 'approvePromotion' } // 자동 처리 범위 승급 제안 승인 (운영자 토큰, 백엔드 approve_promotion)
+  | { type: 'rejectPromotion' } // 승급 제안 보류 (운영자 토큰, 연속 건수 다시 셈)
   // 소통
   | { type: 'postMessage'; thread: string; text: string }
   | { type: 'deptChat'; from: Dept }

@@ -179,7 +179,7 @@ export function CostLimitCard() {
             {hasChange && check.errors.length === 0 && check.warnings.map((m) => <p key={m} className={`rounded-xl px-3 py-2 text-xs ${TONE.warn}`}>{m}</p>)}
             <p className="text-xs text-ink-500">{lowerPathKo(selfApprove)}</p>
             {!state.viewer.can_edit && <p className="text-xs text-ink-500">예산 변경 권한이 없는 계정입니다. 관리자가 회원·서버 관리에서 권한을 켜야 바꿀 수 있습니다.</p>}
-            {!HUMAN_TOKEN_SET && <p className="text-xs text-ink-500">사람 토큰이 설정되지 않아 바꿀 수 없습니다.</p>}
+            {!HUMAN_TOKEN_SET && <p className="text-xs text-ink-500">로그인이 필요해요. 로그인하면 바꿀 수 있어요.</p>}
           </div>
         </>
       )}

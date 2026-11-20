@@ -189,7 +189,7 @@ export default function SecretKeysPage() {
             <button className="btn-ghost text-xs" disabled={!baseOk || !reason.trim()} onClick={() => submit('delete')}>삭제 요청(승인 필요)</button>
           </div>
           {canEdit && (nameIssue || valueIssue) && <p className={`rounded-xl px-3 py-2 text-xs ${TONE.warn}`}>{nameIssue ?? valueIssue}</p>}
-          {!HUMAN_TOKEN_SET && <p className="text-xs text-ink-500">사람 토큰이 설정되지 않아 바꿀 수 없어요.</p>}
+          {!HUMAN_TOKEN_SET && <p className="text-xs text-ink-500">로그인이 필요해요. 로그인하면 바꿀 수 있어요.</p>}
           {shown && (
             <p className={`rounded-xl px-3 py-2 text-sm ${shown.kind === 'done' ? TONE.ok : shown.kind === 'held' ? TONE.warn : TONE.bad}`} role="status">
               {shown.text}

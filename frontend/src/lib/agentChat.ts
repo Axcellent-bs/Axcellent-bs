@@ -242,7 +242,7 @@ export type ChatItem =
       toKey?: string }
   | { kind: "system"; id: string; at: string; room: string; text: string }
   | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string; decideAt?: string
-      /** 결정을 기다리는 부서 (리플레이처럼 사건 단계가 없을 때만) */
+      /** 결정을 기다리는 부서 (사건 단계가 없을 때만) */
       dept?: string }
   | { kind: "separator"; id: string; at: string; room: string; text: string; raw?: string; variant: "day" | "topic" };
 

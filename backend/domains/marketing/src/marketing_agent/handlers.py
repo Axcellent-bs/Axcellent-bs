@@ -103,6 +103,7 @@ from marketing_agent.chat import (
 from marketing_agent.chat_store import ChatStorageError, ChatStore
 from marketing_agent.coupons import CouponLedger, SequenceGap, total_value
 from marketing_agent.links import BuildCampaignLinkInput, CampaignLink, build_campaign_link
+from marketing_agent.media import async_generate
 from marketing_agent.media.bgm_flow import generate_media_flow
 from marketing_agent.media.config import MediaSettings
 from marketing_agent.media.ledger import MediaLedger
@@ -218,6 +219,7 @@ def reset_state() -> None:
     """테스트 사이에 저장소를 비운다."""
     global STATE
     STATE = State()
+    async_generate.reset()
 
 
 def _now() -> datetime:
@@ -1341,10 +1343,17 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
     return await check_sns_post(request, STATE.sns)
 
 
-async def generate_media_skill(request: AgentRequest) -> AgentResult:
+async def _generate_media_sync(request: AgentRequest) -> AgentResult:
     return await generate_media_flow(
         request, ledger=STATE.media_ledger, from_decision=_from_decision
     )
+
+
+async def generate_media_skill(request: AgentRequest) -> AgentResult:
+    """총괄이 부르면 긴 작업(접수 즉시 WORKING + task_id, 끝나면 task.completed). 그 밖은 동기."""
+    if async_generate.is_orchestrator(request):
+        return await async_generate.generate_media_async(request, _generate_media_sync)
+    return await _generate_media_sync(request)
 
 
 async def prepare_sns_post_from_media_skill(request: AgentRequest) -> AgentResult:

@@ -206,7 +206,7 @@ export function ReconciliationSection({ tick }: { tick: number }) {
                   {Math.min(PAGE, items.length - limit)}건 더 보기 (남은 {(items.length - limit).toLocaleString("ko-KR")}건)
                 </button>
               )}
-              {!humanTokenSet && <p className="text-sm text-amber-800">사람 권한(VITE_SAFETY_HUMAN_TOKEN)이 설정되지 않아 메모를 저장할 수 없습니다.</p>}
+              {!humanTokenSet && <p className="text-sm text-amber-800">로그인이 필요해요. 로그인하면 메모를 저장할 수 있어요.</p>}
             </div>
           );
         }}

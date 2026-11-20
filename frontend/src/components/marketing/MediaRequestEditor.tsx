@@ -120,7 +120,7 @@ export function MediaRequestEditor({ item, request, onDone }: { item: StoredBrie
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <button className="btn-primary text-xs" disabled={busy || !HUMAN_TOKEN_SET} onClick={() => void save()} title={HUMAN_TOKEN_SET ? undefined : "사람 토큰이 없어 쓸 수 없습니다"}>{busy ? "저장하는 중" : "종류·필드 저장"}</button>
+        <button className="btn-primary text-xs" disabled={busy || !HUMAN_TOKEN_SET} onClick={() => void save()} title={HUMAN_TOKEN_SET ? undefined : "로그인이 필요해요"}>{busy ? "저장하는 중" : "종류·필드 저장"}</button>
         <span className="text-ink-500">저장은 요청 초안만 바꿉니다. 미디어 생성(비용)과 게시(사람 승인)는 하지 않습니다.{kind === "carousel" && " 캐러셀 장수는 생성 단계에서 정합니다."}</span>
       </div>
       {saved && !error && <p className="text-brand-700">저장했습니다.</p>}

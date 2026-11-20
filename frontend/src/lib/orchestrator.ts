@@ -1,5 +1,7 @@
 import { ApiError } from "./apiError";
+import { tokenFree } from "./apiDirect";
 import { ORCHESTRATOR_URL, RELAY_TOKEN, SAFETY_HUMAN_TOKEN } from "./env";
+import { sessionAuth } from "./humanToken";
 import type { AgentDiagnosisRow, DiagnosisDelivery } from "./agentDiagnosis";
 import type { DemoRequest, OrchIncident } from "./agentChat";
 import type { WorkRequestRow, WorkRequestTask } from "./workRequests";
@@ -7,7 +9,9 @@ import type { WorkRequestRow, WorkRequestTask } from "./workRequests";
 // 총괄(orchestrator) API. 응답은 ax-backend 규약 {data, meta}. 형식은 orchestrator/src/ax_orchestrator/main.py 기준.
 
 async function callRaw<T, M = Record<string, unknown>>(path: string, init?: RequestInit): Promise<{ data: T; meta: M }> {
-  const res = await fetch(`${ORCHESTRATOR_URL}${path}`, { cache: "no-store", ...init });
+  // 머리 없는 읽기(GET)는 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이). 토큰을 안 보는 읽기는 싣지 않는다
+  const read = (init?.method ?? "GET").toUpperCase() === "GET" && !new Headers(init?.headers).has("authorization") && !tokenFree("orch", path);
+  const res = await fetch(`${ORCHESTRATOR_URL}${path}`, { cache: "no-store", ...init, ...(read ? { headers: { ...Object.fromEntries(new Headers(init?.headers)), ...sessionAuth() } } : {}) });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     // FastAPI HTTPException은 {detail}, 직접 만든 오류는 {error: {message}}

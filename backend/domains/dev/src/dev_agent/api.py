@@ -22,7 +22,6 @@ from ax_workflow.api import (
     add_common_routes,
 )
 from ax_workflow.auth import AuthError, check_human
-from ax_workflow.base import TEAM_LEAD
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import dump
 from dev_agent import coder, dev_chat, llm_key, vcs, vcs_bridge
@@ -47,6 +46,7 @@ CODING_CONFLICT = {
     "TRIAL_EXHAUSTED",  # 서버 AI 체험 한도를 다 씀
 }
 MAX_CHATS_LISTED = 20
+APPROVER_MAX = 40  # 화면 승인자 이름 칸(ApproverName.tsx)과 같은 길이
 
 
 def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
@@ -284,11 +284,17 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
 
     @router.post("/deployments/{dep_id}/approve", response_model=None, dependencies=HUMAN)
     async def post_approve_deployment(dep_id: str, request: Request) -> dict | JSONResponse:
-        """사람 승인 버튼. 본문 `{approved_by}`는 없어도 된다 (목: 팀장)."""
+        """사람 승인 버튼. 본문 `{approved_by}`(승인자 이름)가 꼭 있어야 한다.
+
+        이름이 없으면 400. 기본 승인자를 채우지 않는다 (누가 승인했는지 지어내지 않는다)."""
         svc = get_service()
+        if get_deploy_store().get(dep_id) is None:
+            return _err(404, "NOT_FOUND", f"배포 {dep_id}가 없다")
         body = await _body(request) or {}
         who = body.get("approved_by")
-        who = who.strip() if isinstance(who, str) and who.strip() else TEAM_LEAD
+        who = who.strip()[:APPROVER_MAX] if isinstance(who, str) else ""
+        if not who:
+            return _err(400, "APPROVER_REQUIRED", "approved_by(승인자 이름)가 필요하다")
         try:
             dep = await get_deploy_store().approve(svc, dep_id, who)
         except DeployError as exc:
