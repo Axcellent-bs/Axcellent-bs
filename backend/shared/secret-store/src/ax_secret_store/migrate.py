@@ -8,6 +8,9 @@
 - `verify [같은 인자]` 이전 전후 대조. 지문(HMAC)이 같은지만 `match`/`mismatch`로 보인다.
 - `rewrap` 마스터 키를 바꾼 뒤 모든 값을 현재 키 버전으로 다시 암호화한다.
 - `keygen` 새 마스터 키를 한 번 출력한다(`.env`에 넣고 따로 백업한다).
+- `retenant [--from default] [--to catbooks] [--dry-run]` 한 tenant의 값을 다른 tenant로 옮긴다
+  (회사 공간 나누기 1-7). 값마다 풀고 새 tenant로 다시 암호화한다. 대상에 다른 값이 있으면
+  `conflict`로 둘 다 두고 종료 코드 1. 처리 안 된 요청이 있으면 아무것도 하지 않는다.
 `.env` 값은 지우지 않는다. 스위치를 `env`로 되돌리면 롤백이다.
 """
 
@@ -124,6 +127,10 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--dry-run", action="store_true")
             p.add_argument("--overwrite", action="store_true")
     sub.add_parser("rewrap")
+    p = sub.add_parser("retenant")
+    p.add_argument("--from", dest="source", default="default")
+    p.add_argument("--to", dest="target", default="catbooks")
+    p.add_argument("--dry-run", action="store_true")
     sub.add_parser("keygen")
     args = parser.parse_args(argv)
     if args.cmd == "keygen":
@@ -134,6 +141,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "rewrap":
             print(f"rewrapped\t{svc.rewrap_all(WHO)}")
             return 0
+        if args.cmd == "retenant":
+            moved = svc.retenant(args.source, args.target, WHO, dry_run=args.dry_run)
+            _print(moved)
+            return 1 if any(s == "conflict" for _, s in moved) else 0
         tenant = args.tenant or default_tenant()
         source = _source(args.env_file)
         patterns = patterns_from(args.names)

@@ -32,7 +32,7 @@ db 모드에서 서비스는 시작할 때 DB를 열고 모든 값을 복호화�
 - DB에는 암호문·nonce·kid·**끝 글자 힌트(최대 4자)**·버전·누가/언제만 있다. 평문 컬럼은 없다.
 - 평문은 화면·API 응답·로그·예외·이력·안전 서버(승인 화면) 어디에도 나오지 않는다. 승인 화면에는 값 대신 지문(HMAC 16자)과 끝 글자만 간다.
 - **한 번 넣으면 다시 볼 수 없다.** 값을 돌려주는 API는 없다(교체만 가능).
-- 이력(`history` 테이블): 누가·언제·동작(request_*/add/replace/delete/migrate/rewrap)·tenant·이름. 값 없음.
+- 이력(`history` 테이블): 누가·언제·동작(request_*/add/replace/delete/migrate/rewrap/retenant_*)·tenant·이름. 값 없음.
 
 ## 권한·승인 (대시보드 API `/api/dashboard/secrets`)
 
@@ -54,6 +54,27 @@ uv run python -m ax_secret_store verify --tenant <고객사ID> --env-file /경�
 ```
 
 `.env`의 값은 지우지 않는다. 스위치를 `env`로 되돌리면 롤백이다.
+
+## tenant 옮기기 (회사 공간 나누기 1-7: `default` → `catbooks`)
+
+암호문의 AAD·지문에 tenant가 들어 있어 DB의 tenant 칸만 바꾸면 값을 풀 수 없다. 그래서 값마다 옛 tenant로
+풀고 새 tenant로 다시 암호화해 옮기는 명령을 쓴다(값은 출력하지 않는다).
+
+```bash
+cd backend
+# 0) DB 파일(AX_SECRET_DB_FILE) 백업
+# 1) 미리보기: 이름별 would_move / same_exists / conflict
+uv run python -m ax_secret_store retenant --from default --to catbooks --dry-run
+# 2) 옮기기 (새 행 쓰기 + 옛 행 지우기를 값마다 한 트랜잭션으로)
+uv run python -m ax_secret_store retenant --from default --to catbooks
+# 3) .env의 AX_SECRET_DEFAULT_TENANT=catbooks 확인 후 백엔드 재시작(다른 프로세스는 캐시 TTL 안에 따라온다)
+```
+
+- `same_exists`: 대상에 같은 값이 이미 있어 옛 행만 지웠다.
+- `conflict`: 대상에 다른 값이 있어 둘 다 그대로 두었다(종료 코드 1). 어느 값이 맞는지 사람이 정하고 화면에서 교체한다.
+- 옮길 tenant에 처리 안 된 교체·삭제 요청이 있으면(`pending_exists`) 아무것도 하지 않는다. 요청을 승인·거절한 뒤 다시 돌린다.
+- 이력에는 `retenant_from_default`(새 tenant 쪽)·`retenant_drop_duplicate`가 남는다.
+- 되돌리기: 같은 명령을 `--from catbooks --to default`로 돌리고 `AX_SECRET_DEFAULT_TENANT`를 되돌린다(또는 0번 백업 파일).
 
 ## 마스터 키 — 분실하면 복구할 수 없다
 
