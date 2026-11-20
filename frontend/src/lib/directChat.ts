@@ -72,7 +72,8 @@ export const directChatApi = (ep: ChatEndpoint, opts: { closable?: boolean; getB
     list: () => request(ep, "").then(toThreads),
     get: (id: string) => request(ep, opts.getByQuery ? `?thread_id=${encodeURIComponent(id)}` : `/${encodeURIComponent(id)}`).then(one),
     // room_id: 단톡방에서 보낼 때만 (safety만 이 창구를 쓴다. 중계 부서에는 화면이 넣지 않는다, lib/officeTalkView.ts)
-    send: (x: { thread_id?: string; message: string; room_id?: string }) => request(ep, "", { method: "POST", body: JSON.stringify(x) }).then(one),
+    // record_id: 마케팅 1:1에서 올린 캐릭터 이미지로 먼저 만든 이미지 시트 기록(CR-…)
+    send: (x: { thread_id?: string; message: string; room_id?: string; record_id?: string }) => request(ep, "", { method: "POST", body: JSON.stringify(x) }).then(one),
     ...(opts.closable ? { close: (id: string) => request(ep, `/${encodeURIComponent(id)}/close`, { method: "POST", body: "{}" }).then(one) } : {}),
     // 대화 지우기 (본인 대화만, 서버가 확인). POST 전용 `<주소>/<id>/remove` (DELETE는 쓰지 않는다)
     remove: (id: string) => request(ep, `/${encodeURIComponent(id)}/remove`, { method: "POST", body: "{}" }).then(() => undefined),

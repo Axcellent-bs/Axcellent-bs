@@ -67,9 +67,9 @@ docs/requirements.md (사람이 수정) ──claude-plan──▶ 작업 이슈
 | infra (준하) | finance (태윤) + planning (예진) | 전체 compose·장애 주입 |
 | planning (예진) | orchestrator (준하) | 변경 요청·롤백 검증을 통합 에이전트가 지시 |
 | dejafix (예진) | orchestrator (준하) | 진단·롤백을 통합 에이전트가 지시 |
-| support (병환) | marketing (재현·태윤·예진, 서브 재헌) | 보상 요청 → 쿠폰 경로 |
+| support (병환) | marketing (태윤·재현·예진, 서브 재헌) | 보상 요청 → 쿠폰 경로 |
 | dashboard-api (병환) | safety (태윤) | C 보류 큐 승인·거절 |
-| marketing (재현·태윤·예진, 서브 재헌) | support (병환) | 공지·보상 쿠폰을 support가 씀 |
+| marketing (태윤·재현·예진, 서브 재헌) | support (병환) | 공지·보상 쿠폰을 support가 씀 |
 | shop-api (재헌) | data (재현) | 데이터 조회 API 사용자 |
 | contracts (준하·태윤) | agent-template (준하) + safety (태윤) | 계약은 2명. 작성자가 둘 중 한 사람이면 그 자리는 data (재현) |
 
@@ -126,7 +126,7 @@ depts:      # id: { folder, aliases, owners(첫 번째가 실행 토큰), env_pr
   dejafix:        { folder: agents/infra-dejafix, aliases: [infra-dejafix], owners: [NYejin], env_prefix: INFRA }
   support:        { folder: agents/support,       owners: [bxbae],          env_prefix: SUPPORT }
   dashboard-api:  { folder: dashboard-api,        owners: [bxbae],          env_prefix: DASHBOARD }
-  marketing:      { folder: agents/marketing,     owners: [JangJaehyeonn, 2taeyoon, NYejin, areatmadm],  env_prefix: MARKETING }   # 메인1 재현, 메인2 태윤, 메인3 예진, 서브 재헌 (2026-11-19)
+  marketing:      { folder: agents/marketing,     owners: [2taeyoon, JangJaehyeonn, NYejin, areatmadm],  env_prefix: MARKETING }   # 메인1 태윤, 메인2 재현, 메인3 예진, 서브 재헌 (2026-11-20)
   shop-api:       { folder: shop-api,             owners: [areatmadm],      env_prefix: SHOP }
   contracts:      { folder: contracts,            owners: [haakim7, 2taeyoon] }   # env_prefix 없음 → MOCK 변수 안 씀
 reviewers: (위 "리뷰어 배정" 표를 부서 id로 그대로)

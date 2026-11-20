@@ -67,6 +67,11 @@ body { overflow-x: clip; }
 .nav a[aria-current="true"] { background: rgba(255, 255, 255, .16); color: #fff; box-shadow: inset 0 -3px 0 var(--gold); }
 /* 고정 헤더만큼 띄우는 건 html 의 scroll-padding-top 한 곳에서만 한다 (여기에도 두면 두 번 더해져 앞 구역이 80px쯤 보인다) */
 .top-pdf { white-space: nowrap; }
+.dl-card { margin-top: var(--gap-inner); display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; background: var(--soft); border-radius: 16px; padding: 20px 24px; }
+.dl-body { flex: 1 1 320px; min-width: 0; }
+.dl-body h3 { font-size: 20px; color: var(--navy); }
+.dl-body p { margin-top: 6px; color: #4a4a68; font-size: 15px; }
+.dl-size { display: inline-block; margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--brand-d); }
 .posts-lead { margin-top: var(--gap-lead); max-width: 60ch; color: #4a4a68; }
 .vposts { margin-top: var(--gap-block); display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 340px)); justify-content: start; gap: 24px; }
 .vpost { background: var(--paper); border-radius: 26px; padding: 16px 16px 24px; min-width: 0; }

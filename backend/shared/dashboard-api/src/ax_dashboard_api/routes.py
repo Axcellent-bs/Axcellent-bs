@@ -1430,6 +1430,9 @@ async def marketing_creative_record(
 class MarketingChatSendBody(BaseModel):
     thread_id: str | None = Field(default=None, min_length=1, max_length=64)
     message: str = Field(min_length=1, max_length=2000)
+    # 대화에 올린 캐릭터 이미지로 먼저 만든 이미지 시트 기록
+    # (POST /marketing/character-sheet의 record_id)
+    record_id: str | None = Field(default=None, pattern=r"^CR-[0-9a-f]{12}$")
 
 
 @router.get("/marketing-chat")
@@ -1450,8 +1453,10 @@ async def marketing_chat_get(thread_id: str, request: Request) -> dict:
 async def marketing_chat_send(body: MarketingChatSendBody, request: Request) -> dict:
     """말을 저장하고 `status: answering`으로 바로 돌려준다. 답은 GET으로 가져간다."""
     who = human_from_authorization(request.headers.get("authorization"))
-    payload = {"who": who, "message": body.message} | (
-        {"thread_id": body.thread_id} if body.thread_id else {}
+    payload = (
+        {"who": who, "message": body.message}
+        | ({"thread_id": body.thread_id} if body.thread_id else {})
+        | ({"record_id": body.record_id} if body.record_id else {})
     )
     out = await marketing_client.chat_call("marketing_chat_send", payload)
     return ok(out["thread"])

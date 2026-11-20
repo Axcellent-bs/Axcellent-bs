@@ -49,7 +49,14 @@ async def test_request_is_recorded_with_plan_and_customer_gets_a_receipt() -> No
     assert row["text"] == "홍보 영상 만들어 주세요"
     assert row["status"] == "classified"
     assert row["task"] == "promo_video"
-    assert [s["step_id"] for s in row["plan"]] == ["trend", "insight", "plan", "confirm", "make"]
+    assert [s["step_id"] for s in row["plan"]] == [
+        "trend",
+        "insight",
+        "plan",
+        "confirm",
+        "prepare",
+        "make",
+    ]
     assert row["classification"]["prompt_version"] == "v1"
     assert row["classification"]["confidence"] == 0.9
 

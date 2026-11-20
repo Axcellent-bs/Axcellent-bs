@@ -57,6 +57,12 @@ class TaskStep:
     # 고객 글에 속아도 승인 없이는 실행되지 않게 한다. 입력이 앞 부서 결과에서만 오는 단계는
     # 부서의 안전 관문에 맡긴다
     human_gate: bool = False
+    # 앞 단계 결과를 그대로 받는 단계 설정. `carry_keys`는 이 단계 결과의 여러 칸(예: proposal_id·
+    # video_plan)을 한 묶음으로 다음 단계에 넘기고, `carry_from`은 넘겨받을 단계(없으면 `after`),
+    # `on_missing`은 넘길 값이 없을 때 건너뛸지(skip) 실패로 닫을지(fail)다
+    carry_keys: tuple[str, ...] = ()
+    carry_from: str | None = None
+    on_missing: str = "skip"
 
 
 @dataclass(frozen=True)
@@ -143,9 +149,33 @@ PROMO_VIDEO = TaskDef(
             "A",
             after=("insight",),
             takes_carry=True,
+            carry_keys=("proposal_id", "video_plan"),
         ),
         TaskStep("confirm", None, "human_check", "사람 확인", None, after=("plan",), kind="human"),
-        TaskStep("make", "marketing", "generate_media", "영상 제작", "B", after=("confirm",)),
+        # 사람이 제작안을 확인한 뒤: 마케팅이 제작안으로 SNS 초안·장면 템플릿을 정하고(읽기),
+        # 그 결과(`generate_media_input`)를 그대로 영상 제작(B)에 넘긴다
+        TaskStep(
+            "prepare",
+            "marketing",
+            "prepare_video_draft_from_plan",
+            "영상 초안 준비",
+            READ_GRADE,
+            after=("confirm",),
+            takes_carry=True,
+            carry_from="plan",
+            carries="generate_media_input",
+            on_missing="fail",
+        ),
+        TaskStep(
+            "make",
+            "marketing",
+            "generate_media",
+            "영상 제작",
+            "B",
+            after=("prepare",),
+            takes_carry=True,
+            on_missing="fail",
+        ),
     ),
 )
 
@@ -272,6 +302,7 @@ TASKS: tuple[TaskDef, ...] = (
         ("인스타 글 초안 만들어 주세요", "신간 소개 SNS 문구 써 줘"),
         "marketing",
         "draft_sns_post",
+        fill="sns_topic",
     ),
     _one(
         "dev_status",
@@ -279,7 +310,7 @@ TASKS: tuple[TaskDef, ...] = (
         "개발이 어디까지 진행됐는지 알려 달라는 의뢰.",
         ("요청한 기능 개발 어디까지 됐어요", "진행 중인 개발 작업 보여 주세요"),
         "dev",
-        "list_in_progress",
+        "list_dev_progress",
     ),
     _one(
         "similar_cases",
@@ -353,6 +384,9 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "takes_carry": s.takes_carry,
             "fill": s.fill,
             "human_gate": s.human_gate,
+            "carry_keys": list(s.carry_keys),
+            "carry_from": s.carry_from,
+            "on_missing": s.on_missing,
         }
         for s in task.steps
     ]

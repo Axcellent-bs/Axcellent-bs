@@ -154,7 +154,14 @@ class ChatStore:
         return self.get(f"mktchat-{seq}") or {}
 
     @staticmethod
-    def _message(msgs: list[dict[str, Any]], role: str, text: str, kind: str, at: str) -> None:
+    def _message(
+        msgs: list[dict[str, Any]],
+        role: str,
+        text: str,
+        kind: str,
+        at: str,
+        card: dict[str, Any] | None = None,
+    ) -> None:
         n = max((int(m["id"][1:]) for m in msgs if str(m.get("id", "")).startswith("m")), default=0)
         msgs.append(
             {
@@ -165,6 +172,7 @@ class ChatStore:
                 "kind": kind,
                 "plan": None,
                 "task_id": None,
+                "card": card,  # 이미지 시트·스토리보드 기록 카드(없으면 None)
             }
         )
 
@@ -204,7 +212,9 @@ class ChatStore:
         except sqlite3.Error as error:
             raise ChatStorageError(f"대화를 저장할 수 없다: {type(error).__name__}") from error
 
-    def begin_turn(self, thread_id: str, text: str) -> tuple[str, dict[str, Any] | None]:
+    def begin_turn(
+        self, thread_id: str, text: str, card: dict[str, Any] | None = None
+    ) -> tuple[str, dict[str, Any] | None]:
         """사람 말을 적고 `answering`으로 바꾼다. (`ok`|`closed`|`busy`|`missing`, 대화)."""
         outcome = "missing"
 
@@ -217,19 +227,25 @@ class ChatStore:
                 outcome = "busy"
                 return None
             outcome = "ok"
-            self._message(th["messages"], "user", text, "text", at)
+            self._message(th["messages"], "user", text, "text", at, card)
             return "answering"
 
         th = self._update(thread_id, mutate)
         return outcome, th
 
     def finish_turn(
-        self, thread_id: str, reply: str, *, summary: str | None = None, kind: str = "text"
+        self,
+        thread_id: str,
+        reply: str,
+        *,
+        summary: str | None = None,
+        kind: str = "text",
+        card: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """AI 답을 붙이고 `talking`으로 되돌린다. 그 사이 닫혔으면 닫힌 채로 둔다."""
 
         def mutate(th: dict[str, Any], at: str) -> Status | None:
-            self._message(th["messages"], "assistant", reply, kind, at)
+            self._message(th["messages"], "assistant", reply, kind, at, card)
             if summary:
                 th["summary"] = summary
             return "closed" if th["status"] == "closed" else "talking"

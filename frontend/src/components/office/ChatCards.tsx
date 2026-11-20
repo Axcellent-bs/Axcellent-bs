@@ -9,6 +9,7 @@ import {
   type SubmitState, type TrendNavState,
 } from "@/lib/chatCards";
 import { REPORT_POLL_MS, REPORT_STATUS, reportHash, reportLabel } from "@/lib/trendReportView";
+import { CreativeChatCard } from "./CreativeChatCard";
 
 // 데이터분석 1:1 대화(DirectChat, 데이터분석 AI만)의 메시지 카드 3종 (공통 계약 lib/planningData.ts ChatCard).
 // - 분석 의뢰 카드: 칸 요약(프리셋 꼬리표) · 이유 · 예상 호출 · [분석 의뢰 넣기](trend_report_create, 한 번만) · [분석 의뢰 탭에서 고치기] · [아니에요](접기)
@@ -20,6 +21,7 @@ import { REPORT_POLL_MS, REPORT_STATUS, reportHash, reportLabel } from "@/lib/tr
 const submitted = new Map<string, SubmitState>();
 
 export function ChatCardView({ card, messageId, threadId }: { card: ChatCard; messageId: string; threadId: string | null }) {
+  if (card.kind === "creative") return <CreativeChatCard card={card} />;
   if (card.kind === "trend_request") return <RequestCard card={card} messageId={messageId} threadId={threadId} />;
   if (card.kind === "trend_report_progress") return <ProgressCard card={card} />;
   return <DoneCard card={card} />;

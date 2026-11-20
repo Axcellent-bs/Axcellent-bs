@@ -14,7 +14,7 @@
 | 고객사 마케팅 사례: 요약 한 줄 | 시연 환경 기준, 효과 주장 없이 | — | `cases.items[].summary` |
 | 숫자 출처 | 36초·17건·7건·6명·249,000원·12,000원이 나온 시연 이슈 기록 번호와 날짜 | 이 문서 아래 표 | `story.statsSource` |
 | 문구 수정안 | 2·3쪽(A2A·장애 대응) 원고, 단계별 문장 | — | `vision`, `a2a`, `story.steps` |
-| 브로셔 PDF 최종본 | PDF | `assets/AXcellent_홍보브로셔.pdf` | `links.brochureUrl` |
+| 브로셔 PDF 최종본 | PDF | `assets/axcellent-brochure.pdf` | `links.brochureUrl` |
 | 연락 수단 | Instagram DM 주소 또는 메일 주소 | — | `links.contactUrl`, `links.contactNote` |
 | 인스타 게시물·소재 링크 | 게시물에서 이 페이지로 오는 주소(추적 꼬리표 포함) | — | (페이지는 꼬리표를 읽지 않는다. 링크만 맞추면 된다) |
 

@@ -9,11 +9,25 @@
 - 모르는 샷 크기·앵글 id는 버리지 않고 기본값(전신·눈높이)으로 바꾼다. 칸 수가 모자라면 거절하고
   넘치면 자른다(지어내지 않는다).
 - LLM 설정이 없으면 `llm_not_configured`로 거절한다. 이미지는 만들지 않는다.
+- 칸 수가 모자라게 온 답(스키마는 맞지만 `shots`가 비거나 모자란 경우)은 LLM을 다시 불러 본다
+  (`MAX_SHORT_RETRIES`). 시간 초과·API 오류·형식 오류·입력 오류는 다시 부르지 않는다.
+
+재시도와 마감 (dashboard-api A2A 마감 120초, `STORYBOARD_DEADLINE_SECONDS`)
+- LLM 호출 하나의 시간 제한은 기본 60초(`LLM_TIMEOUT_SEC`)다. 시간 초과는 재시도하지 않으므로
+  첫 호출이 60초에 끊기면 거기서 끝난다.
+- 칸 수 부족은 앞선 호출이 응답을 돌려줬다는 뜻이다. 다시 부르는 건 지금까지 걸린 시간에 호출 시간
+  제한을 더해도 `RETRY_BUDGET_SECONDS`(110초 = 마감 120초 - 여유 10초)를 안 넘을 때만이다.
+  그래서 재시도로 마감을 넘기지 않는다. 실패 호출은 출력 토큰이 700~1,400개로 짧아 빨리 끝난다.
+- 다시 부를 때 기다리는 시간은 없다. 재시도 1회당 LLM 호출 비용이 한 번 더 든다.
+- 제작 기록 쓰기는 호출 쪽(`handlers._record_storyboard`)에서 최종 성공 뒤 한 번만 한다.
+- 로그에는 outcome·요청 칸 수·실제 칸 수·시도 횟수·소요 초만 남긴다
+  (줄거리·캐릭터·그림체·LLM 응답은 남기지 않는다).
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -35,6 +49,12 @@ from ax_contracts.schemas.marketing_storyboard import (
 )
 
 logger = logging.getLogger("marketing.storyboard")
+
+MAX_SHORT_RETRIES = 2  # 칸 수 부족일 때 LLM을 더 부르는 횟수 (총 3회 시도)
+RETRY_BUDGET_SECONDS = 110.0  # A2A 마감 120초 - 여유 10초. 이 안에 못 끝날 재시도는 하지 않는다
+FALLBACK_LLM_TIMEOUT_SECONDS = (
+    60.0  # LLM 클라이언트에 timeout 값이 없을 때 쓰는 가정(기본값과 같다)
+)
 
 DEFAULT_STYLE = (
     "soft hand-painted anime illustration, warm cinematic lighting, rich detailed backgrounds"
@@ -58,6 +78,17 @@ class StoryboardRefused(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+class StoryboardShort(StoryboardRefused):
+    """LLM 답에서 쓸 수 있는 칸이 요청보다 적다(`llm_failed`). 다시 불러 볼 수 있는 거절."""
+
+    def __init__(self, requested: int, actual: int) -> None:
+        super().__init__(
+            "llm_failed", f"장면을 {requested}칸 다 만들지 못했다({actual}칸). 다시 해 보세요"
+        )
+        self.requested = requested
+        self.actual = actual
 
 
 class LooseShot(AxModel):
@@ -165,9 +196,7 @@ def build_output(
     style = style or _cut(read.style_en, MAX_STYLE_EN) or DEFAULT_STYLE
     loose = [s for s in read.shots if _cut(s.scene_ko, 200)]
     if len(loose) < count:
-        raise StoryboardRefused(
-            "llm_failed", f"장면을 {count}칸 다 만들지 못했다({len(loose)}칸). 다시 해 보세요"
-        )
+        raise StoryboardShort(count, len(loose))
     loose = loose[:count]
     shots: list[StoryboardShot] = []
     lines: list[str] = []
@@ -215,6 +244,31 @@ def build_output(
     )
 
 
+def _log_refusal(
+    code: str, requested: int, actual: int | None, attempts: int, started: float
+) -> None:
+    """실패 사실만 남긴다. 줄거리·캐릭터·그림체·LLM 응답은 넣지 않는다."""
+    logger.warning(
+        "스토리보드 실패: outcome=%s 요청칸=%d 실제칸=%s 시도=%d 소요=%.1f초",
+        code,
+        requested,
+        "-" if actual is None else actual,
+        attempts,
+        time.monotonic() - started,
+    )
+
+
+def _can_retry(llm: Any, started: float) -> bool:
+    """지금까지 걸린 시간에 LLM 호출 시간 제한을 더해도 예산 안이면 다시 부른다."""
+    limit = getattr(llm, "timeout", None)
+    limit = (
+        float(limit)
+        if isinstance(limit, int | float) and limit > 0
+        else (FALLBACK_LLM_TIMEOUT_SECONDS)
+    )
+    return time.monotonic() - started + limit <= RETRY_BUDGET_SECONDS
+
+
 async def make_storyboard(
     untrusted: dict[str, Any], llm_factory: Callable[[], Any], context_id: str | None = None
 ) -> StoryboardPromptOutput:
@@ -223,27 +277,51 @@ async def make_storyboard(
     if llm is None:
         raise StoryboardRefused("llm_not_configured", "LLM 설정이 없다 (MARKETING_LLM_*·LLM_*)")
     data = {"story": story, "shots": count, "character": character or "(없음)"}
-    try:
-        read = await llm.structured(PROMPT, StoryRead, untrusted=data, context_id=context_id)
-    except LLMNotConfiguredError as exc:
-        raise StoryboardRefused(
-            "llm_not_configured", "LLM 설정이 없다 (MARKETING_LLM_*·LLM_*)"
-        ) from exc
-    except LLMFormatError as exc:
-        logger.warning("스토리보드: LLM 응답이 형식과 맞지 않음 (칸 %d)", count)
-        raise StoryboardRefused(
-            "llm_failed", "LLM 응답이 스토리보드 형식과 맞지 않았다. 다시 해 보세요"
-        ) from exc
-    except LLMResponseError as exc:
-        code = getattr(exc, "status_code", None)
-        logger.warning("스토리보드: LLM API 오류 status=%s", code)
-        message = (
-            f"LLM API가 {code} 오류를 돌려줬다. 잠시 뒤 다시 해 보세요"
-            if code
-            else "LLM API를 부르지 못했다(시간 초과 등). 잠시 뒤 다시 해 보세요"
+    started = time.monotonic()
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            read = await llm.structured(PROMPT, StoryRead, untrusted=data, context_id=context_id)
+        except LLMNotConfiguredError as exc:
+            raise StoryboardRefused(
+                "llm_not_configured", "LLM 설정이 없다 (MARKETING_LLM_*·LLM_*)"
+            ) from exc
+        except LLMFormatError as exc:
+            _log_refusal("llm_failed", count, None, attempts, started)
+            raise StoryboardRefused(
+                "llm_failed", "LLM 응답이 스토리보드 형식과 맞지 않았다. 다시 해 보세요"
+            ) from exc
+        except LLMResponseError as exc:
+            code = getattr(exc, "status_code", None)
+            _log_refusal("llm_failed", count, None, attempts, started)
+            message = (
+                f"LLM API가 {code} 오류를 돌려줬다. 잠시 뒤 다시 해 보세요"
+                if code
+                else "LLM API를 부르지 못했다(시간 초과 등). 잠시 뒤 다시 해 보세요"
+            )
+            raise StoryboardRefused("llm_failed", message) from exc
+        try:
+            out = build_output(read, character, style, count)
+        except StoryboardShort as short:
+            if attempts > MAX_SHORT_RETRIES or not _can_retry(llm, started):
+                _log_refusal(short.code, count, short.actual, attempts, started)
+                raise
+            logger.warning(
+                "스토리보드 재시도: outcome=%s 요청칸=%d 실제칸=%d 시도=%d 소요=%.1f초",
+                short.code,
+                count,
+                short.actual,
+                attempts,
+                time.monotonic() - started,
+            )
+            continue
+        logger.info(
+            "스토리보드 완료: 요청칸=%d 실제칸=%d 시도=%d 소요=%.1f초 캐릭터 문장 %s",
+            count,
+            len(out.shots),
+            attempts,
+            time.monotonic() - started,
+            "있음" if character else "없음",
         )
-        raise StoryboardRefused("llm_failed", message) from exc
-    logger.info(
-        "스토리보드 프롬프트: 칸 %d, 캐릭터 문장 %s", count, "있음" if character else "없음"
-    )
-    return build_output(read, character, style, count)
+        return out

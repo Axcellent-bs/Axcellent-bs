@@ -21,8 +21,8 @@ node build.mjs      # content.mjs → index.html
 만들어진 `index.html`을 브라우저로 열면 된다(서버 없이 열린다). 글꼴(Pretendard)만 인터넷에서 받는다.
 
 ## 지금 일부러 비워 둔 것 (비어 있으면 그 버튼·칸은 화면에 안 나온다)
-- `links.brochureUrl` — 브로셔 PDF 받기. PDF 검수가 끝나고 공개하기로 정한 뒤에 채운다
-- (채움) `links.contactUrl`·`links.contactNote` — 상담 문의는 이메일로 받는다(#1362). 값은 `content.mjs`에 있다. 다른 수단(Instagram DM 등)으로 바꾸려면 팀 합의 후 고친다
+- `links.brochureUrl` — 브로셔 PDF 받기(`assets/axcellent-brochure.pdf`). 맨 위 메뉴·첫 화면·마지막 안내 버튼과 콘텐츠 칸 받기 카드(`posts.brochure`)가 이 주소를 쓴다. 비우면 모두 안 보인다
+- `links.contactUrl`·`links.contactNote` — 상담 문의는 이메일로 받는다(#1362). 노란 "상담 문의" 버튼은 뺐다(`contactUrl`을 비움). 마지막 안내에는 `contactNote` 글(이메일 안내)만 남는다. 버튼을 다시 보이려면 `contactUrl`에 mailto나 Instagram DM 주소를 채운다
 - `story.media` — 시연 장면(결제 장애) 영상·화면. 아직 비어 있다. 준하 님 자료가 오면 채운다(`INTAKE.md`). 홍보 영상 2개(30초 세로, 1분 음악 포함)는 별도로 **콘텐츠** 칸(`posts.items`)에 들어 있다(#1360)
 - 인스타 게시물은 **콘텐츠** 칸(`posts.instagram`)에 고객사별로 보인다. 사례 칸(`cases.items[].posts`)에는 고객사 사이트 화면을 넣는 자리로 비워 둔다(2026-11-18 변경).
 - `cases.items[].posts` — **고객사 마케팅 사례** 칸(캣북스, 누비투어, 스터디온에듀). 게시물·반응 자료가 오면 채운다. 규칙: 채워진 사례가 하나라도 있으면 모든 고객사 카드가 보이고(빈 쪽은 "사례 준비 중"), 하나도 없으면 `cases.showEmpty`가 `true`일 때만 빈 카드가 보인다. 외부에 공개할 때 둘 다 비어 있으면 `false`로 두면 순환 그림만 남고 카드는 숨는다. 캣북스가 채워지면 `true`로 돌려도 된다

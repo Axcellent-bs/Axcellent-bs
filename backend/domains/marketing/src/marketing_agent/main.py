@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -14,6 +15,24 @@ from ax_contracts.schemas import AgentCard
 from marketing_agent import brief_auto_handoff, campaign_auto, handlers
 from marketing_agent.handlers import HANDLERS
 from marketing_agent.sns_publish import publisher
+
+
+def _setup_app_logging() -> None:
+    """`marketing.*` 로거의 INFO 이상을 서비스 로그(stderr → .logs/<이름>.log)로 내보낸다.
+
+    uvicorn은 자기 로거(`uvicorn.*`)만 설정하고 루트 로거에는 핸들러가 없어서, 마케팅 코드의
+    `logger.info`는 어디에도 안 나가고 `warning`만 기본 임시 핸들러로 나간다. 이 서비스 프로세스의
+    `marketing` 로거에만 핸들러를 달아(루트·다른 로거는 그대로, 전파는 유지) 중복 없이 한 번만 켠다.
+    형식은 uvicorn 기본(`INFO:     ...`)과 맞춘다.
+    """
+    log = logging.getLogger("marketing")
+    if any(getattr(h, "_ax_marketing", False) for h in log.handlers):
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+    handler._ax_marketing = True  # type: ignore[attr-defined]
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
 
 
 def _card_path() -> Path:
@@ -36,6 +55,7 @@ def load_card() -> AgentCard:
     return AgentCard.model_validate_json(_card_path().read_text(encoding="utf-8"))
 
 
+_setup_app_logging()
 app = create_agent_app(load_card(), HANDLERS)
 
 # publish_sns: 승인 이벤트 구독(REDIS_URL이 없으면 꺼짐을 기록) + 폴링 대비책 + 시작 시 멈춘 건 복구

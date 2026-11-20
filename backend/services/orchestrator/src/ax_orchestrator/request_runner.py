@@ -62,6 +62,7 @@ NO_AGENT = "no_agent"
 NO_REF = "no_ref"
 APPROVED = "approved"
 NO_INPUT = "no_input"  # 고객 문장에서 부서가 요구하는 입력을 찾지 못해 부서에 보내지 않음
+NO_CARRY = "no_carry"  # 앞 단계가 넘겨야 할 결과가 없어 이 단계를 시키지 않음
 NO_INSIGHT = "no_insight"  # 기획에 넘길 근거(facts)가 없어 영상 제작안을 건너뜀
 ASYNC_SILENT = "async_silent"
 ASYNC_SILENCE = 300.0  # 긴 작업 알림이 이만큼(초) 없으면 응답 끊김 (엔진의 기준과 같다)
@@ -261,6 +262,17 @@ class RequestRunner:
         carried = None
         if spec.get("takes_carry"):  # 넘길 값이 없으면 승인도 묻지 않고 이 단계를 건너뛴다
             carried = self._carried(row, spec)
+            if carried is None and spec.get("on_missing") == "fail":
+                self._update(
+                    rid,
+                    step_id,
+                    status="failed",
+                    reason_code=NO_CARRY,
+                    note="앞 단계가 넘겨야 할 결과가 없어 시킬 수 없다",
+                    started_at=stamp(),
+                    finished_at=stamp(),
+                )
+                return
             if carried is None:
                 self._update(
                     rid,
@@ -486,7 +498,8 @@ class RequestRunner:
     # ---- 긴 작업 알림 ---------------------------------------------------------------
     def _carried(self, row: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any] | None:
         """앞 단계가 다음 단계로 넘기려고 둔 값. 없으면 None."""
-        for before in spec.get("after") or []:
+        source = [spec["carry_from"]] if spec.get("carry_from") else spec.get("after") or []
+        for before in source:
             value = self._requests.get_carry(row["request_id"], before)
             if value:
                 return value
@@ -497,13 +510,19 @@ class RequestRunner:
     ) -> None:
         """단계를 완료로 닫는다. 결과 번호를 읽고, 다음 단계가 통째로 받을 값(`carries`)을 둔다."""
         key = spec.get("carries")
-        if key:
+        keys = spec.get("carry_keys") or []
+        if keys:  # 결과의 여러 칸을 한 묶음으로 (하나라도 비면 넘기지 않는다)
+            bundle = {k: out.get(k) for k in keys}
+            self._requests.set_carry(rid, step_id, bundle if all(bundle.values()) else None)
+        elif key:
             value = out.get(key)
-            # 기획 입력은 근거(facts)가 있어야 쓸 수 있다. 없으면 넘기지 않고 다음 단계가 건너뛴다
-            ok = isinstance(value, dict) and bool(value.get("facts"))
+            ok = isinstance(value, dict) and bool(value)
+            if key == "insight":  # 기획 입력은 근거(facts)가 있어야 쓸 수 있다
+                ok = ok and bool(value.get("facts"))
             self._requests.set_carry(rid, step_id, value if ok else None)
         if spec.get("takes_carry"):  # 넘겨받은 값은 쓰고 나면 지운다
-            for before in spec.get("after") or []:
+            source = [spec["carry_from"]] if spec.get("carry_from") else spec.get("after") or []
+            for before in source:
                 self._requests.set_carry(rid, before, None)
         self._update(
             rid,
