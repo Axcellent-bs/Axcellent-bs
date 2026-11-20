@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -384,3 +385,351 @@ def test_components_come_from_config() -> None:
     )
     assert GithubActionsTool(actions, APP).components == ("checkout",)
     assert GithubActionsTool(ACTIONS, APP).components == ()
+
+
+# ---------- 디스패치 시간 초과: 실제로 들어갔는지 먼저 찾고, 두 번 보내지 않는다 ----------
+
+
+def _actions_timeout_handler(posted: list[dict[str, Any]], runs: list[dict] | None) -> Any:
+    """디스패치 POST는 시간 초과, 실행 목록은 `runs` (None이면 목록 읽기도 실패)."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path.endswith("/access_tokens"):
+            return _token_response()
+        if path == "/repos/acme/shop":
+            return httpx.Response(
+                200,
+                json={"default_branch": "release"},
+                headers={"Date": "Mon, 16 Nov 2026 02:00:00 GMT"},
+            )
+        if path.endswith("/dispatches"):
+            posted.append(json.loads(req.content))
+            raise httpx.ReadTimeout("dispatch timed out", request=req)
+        if path.endswith("/runs"):
+            assert req.url.params["event"] == "workflow_dispatch"
+            if runs is None:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"workflow_runs": runs})
+        raise AssertionError(path)
+
+    return handler
+
+
+def test_actions_dispatch_timeout_uses_landed_run() -> None:
+    """(a) POST가 시간 초과여도 같은 버전 실행이 디스패치 뒤에 생겼으면 그 실행을 쓴다."""
+    posted: list[dict[str, Any]] = []
+    runs = [
+        # 디스패치 뒤에 생겼지만 버전이 다르다 (다른 사람이 띄운 실행)
+        _run(10, "Deploy v2.5.0", "f" * 40, created_at="2026-11-16T02:00:02Z"),
+        # 우리 실행: 같은 버전, 디스패치 뒤
+        _run(9, "Deploy v2.4.0", "d" * 40, created_at="2026-11-16T02:00:03Z"),
+        # 같은 버전이지만 디스패치 전 실행 (예전 배포)
+        _run(8, "Deploy v2.4.0", "e" * 40, created_at="2026-11-16T01:00:00Z"),
+    ]
+    tool = GithubActionsTool(
+        ACTIONS,
+        APP,
+        transport=httpx.MockTransport(_actions_timeout_handler(posted, runs)),
+        sleep=_no_sleep,
+    )
+
+    ref = asyncio.run(tool.redeploy("v2.4.0"))
+    assert len(posted) == 1  # 다시 보내지 않는다
+    assert (ref.tool, ref.run_id) == ("github_actions", "9")
+    assert ref.url == "https://github.com/acme/shop/actions/runs/9"
+
+
+@pytest.mark.parametrize(
+    "runs",
+    [
+        [],
+        # 다른 버전이거나 디스패치 전 실행, 제목에 버전이 없는 실행은 우리 것으로 보지 않는다
+        [
+            _run(10, "Deploy v2.5.0", "f" * 40, created_at="2026-11-16T02:00:02Z"),
+            _run(11, "Deploy", "a" * 40, created_at="2026-11-16T02:00:04Z"),
+            _run(8, "Deploy v2.4.0", "e" * 40, created_at="2026-11-16T01:00:00Z"),
+        ],
+        None,  # 실행 목록 읽기도 실패
+    ],
+)
+def test_actions_dispatch_timeout_without_run_keeps_timeout(runs) -> None:
+    """(b) 들어간 실행을 못 찾으면 지금처럼 timeout 오류. 저절로 다시 보내지 않는다."""
+    posted: list[dict[str, Any]] = []
+    tool = GithubActionsTool(
+        ACTIONS,
+        APP,
+        transport=httpx.MockTransport(_actions_timeout_handler(posted, runs)),
+        sleep=_no_sleep,
+    )
+    with pytest.raises(ToolConnectionError) as e:
+        asyncio.run(tool.redeploy("v2.4.0"))
+    assert e.value.code == "timeout"
+    assert len(posted) == 1
+    assert INSTALL_TOKEN not in str(e.value)
+
+
+JOB_URL = f"{JENKINS}/job/shop-deploy/"
+# Jenkins 서버 시각 (조회 응답의 Date 머리글) = 2026-11-16T02:00:10Z
+JENKINS_NOW_MS = 1_794_794_410_000
+
+
+def _queue_item(item_id: int, version: str, at_ms: int, *, job: str = JOB_URL) -> dict:
+    return {
+        "id": item_id,
+        "inQueueSince": at_ms,
+        "task": {"url": job},
+        "actions": [{"parameters": [{"name": "VERSION", "value": version}]}],
+    }
+
+
+def _jenkins_build(number: int, version: str, at_ms: int) -> dict:
+    return {
+        "number": number,
+        "timestamp": at_ms,
+        "url": f"{JOB_URL}{number}/",
+        "actions": [{"parameters": [{"name": "VERSION", "value": version}]}],
+    }
+
+
+def _jenkins_timeout_handler(
+    posted: list[httpx.Request], queue: list[dict] | None, builds: list[dict] | None
+) -> Any:
+    date = {"Date": "Mon, 16 Nov 2026 02:00:10 GMT"}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path.endswith("/buildWithParameters"):
+            posted.append(req)
+            raise httpx.ReadTimeout("queue timed out", request=req)
+        if path == "/queue/api/json":
+            if queue is None:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"items": queue}, headers=date)
+        if path == "/job/shop-deploy/api/json":
+            if builds is None:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"builds": builds}, headers=date)
+        raise AssertionError(path)
+
+    return handler
+
+
+def test_jenkins_dispatch_timeout_uses_queued_item() -> None:
+    """(a) Jenkins: POST가 시간 초과여도 같은 버전이 대기열에 들어갔으면 그 항목을 쓴다."""
+    posted: list[httpx.Request] = []
+    queue = [
+        _queue_item(60, "v2.5.0", JENKINS_NOW_MS - 500),  # 다른 버전
+        _queue_item(61, "v2.4.0", JENKINS_NOW_MS - 500, job=f"{JENKINS}/job/other/"),  # 다른 작업
+        _queue_item(58, "v2.4.0", JENKINS_NOW_MS - 500),  # 우리 것
+        _queue_item(50, "v2.4.0", JENKINS_NOW_MS - 3_600_000),  # 한 시간 전부터 대기
+    ]
+    tool = JenkinsTool(
+        JENKINS_CONN,
+        transport=httpx.MockTransport(_jenkins_timeout_handler(posted, queue, [])),
+        sleep=_no_sleep,
+    )
+
+    ref = asyncio.run(tool.redeploy("v2.4.0"))
+    assert len(posted) == 1
+    assert (ref.tool, ref.run_id, ref.url) == ("jenkins", "queue-58", f"{JENKINS}/queue/item/58/")
+
+
+def test_jenkins_dispatch_timeout_uses_started_build() -> None:
+    """(a) Jenkins: 대기열을 이미 떠나 빌드가 시작됐으면 그 빌드를 쓴다."""
+    posted: list[httpx.Request] = []
+    builds = [
+        _jenkins_build(44, "v2.5.0", JENKINS_NOW_MS - 400),  # 다른 버전
+        _jenkins_build(43, "v2.4.0", JENKINS_NOW_MS - 300),  # 우리 것
+        _jenkins_build(42, "v2.4.0", JENKINS_NOW_MS - 3_600_000),  # 예전 배포
+    ]
+    tool = JenkinsTool(
+        JENKINS_CONN,
+        transport=httpx.MockTransport(_jenkins_timeout_handler(posted, [], builds)),
+        sleep=_no_sleep,
+    )
+
+    ref = asyncio.run(tool.redeploy("v2.4.0"))
+    assert len(posted) == 1
+    assert (ref.tool, ref.run_id, ref.url) == ("jenkins", "43", f"{JOB_URL}43/")
+
+
+@pytest.mark.parametrize(
+    ("queue", "builds"),
+    [
+        ([], []),
+        (
+            [_queue_item(60, "v2.5.0", JENKINS_NOW_MS - 500)],
+            [_jenkins_build(42, "v2.4.0", JENKINS_NOW_MS - 3_600_000)],
+        ),
+        (None, None),  # 조회도 실패
+    ],
+)
+def test_jenkins_dispatch_timeout_without_build_keeps_timeout(queue, builds) -> None:
+    """(b) Jenkins: 못 찾으면 지금처럼 timeout 오류. 저절로 다시 보내지 않는다."""
+    posted: list[httpx.Request] = []
+    tool = JenkinsTool(
+        JENKINS_CONN,
+        transport=httpx.MockTransport(_jenkins_timeout_handler(posted, queue, builds)),
+        sleep=_no_sleep,
+    )
+    with pytest.raises(ToolConnectionError) as e:
+        asyncio.run(tool.redeploy("v2.4.0"))
+    assert e.value.code == "timeout"
+    assert len(posted) == 1
+    assert JENKINS_TOKEN not in str(e.value)
+
+
+def test_jenkins_normal_redeploy_makes_no_lookup() -> None:
+    """(c) 정상 응답이면 지금처럼 POST 한 번만 하고 대기열 항목을 돌려준다."""
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        return httpx.Response(201, headers={"Location": f"{JENKINS}/queue/item/57/"})
+
+    tool = JenkinsTool(JENKINS_CONN, transport=httpx.MockTransport(handler), sleep=_no_sleep)
+    ref = asyncio.run(tool.redeploy("v2.4.0"))
+    assert [r.method for r in seen] == ["POST"]
+    assert ref.run_id == "queue-57"
+
+
+# ---------- 시간 초과 뒤 확인의 한도·이상한 응답 (원래 timeout 오류를 바꾸지 않는다) ----------
+
+
+def _gh_handler(
+    posted: list[dict[str, Any]],
+    runs_body: Any,
+    *,
+    date: bool = True,
+    run_calls: list[httpx.Request] | None = None,
+) -> Any:
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path.endswith("/access_tokens"):
+            return _token_response()
+        if path == "/repos/acme/shop":
+            headers = {"Date": "Mon, 16 Nov 2026 02:00:00 GMT"} if date else {}
+            return httpx.Response(200, json={"default_branch": "release"}, headers=headers)
+        if path.endswith("/dispatches"):
+            posted.append(json.loads(req.content))
+            raise httpx.ReadTimeout("dispatch timed out", request=req)
+        if path.endswith("/runs"):
+            if run_calls is not None:
+                run_calls.append(req)
+            return httpx.Response(200, json=runs_body)
+        raise AssertionError(path)
+
+    return handler
+
+
+def _expect_timeout(tool: Any) -> None:
+    with pytest.raises(ToolConnectionError) as e:
+        asyncio.run(tool.redeploy("v2.4.0"))
+    assert e.value.code == "timeout"
+
+
+def test_actions_timeout_without_date_header_skips_lookup() -> None:
+    """GitHub 시각(`Date`)이 없으면 기준 시각을 모른다: 찾지 않고 원래 timeout 오류."""
+    posted: list[dict[str, Any]] = []
+    run_calls: list[httpx.Request] = []
+    landed = {
+        "workflow_runs": [
+            _run(9, "Deploy v2.4.0", "d" * 40, created_at="2026-11-16T02:00:03Z"),
+        ]
+    }
+    handler = _gh_handler(posted, landed, date=False, run_calls=run_calls)
+    tool = GithubActionsTool(ACTIONS, APP, transport=httpx.MockTransport(handler), sleep=_no_sleep)
+    _expect_timeout(tool)
+    assert len(posted) == 1 and run_calls == []
+
+
+def test_jenkins_timeout_without_date_header_is_not_found() -> None:
+    """Jenkins 대기열 응답에 `Date`가 없으면 기준 시각을 모른다: 원래 timeout 오류."""
+    posted: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path.endswith("/buildWithParameters"):
+            posted.append(req)
+            raise httpx.ReadTimeout("queue timed out", request=req)
+        if path == "/queue/api/json":
+            # 이 서버 시계로는 방금 들어온 항목이다 (예전처럼 이 서버 시계로 바꿔 보면 찾아 버린다)
+            item = _queue_item(58, "v2.4.0", int(time.time() * 1000))
+            return httpx.Response(200, json={"items": [item]})
+        if path == "/job/shop-deploy/api/json":
+            return httpx.Response(200, json={"builds": []})
+        raise AssertionError(path)
+
+    tool = JenkinsTool(JENKINS_CONN, transport=httpx.MockTransport(handler), sleep=_no_sleep)
+    _expect_timeout(tool)
+    assert len(posted) == 1
+
+
+@pytest.mark.parametrize(
+    "runs_body",
+    [
+        {"workflow_runs": 5},
+        {"workflow_runs": "x"},
+        {"workflow_runs": [{"id": 9, "created_at": 7, "display_title": ["v2.4.0"]}]},
+        [1, 2],
+    ],
+)
+def test_actions_timeout_odd_runs_shape_keeps_timeout(runs_body) -> None:
+    posted: list[dict[str, Any]] = []
+    handler = _gh_handler(posted, runs_body)
+    tool = GithubActionsTool(ACTIONS, APP, transport=httpx.MockTransport(handler), sleep=_no_sleep)
+    _expect_timeout(tool)
+    assert len(posted) == 1
+
+
+@pytest.mark.parametrize(
+    ("queue", "builds"),
+    [
+        (5, "x"),
+        ([{"id": 58, "inQueueSince": JENKINS_NOW_MS, "task": "x", "actions": 5}], 3),
+        (
+            [{"id": 58, "inQueueSince": JENKINS_NOW_MS, "task": {"url": 9}, "actions": [5]}],
+            [{"number": 43, "timestamp": JENKINS_NOW_MS, "actions": [{"parameters": 7}]}],
+        ),
+        (
+            [{"id": 58, "inQueueSince": JENKINS_NOW_MS, "actions": [{"parameters": [3, None]}]}],
+            [{"number": 43, "timestamp": "now", "actions": {"parameters": []}}],
+        ),
+    ],
+)
+def test_jenkins_timeout_odd_shape_keeps_timeout(queue, builds) -> None:
+    posted: list[httpx.Request] = []
+    tool = JenkinsTool(
+        JENKINS_CONN,
+        transport=httpx.MockTransport(_jenkins_timeout_handler(posted, queue, builds)),
+        sleep=_no_sleep,
+    )
+    _expect_timeout(tool)
+    assert len(posted) == 1
+
+
+async def _slow_sleep(_: float) -> None:
+    await asyncio.sleep(10)
+
+
+def test_timeout_lookup_is_bounded(monkeypatch) -> None:
+    """확인 전체에 한도를 둔다: 넘으면 원래 timeout 오류 (GitHub·Jenkins 모두)."""
+    monkeypatch.setattr(deploy_tools, "DISPATCH_RECHECK_LIMIT", 0.05)
+    posted: list[Any] = []
+    gh = GithubActionsTool(
+        ACTIONS,
+        APP,
+        transport=httpx.MockTransport(_gh_handler(posted, {"workflow_runs": []})),
+        sleep=_slow_sleep,
+    )
+    jenkins = JenkinsTool(
+        JENKINS_CONN,
+        transport=httpx.MockTransport(_jenkins_timeout_handler(posted, [], [])),
+        sleep=_slow_sleep,
+    )
+    started = time.monotonic()
+    _expect_timeout(gh)
+    _expect_timeout(jenkins)
+    assert len(posted) == 2
+    assert time.monotonic() - started < 5
