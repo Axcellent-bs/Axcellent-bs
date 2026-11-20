@@ -7,7 +7,11 @@
 
 - `POST /api/dashboard/office-room`: 단톡방에서 말을 보낸 화면이 보낼 때마다 올린다.
   사람 토큰이 필요하다. 같은 부서·같은 대화를 다시 올리면 `updated_at`만 바뀐다
-  (보낸 사람은 처음 올린 사람 그대로).
+  (보낸 사람·건 사람은 처음 올린 사람 그대로).
+  11/20: 처음 올릴 때 건 사람의 사람 토큰 이름(`owner_who`)을 같이 남긴다.
+  중계 부서 8곳은 그 대화가 올리는 사람 것인지 부서 대화 창구로 먼저 확인한다
+  (아니면 403 NOT_THREAD_OWNER, 부서가 응답하지 않으면 503).
+  단톡방 대화의 상세는 로그인한 누구나 원문을 읽는다(`chat_read`, 건 사람 이름으로 묻는다)
 - `GET /api/dashboard/office-room?hours=&room=`: 최근 `hours`시간(기본 24, 최대 168) 안에
   말이 오간 대화. 최근에 말이 오간 것이 먼저다(최대 200줄). `room`을 주면 그 방 대화만 준다.
   읽기는 다른 화면 읽기처럼 열려 있다. 이 읽기는 부서 AI를 부르지 않아 공통 로그에 줄이
@@ -37,7 +41,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from ax_dashboard_api import chat_remove
-from ax_dashboard_api.auth import require_human
+from ax_dashboard_api.auth import human_from_authorization, require_human
 from ax_dashboard_api.envelope import ApiError, ok
 
 DB_ENV = "AX_OFFICE_ROOM_DB"
@@ -85,7 +89,17 @@ _LATE_COLUMNS = {
     "room_id": f"TEXT NOT NULL DEFAULT '{ALL_ROOM}'",
     "removed_at": "TEXT",
     "removed_by": "TEXT",
+    # 11/20: 대화를 건 사람의 사람 토큰 이름 (부서 서버가 그 대화에 저장한 who와 같다).
+    # 단톡방 대화를 다른 계정이 원문으로 읽을 때 부서에 이 이름으로 묻는다(`read_who`).
+    # 예전 줄은 비어 있다(채우지 않음: from_id는 화면 계정 id라 부서가 저장한 who를 확실히 모른다)
+    "owner_who": "TEXT",
 }
+# 원문을 읽을 때 dashboard-api가 부서 대화 창구(A2A)로 중계하는 부서.
+# 단톡방에 처음 올릴 때 그 대화가 올리는 사람 것인지 이 창구로 확인한다.
+# hr·safety·archive는 부서 서버가 HTTP로 직접 받아 room_id로 정한다
+RELAY_AGENTS = frozenset({"marketing", "planning", "finance", "orchestrator", "data", "infra",
+                          "dev", "support"})  # fmt: skip
+NOT_OWNER_TEXT = "내가 건 대화만 단톡방에 올릴 수 있어요"
 _SHOWN = "removed_at IS NULL"
 
 
@@ -119,14 +133,24 @@ class OfficeRoomStore:
                     self._conn.execute(f"ALTER TABLE office_threads ADD COLUMN {name} {spec}")
             self._conn.execute(_ROOM_INDEX)
 
-    def touch(self, body: OfficeThreadBody, now: datetime) -> dict[str, Any]:
-        """처음이면 넣고, 있으면 마지막 시각만 바꾼다(보낸 사람·방은 처음 그대로)."""
+    def get(self, agent: str, thread_id: str) -> dict[str, Any] | None:
+        """그 부서·대화 줄 (숨긴 줄 포함). 없으면 None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM office_threads WHERE agent = ? AND thread_id = ?",
+                (agent, thread_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def touch(
+        self, body: OfficeThreadBody, now: datetime, owner_who: str | None = None
+    ) -> dict[str, Any]:
+        """처음이면 넣고, 있으면 마지막 시각만 바꾼다(보낸 사람·방·건 사람은 처음 그대로)."""
         at = now.isoformat()
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO office_threads"
-                " (agent, thread_id, from_id, from_name, created_at, updated_at, room_id)"
-                " VALUES (?,?,?,?,?,?,?)"
+                "INSERT INTO office_threads (agent, thread_id, from_id, from_name, created_at,"
+                " updated_at, room_id, owner_who) VALUES (?,?,?,?,?,?,?,?)"
                 " ON CONFLICT (agent, thread_id) DO UPDATE SET updated_at = excluded.updated_at",
                 (
                     body.agent,
@@ -136,6 +160,7 @@ class OfficeRoomStore:
                     at,
                     at,
                     body.room_id,
+                    owner_who,
                 ),
             )
             row = self._conn.execute(
@@ -211,13 +236,55 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def shared_owner(agent: str, thread_id: str) -> str | None:
+    """단톡방에 올라온(숨기지 않은) 대화를 건 사람. 1:1 대화·숨긴 줄·예전 줄(이름 없음)이면 None."""
+    row = get_store().get(agent, thread_id)
+    if row is None or row.get("removed_at") or not row.get("owner_who"):
+        return None
+    return str(row["owner_who"])
+
+
+def read_who(agent: str, thread_id: str, who: str) -> str:
+    """원문을 부서에 물을 때 넘길 who: 단톡방 대화면 건 사람, 아니면 요청한 사람 그대로.
+
+    읽기(상세)에만 쓴다. 이어 쓰기·끝내기·지우기는 요청한 사람 그대로라
+    부서의 본인 검사가 막는다."""
+    return shared_owner(agent, thread_id) or who
+
+
 # 쓰기(POST)는 사람 토큰, 읽기는 열려 있다
 router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human)])
 
 
+async def _check_owner(agent: str, thread_id: str, request: Request, who: str) -> None:
+    """처음 올리는 대화가 올리는 사람 것인지 부서 대화 창구로 확인한다 (남의 1:1 대화 번호로
+    원문을 여는 길을 막는다). 본인 것이 아니면 403, 부서가 응답하지 않으면 503."""
+    from ax_dashboard_api import chat_read
+
+    try:
+        thread = await chat_read.get_thread(agent, thread_id, who,
+                                            request.headers.get("authorization"))  # fmt: skip
+    except ApiError as exc:
+        if exc.status_code in (403, 404):
+            raise ApiError(403, "NOT_THREAD_OWNER", NOT_OWNER_TEXT) from None
+        raise ApiError(503, "UPSTREAM_UNAVAILABLE", f"부서 대화를 확인하지 못했어요 ({agent})"
+                       ) from None  # fmt: skip
+    except Exception as exc:  # noqa: BLE001 - 연결 실패 등: 넣지 않고 다시 시도하게 한다
+        why = f"부서 대화를 확인하지 못했어요 ({type(exc).__name__})"
+        raise ApiError(503, "UPSTREAM_UNAVAILABLE", why) from None
+    if not isinstance(thread, dict) or not thread or thread.get("restricted") is not False:
+        raise ApiError(403, "NOT_THREAD_OWNER", NOT_OWNER_TEXT)
+
+
 @router.post("/office-room", status_code=201)
-def touch_office_thread(body: OfficeThreadBody) -> dict[str, Any]:
-    return ok(get_store().touch(body, _now()))
+async def touch_office_thread(body: OfficeThreadBody, request: Request) -> dict[str, Any]:
+    """처음 올리면 건 사람(사람 토큰 이름)을 같이 남긴다. 중계 부서 8곳은 그 대화가 올리는 사람
+    것인지 먼저 확인한다. 이미 있는 줄은 마지막 시각만 바꾼다."""
+    store = get_store()
+    who = human_from_authorization(request.headers.get("authorization"))
+    if store.get(body.agent, body.thread_id) is None and body.agent in RELAY_AGENTS:
+        await _check_owner(body.agent, body.thread_id, request, who)
+    return ok(store.touch(body, _now(), owner_who=who))
 
 
 @router.get("/office-room")

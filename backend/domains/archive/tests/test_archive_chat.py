@@ -82,3 +82,39 @@ def test_no_llm_is_refused(svc: Services) -> None:
 def test_facts_count_confirmed_and_candidates_apart(svc: Services) -> None:
     out = asyncio.run(facts.collect(svc))
     assert "confirmed_by_kind" in out and isinstance(out["waiting_candidates"], int)
+
+
+# ---- 단톡방(room_id)에서 만든 대화는 누구나 원문 (11/20) ----
+
+URL = "/api/archive/chat"
+
+
+def test_room_thread_is_readable_by_others_but_writes_stay_owner_only(client: TestClient) -> None:
+    th = client.post(URL, json={"message": "결정 기록?", "room_id": "ctx_inc_1"},
+                     headers=A).json()["data"]  # fmt: skip
+    assert th["room_id"] == "ctx_inc_1" and th["shared"] is True and th["owner"] == "gaon"
+    other = client.get(f"{URL}/{th['id']}", headers=B).json()["data"]
+    assert other["restricted"] is False and len(other["messages"]) == 2
+    assert other["shared"] is True and other["owner"] == "gaon"
+    assert post(client, "끼어들기", headers=B, thread_id=th["id"]).status_code == 403
+    assert client.post(f"{URL}/{th['id']}/remove", headers=B).status_code == 403
+    assert client.post(f"{URL}/{th['id']}/remove", headers=A).status_code == 200
+    assert client.get(f"{URL}/{th['id']}", headers=B).status_code == 404  # 숨긴 대화는 공유 안 함
+
+
+def test_one_to_one_thread_is_still_hidden_and_room_id_on_reply_is_ignored(
+    client: TestClient,
+) -> None:
+    th = post(client, "1:1 질문").json()["data"]
+    assert th["room_id"] is None and th["shared"] is False and th["owner"] is None
+    again = client.post(URL, json={"message": "더", "thread_id": th["id"], "room_id": "all"},
+                        headers=A).json()["data"]  # fmt: skip
+    assert again["room_id"] is None
+    other = client.get(f"{URL}/{th['id']}", headers=B).json()["data"]
+    assert other["restricted"] is True and other["messages"] == [] and other["shared"] is False
+
+
+def test_room_id_must_be_1_to_64_chars(client: TestClient) -> None:
+    for bad in ("", "x" * 65, 3):
+        assert client.post(URL, json={"message": "안녕", "room_id": bad},
+                           headers=A).status_code == 400  # fmt: skip

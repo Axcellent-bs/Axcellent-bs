@@ -246,3 +246,40 @@ async def test_facts_count_teams_from_confirmed_records_without_an_org_chart(
     }
     assert dec["teams"] == {"개발팀": 2, "기획팀": 1}
     assert "member_id" not in str(out)  # 직원 번호는 사실에 넣지 않는다
+
+
+# ---- 단톡방(room_id)에서 만든 대화는 누구나 원문 (11/20) ----
+
+
+def test_room_thread_is_readable_by_others_but_writes_stay_owner_only(client: TestClient) -> None:
+    th = client.post("/api/hr/chat", json={"message": "팀 인원?", "room_id": "all"},
+                     headers=A).json()["data"]  # fmt: skip
+    assert th["room_id"] == "all" and th["shared"] is True and th["owner"] == "gaon"
+    other = client.get(f"/api/hr/chat/{th['id']}", headers=B).json()["data"]
+    assert other["restricted"] is False and len(other["messages"]) == 2
+    assert other["shared"] is True and other["owner"] == "gaon"
+    # 다른 계정의 이어 쓰기·지우기는 그대로 막힌다
+    assert post(client, "끼어들기", headers=B, thread_id=th["id"]).status_code == 403
+    assert client.post(f"/api/hr/chat/{th['id']}/remove", headers=B).status_code == 403
+    # 지우면 숨기고, 숨긴 대화는 공유하지 않는다
+    assert client.post(f"/api/hr/chat/{th['id']}/remove", headers=A).status_code == 200
+    assert client.get(f"/api/hr/chat/{th['id']}", headers=B).status_code == 404
+
+
+def test_one_to_one_thread_is_still_hidden_and_room_id_on_reply_is_ignored(
+    client: TestClient,
+) -> None:
+    th = post(client, "1:1 질문").json()["data"]
+    assert th["room_id"] is None and th["shared"] is False and th["owner"] is None
+    # 이어 쓰기에서 준 room_id는 무시 (대화가 단톡방으로 바뀌지 않는다)
+    body = {"message": "더", "thread_id": th["id"], "room_id": "all"}
+    again = client.post("/api/hr/chat", json=body, headers=A).json()["data"]
+    assert again["room_id"] is None
+    other = client.get(f"/api/hr/chat/{th['id']}", headers=B).json()["data"]
+    assert other["restricted"] is True and other["messages"] == [] and other["shared"] is False
+
+
+def test_room_id_must_be_1_to_64_chars(client: TestClient) -> None:
+    for bad in ("", "x" * 65, 3):
+        res = client.post("/api/hr/chat", json={"message": "안녕", "room_id": bad}, headers=A)
+        assert res.status_code == 400

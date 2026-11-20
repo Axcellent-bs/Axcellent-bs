@@ -31,7 +31,7 @@ from typing import Annotated, Any, Literal
 from fastapi import FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from ax_agent_template import human_auth
 from ax_agent_template.config import is_mock, refuse_mock_outside_tests, set_agent_name
@@ -83,6 +83,9 @@ class ChatSendBody(BaseModel):
 
     thread_id: str | None = None
     message: str
+    # 11/20: 단톡방(전체 대화방 "all"·이슈 방 context_id)에서 보낼 때만 화면이 넣는다.
+    # 새 대화를 만들 때만 저장(이어 쓰기에서는 무시). 단톡방 대화는 누구나 원문을 읽는다
+    room_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 def _ok(data: Any) -> dict[str, Any]:
@@ -443,7 +446,7 @@ def create_app(
     ) -> dict | JSONResponse:
         try:
             who = _who(authorization, True)
-            return _ok(chat.send(who, body.thread_id, body.message))
+            return _ok(chat.send(who, body.thread_id, body.message, body.room_id))
         except PermissionError as exc:
             return _error(403, "HUMAN_ONLY", str(exc))
         except ChatRefused as exc:

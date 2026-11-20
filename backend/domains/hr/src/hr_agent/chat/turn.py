@@ -53,12 +53,14 @@ def _title(message: str) -> str:
 
 
 async def turn(
-    svc: Services, thread_id: str | None, message: str, who: str | None
+    svc: Services, thread_id: str | None, message: str, who: str | None,
+    room_id: str | None = None,
 ) -> dict[str, Any]:
+    """`room_id`(단톡방)는 새 대화를 만들 때만 저장한다. 이어 쓰기에서는 무시한다."""
     if svc.llm is None:
         raise ChatRefused(409, "LLM_NOT_CONFIGURED", "LLM 설정이 없다 (HR_LLM_*·LLM_*)")
     if thread_id is None:
-        th = threads.create(svc, _title(message), who)
+        th = threads.create(svc, _title(message), who, room_id)
     else:
         th = threads.get(svc, thread_id)
         if th is None:

@@ -21,10 +21,18 @@ def _body(**extra) -> dict:
     return {"agent": "dev", "thread_id": "th_1", "from_id": "acc_a", "from_name": "재현", **extra}
 
 
+async def _own_thread(agent: str, thread_id: str, who: str, authorization: object) -> dict:
+    """부서 대화 창구 자리: 올리는 사람 본인 대화라고 답한다 (본인 확인은 아래 따로 시험)."""
+    return {"id": thread_id, "who": who, "restricted": False, "messages": []}
+
+
 @pytest.fixture(autouse=True)
 def _env(monkeypatch: pytest.MonkeyPatch):
+    from ax_dashboard_api import chat_read
+
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
     monkeypatch.delenv(office_room.DB_ENV, raising=False)
+    monkeypatch.setattr(chat_read, "get_thread", _own_thread)
     office_room.reset_store()
     yield
     office_room.reset_store()

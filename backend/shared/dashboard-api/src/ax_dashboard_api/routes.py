@@ -60,6 +60,7 @@ from ax_contracts.schemas.marketing_storyboard import (
 from ax_contracts.schemas.record import Card
 from ax_dashboard_api import (
     archive_client,
+    chat_read,
     chat_remove,
     claim_mapping,
     data_chat,
@@ -1402,11 +1403,8 @@ async def marketing_chat_list(request: Request) -> dict:
 
 @router.get("/marketing-chat/{thread_id}")
 async def marketing_chat_get(thread_id: str, request: Request) -> dict:
-    who = human_from_authorization(request.headers.get("authorization"))
-    out = await marketing_client.chat_call(
-        "marketing_chat_get", {"who": who, "thread_id": thread_id}
-    )
-    return ok(out["thread"])
+    """단톡방 대화면 누구나 원문(`shared`·`owner`), 1:1 대화는 본인만 (chat_read)."""
+    return ok(await chat_read.read("marketing", thread_id, request.headers.get("authorization")))
 
 
 @router.post("/marketing-chat")
@@ -1445,9 +1443,7 @@ async def planning_chat_list(request: Request) -> dict:
 
 @router.get("/planning-chat/{thread_id}")
 async def planning_chat_get(thread_id: str, request: Request) -> dict:
-    who = human_from_authorization(request.headers.get("authorization"))
-    out = await planning_chat.call("planning_chat_get", {"who": who, "thread_id": thread_id})
-    return ok(out["thread"])
+    return ok(await chat_read.read("planning", thread_id, request.headers.get("authorization")))
 
 
 @router.post("/planning-chat")
@@ -1485,9 +1481,7 @@ async def finance_chat_list(request: Request) -> dict:
 
 @router.get("/finance-chat/{thread_id}")
 async def finance_chat_get(thread_id: str, request: Request) -> dict:
-    who = human_from_authorization(request.headers.get("authorization"))
-    out = await finance_chat.call("finance_chat_get", {"who": who, "thread_id": thread_id})
-    return ok(out["thread"])
+    return ok(await chat_read.read("finance", thread_id, request.headers.get("authorization")))
 
 
 @router.post("/finance-chat")
@@ -1525,10 +1519,8 @@ async def orchestrator_chat_list(request: Request) -> dict:
 
 @router.get("/orchestrator-chat/{thread_id}")
 async def orchestrator_chat_get(thread_id: str, request: Request) -> dict:
-    who = human_from_authorization(request.headers.get("authorization"))
-    payload = {"who": who, "thread_id": thread_id}
-    out = await orchestrator_chat.call("orchestrator_chat_get", payload)
-    return ok(out["thread"])
+    auth = request.headers.get("authorization")
+    return ok(await chat_read.read("orchestrator", thread_id, auth))
 
 
 @router.post("/orchestrator-chat")
@@ -1567,9 +1559,7 @@ async def data_chat_list(request: Request) -> dict:
 
 @router.get("/data-chat/{thread_id}")
 async def data_chat_get(thread_id: str, request: Request) -> dict:
-    who = human_from_authorization(request.headers.get("authorization"))
-    out = await data_chat.call("data_chat_get", {"who": who, "thread_id": thread_id})
-    return ok(out["thread"])
+    return ok(await chat_read.read("data", thread_id, request.headers.get("authorization")))
 
 
 @router.post("/data-chat")
@@ -1607,9 +1597,7 @@ async def infra_chat_list(request: Request) -> dict:
 
 @router.get("/infra-chat/{thread_id}")
 async def infra_chat_get(thread_id: str, request: Request) -> dict:
-    who = human_from_authorization(request.headers.get("authorization"))
-    out = await infra_chat.call("infra_chat_get", {"who": who, "thread_id": thread_id})
-    return ok(out["thread"])
+    return ok(await chat_read.read("infra", thread_id, request.headers.get("authorization")))
 
 
 @router.post("/infra-chat")
@@ -1648,9 +1636,7 @@ async def dev_chat_list(request: Request) -> dict:
 
 @router.get("/dev-chat/{thread_id}")
 async def dev_chat_get(thread_id: str, request: Request) -> dict:
-    who = human_from_authorization(request.headers.get("authorization"))
-    out = await dev_chat.call("dev_chat_get", {"who": who, "thread_id": thread_id})
-    return ok(out["thread"])
+    return ok(await chat_read.read("dev", thread_id, request.headers.get("authorization")))
 
 
 @router.post("/dev-chat")
@@ -2341,11 +2327,7 @@ async def support_chat_list(request: Request) -> dict:
 async def support_chat_get(thread_id: str, request: Request) -> dict:
     if is_mock():
         raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "직접 대화는 실제 모드에서만 된다")
-    return ok(
-        await support_client.call(
-            "support_chat_get", {"thread_id": thread_id, **_chat_viewer(request)}
-        )
-    )
+    return ok(await chat_read.read("support", thread_id, request.headers.get("authorization")))
 
 
 @router.post("/support-chat")
