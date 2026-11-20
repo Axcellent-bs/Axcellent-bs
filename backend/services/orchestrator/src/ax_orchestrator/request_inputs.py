@@ -86,7 +86,7 @@ HEADCOUNT_ASK = "몇 월의 팀별 인원을 알려 드릴까요? 예: '이번 �
 SETTLEMENT_ASK = "판매자 정산은 주 단위로 볼 수 있어요. 어느 주로 볼까요? 예: '이번 주', '지난주'"
 
 
-def sales_period(text: str, now: datetime) -> Fill:
+def sales_period(text: str, now: datetime, request_id: str | None = None) -> Fill:
     """매출 분석: 오늘·최근 7일·최근 30일만 지원한다. 기간 말이 없으면 부서 기본값(7일)."""
     unsupported = (
         r"어제|그제|그저께|지난\s*달|지난달|작년|올해|분기|지난\s*주|지난주|(?<!\d)\d{1,2}\s*월"
@@ -102,7 +102,7 @@ def sales_period(text: str, now: datetime) -> Fill:
     return Fill()
 
 
-def closing_period(text: str, now: datetime) -> Fill:
+def closing_period(text: str, now: datetime, request_id: str | None = None) -> Fill:
     """손익 정리: 일·주·월 단위와 그 기준 날짜. 말이 없으면 오늘 하루."""
     today = _today(now)
     if _has(text, r"지난\s*달|지난달|전월|저번\s*달"):
@@ -132,8 +132,8 @@ def closing_period(text: str, now: datetime) -> Fill:
     return Fill({"period": "day", "date": today.isoformat()}, note="오늘 기준")
 
 
-def _month_rule(ask: str, *, upcoming: bool) -> Callable[[str, datetime], Fill]:
-    def rule(text: str, now: datetime) -> Fill:
+def _month_rule(ask: str, *, upcoming: bool) -> Callable[..., Fill]:
+    def rule(text: str, now: datetime, request_id: str | None = None) -> Fill:
         found = _month_of(text, _today(now), upcoming=upcoming)
         if found is None:
             return Fill(ask=ask)
@@ -143,7 +143,7 @@ def _month_rule(ask: str, *, upcoming: bool) -> Callable[[str, datetime], Fill]:
     return rule
 
 
-def settlement_week(text: str, now: datetime) -> Fill:
+def settlement_week(text: str, now: datetime, request_id: str | None = None) -> Fill:
     """판매자 정산: ISO 주(`YYYY-Www`). 주가 없으면 부서 기본 주. 달 단위 말은 지원하지 않는다."""
     today = _today(now)
     if _has(text, r"지난\s*달|지난달|이번\s*달|이번달|월간|월별|(?<!\d)\d{1,2}\s*월"):
@@ -155,7 +155,7 @@ def settlement_week(text: str, now: datetime) -> Fill:
     return Fill()
 
 
-def anomaly_window(text: str, now: datetime) -> Fill:
+def anomaly_window(text: str, now: datetime, request_id: str | None = None) -> Fill:
     """지표 이상 점검: 시간대가 있는 시각 구간. 말이 없으면 최근 24시간."""
     end = now if now.tzinfo else now.replace(tzinfo=KST)
     end = end.astimezone(KST).replace(microsecond=0)
@@ -175,17 +175,50 @@ def anomaly_window(text: str, now: datetime) -> Fill:
     return Fill({"window_from": start.isoformat(), "window_to": stop.isoformat()}, note=note)
 
 
-def customer_text(text: str, now: datetime) -> Fill:
+def customer_text(text: str, now: datetime, request_id: str | None = None) -> Fill:
     """고객 질문 그대로(고객층 질문 `text`). 문장은 데이터로만 쓰이며 길이만 자른다."""
     return Fill({"text": text.strip()[:MAX_SEGMENT_TEXT]})
 
 
-def search_query(text: str, now: datetime) -> Fill:
+def search_query(text: str, now: datetime, request_id: str | None = None) -> Fill:
     """과거 기록 찾기 `query`: 고객 문장 그대로(길이만 자른다)."""
     return Fill({"query": text.strip()[:MAX_QUERY]})
 
 
-RULES: dict[str, Callable[[str, datetime], Fill]] = {
+NOTICE_ASK = "어떤 공지인가요? 장애 안내, 복구 안내, 신상품 안내 중에서 알려 주세요."
+MAX_TICKET_TITLE = 100
+MAX_TICKET_EVIDENCE = 400
+
+
+def notice_kind(text: str, now: datetime, request_id: str | None = None) -> Fill:
+    """공지 초안: 문장의 키워드로 공지 종류를 정한다. 시각 같은 세부 값은 비워 보낸다(고정 문안)."""
+    if _has(text, r"복구|정상화|복귀|해결|재개"):
+        kind, note = "incident_resolved", "복구 안내 공지로 작성"
+    elif _has(text, r"신상품|신간|신규\s*상품|새\s*상품|상품\s*등록|입고"):
+        kind, note = "product_created", "신상품 안내 공지로 작성"
+    elif _has(text, r"점검|장애|오류|지연|접속|결제\s*불가|중단|먹통"):
+        kind, note = "incident_opened", "장애 안내 공지로 작성"
+    else:
+        return Fill(ask=NOTICE_ASK)
+    return Fill({"kind": kind, "facts": {}}, note=note)
+
+
+def ticket_text(text: str, now: datetime, request_id: str | None = None) -> Fill:
+    """기능 개발 요청: 문장을 제목으로, 근거는 의뢰 번호와 문장 앞부분으로 채운다(길이는 자른다)."""
+    one = re.sub(r"\s+", " ", text).strip()
+    tag = f" {request_id}" if request_id else ""
+    payload: dict[str, Any] = {
+        "title": one[:MAX_TICKET_TITLE],
+        "evidence": f"고객 의뢰{tag}: {one[:MAX_TICKET_EVIDENCE]}",
+    }
+    if request_id:
+        payload["source_ref"] = request_id
+    return Fill(payload)
+
+
+RULES: dict[str, Callable[..., Fill]] = {
+    "notice_kind": notice_kind,
+    "ticket_text": ticket_text,
     "sales_period": sales_period,
     "closing_period": closing_period,
     "month_upcoming": _month_rule(EVENT_ASK, upcoming=True),
@@ -197,9 +230,9 @@ RULES: dict[str, Callable[[str, datetime], Fill]] = {
 }
 
 
-def fill(rule: str, text: str, now: datetime) -> Fill:
+def fill(rule: str, text: str, now: datetime, request_id: str | None = None) -> Fill:
     """규칙 이름으로 입력을 만든다. 모르는 규칙 이름이면 오류(일 목록의 오타를 시험이 잡는다)."""
-    return RULES[rule](text, now)
+    return RULES[rule](text, now, request_id)
 
 
 def check(task: Any, text: str, now: datetime) -> tuple[str | None, list[str]]:

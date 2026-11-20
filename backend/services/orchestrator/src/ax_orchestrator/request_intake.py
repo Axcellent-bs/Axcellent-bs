@@ -156,6 +156,8 @@ class RequestIntake:
         )
         if d.outcome == "task" and d.task is not None:
             ask, notes = request_inputs.check(d.task, text, self._clock())
+            if d.task.note and ask is None:
+                notes = [*notes, d.task.note]
             if (
                 ask is not None
             ):  # 부서가 요구하는 입력을 문장에서 못 찾았다: 부서에 보내지 않고 묻는다
