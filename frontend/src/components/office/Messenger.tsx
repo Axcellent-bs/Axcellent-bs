@@ -76,7 +76,6 @@ export interface HoldProps {
 /** 사람 승인 대기 카드. 결정 경로는 하나: 실제 C 보류는 담당 보류 큐에서만. 총괄 보류 버튼은 목 모드 데모일 때만 */
 function HoldCard({ h, hold }: { h: Extract<ChatItem, { kind: "hold" }>; hold: HoldProps }) {
   const orchHold = !h.link;
-  const replay = h.contextId?.startsWith("replay-");
   const showButtons = !!hold.onDecide && orchHold && !!hold.orchMock;
   const link = hold.decideHref ?? h.link ?? (hold.orchMock ? undefined : h.decideAt ?? "/finance");
   const busy = hold.busyHold === h.id;
@@ -89,8 +88,6 @@ function HoldCard({ h, hold }: { h: Extract<ChatItem, { kind: "hold" }>; hold: H
       <p className="px-3 py-2 text-xs leading-relaxed text-ink-700">{humanizePlanIds(h.detail)}</p>
       {h.state !== "pending" ? (
         <p className="border-t border-ink-100 px-3 py-2 text-xs font-medium text-ink-700">{outcome}</p>
-      ) : replay ? (
-        <p className="border-t border-ink-100 px-3 py-2 text-xs text-ink-500">리플레이에서는 잠시 뒤 자동으로 승인됩니다.</p>
       ) : showButtons ? (
         <>
           <div className="flex border-t border-ink-100">
