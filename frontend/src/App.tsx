@@ -43,8 +43,6 @@ const SellerSettlements = lazy(() => import('@/pages/SellerSettlements'))
 const Orders = lazy(() => import('@/pages/Orders'))
 const ToolConnections = lazy(() => import('@/demo/ToolConnections'))
 const CompanyConnect = lazy(() => import('@/demo/CompanyConnect'))
-const CostPolicyPage = lazy(() => import('@/demo/CostPolicyPage'))
-const SecretKeysPage = lazy(() => import('@/demo/SecretKeysPage'))
 const MembersPage = lazy(() => import('@/demo/MembersPage'))
 const ControlCenter = lazy(() => import('@/control/ControlCenter'))
 
@@ -125,8 +123,8 @@ function Pages() {
           {/* PC·서버 연결은 회원·서버 관리의 탭으로 합쳤다 */}
           <Route path="/system/hosts" element={<Navigate to="/system/members?tab=pcs" replace />} />
           <Route path="/system/members" element={<MembersPage />} />
-          <Route path="/system/policy" element={<CostPolicyPage />} />
-          <Route path="/system/keys" element={<SecretKeysPage />} />
+          <Route path="/system/policy" element={<Navigate to="/system/connect" replace />} />
+          <Route path="/system/keys" element={<Navigate to="/system/connect" replace />} />
           {/* 서비스 고르기는 없앴다(모든 서비스 필수). 예전 주소는 관리자 첫 화면으로 */}
           <Route path="/system/services" element={<Navigate to={ADMIN_HOME} replace />} />
           <Route path="/system/connect" element={<CompanyConnect />} />
