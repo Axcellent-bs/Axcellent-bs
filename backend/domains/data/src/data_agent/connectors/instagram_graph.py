@@ -179,6 +179,25 @@ class InstagramGraph:
 
     # ------------------------------------------------------------ 비즈니스 검색
 
+    async def token_info(self) -> dict[str, Any]:
+        """지금 토큰의 만료 시각 (공식 debug_token, 읽기 전용. 토큰을 바꾸거나 새로 고치지 않는다).
+
+        graph.facebook.com/debug_token?input_token=<토큰>&access_token=<같은 토큰>. 사용자·페이지
+        토큰은 자기 자신을 검사할 수 있다. 돌려주는 값: expires_at(초, 0 = 만료 없음)·
+        data_access_expires_at·is_valid. 토큰 값은 돌려주지 않는다. 호출 1번(하루 상한에 셈)."""
+        payload = await self._get("debug_token", {"input_token": self._token})
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            raise IgError("NO_DATA", "debug_token이 data를 주지 않음")
+
+        def seconds(key: str) -> int | None:
+            value = data.get(key)
+            return value if isinstance(value, int) and value >= 0 else None
+
+        return {"expires_at": seconds("expires_at"),
+                "data_access_expires_at": seconds("data_access_expires_at"),
+                "is_valid": bool(data.get("is_valid"))}  # fmt: skip
+
     async def business_profile(self, username: str) -> dict[str, Any]:
         """프로페셔널 계정 하나의 공개 정보 (이름·팔로워 수·게시물 수). 호출 1번.
 

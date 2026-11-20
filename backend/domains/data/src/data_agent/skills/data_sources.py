@@ -271,6 +271,9 @@ async def list_sources(
 
     out.youtube_chart_failures = chart_failures(env)
     out.fresh_track = _fresh_track(env, now)  # 새 숏츠 추적 (수집기 상태 화면)
+    from data_agent.skills.instagram import token_expiry
+
+    out.instagram_token = token_expiry(env, now)  # 인스타 칸: 만료까지 N일(확인|추정)
     # 기다리는 출처: 출처 목록(수집 계획 후보)에 넣지 않고 따로 보여 준다
     out.pending_sources = [PendingSource(name="광고 데이터", reason=AD_DATA_PENDING)]
     return SourcesResult(out, Evidence(queries=queries, data_summary=out.summary, collected_at=now))

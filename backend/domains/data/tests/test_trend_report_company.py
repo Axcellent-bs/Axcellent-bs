@@ -44,7 +44,8 @@ def _profile(tenant: str, industry: str, seeds: list[str], groups: list[str],
                                catalog_hash=key)  # fmt: skip
 
 
-BOOK = _profile("테스트서점", "출판·교육", ["독서모임", "고양이 그림책"], ["그림책", "에세이"],
+# 어린이 낱말(그림책 등)은 아래 child 테스트에서 따로 본다 (30대 타깃이면 빠진다)
+BOOK = _profile("테스트서점", "출판·교육", ["독서모임", "고양이 에세이"], ["소설", "에세이"],
                 "hash_book")  # fmt: skip
 BEAUTY = _profile("테스트코스메틱", "뷰티", ["수분크림", "선크림"], ["스킨케어"], "hash_beauty")
 # LLM 후보 (업종마다). fake_ghost는 공식 API에 없다 → 버려야 한다
@@ -90,7 +91,7 @@ class Company:
     profile: Any
     favorites: list[str]
     favorites_reason: str | None = None
-    pool: tuple[str, ...] = ("책 추천", "그림책", "독서")
+    pool: tuple[str, ...] = ("책 추천", "시집", "독서")
 
 
 def _gather(company: Company, llm: FakeLLM, graph: FakeGraph, store: ca.AccountStore,
@@ -132,11 +133,11 @@ def env(tmp_path: Path) -> dict[str, str]:
 
 def test_book_company_fills_keywords_format_and_verified_competitors(env: dict[str, str]) -> None:
     store, graph = ca.AccountStore(":memory:"), FakeGraph()
-    resolved, ctx = _resolve(Company(BOOK, ["그림책", "에세이"]), FakeLLM(), graph, store, env)
+    resolved, ctx = _resolve(Company(BOOK, ["소설", "에세이"]), FakeLLM(), graph, store, env)
     b, src = resolved.brief, resolved.brief.sources
     assert b.preset is None  # 의뢰문이 프리셋 낱말과 안 맞음
     assert (b.target_gender, b.target_ages) == ("m", ["30"])
-    assert b.keywords == ["그림책", "에세이", "독서모임", "고양이 그림책", "책 추천"]
+    assert b.keywords == ["소설", "에세이", "독서모임", "고양이 에세이", "책 추천"]
     assert src.keywords == "company" and len(b.keywords) == 5
     assert b.format == "릴스 30초" and src.format == "company"
     assert b.product == "테스트서점 (출판·교육)" and src.product == "company"
@@ -144,8 +145,8 @@ def test_book_company_fills_keywords_format_and_verified_competitors(env: dict[s
     assert b.competitors == ["book_b", "book_a"] and src.competitors == "company"
     assert "fake_ghost" in graph.asked and "bad id!" not in graph.asked
     assert resolved.names == {"book_b": "BOOK_B", "book_a": "BOOK_A"}
-    assert resolved.shopping_category is None  # 업종 이름이 쇼핑 분야와 달라 건너뜀
-    assert any("쇼핑 칸은 건너뜀" in x for x in resolved.limits)
+    assert resolved.shopping_category == "50005542"  # 출판·교육 → 도서 (11/20 짝 표)
+    assert not any("쇼핑 칸은 건너뜀" in x for x in resolved.limits)
     assert set(resolved.accounts) >= {"book_a", "book_b"}
 
 
@@ -206,7 +207,7 @@ def test_segment_insufficient_skips_favorites_with_a_reason(env: dict[str, str])
     store = ca.AccountStore(":memory:")
     company = Company(BOOK, [], favorites_reason="집단 구매자 수가 기준보다 적음")
     resolved, _ = _resolve(company, FakeLLM(), FakeGraph(), store, env)
-    assert resolved.brief.keywords[:2] == ["독서모임", "고양이 그림책"]  # ①을 건너뛰고 ②부터
+    assert resolved.brief.keywords[:2] == ["독서모임", "고양이 에세이"]  # ①을 건너뛰고 ②부터
     assert any("타깃 집단 순위를 건너뜀" in x for x in resolved.limits)
 
 
@@ -252,7 +253,9 @@ def test_format_rule_and_default(env: dict[str, str]) -> None:
                                               encoding="utf-8")  # fmt: skip
     assert trc.format_of("요즘 트렌드 알려줘", env) == "쇼츠 15초"
     assert trc.shopping_category_of("화장품/미용") == "50000002"
-    assert trc.shopping_category_of("뷰티") is None
+    assert trc.shopping_category_of("뷰티") == "50000002"  # 11/20 짝 표
+    assert trc.shopping_category_of("반려동물") is None  # 짝 없음
+    assert trc.shopping_category_of("없는 업종") is None
 
 
 def test_eco_preset_request_does_not_touch_the_company(tmp_path: Path) -> None:

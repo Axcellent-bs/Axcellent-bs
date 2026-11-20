@@ -1297,8 +1297,7 @@ async def _trend_report_company(brief: Any, request_text: str | None,
         store = ca.AccountStore(env.get(ca.DB_ENV) or ca.DEFAULT_DB)
         try:
             tenant, key = ca.tenant_key(p)
-            hit = store.get(tenant, key)
-            if (hit is None or datetime.now(UTC) - hit[0] >= ca.REUSE) and on_note is not None:
+            if store.fresh(tenant, key, datetime.now(UTC)) is None and on_note is not None:
                 got = on_note("회사 경쟁사 찾는 중")
                 if asyncio.iscoroutine(got):
                     await got

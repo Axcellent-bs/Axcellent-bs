@@ -141,7 +141,7 @@ def test_instagram_reads_cursor_cycles_runs_without_the_token(env: dict[str, str
     run = f["레이더 계정 읽기 마지막 기록"]
     assert run["상태"] == "rate_limited" and len(run["이유"]) == 200
     assert f["인기 오디오 마지막 기록"]["상태"] == "connected"
-    assert f["토큰 만료까지"].startswith("모름")
+    assert f["토큰 만료"].startswith("모름")  # 확인·추정 기록 없음
     material = dc.read_material(["instagram"], env, NOW)
     text = json.dumps(material, ensure_ascii=False)
     assert SECRET not in text and "17841400000000000" not in text

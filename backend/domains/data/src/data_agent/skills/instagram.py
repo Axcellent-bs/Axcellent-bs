@@ -54,6 +54,7 @@ from ax_contracts.schemas.data import (
     InstagramRadarOutput,
     InstagramRadarPost,
     InstagramSource,
+    InstagramTokenExpiry,
     MemePlatform,
     TrendMeme,
 )
@@ -270,6 +271,13 @@ async def collect(env: Mapping[str, str], graph: Any, *, now: datetime | None = 
     audio: dict[str, str] = {}
     read = failed = 0
     try:
+        # 0. 토큰 만료 확인: 하루 한 번 공식 debug_token (읽기 전용, 새로 고치지 않는다)
+        if hasattr(graph, "token_info") and not audio_store.token_checked(day):
+            try:
+                audio_store.save_token_check(day, now, await graph.token_info())
+            except ConnectorUnavailable as error:
+                code = getattr(error, "code", "")
+                audio_store.save_token_check(day, now, None, f"debug_token 실패 ({code})")
         # 1. 인기 오디오 (권한 오류여도 레이더는 계속)
         for kind in AUDIO_TYPES:
             if audio_store.done(day, kind):
@@ -322,6 +330,67 @@ async def run(env: Mapping[str, str] | None = None) -> CollectResult | None:
 
 
 # ---------------------------------------------------------------- 출처 줄 (화면 데이터 출처)
+
+
+TOKEN_LIFETIME_DAYS = 60  # 장기 사용자 토큰 수명 (메타 문서). 추정에만 쓴다
+TOKEN_WARN_DAYS = 14
+
+
+def _token_put_at(env: Mapping[str, str]) -> datetime | None:
+    """키 저장소가 아는 "토큰을 넣은 시각" (db 모드만, 값은 읽지 않는다). 모르면 None."""
+    from data_agent.connectors.instagram_graph import TOKEN_ENV
+
+    try:
+        from ax_secret_store import resolver
+
+        if not resolver.is_db_mode():
+            return None
+        rows = resolver.service().list_status([resolver.default_tenant()])
+    except Exception:  # noqa: BLE001 - 키 저장소를 못 읽으면 모름
+        return None
+    for row in rows:
+        if row.get("name") == TOKEN_ENV and row.get("updated_at"):
+            try:
+                at = datetime.fromisoformat(str(row["updated_at"]))
+            except ValueError:
+                return None
+            return at if at.tzinfo else at.replace(tzinfo=UTC)
+    return None
+
+
+def token_expiry(env: Mapping[str, str], now: datetime | None = None,
+                 put_at: Callable[[Mapping[str, str]], datetime | None] = _token_put_at,
+                 ) -> InstagramTokenExpiry:  # fmt: skip
+    """인스타 토큰 만료: 확인(debug_token 저장분) → 추정(넣은 시각 + 60일) → 모름. 토큰 값 없음."""
+    now = now or datetime.now(UTC)
+    out = InstagramTokenExpiry()
+    check = st.last_token_check(st.path_of(env, st.AUDIO_ENV))
+    if check is not None and check.get("expires_at") is not None:
+        out.basis = "checked"
+        out.checked_at = datetime.fromisoformat(check["checked_at"])
+        if check["expires_at"] == 0:
+            out.never_expires, out.line = True, "만료 없음(확인)"
+            return out
+        out.expires_at = datetime.fromtimestamp(check["expires_at"], UTC)
+    elif (at := put_at(env)) is not None:
+        out.basis = "estimated"
+        out.expires_at = at + timedelta(days=TOKEN_LIFETIME_DAYS)
+        why = check.get("reason") if check else None
+        out.reason = f"토큰을 넣은 시각 + {TOKEN_LIFETIME_DAYS}일로 추정"
+        if why:
+            out.reason += f" ({why})"
+    else:
+        out.line = "만료 모름"
+        out.reason = (check or {}).get("reason") or "확인한 만료 시각도, 토큰을 넣은 시각도 없음"
+        return out
+    out.days_left = (out.expires_at.astimezone(KST).date() - now.astimezone(KST).date()).days
+    word = "확인" if out.basis == "checked" else "추정"
+    out.line = (f"만료까지 {out.days_left}일({word})" if out.days_left >= 0
+                else f"만료됨({word}, {-out.days_left}일 지남)")  # fmt: skip
+    if out.days_left <= TOKEN_WARN_DAYS:
+        out.warning = True
+        out.line += " · 곧 만료돼요. 사람이 토큰을 바꿔 주세요"
+    return out
 
 
 def sources(env: Mapping[str, str]) -> list[InstagramSource]:

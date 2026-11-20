@@ -64,7 +64,28 @@ class AudioStore(_Store):
         " duration_ms INTEGER, link TEXT, PRIMARY KEY (day, audio_type, rank));"
         "CREATE TABLE IF NOT EXISTS runs (source TEXT PRIMARY KEY, day TEXT NOT NULL,"
         " status TEXT NOT NULL, reason TEXT, at TEXT NOT NULL);"
+        # 11/20: 토큰 만료 확인 (debug_token, 하루 한 번). 토큰 값은 저장하지 않는다
+        "CREATE TABLE IF NOT EXISTS token_check (day TEXT PRIMARY KEY, checked_at TEXT NOT NULL,"
+        " expires_at INTEGER, data_access_expires_at INTEGER, is_valid INTEGER, reason TEXT);"
     )
+
+    def token_checked(self, day: date) -> bool:
+        with self._lock:
+            row = self._conn.execute("SELECT 1 FROM token_check WHERE day = ?",
+                                     (day.isoformat(),)).fetchone()  # fmt: skip
+        return row is not None
+
+    def save_token_check(self, day: date, at: datetime, info: Mapping[str, Any] | None,
+                         reason: str | None = None) -> None:  # fmt: skip
+        info = info or {}
+        valid = info.get("is_valid")
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO token_check VALUES (?,?,?,?,?,?)",
+                (day.isoformat(), at.isoformat(), info.get("expires_at"),
+                 info.get("data_access_expires_at"), None if valid is None else int(bool(valid)),
+                 reason),
+            )  # fmt: skip
 
     def save(self, day: date, audio_type: str, items: Sequence[Mapping[str, Any]]) -> None:
         with self._lock, self._conn:
@@ -110,6 +131,26 @@ def audio_days(path: str | Path, audio_type: str, until: date,
             {"rank": rank, "audio_id": aid, "title": title, "artist": artist,
              "duration_ms": dur, "link": link})  # fmt: skip
     return out
+
+
+def last_token_check(path: str | Path) -> dict[str, Any] | None:
+    """가장 최근 토큰 만료 확인 (읽기 전용, 만료 시각을 읽은 것 우선). 없으면 None."""
+    conn = _ro(path)
+    if conn is None:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT checked_at, expires_at, data_access_expires_at, is_valid, reason"
+            " FROM token_check ORDER BY (expires_at IS NULL), day DESC LIMIT 1"
+        ).fetchone()
+    except sqlite3.DatabaseError:
+        return None
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    keys = ("checked_at", "expires_at", "data_access_expires_at", "is_valid", "reason")
+    return dict(zip(keys, row, strict=True))
 
 
 def runs(path: str | Path) -> dict[str, tuple[str, str, str | None]]:
