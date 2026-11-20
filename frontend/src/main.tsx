@@ -6,6 +6,10 @@ import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css'
 import './styles.css'
 import { App } from './App'
 import { SessionProvider } from './demo/session'
+import { installApiDirect, readDirectConfig } from './lib/apiDirect'
+
+// 읽기 API 를 외부 직접 호스트로 보내는 길. 환경값(VITE_API_DIRECT_BASE·VITE_API_DIRECT_SERVICES)이 비면 아무것도 하지 않는다
+installApiDirect(readDirectConfig(import.meta.env))
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
