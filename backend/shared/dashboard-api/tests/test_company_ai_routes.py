@@ -132,7 +132,10 @@ def test_admin_routes_need_a_company_admin_session(client: TestClient, people: A
 def test_writes_take_human_sessions_only_not_agent_or_shared_tokens(
     client: TestClient, people: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """키·설정 쓰기는 사람 로그인 세션만 받는다. AI 에이전트 토큰·공용 사람 토큰은 막는다(11/20 태윤 님 조건)."""
+    """키·설정 쓰기는 사람 로그인 세션만 받는다.
+
+    AI 에이전트 토큰·공용 사람 토큰은 막는다(11/20 태윤 님 조건).
+    """
     monkeypatch.setenv("AX_AGENT_TOKENS", "orchestrator=orch-agent-token,marketing=mkt-agent-token")
     _put_key(client, people["a-1"])
     req_id = _put_key(client, people["a-1"], DUMMY2).json()["data"]["request"]["id"]
@@ -164,7 +167,9 @@ def test_replace_and_approve_never_leak_the_raw_key(
     seen.append(client.post(f"{ADMIN}/requests/{req_id}/approve", headers=people["a-2"]).text)
     seen.append(client.get(ADMIN, headers=people["a-2"]).text)
     seen.append(client.get(f"{VIEW}/status", headers=people["a-3"]).text)
-    seen.append(client.post(f"{ADMIN}/keys/NOPE", json={"value": DUMMY}, headers=people["a-1"]).text)
+    seen.append(
+        client.post(f"{ADMIN}/keys/NOPE", json={"value": DUMMY}, headers=people["a-1"]).text
+    )
     folder = env / "company_ai" / "catbooks"
     seen += [p.read_text(encoding="utf-8") for p in folder.iterdir()]
     text = "\n".join(seen) + caplog.text
