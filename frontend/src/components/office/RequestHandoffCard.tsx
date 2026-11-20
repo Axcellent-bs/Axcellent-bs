@@ -4,6 +4,7 @@ import { ago } from "@/lib/format";
 import { handoffRequests, requestTitle, shortNo } from "@/lib/requestHandoffs";
 import { REQUEST_STATUS } from "@/lib/workRequests";
 import { useWorkRequests } from "@/components/office/useWorkRequests";
+import { STALE_HOURS, staleHours } from "@/lib/officeRequests";
 
 // 고객 의뢰가 부서 사이로 넘어가는 모습: AI 대화방·AI 오피스 공용 카드. 장애 이슈와 따로, 의뢰 전용으로 그린다.
 // 평소에는 접어 두고(의뢰가 늘어도 아래 대화 칸이 밀리지 않게) 펼치면 한 줄에 카드 3개씩 보인다.
@@ -12,19 +13,21 @@ import { useWorkRequests } from "@/components/office/useWorkRequests";
 
 const SHOWN = 12;
 
-export function RequestHandoffCard() {
+/** compact: 접힌 한 줄(작은 글자·얇은 줄)로 둔다. 펼치면 지금 카드 그대로 (AI 오피스 머리·AI 대화방 방 목록 위) */
+export function RequestHandoffCard({ compact = false }: { compact?: boolean } = {}) {
   // 의뢰 목록은 같은 페이지의 AI 오피스 자리 불·대화방 진행 카드와 한 번만 읽어 나눠 쓴다 (10초마다, 사람 토큰 없으면 읽지 않음)
   const { hasToken, rows, tasks, failed } = useWorkRequests();
 
   const all = useMemo(() => handoffRequests(rows ?? []), [rows]);
   const groups = all.slice(0, SHOWN);
+  const now = Date.now();
   if (!hasToken) return null;
 
   return (
-    <details className="card px-5 py-4" aria-label="고객 의뢰 넘김">
-      <summary className="cursor-pointer text-[15px] font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+    <details className={compact ? "card shrink-0 px-3 py-1.5" : "card px-5 py-4"} aria-label="고객 의뢰 넘김">
+      <summary className={`cursor-pointer font-semibold text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${compact ? "text-[13px]" : "text-[15px]"}`}>
         고객 의뢰 넘김
-        {rows !== null && <span className="ml-2 text-[13px] font-normal tabular-nums text-ink-500">{all.length}건</span>}
+        {rows !== null && <span className={`ml-2 font-normal tabular-nums text-ink-500 ${compact ? "text-xs" : "text-[13px]"}`}>{all.length}건</span>}
       </summary>
       {rows === null ? (
         <p className="mt-2 text-[13px] text-ink-500">{failed ? "의뢰 기록을 불러오지 못했어요" : "불러오는 중…"}</p>
@@ -38,6 +41,7 @@ export function RequestHandoffCard() {
                 <p className="flex items-start gap-2">
                   <b className="text-[14px] font-semibold text-ink-900">{requestTitle(row, tasks)}</b>
                   <span className={`chip shrink-0 ${REQUEST_STATUS[row.status].tone}`}>{REQUEST_STATUS[row.status].label}</span>
+                  {staleHours(row, now) !== null && <span className="chip shrink-0 bg-ink-100 text-ink-500" title={`${STALE_HOURS}시간 넘게 바뀌지 않아 AI 오피스 자리 상태에는 쓰지 않아요`}>오래 멈춤 · {staleHours(row, now)}시간</span>}
                 </p>
                 <p className="mt-0.5 text-[12px] tabular-nums text-ink-500" title={row.request_id}>
                   의뢰 {shortNo(row.request_id)} · {ago(row.created_at)}

@@ -14,6 +14,8 @@ import { RoomMenu, type MenuItem } from "@/components/office/RoomMenu";
 import { useHiddenRooms } from "@/components/office/useHiddenRooms";
 import { useRoomRemoval, type RowKind } from "@/components/office/useRoomRemoval";
 import { useToast } from "@/components/office/useToast";
+import { useScrollAnchor } from "@/components/office/useScrollAnchor";
+import { markSeen } from "@/lib/chatView";
 
 // AI 대화방 · 대화 기록. 부서 AI들이 A2A로 주고받은 일과 사람이 건 말을 메신저처럼 보여 준다.
 // 방: 전체 대화방(처음 열면 여기) / 장애·이슈 방(총괄 사건 하나 = 방 하나) / 1:1 대화(나만 보임).
@@ -164,11 +166,11 @@ function RoomList({ all, incidents, unseen, act, focusedRoom, narrow }: {
   const shownDirect = DIRECT_AGENTS.filter((a) => matchRoom(q, a.name) && visibleRoom(DIRECT_PREFIX + a.key));
   const showAll = matchRoom(q, all.title, "전체") && visibleRoom(all.id);
   return (
-    <nav aria-label="채팅 목록" className={`card flex shrink-0 flex-col overflow-hidden ${narrow ? "lg:w-64" : "lg:w-80"}`}>
+    <nav aria-label="채팅 목록" className={`card flex min-h-0 flex-1 flex-col overflow-hidden ${narrow ? "lg:w-64" : "lg:w-80"}`}>
       <div className="p-3">
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="대화방·부서 검색" aria-label="대화방·부서 검색" className="field w-full text-xs" />
       </div>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-2 lg:max-h-[calc(100vh-270px)]">
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-2">
         {showAll && (
           <ul>
             <RoomRow id={all.id} on={focusedRoom === all.id} avatar={<RoomAvatar room={all} />} title={all.title}
@@ -290,28 +292,33 @@ function RoomPane(p: PaneProps) {
   const title = direct ? `🔒 ${direct.name}` : roomInfo?.title ?? (room.startsWith("ctx_") ? "찾을 수 없는 방" : room);
 
   // ------------------------------------------------ 하나씩 보여 주기
-  // 방을 열 때 이미 있던 기록은 한 번에(지난 기록을 다시 재생하지 않음), 그 뒤에 도착한 부서 기록은 하나씩.
-  // 사람 대화는 바로 시각순으로 끼워 넣는다 (내 말풍선이 바로 붙게)
+  // 방을 연 시각(openedAt) − 5초보다 이른 기록은 한 번에(지난 기록을 다시 재생하지 않음), 그 뒤에 생긴 부서 기록만 하나씩.
+  // 늦게 들어온 예전 줄(의뢰 목록이 늦게 와 거르기가 바뀜·공통 로그 창이 움직임·첫 응답이 일부만 옴)도 바로 보인다 (lib/chatView.ts markSeen).
+  // 새 사건 방으로 옮겨 처음부터 보여 줄 때(replayRoom)만 모두 하나씩. 사람 대화는 바로 시각순으로 끼워 넣는다 (내 말풍선이 바로 붙게)
   const records = useMemo(() => items.filter((it) => !it.id.startsWith("direct:")), [items]);
   const human = useMemo(() => items.filter((it) => it.id.startsWith("direct:")), [items]);
-  const [revealed, setRevealed] = useState(0);
+  const [revealedIds, setRevealedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const seenRef = useRef(new Map<string, number>());
+  const openedAt = useRef(Date.now());
   const primed = useRef(false);
   const { replayRoom } = p;
-  useLayoutEffect(() => { primed.current = false; }, [room]);
-  useLayoutEffect(() => {
-    if (primed.current || !loaded) return;
+  // 칸은 방마다 새로 만든다(key에 방 id) — 방이 바뀌면 이 상태도 새로 시작한다
+  if (!primed.current && loaded) {
     primed.current = true;
-    if (replayRoom.current === room) { replayRoom.current = null; setRevealed(0); return; }
-    setRevealed(records.length);
-  }, [room, records.length, loaded, replayRoom]);
+    openedAt.current = replayRoom.current === room ? -Infinity : Date.now();
+    if (replayRoom.current === room) replayRoom.current = null;
+  }
+  const seen = primed.current ? markSeen(seenRef.current, records, openedAt.current, Date.now()) : seenRef.current;
+  const queue = primed.current ? records.filter((r) => (seen.get(r.id) ?? 0) > 0 && !revealedIds.has(r.id)) : [];
+  const nextId = queue[0]?.id;
   useEffect(() => {
-    if (!primed.current || revealed >= records.length) return;
-    const backlog = records.length - revealed;
-    const t = setTimeout(() => setRevealed((r) => r + 1), backlog > FAST_BACKLOG ? REVEAL_FAST_MS : REVEAL_MS);
+    if (!nextId) return;
+    const t = setTimeout(() => setRevealedIds((s) => new Set(s).add(nextId)), queue.length > FAST_BACKLOG ? REVEAL_FAST_MS : REVEAL_MS);
     return () => clearTimeout(t);
-  }, [revealed, records.length]);
+  }, [nextId, queue.length]);
+  const revealedKey = revealedIds.size;
   const shown = useMemo(() => {
-    const base = records.slice(0, Math.min(revealed, records.length));
+    const base = primed.current ? records.filter((r) => seen.get(r.id) === 0 || revealedIds.has(r.id)) : [];
     if (!human.length) return base;
     const out: ChatItem[] = [];
     let h = 0;
@@ -322,8 +329,9 @@ function RoomPane(p: PaneProps) {
     }
     while (h < human.length) out.push(human[h++]);
     return out;
-  }, [records, revealed, human]);
-  const typing = primed.current && revealed < records.length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [records, revealedKey, human, loaded]);
+  const typing = queue.length > 0;
   const people = useMemo(() => roomPeople(items, DIRECT_AGENTS.map((a) => a.key)), [items]);
 
   // ------------------------------------------------ 스크롤: 맨 아래에 붙어 있으면 따라가고, 위로 올렸으면 "새 메시지" 알약
@@ -350,11 +358,14 @@ function RoomPane(p: PaneProps) {
     if (pinned.current) toBottom(!first);
     else if (added > 0) setFresh((f) => f + added);
   }, [shown, toBottom]);
+  // 위로 올려 보던 중이면 위쪽에 줄이 끼어도 보던 말풍선을 같은 자리에 (components/office/useScrollAnchor.ts)
+  const remember = useScrollAnchor(scroller, pinned, [shown]);
   const onScroll = () => {
     const el = scroller.current;
     if (!el || Date.now() - autoScrollAt.current < 600) return;
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     if (pinned.current) setFresh(0);
+    remember();
   };
 
   const links = [
@@ -401,9 +412,9 @@ function RoomPane(p: PaneProps) {
         ) : (
           <>
             <CommNote conn={commConn} truncated={commTruncated} />
-            <MessengerLog items={shown} talk={talkable ? talk : undefined} label={`${title} 대화`}
+            <MessengerLog items={shown} talk={talkable ? talk : undefined} label={`${title} 대화`} panes={total}
               hold={{ busyHold: p.busyHold, canDecide: orchConn === "on", orchMock, onDecide: p.onDecide }} />
-            {typing && <p className="mt-2 animate-pulse px-1 text-xs text-ink-500" aria-live="polite">AI들이 이야기하는 중… ({records.length - revealed}개 남음)</p>}
+            {typing && <p className="mt-2 animate-pulse px-1 text-xs text-ink-500" aria-live="polite">AI들이 이야기하는 중… ({queue.length}개 남음)</p>}
           </>
         )}
       </div>
@@ -544,29 +555,36 @@ export default function AgentChat() {
   const cols = shownCount === 3 ? "lg:grid-cols-3" : shownCount === 2 ? "lg:grid-cols-2" : "";
 
   return (
-    <div className="flex h-full flex-col gap-4 p-4 lg:p-6">
-      <header className="flex flex-wrap items-start gap-x-6 gap-y-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-semibold tracking-tight">AI 대화방 · 대화 기록</h1>
-          <p className="mt-1 text-sm text-ink-500">
-            AI들이 서로 일을 부탁하고 결과를 알려 준 실제 기록입니다(A2A). 장애·이슈가 생기면 방이 따로 열리고, AI 오피스 단톡방과 같은 방을 봅니다.
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <ConnChip label="총괄 AI" conn={orchConn} />
-            <ConnChip label="안전 처리 로그" conn={safetyConn} />
-            <ConnChip label="공통 로그" conn={commConn} />
-            {orchOn && !orchMock && (
-              <span className={`chip ${fault?.active ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`} title="회사 쇼핑몰 결제 서버 상태 (장애는 운영자가 넣고 뺀다)">
-                쇼핑몰 결제 {fault == null ? "확인 중" : fault.active ? (fault.failing ? "장애 중" : `느림(${fault.delay_ms}ms)`) : "정상"}{fault?.degraded ? " · 감지됨" : ""}
-              </span>
-            )}
-            <span className="chip bg-ink-100 text-ink-500">{POLL_MS / 1000}초마다 새로고침</span>
+    // 머리는 한 줄(제목 · ⓘ 설명·연결 접기 · 칸 수). 11/20 1920×919: 머리(설명 2줄·칩 6개·칸 수 줄)와 고객 의뢰 넘김 카드가 세로를 먹어
+    // 메시지 칸이 388px뿐이었다. 고객 의뢰 넘김은 방 목록 위 접힌 한 줄로 옮겼다
+    <div className="flex h-full flex-col gap-3 p-4 lg:p-5">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h1 className="text-lg font-semibold tracking-tight">AI 대화방 · 대화 기록</h1>
+        <details className="relative">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs text-ink-500 hover:text-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+            <span aria-hidden="true">ⓘ</span> 설명 · 연결
+            {[orchConn, safetyConn, commConn].some((c) => c === "off" || c === "unready") && <span className="h-1.5 w-1.5 rounded-full bg-red-700" aria-label="꺼진 연결 있음" />}
+          </summary>
+          <div className="absolute left-0 z-30 mt-1 w-[min(34rem,85vw)] space-y-2 rounded-xl border border-ink-100 bg-surface p-3 shadow-lg">
+            <p className="text-sm text-ink-500">
+              AI들이 서로 일을 부탁하고 결과를 알려 준 실제 기록입니다(A2A). 장애·이슈가 생기면 방이 따로 열리고, AI 오피스 단톡방과 같은 방을 봅니다.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <ConnChip label="총괄 AI" conn={orchConn} />
+              <ConnChip label="안전 처리 로그" conn={safetyConn} />
+              <ConnChip label="공통 로그" conn={commConn} />
+              <span className="chip bg-ink-100 text-ink-500">{POLL_MS / 1000}초마다 새로고침</span>
+            </div>
           </div>
-        </div>
-      </header>
-
+        </details>
+        {/* 쇼핑몰 결제 상태는 장애일 때만 머리에 바로 보인다 (평소에는 ⓘ 안에서) */}
+        {orchOn && !orchMock && (
+          <span className={`chip ${fault?.active ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"} ${fault?.active ? "" : "hidden lg:inline-flex"}`} title="회사 쇼핑몰 결제 서버 상태 (장애는 운영자가 넣고 뺀다)">
+            쇼핑몰 결제 {fault == null ? "확인 중" : fault.active ? (fault.failing ? "장애 중" : `느림(${fault.delay_ms}ms)`) : "정상"}{fault?.degraded ? " · 감지됨" : ""}
+          </span>
+        )}
       {/* 나눠 보기: 한 번에 볼 칸 수 */}
-      <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
+      <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-ink-500">
         <span>한 번에 보기</span>
         <div role="radiogroup" aria-label="한 번에 볼 방 개수" className="flex border border-ink-100 bg-surface">
           {([1, 2, 3] as const).map((n) => (
@@ -578,17 +596,19 @@ export default function AgentChat() {
           ))}
         </div>
         {shownCount > 1
-          ? <span>목록 줄의 ＋를 누르거나 방을 칸으로 끌어다 놓아요. 그냥 누르면 선택된 칸의 방이 바뀌어요.</span>
+          ? <span className="hidden 2xl:inline" title="목록 줄의 ＋를 누르거나 방을 칸으로 끌어다 놓아요. 그냥 누르면 선택된 칸의 방이 바뀌어요.">목록 줄의 ＋나 끌어다 놓기로 칸에 열어요</span>
           : count > 1 && <span>화면이 좁아 지금은 {limit}개만 보여요. 넓히면 나머지 칸이 다시 보여요.</span>}
       </div>
-
-      <RequestHandoffCard />
+      </header>
 
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{error}</p>}
 
       {/* chat-round: 이 안의 말풍선·알약·아바타·배지만 둥글게 (styles.css) */}
       <div className="chat-round flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <RoomList all={all} incidents={incidentRooms} unseen={data.unseen} act={act} focusedRoom={focusedRoom} narrow={shownCount >= 3} />
+        <div className={`flex min-h-0 shrink-0 flex-col gap-2 ${shownCount >= 3 ? "lg:w-64" : "lg:w-80"}`}>
+          <RequestHandoffCard compact />
+          <RoomList all={all} incidents={incidentRooms} unseen={data.unseen} act={act} focusedRoom={focusedRoom} narrow={shownCount >= 3} />
+        </div>
         <div className={`grid min-h-0 min-w-0 flex-1 gap-3 ${cols}`}>
           {Array.from({ length: shownCount }, (_, i) => {
             const id = visible[i];

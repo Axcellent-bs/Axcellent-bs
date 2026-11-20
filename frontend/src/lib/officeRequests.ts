@@ -5,7 +5,21 @@
 // - 단계 running·waiting_async → 그 부서 자리 working + 말풍선(단계 label, note에 진행률 %가 있으면 붙임. 부서 문장은 옮기지 않는다)
 // - waiting_human(사람 확인·승인) → 총괄 자리 waiting, held → 안전 처리 로그 자리 waiting (사건 규칙과 같다)
 // - 사건 단계가 이미 쓰는 자리는 사건이 먼저 (장애 대응 우선)
+// - 11/20: 오전 12:40 의뢰 2개가 오후 내내 총괄 "승인 대기"를 띄웠다. updated_at이 STALE_HOURS 넘게 지난 열린 의뢰는 자리 상태에 쓰지 않는다
+//   (대화방 의뢰 진행 카드·고객 의뢰 넘김 카드에는 그대로 보이고 "오래 멈춤 · N시간" 칩이 붙는다: staleHours)
 import { isOpenRequest, type WorkRequestRow } from "./workRequests.ts";
+
+/** 열린 의뢰가 이 시간 넘게 바뀌지 않으면 "오래 멈춤" (자리 상태에서 뺀다) */
+export const STALE_HOURS = 6;
+
+/** 오래 멈춘 열린 의뢰면 멈춘 시간(시간 단위, 내림), 아니면 null. 끝난 의뢰·시각을 못 읽으면 null */
+export function staleHours(r: Pick<WorkRequestRow, "status" | "updated_at">, now: number): number | null {
+  if (!isOpenRequest(r)) return null;
+  const t = Date.parse(r.updated_at);
+  if (!Number.isFinite(t)) return null;
+  const h = (now - t) / 3_600_000;
+  return h > STALE_HOURS ? Math.floor(h) : null;
+}
 
 export interface RequestDesk { desk: string; state: "working" | "waiting"; bubble: string | null; skill: string }
 
@@ -17,19 +31,20 @@ export function progressOf(note: string | null | undefined): number | null {
   return n >= 0 && n <= 100 ? n : null;
 }
 
-/** 가장 최근(updated_at) 열린 의뢰 */
-export function latestOpenRequest(requests: WorkRequestRow[] | null | undefined): WorkRequestRow | null {
+/** 가장 최근(updated_at) 열린 의뢰. now를 주면 오래 멈춘 의뢰(staleHours)는 뺀다 */
+export function latestOpenRequest(requests: WorkRequestRow[] | null | undefined, now?: number): WorkRequestRow | null {
   let best: WorkRequestRow | null = null;
   for (const r of requests ?? []) {
     if (!isOpenRequest(r)) continue;
+    if (now !== undefined && staleHours(r, now) !== null) continue;
     if (!best || r.updated_at > best.updated_at) best = r;
   }
   return best;
 }
 
-/** 의뢰 단계 → 자리 상태 (plan 순서). desk는 서버 부서 이름 그대로(화면 자리로 바꾸는 건 부르는 쪽) */
-export function requestDesks(requests: WorkRequestRow[] | null | undefined): RequestDesk[] {
-  const r = latestOpenRequest(requests);
+/** 의뢰 단계 → 자리 상태 (plan 순서). desk는 서버 부서 이름 그대로(화면 자리로 바꾸는 건 부르는 쪽). now를 주면 오래 멈춘 의뢰는 쓰지 않는다(deriveOffice가 준다) */
+export function requestDesks(requests: WorkRequestRow[] | null | undefined, now?: number): RequestDesk[] {
+  const r = latestOpenRequest(requests, now);
   if (!r) return [];
   const out: RequestDesk[] = [];
   for (const p of r.plan) {

@@ -6,13 +6,16 @@ import { TalkInput } from "@/components/office/TalkInput";
 import type { OfficeTalk } from "@/components/office/useOfficeTalk";
 import { ALL_ROOM, type ChatItem, type OrchIncident } from "@/lib/agentChat";
 import { Link } from "@/lib/nav";
+import { useScrollAnchor } from "@/components/office/useScrollAnchor";
 
 // AI 오피스 옆 단톡방. 대화 기록(/agents/chat)과 같은 방·같은 대화를 메신저형으로 좁게 보여 준다.
 // 승인 결정 버튼은 두지 않고 대화 기록의 같은 방으로 보낸다.
+// 머리 줄 한 줄: 방 고르기(드롭다운, 안 읽은 수 배지) · 사람 수 · "⤢ 넓게"(580px ↔ 화면 절반) · "크게 보기". 받는 AI는 입력칸 왼쪽 드롭다운.
+// 스크롤: 맨 아래에 붙어 있으면 따라가고, 위로 올려 보던 중이면 새 줄이 위에 끼어도 보던 줄이 그대로다(useScrollAnchor).
 
 export interface Typing { key: string; name: string; what: string }
 
-export function OfficeChat({ items, typing, freshIds, title, longTitle, status, inc, room = ALL_ROOM, talk, tabs, big = true }: {
+export function OfficeChat({ items, typing, freshIds, title, longTitle, status, inc, room = ALL_ROOM, talk, picker, wide, onWide, big = true }: {
   items: ChatItem[]; typing: Typing[]; freshIds: ReadonlySet<string>; title: string; status?: string;
   /** 장애 방의 긴 문장 이름 (방 머리 아래 보조 줄) */
   longTitle?: string;
@@ -21,8 +24,11 @@ export function OfficeChat({ items, typing, freshIds, title, longTitle, status, 
   /** 말을 거는 방 */
   room?: string;
   talk?: OfficeTalk;
-  /** 방 탭 (위에 붙인다) */
-  tabs?: ReactNode;
+  /** 방 고르기 (머리 줄 왼쪽, 방 이름 자리) */
+  picker?: ReactNode;
+  /** 넓게 보기 (오른쪽 칸 화면 절반). onWide가 없으면 버튼 없음 */
+  wide?: boolean;
+  onWide?: () => void;
   /** "대화 기록에서 크게 보기" 링크 */
   big?: boolean;
 }) {
@@ -39,27 +45,30 @@ export function OfficeChat({ items, typing, freshIds, title, longTitle, status, 
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [items, typing]);
   useLayoutEffect(() => { pinned.current = true; }, [room]);
+  const remember = useScrollAnchor(box, pinned, [items, typing]);
   const onScroll = () => {
     const el = box.current;
     if (el) pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    remember();
   };
   const chatHref = `/agents/chat?room=${encodeURIComponent(room)}`;
   const people = useMemo(() => roomPeople(items, DIRECT_AGENTS.map((a) => a.key)), [items]);
 
   return (
     // chat-round: 이 안의 말풍선·알약·아바타·배지만 둥글게 (styles.css)
-    <section aria-label="부서 단톡방" className="chat-round card flex min-h-[460px] min-w-0 xl:min-h-0 flex-1 flex-col overflow-hidden bg-chat xl:w-[580px] xl:flex-none">
-      {tabs}
-      <header className="flex flex-wrap items-center gap-2 border-b border-ink-900/[.07] px-4 py-2.5">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h2 className="min-w-0 truncate text-sm font-semibold">{title}</h2>
-            {people && <span className="text-xs text-ink-700">{people}</span>}
-            <StatusChip status={status} />
-          </div>
-          {longTitle && <p className="mt-0.5 truncate text-xs text-ink-500">{longTitle}</p>}
+    <section aria-label="부서 단톡방" className={`chat-round card flex min-h-[460px] min-w-0 xl:min-h-0 flex-1 flex-col overflow-hidden bg-chat xl:flex-none ${officeChatWidth(!!wide)}`}>
+      <header className="flex items-center gap-2 border-b border-ink-900/[.07] px-3 py-2">
+        <div className="flex min-w-0 flex-1 items-center gap-x-2">
+          {picker ?? <h2 className="min-w-0 truncate text-sm font-semibold">{title}</h2>}
+          {people && <span className="hidden shrink-0 text-xs text-ink-700 sm:inline">{people}</span>}
+          <StatusChip status={status} />
+          {longTitle && <span className="min-w-0 truncate text-xs text-ink-500" title={longTitle}>{longTitle}</span>}
         </div>
-        {big && <Link href={chatHref} className="btn-ghost ml-auto px-2.5 py-1 text-xs">대화 기록에서 크게 보기</Link>}
+        {onWide && (
+          <button type="button" onClick={onWide} aria-pressed={!!wide} title={wide ? "단톡방을 580px로" : "단톡방을 화면 절반으로"}
+            className="btn-ghost hidden shrink-0 px-2 py-1 text-xs xl:inline-flex">⤢ {wide ? "좁게" : "넓게"}</button>
+        )}
+        {big && <Link href={chatHref} className="btn-ghost shrink-0 px-2 py-1 text-xs" title="대화 기록에서 크게 보기">크게 보기</Link>}
       </header>
       {inc && <PinNotice inc={inc} />}
       <div ref={box} onScroll={onScroll} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-4">
@@ -74,3 +83,6 @@ export function OfficeChat({ items, typing, freshIds, title, longTitle, status, 
     </section>
   );
 }
+
+/** 오른쪽 칸 폭 (xl 이상): 기본 580px, 넓게면 화면 절반 */
+export const officeChatWidth = (wide: boolean) => (wide ? "xl:w-1/2" : "xl:w-[580px]");

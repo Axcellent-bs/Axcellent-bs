@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 대화방 의뢰 진행 카드: 번호 찾기(총괄 문장만) · 단계 칩·버튼 · 같은 의뢰 알림 줄 숨김 · 보고서·제안 잇기 · 토큰 없으면 카드 없음.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { noticeIdOf, placeRequestCards, planCard, planLookupDue, proposalOfRequest, reportIdOfRequest, requestIdOf, showRequestCard, stepRows } from "./requestCards.ts";
+import { noticeIdOf, placeRequestCards, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, requestIdOf, showRequestCard, stepRows } from "./requestCards.ts";
 import { progressKeepPolling } from "./chatCards.ts";
 import type { StepStatus, WorkRequestRow } from "./workRequests.ts";
 
@@ -104,4 +104,14 @@ test("기획 기록 다시 읽기는 1분에 한 번까지", () => {
   assert.equal(planLookupDue(null, 1_000), true);
   assert.equal(planLookupDue(1_000, 1_000 + 59_999), false);
   assert.equal(planLookupDue(1_000, 1_000 + 60_000), true);
+});
+
+test("버튼 실패 문구: 403 서버 차단 · 409 이미 처리(목록 다시 읽기) · 404 · 그 밖 상태 코드", () => {
+  const err = (status: number) => Object.assign(new Error("x"), { status });
+  assert.deepEqual(requestActionError(err(403)), { text: "서버가 막았어요 (403) · 관리자에게 이 경로 허용을 요청해 주세요", reload: false });
+  assert.deepEqual(requestActionError(err(409)), { text: "이미 다른 사람이 처리했어요", reload: true });
+  assert.deepEqual(requestActionError(err(404)), { text: "의뢰나 단계를 찾지 못했어요", reload: false });
+  assert.deepEqual(requestActionError(err(502)), { text: "처리하지 못했어요 (502)", reload: false });
+  assert.deepEqual(requestActionError(new TypeError("Failed to fetch")), { text: "처리하지 못했어요", reload: false });
+  assert.deepEqual(requestActionError(null), { text: "처리하지 못했어요", reload: false });
 });
