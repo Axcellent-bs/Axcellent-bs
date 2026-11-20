@@ -485,6 +485,53 @@ async def outage_media_preview(draft_id: str) -> tuple[Path, str]:
     return _preview_file(prepared.get("asset_ref"), prepared.get("asset_sha256"), missing)
 
 
+REQUEST_VIDEO_PREVIEW = "/dashboard-api/api/dashboard/marketing/sns-drafts/{draft_id}/media/preview"
+
+
+async def request_videos_call(request_id: str | None, limit: int) -> dict[str, Any]:
+    """의뢰 홍보 영상 목록(`list_request_videos`, 읽기). 파일 확인용 `prepared`는 응답에서 뺀다.
+
+    `labeled`가 거짓이면 `preview_path`는 None이다(라벨 없는 원본은 보여 주지 않는다).
+    """
+    payload: dict[str, Any] = {"limit": limit}
+    if request_id:
+        payload["request_id"] = request_id
+    out = await call(
+        "list_request_videos",
+        payload,
+        campaign_id="request_videos",
+        key=f"ui:request-videos:{request_id or 'all'}:{limit}",
+    )
+    if out["status"] == TaskStatus.FAILED.value:
+        raise ApiError(400, "INVALID_INPUT", f"영상 목록을 만들 수 없다 ({out['outcome']})")
+    items: list[dict[str, Any]] = []
+    for raw in (out.get("output") or {}).get("items") or []:
+        item = {k: v for k, v in raw.items() if k != "prepared"}
+        labeled = bool(raw.get("labeled")) and isinstance(raw.get("prepared"), dict)
+        item["labeled"] = labeled
+        item["preview_path"] = (
+            REQUEST_VIDEO_PREVIEW.format(draft_id=raw.get("post_draft_id")) if labeled else None
+        )
+        items.append(item)
+    return {"items": items}
+
+
+async def sns_draft_media_preview(draft_id: str) -> tuple[Path, str]:
+    """의뢰 영상 초안의 AI 라벨 입힌 파일(경로, Content-Type). 없으면 404(`_preview_file` 규칙)."""
+    missing = ApiError(404, "NOT_FOUND", "준비된 영상이 없다")
+    out = await call(
+        "list_request_videos",
+        {"post_draft_id": draft_id, "limit": 1},
+        campaign_id="request_videos",
+        key=f"ui:sns-draft-preview:{draft_id}",
+    )
+    items = (out.get("output") or {}).get("items") or []
+    prepared = (items[0].get("prepared") or {}) if items else {}
+    if not isinstance(prepared, dict):
+        raise missing
+    return _preview_file(prepared.get("asset_ref"), prepared.get("asset_sha256"), missing)
+
+
 async def outage_sns_merge_call(draft_ids: list[str] | None, dry_run: bool) -> dict[str, Any]:
     """장애 사과·보상 SNS 초안의 유사 초안 병합(`merge_outage_sns_drafts`).
 
@@ -745,11 +792,29 @@ VIDEO_REFUSALS = {
     "quota_not_configured": (409, "QUOTA_NOT_CONFIGURED"),
     "in_progress": (409, "IN_PROGRESS"),
     "storage_error": (500, "STORAGE_ERROR"),
+    "bad_asset": (422, "BAD_ASSET"),
+    "file_missing": (409, "FILE_MISSING"),
+    "gate_held": (409, "GATE_HELD"),
+    "gate_rejected": (409, "GATE_REJECTED"),
+    "gate_blocked": (409, "GATE_BLOCKED"),
 }
 CREATIVE_FILES = {
     "sheet_image": ("sheet.jpg", "image/jpeg"),
     "board_image": ("board.jpg", "image/jpeg"),
     "video": ("video.mp4", "video/mp4"),
+    "final_video": ("final.mp4", "video/mp4"),
+}
+# 사람이 올린 PNG 그림은 PNG 그대로 둔다
+CREATIVE_ALT_FILES = {
+    "sheet_image": ("sheet.png", "image/png"),
+    "board_image": ("board.png", "image/png"),
+}
+UPLOAD_MAX_BYTES = {"image": 20 * 1024 * 1024, "video": 200 * 1024 * 1024}
+UPLOAD_BASE = {
+    "sheet_image": "sheet",
+    "board_image": "board",
+    "video": "video",
+    "final_video": "final",
 }
 
 
@@ -768,8 +833,9 @@ async def creative_asset(record_id: str, part: str) -> tuple[Path, str]:
     item = ((rec.get("render") or {}).get(part)) or {}
     name, sha = item.get("asset"), item.get("sha256")
     raw_root = (os.getenv(MEDIA_DIR_ENV) or "").strip()
-    expected = CREATIVE_FILES.get(part)
-    if not (expected and name == expected[0] and isinstance(sha, str) and raw_root):
+    allowed = [f for f in (CREATIVE_FILES.get(part), CREATIVE_ALT_FILES.get(part)) if f]
+    expected = next((f for f in allowed if f[0] == name), None)
+    if not (expected and isinstance(sha, str) and raw_root):
         raise missing
     root = Path(raw_root).resolve()
     path = (root / "creative" / record_id / name).resolve()
@@ -782,3 +848,78 @@ async def creative_asset(record_id: str, part: str) -> tuple[Path, str]:
     if digest.hexdigest() != sha:
         raise missing
     return path, expected[1]
+
+
+def _sniff(head: bytes) -> str | None:
+    """앞 바이트로 형식을 본다(확장자·Content-Type은 믿지 않는다)."""
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        return "mp4"
+    return None
+
+
+async def creative_upload(
+    record_id: str,
+    part: str,
+    chunks: Any,
+    who: str | None,
+    label: str | None,
+) -> dict[str, Any]:
+    """사람이 올린 그림·영상을 미디어 폴더에 저장하고 마케팅에 기록을 붙여 달라고 한다.
+
+    `chunks`는 요청 본문 바이트 조각(async iterator). 크기는 칸 종류별 상한까지만 받는다.
+    """
+    raw_root = (os.getenv(MEDIA_DIR_ENV) or "").strip()
+    if not raw_root:
+        raise ApiError(503, "STORAGE_NOT_CONFIGURED", "미디어 폴더가 설정되지 않았다")
+    await creative_record_call(record_id)  # 없는 기록이면 404
+    kind = "video" if part in ("video", "final_video") else "image"
+    limit = UPLOAD_MAX_BYTES[kind]
+    root = Path(raw_root).resolve()
+    folder = (root / "creative" / record_id).resolve()
+    if not folder.is_relative_to(root):
+        raise ApiError(422, "BAD_RECORD", "기록 번호가 올바르지 않다")
+    folder.mkdir(parents=True, exist_ok=True)
+    tmp = folder / f".upload-{uuid.uuid4().hex}"
+    digest = hashlib.sha256()
+    size = 0
+    head = b""
+    try:
+        with tmp.open("wb") as handle:
+            async for chunk in chunks:
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > limit:
+                    mb = limit // (1024 * 1024)
+                    raise ApiError(413, "TOO_LARGE", f"파일이 너무 크다 (최대 {mb}MB)")
+                if len(head) < 16:
+                    head += chunk[: 16 - len(head)]
+                digest.update(chunk)
+                handle.write(chunk)
+        if size == 0:
+            raise ApiError(422, "EMPTY", "빈 파일이다")
+        ext = _sniff(head)
+        ok_ext = ("mp4",) if kind == "video" else ("jpg", "png")
+        if ext not in ok_ext:
+            want = "MP4 영상" if kind == "video" else "JPG·PNG 그림"
+            raise ApiError(415, "UNSUPPORTED_FILE", f"{want}만 올릴 수 있다")
+        asset = f"{UPLOAD_BASE[part]}.{ext}"
+        os.replace(tmp, folder / asset)
+    finally:
+        tmp.unlink(missing_ok=True)
+    payload: dict[str, Any] = {
+        "record_id": record_id,
+        "part": part,
+        "asset": asset,
+        "sha256": digest.hexdigest(),
+        "size_bytes": size,
+    }
+    if label:
+        payload["label"] = label[:120]
+    if who:
+        payload["who"] = who
+    return await _creative_read("creative_record_attach", payload)

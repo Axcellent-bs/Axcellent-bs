@@ -159,3 +159,40 @@ def test_asset_without_a_finished_render_is_404(client: TestClient, fake: Fake) 
     assert client.get(url).status_code == 404
     bad = "/api/dashboard/marketing/creative-records/CR-0123456789ab/asset/secret"
     assert client.get(bad).status_code == 422
+
+
+UPLOAD_URL = "/api/dashboard/marketing/creative-records/CR-0123456789ab/upload/final_video"
+MP4 = b"\x00\x00\x00\x18ftypmp42" + bytes(64)
+
+
+def test_upload_saves_the_file_and_asks_marketing_to_attach(
+    client: TestClient, fake: Fake, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+
+    monkeypatch.setenv("MARKETING_MEDIA_DIR", str(tmp_path))
+    fake.output = {
+        "record_id": "CR-0123456789ab",
+        "part": "final_video",
+        "item": {"status": "done"},
+    }
+    res = client.post(UPLOAD_URL + "?name=promo.mp4", content=MP4)
+    assert res.status_code == 200, res.text
+    saved = tmp_path / "creative" / "CR-0123456789ab" / "final.mp4"
+    assert saved.read_bytes() == MP4
+    target, request = fake.calls[-1]
+    assert (target, request.skill) == ("marketing", "creative_record_attach")
+    assert request.input["sha256"] == hashlib.sha256(MP4).hexdigest()
+    assert request.input["label"] == "promo.mp4" and request.input["asset"] == "final.mp4"
+
+
+def test_upload_rejects_a_non_video_body(
+    client: TestClient, fake: Fake, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MARKETING_MEDIA_DIR", str(tmp_path))
+    fake.output = {"record_id": "CR-0123456789ab"}
+    res = client.post(UPLOAD_URL, content=b"<html>not a video</html>")
+    assert res.status_code == 415
+    assert not list((tmp_path / "creative" / "CR-0123456789ab").iterdir())
+    assert all(r.skill != "creative_record_attach" for _, r in fake.calls)
+    assert client.post(UPLOAD_URL.replace("final_video", "secret"), content=MP4).status_code == 422

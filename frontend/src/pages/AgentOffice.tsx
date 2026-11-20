@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
-import { OfficeChat, type Typing } from "@/components/office/OfficeChat";
+import { OfficeChat, officeChatWidth, type Typing } from "@/components/office/OfficeChat";
 import { useChatRooms, type Conn } from "@/components/office/useChatRooms";
 import { RequestHandoffCard } from "@/components/office/RequestHandoffCard";
 import { useWorkRequests } from "@/components/office/useWorkRequests";
@@ -8,14 +8,21 @@ import { PixelOffice } from "@/components/office/PixelOffice";
 import { ALL_ROOM, incidentTitle, skillKo, type ChatItem } from "@/lib/agentChat";
 import { Link, useSearchParams } from "@/lib/nav";
 import { DESKS, deriveOffice, type DeskKey, type DeskState, type OfficeStatus } from "@/lib/office";
+import { markSeen } from "@/lib/chatView";
 
 // AI 오피스. 부서 AI가 지금 무엇을 하는지 픽셀 사무실로 보여 주고, 옆에 부서 단톡방을 둔다. 실시간만 있다.
 // 대화 기록(/agents/chat)과 같은 방 목록·같은 대화를 본다(components/office/useChatRooms.ts):
 // 단톡방 위 방 탭(전체 + 장애·이슈 방 + 열어 둔 1:1 탭)에서 고른 방의 대화만 보이고, 사무실 말풍선도 그 방 대화만 쓴다.
 // 캐릭터를 누르면 그 부서 1:1 탭이 열린다(나만 보임). ?room=<방 id>로 들어오면 그 방 탭을 연다.
 // 총괄이 꺼져 있으면 사무실 위에 연결 안내와 다시 연결 버튼을 둔다(예시 사건은 보여 주지 않는다).
+// 11/20 1920×919: 대화 카드 541px 중 메시지 칸 223px뿐이었다(방 탭 줄·받는 AI 버튼 11개·안내 문장·페이지 머리가 세로를 먹음).
+// 방 탭 줄 → 머리 줄의 방 드롭다운, 받는 AI → 입력칸 왼쪽 드롭다운, 안내·연결 칩 → ⓘ 접기, 고객 의뢰 넘김 → 접힌 한 줄.
+// "⤢ 넓게": 오른쪽 칸 580px ↔ 화면 절반 (이 브라우저에 기억)
 
 const POLL_MS = 3000;
+const WIDE_KEY = "axcellent-office-chat-wide";
+const readWide = () => { try { return localStorage.getItem(WIDE_KEY) === "1"; } catch { return false; } };
+const saveWide = (v: boolean) => { try { localStorage.setItem(WIDE_KEY, v ? "1" : "0"); } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ } };
 
 const STATE_KO: Record<DeskState, string> = { idle: "대기", working: "작업 중", waiting: "승인 대기" };
 const STATE_DOT: Record<DeskState, string> = { idle: "bg-ink-300", working: "bg-brand-500", waiting: "bg-amber-700" };
@@ -43,6 +50,9 @@ export default function AgentOffice() {
     setOpenDirect((o) => (o.includes(key) ? o : [...o, key]));
     setRoom(DIRECT_PREFIX + key);
   };
+  // ⤢ 넓게: 오른쪽 단톡방 580px ↔ 화면 절반 (사무실 그림은 남은 폭에 맞춘다)
+  const [wide, setWide] = useState(readWide);
+  const toggleWide = () => setWide((w) => { saveWide(!w); return !w; });
   const closeTalk = (key: string) => {
     setOpenDirect((o) => o.filter((k) => k !== key));
     setRoom((r) => (r === DIRECT_PREFIX + key ? ALL_ROOM : r));
@@ -71,19 +81,13 @@ export default function AgentOffice() {
     return (data.items[room] ?? []).filter((it) => !isHuman(it));
   }, [direct, data.items, room]);
 
-  // 말풍선 id → 처음 본 시각. 연결 직후 이미 있던 기록은 0(말풍선 없음)으로 둔다
+  // 말풍선 id → 처음 본 시각 (0 = 이미 본 것, 걸어가기·말풍선 재생 없음). lib/chatView.ts markSeen:
+  // 화면을 연(방을 바꾼) 시각 − 5초보다 이른 줄은 늦게 들어와도 0이다. 방을 바꿔 들어온 그 방의 예전 줄, 의뢰 목록이 늦게 와
+  // 거르기가 바뀐 줄, 공통 로그 창(1000줄)이 움직여 들어온 줄이 지금 일처럼 다시 재생되지 않게 한다. 보류 승인(:approved)도 같은 규칙
   const seenRef = useRef(new Map<string, number>());
+  const openedAt = useMemo(() => Date.now(), [room]);
   const liveReady = orchConn !== "unknown";
-  const seen = useMemo(() => {
-    const m = seenRef.current;
-    const first = m.size === 0;
-    for (const it of items) {
-      if (!m.has(it.id)) m.set(it.id, first ? 0 : Date.now());
-      // 보류 카드는 승인돼도 id가 같아서 승인을 처음 본 시각을 따로 둔다 ("👤 승인")
-      if (it.kind === "hold" && it.state === "approved" && !m.has(`${it.id}:approved`)) m.set(`${it.id}:approved`, first ? 0 : Date.now());
-    }
-    return m;
-  }, [items]);
+  const seen = useMemo(() => markSeen(seenRef.current, items, openedAt, Date.now()), [items, openedAt]);
 
   // 고객 의뢰(wr_) 단계로도 자리 불을 켠다 (10초마다, 사람 토큰 없으면 읽지 않음). 고객 의뢰 넘김 카드와 같은 값을 쓴다
   const work = useWorkRequests();
@@ -139,23 +143,16 @@ export default function AgentOffice() {
   const roomInfo = room === ALL_ROOM ? data.all : data.incidentRooms.find((r) => r.id === room);
   const roomInc = incidents.find((i) => i.context_id === room);
 
-  const tabs = (
-    <div role="tablist" aria-label="대화방" className="scroll-thin flex gap-1.5 overflow-x-auto border-b border-ink-100 bg-surface px-3 py-2.5">
-      <RoomTab on={room === ALL_ROOM} onClick={() => setRoom(ALL_ROOM)} label="전체" unread={data.unseen[ALL_ROOM]} />
-      {data.incidentRooms.map((r) => (
-        <RoomTab key={r.id} on={room === r.id} onClick={() => setRoom(r.id)} label={r.title} unread={data.unseen[r.id]}
-          mark={r.status === "open" ? <span className="h-1.5 w-1.5 rounded-full bg-red-700" aria-label="진행 중" /> : <span aria-label="끝남">✓</span>} />
-      ))}
-      {openDirect.map((key) => {
-        const a = DIRECT_AGENTS.find((x) => x.key === key);
-        if (!a) return null;
-        return (
-          <RoomTab key={key} on={room === DIRECT_PREFIX + key} onClick={() => setRoom(DIRECT_PREFIX + key)} label={`${a.name.replace(/\s*AI$/, "")} 1:1`} dashed
-            mark={<span aria-hidden="true">🔒</span>} onClose={() => closeTalk(key)} />
-        );
-      })}
-    </div>
-  );
+  // 방 고르기: 탭 줄 대신 드롭다운 하나 (전체 · 장애·이슈 방 · 열어 둔 1:1). 안 읽은 수는 다른 방 합계 배지 + 항목마다 "새 N"
+  const roomOptions: RoomOption[] = [
+    { id: ALL_ROOM, label: "전체 대화방", unread: data.unseen[ALL_ROOM] ?? 0 },
+    ...data.incidentRooms.map((r) => ({ id: r.id, label: `${r.status === "open" ? "● " : "✓ "}${r.title}`, unread: data.unseen[r.id] ?? 0 })),
+    ...openDirect.flatMap((key) => {
+      const a = DIRECT_AGENTS.find((x) => x.key === key);
+      return a ? [{ id: DIRECT_PREFIX + key, label: `🔒 ${a.name.replace(/\s*AI$/, "")} 1:1`, unread: 0, close: () => closeTalk(key) }] : [];
+    }),
+  ];
+  const picker = <RoomPicker room={room} options={roomOptions} onPick={setRoom} />;
 
   return (
     // xl 이상: 왼쪽 칸(제목·의뢰 넘김·사무실)과 오른쪽 칸(단톡방) 두 칸. 단톡방이 제목 옆에서 맨 아래까지 쓰고 대화만 안에서 스크롤된다.
@@ -163,18 +160,26 @@ export default function AgentOffice() {
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 xl:flex-row xl:overflow-hidden lg:p-6">
       <style>{"@keyframes officePop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}"}</style>
       <div className="flex min-w-0 shrink-0 flex-col gap-4 xl:min-h-0 xl:flex-1 xl:shrink xl:overflow-y-auto">
-      <header>
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h1 className="text-xl font-semibold tracking-tight">AI 오피스</h1>
-        <p className="mt-1 text-sm text-ink-500">
-          부서 AI가 지금 무슨 일을 하는지 사무실로 봅니다. 총괄 AI가 일을 맡기면 그 부서가 총괄 AI에게 와서 받아 가고, 일하는 동안 불꽃이 일어납니다. 사람 승인이 필요하면 🚩 승인 대기로 깜빡입니다.
-          {" "}오른쪽 단톡방은 <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">대화 기록</Link>과 같은 방이라 어디서 말해도 양쪽에 보입니다. 캐릭터를 누르면 그 부서와 1:1로 이야기합니다(나만 보임).
-        </p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <ConnChip label="중앙 Agent" conn={orchConn} />
-          <ConnChip label="안전 관문" conn={safetyConn} />
-          <ConnChip label="공통 로그" conn={commConn} />
-          <span className="chip bg-ink-100 text-ink-500">{POLL_MS / 1000}초마다 새로고침</span>
-        </div>
+        <details className="group relative">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs text-ink-500 hover:text-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
+            <span aria-hidden="true">ⓘ</span> 설명 · 연결
+            {[orchConn, safetyConn, commConn].some((c) => c === "off" || c === "unready") && <span className="h-1.5 w-1.5 rounded-full bg-red-700" aria-label="꺼진 연결 있음" />}
+          </summary>
+          <div className="absolute left-0 z-30 mt-1 w-[min(36rem,85vw)] space-y-2 rounded-xl border border-ink-100 bg-surface p-3 shadow-lg">
+            <p className="text-sm text-ink-500">
+              부서 AI가 지금 무슨 일을 하는지 사무실로 봅니다. 총괄 AI가 일을 맡기면 그 부서가 총괄 AI에게 와서 받아 가고, 일하는 동안 불꽃이 일어납니다. 사람 승인이 필요하면 🚩 승인 대기로 깜빡입니다.
+              {" "}오른쪽 단톡방은 <Link href="/agents/chat" className="font-medium text-brand-700 underline-offset-2 hover:underline">대화 기록</Link>과 같은 방이라 어디서 말해도 양쪽에 보입니다. 캐릭터를 누르면 그 부서와 1:1로 이야기합니다(나만 보임).
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <ConnChip label="중앙 Agent" conn={orchConn} />
+              <ConnChip label="안전 관문" conn={safetyConn} />
+              <ConnChip label="공통 로그" conn={commConn} />
+              <span className="chip bg-ink-100 text-ink-500">{POLL_MS / 1000}초마다 새로고침</span>
+            </div>
+          </div>
+        </details>
       </header>
 
       {orchConn === "off" && (
@@ -186,7 +191,7 @@ export default function AgentOffice() {
         </div>
       )}
 
-      <RequestHandoffCard />
+      <RequestHandoffCard compact />
 
         <section aria-label="부서 AI 사무실" className="card flex min-w-0 shrink-0 flex-col gap-3 p-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -220,16 +225,21 @@ export default function AgentOffice() {
       </div>
 
         {direct ? (
-          <div className="chat-round card flex min-h-[460px] min-w-0 xl:min-h-0 flex-1 flex-col overflow-hidden xl:w-[580px] xl:flex-none">
-            {tabs}
+          <div className={`chat-round card flex min-h-[460px] min-w-0 xl:min-h-0 flex-1 flex-col overflow-hidden xl:flex-none ${officeChatWidth(wide)}`}>
+            <header className="flex items-center gap-2 border-b border-ink-900/[.07] px-3 py-2">
+              <div className="min-w-0 flex-1">{picker}</div>
+              <button type="button" onClick={toggleWide} aria-pressed={wide} className="btn-ghost hidden shrink-0 px-2 py-1 text-xs xl:inline-flex">⤢ {wide ? "좁게" : "넓게"}</button>
+            </header>
             <DirectChat agent={direct} narrow />
           </div>
         ) : (
           <OfficeChat
-            items={chatItems.slice(-80)}
+            items={chatItems}
             typing={typing}
             freshIds={freshIds}
-            tabs={tabs}
+            picker={picker}
+            wide={wide}
+            onWide={toggleWide}
             title={roomInfo?.title ?? "찾을 수 없는 방"}
             status={roomInfo?.status}
             longTitle={roomInfo?.longTitle}
@@ -242,23 +252,21 @@ export default function AgentOffice() {
   );
 }
 
-function RoomTab({ on, onClick, label, unread, mark, dashed = false, onClose }: {
-  on: boolean; onClick: () => void; label: string; unread?: number; mark?: ReactNode; dashed?: boolean; onClose?: () => void;
-}) {
-  // 새로 고른 탭(캐릭터를 눌러 연 1:1 탭 등)이 탭 줄 밖에 있으면 보이게 옮긴다
-  const btn = useRef<HTMLButtonElement>(null);
-  useEffect(() => { if (on) btn.current?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [on]);
+interface RoomOption { id: string; label: string; unread: number; close?: () => void }
+
+/** 방 고르기 드롭다운 (지금 방 이름이 보이고 키보드로 고른다). 다른 방의 안 읽은 수 합계는 옆 배지, 항목마다 "새 N". 1:1 탭은 × 로 닫는다 */
+function RoomPicker({ room, options, onPick }: { room: string; options: RoomOption[]; onPick: (id: string) => void }) {
+  const cur = options.find((o) => o.id === room);
+  const others = options.reduce((n, o) => n + (o.id === room ? 0 : o.unread), 0);
   return (
-    <span className={`flex shrink-0 items-center rounded-full border text-xs ${on ? "border-transparent bg-ink-900 text-app" : "border-transparent bg-ink-50 text-ink-700 hover:bg-ink-100"} ${dashed && !on ? "!border-dashed !border-ink-300" : ""}`}>
-      <button type="button" role="tab" aria-selected={on} onClick={onClick} title={label} ref={btn}
-        className="flex max-w-[170px] items-center gap-1.5 rounded-full px-3 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500">
-        {mark}
-        <span className="truncate">{label}</span>
-        {!!unread && !on && <span className="chat-badge bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`안 읽은 메시지 ${unread}개`}>{unread}</span>}
-      </button>
-      {onClose && (
-        <button type="button" onClick={onClose} aria-label={`${label} 탭 닫기`} className="mr-1.5 rounded-full px-1 text-[11px] opacity-70 hover:opacity-100">×</button>
-      )}
+    <span className="flex min-w-0 items-center gap-1.5">
+      <select value={cur ? room : ""} onChange={(e) => onPick(e.target.value)} aria-label="대화방 고르기"
+        className="field min-w-0 max-w-[16rem] truncate py-1 text-sm font-semibold text-ink-900">
+        {!cur && <option value="" disabled>찾을 수 없는 방</option>}
+        {options.map((o) => <option key={o.id} value={o.id}>{o.label}{o.unread && o.id !== room ? ` · 새 ${o.unread}` : ""}</option>)}
+      </select>
+      {others > 0 && <span className="chat-badge shrink-0 bg-red-700 px-1.5 text-[10px] font-bold text-white" aria-label={`다른 방에 안 읽은 메시지 ${others}개`}>{others}</span>}
+      {cur?.close && <button type="button" onClick={cur.close} aria-label={`${cur.label} 닫기`} title="1:1 닫기" className="shrink-0 px-1 text-sm text-ink-500 hover:text-ink-900">×</button>}
     </span>
   );
 }

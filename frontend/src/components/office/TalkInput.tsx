@@ -4,7 +4,8 @@ import { TALK_KEYS, TALK_LABEL, type OfficeTalk } from "@/components/office/useO
 import { ALL_ROOM } from "@/lib/agentChat";
 import { Link } from "@/lib/nav";
 
-// 부서 AI에게 직접 말 거는 입력창 (받는 곳 칩 · @태그 · 안내 줄).
+// 부서 AI에게 직접 말 거는 입력창 (받는 곳 고르기 · @태그 · 안내는 ⓘ에 접음).
+// 받는 곳은 입력칸 왼쪽 드롭다운 하나(지금 고른 AI 이름이 보이고 키보드로 고른다). 예전 칩 11개(2줄)는 대화 칸 세로를 먹었다(11/20 1920×919).
 // AI 오피스 단톡방과 AI 대화방 전체 대화방이 같이 쓴다. 단톡방 대화는 모두에게 보이고, 1:1 직접 대화와는 따로 잇는다(useOfficeTalk).
 
 const TAG_KEY: Record<string, string> = Object.fromEntries(TALK_KEYS.map((k) => [TALK_LABEL[k], k]));
@@ -90,16 +91,7 @@ export function TalkInput({ talk, onSent, where, room = ALL_ROOM, roomName }: {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void go(); }
   };
   return (
-    <div className="space-y-2 border-t border-ink-100 px-3 py-3">
-      <div role="radiogroup" aria-label="받는 곳" className="flex flex-wrap gap-1.5">
-        {talk.chips.map((c) => (
-          <button key={c.key} type="button" role="radio" aria-checked={to === c.key} disabled={c.disabled} title={c.reason ?? undefined}
-            onClick={() => { setTo(c.key); setWarn(null); }}
-            className={`chip py-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-50 ${to === c.key ? "bg-brand-600 text-white" : "bg-ink-50 text-ink-700 ring-1 ring-ink-100 hover:bg-ink-100"}`}>
-            {c.label}
-          </button>
-        ))}
-      </div>
+    <div className="space-y-1.5 border-t border-ink-100 px-3 py-2.5">
       {to === "marketing" && picked && (
         <div className="flex items-center gap-2 text-xs text-ink-700">
           <img src={picked.preview} alt="올릴 캐릭터 이미지" className="h-14 w-14 rounded-lg bg-surface object-contain ring-1 ring-ink-100" />
@@ -108,6 +100,15 @@ export function TalkInput({ talk, onSent, where, room = ALL_ROOM, roomName }: {
         </div>
       )}
       <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); void go(); }}>
+        <label className="flex shrink-0 flex-col gap-0.5 text-[11px] text-ink-500">
+          받는 AI
+          <select value={to} aria-label="받는 곳" onChange={(e) => { setTo(e.target.value); setWarn(null); }}
+            className="field max-w-[9.5rem] py-2 text-sm font-medium text-ink-900">
+            {talk.chips.map((c) => (
+              <option key={c.key} value={c.key} disabled={c.disabled} title={c.reason ?? undefined}>{c.label}{c.disabled ? " (준비 중)" : ""}</option>
+            ))}
+          </select>
+        </label>
         {to === "marketing" && (
           <>
             <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => void pickImage(e.target.files?.[0])} />
@@ -122,13 +123,19 @@ export function TalkInput({ talk, onSent, where, room = ALL_ROOM, roomName }: {
       </form>
       {warn && <p role="alert" className="text-xs text-amber-800">{warn}</p>}
       {to === "dev" && <p className="text-[11px] text-ink-700">{DEV_NOTE}</p>}
-      <p className="text-[11px] text-ink-500">
-        {roomName ? <>이 방에서 건 말은 {roomName} 방에만 보이고, 회사 사람 모두가 볼 수 있어요. </> : <>단톡방 대화는 회사 사람 모두에게 보여요. </>}
-        대화 기록과 AI 오피스는 같은 방을 봐요. 1:1 대화는 이 브라우저에만 목록이 남아요(서버 기록은 팀이 같이 써요). 하루 상한은 같이 세요.
-        {where === "office" && (
-          <>{" "}<Link href={`/agents/chat?room=${encodeURIComponent(room)}`} className="font-medium text-brand-700 underline-offset-2 hover:underline">대화 기록에서 보기</Link></>
-        )}
-      </p>
+      <details className="group text-[11px] text-ink-500">
+        <summary className="inline-flex cursor-pointer list-none items-center gap-1 hover:text-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+          title={roomName ? `이 방에서 건 말은 ${roomName} 방에만 보이고, 회사 사람 모두가 볼 수 있어요` : "단톡방 대화는 회사 사람 모두에게 보여요"}>
+          <span aria-hidden="true">ⓘ</span> 누가 보나요?
+        </summary>
+        <p className="mt-1">
+          {roomName ? <>이 방에서 건 말은 {roomName} 방에만 보이고, 회사 사람 모두가 볼 수 있어요. </> : <>단톡방 대화는 회사 사람 모두에게 보여요. </>}
+          대화 기록과 AI 오피스는 같은 방을 봐요. 1:1 대화는 이 브라우저에만 목록이 남아요(서버 기록은 팀이 같이 써요). 하루 상한은 같이 세요.
+          {where === "office" && (
+            <>{" "}<Link href={`/agents/chat?room=${encodeURIComponent(room)}`} className="font-medium text-brand-700 underline-offset-2 hover:underline">대화 기록에서 보기</Link></>
+          )}
+        </p>
+      </details>
     </div>
   );
 }

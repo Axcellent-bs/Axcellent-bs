@@ -241,3 +241,44 @@ def test_video_without_model_is_refused(
     with pytest.raises(rr.RenderError) as err:
         _run(lambda: rr.request_video(env["ledger"], META, rid, None))
     assert str(err.value) == "model_not_configured"
+
+
+# ---------------------------------------------------------------- 사람이 올린 파일
+def _put_file(env: dict[str, Any], rid: str, name: str, data: bytes) -> str:
+    import hashlib
+
+    folder = env["dir"] / "creative" / rid
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / name).write_bytes(data)
+    return hashlib.sha256(data).hexdigest()
+
+
+def test_uploaded_final_video_is_attached_after_the_gate(env: dict[str, Any]) -> None:
+    env["gate"].status["attach_creative_file"] = "executed"
+    rid = env["store"].add_sheet(SHEET, None, None)
+    sha = _put_file(env, rid, "final.mp4", b"\x00\x00\x00\x18ftypmp42" + bytes(20))
+
+    item = _run(
+        lambda: rr.attach_upload(META, rid, "final_video", "final.mp4", sha, 32, "2D.mp4", "태윤")
+    )
+
+    assert item["status"] == "done" and item["source"] == "upload" and item["sha256"] == sha
+    assert env["store"].get(rid)["render"]["final_video"]["label"] == "2D.mp4"
+    assert [c[0] for c in env["gate"].calls] == ["attach_creative_file"]
+
+
+def test_upload_refuses_a_changed_file_and_a_held_gate(env: dict[str, Any]) -> None:
+    rid = env["store"].add_sheet(SHEET, None, None)
+    sha = _put_file(env, rid, "sheet.png", b"\x89PNG\r\n\x1a\n" + bytes(8))
+    with pytest.raises(rr.RenderError, match="file_missing"):
+        _run(
+            lambda: rr.attach_upload(
+                META, rid, "sheet_image", "sheet.png", "0" * 64, 16, None, None
+            )
+        )
+    with pytest.raises(rr.RenderError, match="bad_asset"):
+        _run(lambda: rr.attach_upload(META, rid, "sheet_image", "final.mp4", sha, 16, None, None))
+    env["gate"].status["attach_creative_file"] = "rejected"
+    with pytest.raises(rr.RenderError, match="gate_rejected"):
+        _run(lambda: rr.attach_upload(META, rid, "sheet_image", "sheet.png", sha, 16, None, None))
+    assert "sheet_image" not in env["store"].get(rid)["render"]

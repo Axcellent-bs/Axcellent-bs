@@ -132,6 +132,16 @@ function RequestFormCard({ form, setForm, busy, onSubmit, error, editing, onCanc
             목표
             <input className="field" value={form.goal} onChange={(e) => set("goal", e.target.value)} placeholder="브랜드 인지도" />
           </label>
+          <div className="flex flex-col gap-1 text-xs text-ink-500 sm:col-span-2">
+            <label className="flex flex-col gap-1">
+              주제 (선택)
+              <input className="field" value={form.theme} onChange={(e) => set("theme", e.target.value)} placeholder="예: 아이돌" />
+            </label>
+            <label className="inline-flex items-center gap-1.5 text-sm text-ink-700">
+              <input type="checkbox" checked={form.themeFind} disabled={!form.theme.trim()} onChange={(e) => set("themeFind", e.target.checked)} />
+              이 주제 안에서 후보를 찾아 순위 매기기
+            </label>
+          </div>
           <div className="flex flex-col gap-1 text-xs text-ink-500" role="group" aria-label="타깃 성별">
             타깃 성별
             <span className="flex flex-wrap gap-3 text-sm text-ink-700">

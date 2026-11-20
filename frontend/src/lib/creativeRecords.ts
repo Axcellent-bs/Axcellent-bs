@@ -21,7 +21,7 @@ export interface CreativeRecordSummary {
   render?: Record<string, string>;
 }
 
-export type RenderPartKey = "sheet_image" | "board_image" | "video";
+export type RenderPartKey = "sheet_image" | "board_image" | "video" | "final_video";
 export interface RenderPart {
   status?: string;
   error?: string | null;
@@ -30,6 +30,12 @@ export interface RenderPart {
   review_id?: string | null;
   request_id?: string;
   at?: string;
+  /** "upload"면 사람이 직접 올린 파일 */
+  source?: string;
+  /** 올린 파일 이름 */
+  label?: string | null;
+  /** 올린 사람 */
+  by?: string | null;
 }
 
 export interface CreativeRecord {
@@ -77,4 +83,18 @@ export async function requestCreativeVideo(id: string): Promise<{ record_id: str
   const parsed: unknown = await res.json().catch(() => undefined);
   if (!res.ok) throw failureError(parsed, res.status, "영상 요청을 보내지 못했어요");
   return (parsed as { data: { record_id: string; video: RenderPart } }).data;
+}
+
+/** 사람이 만든 그림(JPG·PNG)·영상(MP4)을 제작 기록 칸에 올린다(POST, 본문은 파일 그대로) */
+export async function uploadCreativeFile(id: string, part: RenderPartKey, file: File): Promise<RenderPart> {
+  const url = `${DASHBOARD_API_URL}${PATH}/${encodeURIComponent(id)}/upload/${part}?name=${encodeURIComponent(file.name.slice(0, 120))}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": file.type || "application/octet-stream", ...dashboardAuth() },
+    body: file,
+    cache: "no-store",
+  });
+  const parsed: unknown = await res.json().catch(() => undefined);
+  if (!res.ok) throw failureError(parsed, res.status, res.status === 413 ? "파일이 너무 커요" : "파일을 올리지 못했어요");
+  return (parsed as { data: { item: RenderPart } }).data.item;
 }

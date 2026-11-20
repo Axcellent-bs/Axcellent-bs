@@ -773,6 +773,19 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _coding_err(exc)
         return _ok({"thread_id": tid, "removed": True}, svc)
 
+    @router.post("/dev-chat/{thread_id}/remove", response_model=None, dependencies=CALLER)
+    async def remove_dev_chat(
+        thread_id: str, request: Request, account: str | None = None
+    ) -> dict | JSONResponse:
+        """대화를 숨긴다 (기록은 남긴다, A2A `dev_chat_remove`와 같은 함수). 띄운 작업은 그대로
+        돈다. 답하는 중이어도 숨긴다 (늦게 온 답은 버려진다). `?account=` 연 계정."""
+        svc = get_service()
+        try:
+            tid = await dev_chat.remove(svc, thread_id, _person(request), SCREEN, account)
+        except ActionError as exc:
+            return _coding_err(exc)
+        return _ok({"thread_id": tid, "removed": True}, svc)
+
     # ---- 레포 작업 공간 (repo_api.py): PR 게시판·상세·머지·되돌리기·브랜치
     add_repo_routes(router, get_service)
 

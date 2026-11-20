@@ -126,7 +126,7 @@ export function deriveOffice(
     }
   }
   // 1-2) 고객 의뢰(wr_) 단계 → 작업 중 / 승인 대기 (가장 최근 열린 의뢰 하나, 사건이 쓰는 자리는 사건이 먼저. lib/officeRequests.ts)
-  applyRequestDesks(desks, requestDesks(opts.requests).map((d) => ({ ...d, bubble: d.bubble ? short(d.bubble, 16) : null })), deskOf);
+  applyRequestDesks(desks, requestDesks(opts.requests, now).map((d) => ({ ...d, bubble: d.bubble ? short(d.bubble, 16) : null })), deskOf);
 
   // 2) 방금 들어온 말풍선 → 말한 부서 머리 위에 (승인 대기 표시는 덮지 않는다)
   for (const it of items) {

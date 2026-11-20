@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
 import { deptKo } from "@/lib/adminRelay";
 import { SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { ago, shortDateTime } from "@/lib/format";
 import { orchestrator } from "@/lib/orchestrator";
+import { requestVideoLink } from "@/lib/requestVideoView";
+import { requestActionError } from "@/lib/requestCards";
 import {
   REQUEST_STATUS, STEP_STATUS, canDecide, canRerun, confidenceText,
   type WorkRequestRow, type WorkRequestTask,
@@ -31,12 +34,16 @@ function Row({ row, tasks, onChanged }: { row: WorkRequestRow; tasks: WorkReques
       await fn();
       onChanged();
     } catch (e) {
-      setFailed(errText(e));
+      // 결정·다시 돌리기 실패 문구는 대화방 의뢰 카드와 같은 함수 (403 서버 차단·409 이미 처리·404·상태 코드)
+      const err = requestActionError(e);
+      setFailed(err.text);
+      if (err.reload) onChanged();
     } finally {
       setBusy(false);
     }
   };
 
+  const videoLink = requestVideoLink(row);
   const alternatives = row.alternatives.map((a) => tasks.find((t) => t.name === a)?.label ?? a);
 
   return (
@@ -81,6 +88,7 @@ function Row({ row, tasks, onChanged }: { row: WorkRequestRow; tasks: WorkReques
                         {s?.result_ref && <span className="font-mono text-ink-500">결과 번호 {s.result_ref}</span>}
                       </p>
                       {s?.note && <p className="mt-1 text-ink-500">{s.note}</p>}
+                      {videoLink && p.skill === "generate_media" && <p className="mt-1"><Link to={videoLink} className="btn-ghost text-xs">영상 열기</Link></p>}
                       {s && canDecide(s) && (
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           <button type="button" className="btn-primary text-xs" disabled={busy || !SAFETY_HUMAN_TOKEN}

@@ -2,7 +2,7 @@
 // deriveOffice(lib/office.ts)는 env를 읽는 모듈을 가져와 node로 바로 못 불러서, 자리 규칙(requestDesks·applyRequestDesks)을 여기서 고정한다
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyRequestDesks, latestOpenRequest, progressOf, requestDesks } from "./officeRequests.ts";
+import { applyRequestDesks, latestOpenRequest, progressOf, requestDesks, staleHours } from "./officeRequests.ts";
 import type { StepStatus, WorkRequestRow } from "./workRequests.ts";
 
 type Desk = { state: "idle" | "working" | "waiting"; bubble: { text: string; kind: string } | null; skill: string | null };
@@ -79,4 +79,23 @@ test("토큰이 없으면 의뢰 목록이 없다 → 자리는 지금 그대로
     applyRequestDesks(d, requestDesks(none), deskOf);
     assert.deepEqual(d, blank());
   }
+});
+
+test("오래 멈춘 열린 의뢰(STALE_HOURS 6시간 넘게 updated_at 그대로)는 자리 상태에 쓰지 않는다: 7시간 전 waiting_human → 총괄 idle, 1시간 전 → waiting", () => {
+  const now = Date.parse("2026-11-20T15:40:00Z");
+  const at = (h: number) => new Date(now - h * 3_600_000).toISOString();
+  const waiting = (h: number) => req("wr_0000000001", at(h), { s1: step("completed"), s2: step("completed"), s3: step("waiting_human") }, "waiting");
+  const old = blank();
+  applyRequestDesks(old, requestDesks([waiting(7)], now), deskOf);
+  assert.equal(old.orchestrator.state, "idle");
+  const fresh = blank();
+  applyRequestDesks(fresh, requestDesks([waiting(1)], now), deskOf);
+  assert.equal(fresh.orchestrator.state, "waiting");
+  // 오래 멈춘 의뢰가 더 최근이어도 그 앞의 살아 있는 의뢰를 쓴다
+  const live = req("wr_0000000002", at(2), { s1: step("running") });
+  const stuck = req("wr_0000000003", at(6.5), { s3: step("waiting_human") }, "waiting");
+  assert.equal(latestOpenRequest([stuck, live], now)?.request_id, "wr_0000000002");
+  assert.equal(staleHours(waiting(7), now), 7);
+  assert.equal(staleHours(waiting(5.9), now), null);
+  assert.equal(staleHours({ ...waiting(30), status: "done" }, now), null); // 끝난 의뢰는 멈춤이 아니다
 });
