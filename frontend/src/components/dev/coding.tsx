@@ -354,7 +354,7 @@ export function CodingStep({ task, on, prs }: { task: Task; on?: boolean; prs?: 
   // 앞 작업 순서를 기다림 (같은 파일·파일 고르는 중). 앞 작업이 사람 확인으로 멈추면 끝없이 기다리므로 사람이 건너뛴다
   const queueWait = !mine && c.status === 'queued' && !!c.waitingFor?.length && !c.skipQueue
   const skipQueue = () => {
-    if (window.confirm(`${idText(task.id)}를 앞 작업(${(c.waitingFor ?? []).join(', ')})을 기다리지 않고 지금 진행할까요? 같은 파일을 고치면 머지할 때 충돌할 수 있어요.`)) {
+    if (window.confirm(`${idText(task.id)}를 앞 작업(${(c.waitingFor ?? []).join(', ')})을 기다리지 않고 지금 진행할까요?\n앞 작업과 같은 파일을 고치면 PR이 충돌할 수 있어요.`)) {
       void act(() => api.skipQueue(task.id), `${task.id} 지금 진행`)
     }
   }
