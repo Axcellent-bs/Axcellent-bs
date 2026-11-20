@@ -8,7 +8,7 @@
 /** 보내기 body에 room_id를 넣는 부서 (부서 서버가 직접 받는 창구). 그 밖 8곳은 dashboard-api 중계라 body를 바꾸지 않는다 */
 export const ROOM_ID_AGENTS: ReadonlySet<string> = new Set(["safety", "hr", "archive"]);
 
-export interface SendBody { thread_id?: string; message: string; room_id?: string }
+export interface SendBody { thread_id?: string; message: string; room_id?: string; record_id?: string }
 
 /** 단톡방에서 보내는 body. 이어 쓸 내 대화가 있으면 thread_id, safety·hr·archive면 room_id(1~64자일 때만) */
 export function officeSendBody(x: { agent: string; room: string; threadId: string | null; message: string }): SendBody {

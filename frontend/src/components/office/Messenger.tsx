@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import { HandoffLine, PlanCard } from "@/components/office/DevCards";
 import { RequestProgressCard } from "@/components/office/RequestProgressCard";
+import { CreativeChatCard } from "@/components/office/CreativeChatCard";
 import { TALK_LABEL, proceed, type OfficeTalk } from "@/components/office/useOfficeTalk";
 import { INCIDENT_STATUS_KO, type ChatItem, type OrchIncident, type Tone } from "@/lib/agentChat";
 import { clock, detectorName, impactOf, num, rootCauseOf } from "@/lib/data";
@@ -146,6 +147,7 @@ function Bubble({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: Off
           onGo={talk && m.goKey ? () => { void proceed(talk, m.goKey as string, m.room); } : undefined} />
       )}
       {m.handoff && <HandoffLine requestId={m.handoff.requestId} />}
+      {m.creative && <CreativeChatCard card={m.creative} />}
     </div>
   );
 }
