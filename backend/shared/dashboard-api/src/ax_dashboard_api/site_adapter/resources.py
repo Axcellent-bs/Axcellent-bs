@@ -2,6 +2,7 @@
 
 주문 한 건은 상품 한 줄로 본다(누비투어 예약 = 투어 하나).
 결제는 받은 금액이 있으면 한 건으로 만든다.
+판매 기록(`sales_row`)의 환불 줄·취소 주체·결제 실패는 짝에 그 칸이 있을 때만 채운다.
 숫자는 고객사 값을 옮기거나 그 값으로만 계산한다(`unit_price = 총액 // 수량`).
 """
 
@@ -89,7 +90,7 @@ def to_order(row: dict[str, Any], m: ResourceMap) -> dict[str, Any]:
         "updated_at": updated_at,
         "buyer_id": get("buyer_id"),
         "total_amount": total,
-        "refunded_amount": 0,
+        "refunded_amount": _int(get("refunded_amount")) if "refunded_amount" in m.fields else 0,
         "items": [
             {
                 "product_id": get("product_id"),
@@ -181,9 +182,44 @@ def _buyer(order: dict[str, Any]) -> str:
     return order["buyer_id"] or f"guest-{order['order_id']}"
 
 
-def to_sales_row(order: dict[str, Any]) -> dict[str, Any]:
-    """판매 기록 내보내기 한 줄 (`ax_contracts.data_access.shop_sales.SalesOrderRow`)."""
+CANCEL_REASONS = frozenset({"buyer", "seller", "system"})
+
+
+def _optional(row: dict[str, Any], m: ResourceMap, name: str) -> Any:
+    """짝에 칸이 있으면 그 값, 없으면 None (사이트에 없는 값은 지어내지 않는다)."""
+    return _get(row, m, name, "orders") if name in m.fields else None
+
+
+def sales_row(row: dict[str, Any], m: ResourceMap) -> dict[str, Any]:
+    """원본 주문 → 판매 기록 한 줄. 주문 모양에 없는 칸(취소 주체·환불 시각)을 짝에서 더 읽는다."""
+    order = to_order(row, m)
+    reason = _optional(row, m, "cancel_reason_code")
+    return to_sales_row(
+        order,
+        cancel_reason_code=reason if order["status"] == "cancelled" else None,
+        refunded_at=_optional(row, m, "refunded_at"),
+    )
+
+
+def to_sales_row(
+    order: dict[str, Any],
+    *,
+    cancel_reason_code: Any = None,
+    refunded_at: Any = None,
+) -> dict[str, Any]:
+    """판매 기록 내보내기 한 줄 (`ax_contracts.data_access.shop_sales.SalesOrderRow`).
+
+    - 결제 상태: 받은 금액이 있으면 `succeeded`, 상태 값 표가 `payment_failed`로 옮긴
+      주문이면 `failed`, 그 밖은 None
+    - 환불: 사이트의 환불 누적 금액(`refunded_amount`)이 있으면 한 줄. 사이트에 환불 id가 없어
+      `refund_id`는 비운다(감지기가 누적 금액으로 만든다). 시각은 짝의 `refunded_at`, 없으면
+      주문이 마지막으로 바뀐 시각(고객사 값)
+    - 취소 주체: `buyer`·`seller`·`system` 중 하나일 때만(값 표로 옮긴 값). 그 밖은 None
+    """
     paid = any(p["status"] == "succeeded" for p in order["payments"])
+    failed = order["status"] == "payment_failed"
+    refunded = order.get("refunded_amount") or 0
+    reason = cancel_reason_code if cancel_reason_code in CANCEL_REASONS else None
     return {
         "order_id": order["order_id"],
         "buyer_id": _buyer(order),
@@ -191,11 +227,23 @@ def to_sales_row(order: dict[str, Any]) -> dict[str, Any]:
         "created_at": order["created_at"],
         "updated_at": order["updated_at"],
         "items_amount": order["total_amount"],
-        "payment_status": "succeeded" if paid else None,
+        "payment_status": "succeeded" if paid else ("failed" if failed else None),
         "lines": [
             {"product_id": i["product_id"], "qty": i["qty"], "unit_price": i["unit_price"]}
             for i in order["items"]
         ],
+        "refunds": (
+            [
+                {
+                    "refund_id": None,
+                    "amount": refunded,
+                    "refunded_at": refunded_at or order["updated_at"],
+                }
+            ]
+            if refunded > 0
+            else []
+        ),
+        "cancel_reason_code": reason,
     }
 
 

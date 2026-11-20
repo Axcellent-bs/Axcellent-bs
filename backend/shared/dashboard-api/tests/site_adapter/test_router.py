@@ -97,7 +97,13 @@ def test_sales_export_shape(client: TestClient) -> None:
 
     body = client.get(f"{BASE}/api/shop/sales-export?limit=2").json()["data"]
     parsed = ShopSalesExportResult.model_validate(body)
-    assert len(parsed.orders) == 2 and parsed.has_more is True and parsed.next_cursor == "2"
+    assert len(parsed.orders) == 2 and parsed.has_more is True and parsed.next_cursor
+    # 커서는 마지막으로 준 (updated_at, order_id) 자리다. 이어 받으면 남은 주문만 온다
+    rest = client.get(
+        f"{BASE}/api/shop/sales-export", params={"limit": 2, "cursor": parsed.next_cursor}
+    ).json()["data"]
+    tail = ShopSalesExportResult.model_validate(rest)
+    assert [o.order_id for o in tail.orders] == ["NB-20261115-0003"] and tail.has_more is False
 
 
 def test_customers_export_shape(client: TestClient) -> None:
