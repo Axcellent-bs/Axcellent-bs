@@ -8,7 +8,7 @@ import { reloadServerMembers, useServerMembers } from './serverMembers'
 import { createAccount, updateAccount } from '@/lib/authApi'
 import { accountInputProblem, getSession, MIN_PASSWORD_LENGTH, type ServerAccount, type ServerRole } from '@/lib/humanSession'
 import { parseTenants, tenantListProblem } from '@/lib/secretStore'
-import { approverOf, canEditProfile, customerRows, limitEditorOf, limitEditorProblem, policyEditorOf, policyEditorProblem, roleChangeProblem, secretEditorOf, secretEditorProblem, secretTenantsOf, toggleReader, type AccountPatch } from '@/lib/memberAdmin'
+import { approverOf, buyerIdProblem, canEditProfile, customerRows, limitEditorOf, limitEditorProblem, policyEditorOf, policyEditorProblem, roleChangeProblem, secretEditorOf, secretEditorProblem, secretTenantsOf, toggleReader, type AccountPatch } from '@/lib/memberAdmin'
 import { PreparingChip } from '@/components/Preparing'
 import { privateIp, useHosts } from './store'
 import { More, PageHead, SectionHead, StatusChip, Tabs, Tiles } from '@/components/connect/parts'
@@ -168,6 +168,22 @@ function ServerDeptCell({ row, disabled, onSave }: { row: ServerAccount; disable
   )
 }
 
+/** 구매자 연결(shop-api 구매자 번호). 비우고 저장하면 연결을 푼다. 바뀌면 저장 버튼이 나온다 */
+function BuyerCell({ row, disabled, reason, onSave }: { row: ServerAccount; disabled: boolean; reason?: string; onSave: (buyerId: string) => void }) {
+  const saved = row.buyer_id ?? ''
+  const [draft, setDraft] = useState(saved)
+  const problem = buyerIdProblem(draft)
+  return (
+    <div className="flex items-center gap-1">
+      <input className="field w-28 py-1 font-mono text-xs" aria-label={`${row.name} 구매자 번호`} placeholder="buy_0001" value={draft} disabled={disabled}
+        title={reason} onChange={(e) => setDraft(e.target.value)} />
+      {draft.trim() !== saved && (
+        <button type="button" className="btn-ghost px-2 py-1 text-xs" disabled={disabled || !!problem} title={problem ?? undefined} onClick={() => onSave(draft)}>저장</button>
+      )}
+    </div>
+  )
+}
+
 /** 키 담당 고객사 목록 입력(쉼표로 구분). 바뀌면 저장 버튼이 나온다 */
 function SecretTenantsCell({ row, disabled, onSave }: { row: ServerAccount; disabled: boolean; onSave: (tenants: string[]) => void }) {
   const saved = secretTenantsOf(row).join(', ')
@@ -233,6 +249,7 @@ function ServerMembers() {
               <th className="px-4 py-2.5 font-medium">구분</th>
               <th className="px-4 py-2.5 font-medium">연결</th>
               <th className="px-4 py-2.5 font-medium">부서 (선택)</th>
+              <th className="px-4 py-2.5 font-medium">구매자 번호</th>
               <th className="px-4 py-2.5 font-medium">확인 권한</th>
               <th className="px-4 py-2.5 font-medium">비용 상한 변경 권한</th>
               <th className="px-4 py-2.5 font-medium">정책 변경 권한</th>
@@ -245,6 +262,7 @@ function ServerMembers() {
             {list.map((a) => {
               const editable = !!me && canEditProfile(me, a) && busy === null
               const approver = approverOf(a)
+              const selfBuyerBlocked = !!me && me.id === a.id && me.role !== 'operator' // 서버도 막는다(SELF_BUYER_LINK)
               const readers = a.readers ?? []
               const limitEditor = limitEditorOf(a)
               const limitProblem = limitEditorProblem(a)
@@ -272,6 +290,11 @@ function ServerMembers() {
                   <td className="px-4 py-2.5">
                     <ServerDeptCell key={`${a.id}:${a.dept ?? ''}`} row={a} disabled={!editable}
                       onSave={(dept) => void save(a, { dept }, dept.trim() ? `${a.name} 부서를 ${dept.trim()}(으)로 저장했어요.` : `${a.name} 부서를 비웠어요.`)} />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <BuyerCell key={`${a.id}:${a.buyer_id ?? ''}`} row={a} disabled={!editable || selfBuyerBlocked}
+                      reason={selfBuyerBlocked ? '자기 계정의 구매자 연결은 운영자만 바꿀 수 있어요.' : undefined}
+                      onSave={(buyerId) => void save(a, { buyer_id: buyerId }, buyerId.trim() ? `${a.name} 구매자를 ${buyerId.trim()}(으)로 연결했어요.` : `${a.name} 구매자 연결을 풀었어요.`)} />
                   </td>
                   <td className="px-4 py-2.5">
                     <button type="button" role="switch" aria-checked={approver} aria-label={`${a.name} 확인 권한`} disabled={!editable}

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseSession, readServerAccount, type ServerAccount } from "./humanSession.ts";
 import {
-  approverOf, canEditProfile, limitEditorOf, limitEditorProblem, policyEditorOf, policyEditorProblem, customerRows, readAccountList, roleChangeProblem, toggleReader, updateBody,
+  approverOf, buyerIdProblem, canEditProfile, limitEditorOf, limitEditorProblem, policyEditorOf, policyEditorProblem, customerRows, readAccountList, roleChangeProblem, toggleReader, updateBody,
 } from "./memberAdmin.ts";
 
 const acc = (id: string, role: ServerAccount["role"], over: Partial<ServerAccount> = {}): ServerAccount =>
@@ -99,6 +99,8 @@ test("저장 본문: 보낸 칸만, 빈 요청은 보내지 않는다", () => {
   assert.deepEqual(updateBody({ dept: " 개발팀 " }), { dept: "개발팀" });
   assert.deepEqual(updateBody({ dept: "" }), { dept: "" });
   assert.deepEqual(updateBody({ approver: false }), { approver: false });
+  assert.deepEqual(updateBody({ buyer_id: " buy_0007 " }), { buyer_id: "buy_0007" });
+  assert.deepEqual(updateBody({ buyer_id: "" }), { buyer_id: "" });
   assert.deepEqual(updateBody({ readers: ["finance", "hr", "finance"] }), { readers: ["hr", "finance"] });
   assert.deepEqual(updateBody({ role: "admin", name: " 예진 " }), { role: "admin", name: "예진" });
 });
@@ -129,4 +131,21 @@ test("정책 변경 권한: 기본 꺼짐, 일반회원 불가, 주는 사람은
   assert.equal(policyEditorProblem({ role: "admin", policy_editor: true }, { role: "admin" }), null);
   assert.deepEqual(updateBody({ policy_editor: true }), { policy_editor: true });
   assert.equal(readServerAccount({ id: "a", name: "a", email: "a@b.co", role: "admin", policy_editor: true })?.policy_editor, true);
+});
+
+test("구매자 번호 입력: 비우거나 buy_와 숫자 4자리만 통과한다", () => {
+  assert.equal(buyerIdProblem(""), null);
+  assert.equal(buyerIdProblem("  "), null);
+  assert.equal(buyerIdProblem(" buy_0007 "), null);
+  for (const bad of ["7", "buy_7", "usr_0007", "buy_00007", "BUY_0007", "buy_００７７"]) {
+    assert.notEqual(buyerIdProblem(bad), null, bad);
+  }
+});
+
+test("계정 한 줄에서 구매자 번호를 읽는다: 없거나 빈 값은 null, 칸이 안 오면 넣지 않는다", () => {
+  const base = { id: "acc-1", name: "예진", email: "yj@example.com", role: "member" };
+  assert.equal(readServerAccount({ ...base, buyer_id: "buy_0007" })?.buyer_id, "buy_0007");
+  assert.equal(readServerAccount({ ...base, buyer_id: null })?.buyer_id, null);
+  assert.equal(readServerAccount({ ...base, buyer_id: "" })?.buyer_id, null);
+  assert.equal("buyer_id" in (readServerAccount(base) ?? {}), false);
 });

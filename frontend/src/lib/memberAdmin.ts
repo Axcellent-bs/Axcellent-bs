@@ -87,7 +87,7 @@ export function canEditProfile(actor: { role: ServerRole }, target: ServerAccoun
   return actor.role === "admin" && CUSTOMER_ROLES.includes(target.role);
 }
 
-export type AccountPatch = { role?: ServerRole; name?: string; dept?: string; approver?: boolean; limit_editor?: boolean; policy_editor?: boolean; secret_editor?: boolean; secret_tenants?: string[]; readers?: ReaderAreaId[] };
+export type AccountPatch = { role?: ServerRole; name?: string; dept?: string; buyer_id?: string; approver?: boolean; limit_editor?: boolean; policy_editor?: boolean; secret_editor?: boolean; secret_tenants?: string[]; readers?: ReaderAreaId[] };
 
 /** `POST /auth/accounts/{id}/update` 본문: 보낼 칸만. 아무것도 없으면 null (빈 요청은 보내지 않는다) */
 export function updateBody(patch: AccountPatch): AccountPatch | null {
@@ -95,6 +95,7 @@ export function updateBody(patch: AccountPatch): AccountPatch | null {
   if (patch.role !== undefined) out.role = patch.role;
   if (patch.name !== undefined) out.name = patch.name.trim();
   if (patch.dept !== undefined) out.dept = patch.dept.trim();
+  if (patch.buyer_id !== undefined) out.buyer_id = patch.buyer_id.trim();
   if (patch.approver !== undefined) out.approver = patch.approver;
   if (patch.limit_editor !== undefined) out.limit_editor = patch.limit_editor;
   if (patch.policy_editor !== undefined) out.policy_editor = patch.policy_editor;
@@ -102,6 +103,13 @@ export function updateBody(patch: AccountPatch): AccountPatch | null {
   if (patch.secret_tenants !== undefined) out.secret_tenants = [...new Set(patch.secret_tenants.map((t) => t.trim()).filter(Boolean))];
   if (patch.readers !== undefined) out.readers = READER_AREA_IDS.filter((r) => patch.readers?.includes(r));
   return Object.keys(out).length ? out : null;
+}
+
+/** 구매자 번호 입력 검사: 비우면 연결을 푼다. 아니면 buy_ 와 숫자 4자리(서버 규칙과 같다). 문제가 없으면 null */
+export function buyerIdProblem(text: string): string | null {
+  const t = text.trim();
+  if (!t || /^buy_[0-9]{4}$/.test(t)) return null;
+  return "구매자 번호는 buy_0001처럼 buy_와 숫자 4자리예요.";
 }
 
 /** 열람 담당 하나를 켜고 끈다 (순서는 READER_AREA_IDS 순) */
