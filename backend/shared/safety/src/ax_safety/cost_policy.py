@@ -9,8 +9,10 @@
 - 파일: `SAFETY_COST_POLICY_FILE`(없으면 `SAFETY_STATE_DB` 옆 `cost_policy.json`,
   둘 다 없으면 덮어쓰기 없음 = 기본값만, 변경 요청은 거절). 이력은 `<파일>.history.jsonl`.
   `SAFETY_COST_POLICY_FILE`을 정하지 않았고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 설계 1-4)
-  `<회사 폴더>/catbooks/cost_policy.json`. `SAFETY_STATE_DB` 옆 옛 파일은 처음 읽을 때
-  이력과 같이 옮긴다.
+  `<회사 폴더>/catbooks/cost_policy.json`. `SAFETY_STATE_DB` 옆 옛 파일은 안전 서버가 켤 때
+  (`prepare`) 이력과 같이 옮긴다. 판정 경로는 경로만 읽는다(잠금 대기 없음).
+  `AX_COMPANY_FOLDERS=off`로 켜면 옛 경로가 비어 있을 때 회사 폴더 값으로 되살리고, 되살리지
+  못하면 경고 한 번 + 현황의 `moved_unrestored: true`.
 - 쓰는 곳은 안전 서버의 적용 경로(`apply_change`) 한 곳이다. 값은 승인된 보류 건의 요청
   기록에서만 온다. 마케팅·대시보드 코드는 이 파일을 쓰지 않는다(읽기 API만 있다).
 - 안전 서버는 규칙을 볼 때마다 `effective()`로 파일의 mtime을 확인해 재시작 없이 다시 읽는다.
@@ -60,15 +62,53 @@ class PolicyError(Exception):
 POLICY_NAME = "cost_policy.json"
 
 
+HISTORY_SUFFIX = ".history.jsonl"
+
+
+def _old_path() -> Path | None:
+    """예전 자리: `SAFETY_STATE_DB` 옆 `cost_policy.json`."""
+    state = os.getenv("SAFETY_STATE_DB", "").strip()
+    return Path(state).with_name(POLICY_NAME) if state else None
+
+
 def policy_path() -> Path | None:
+    """정책 파일 경로. 판정마다 불리므로 옮기거나 잠금을 기다리지 않고 경로만 정한다.
+
+    `SAFETY_COST_POLICY_FILE` → 회사 폴더(켰을 때, 아직 안 옮긴 옛 파일이 있으면 옛 경로)
+    → `SAFETY_STATE_DB` 옆. 이관·되살리기는 안전 서버가 켤 때 `prepare()`가 한 번 한다.
+    """
     explicit = os.getenv(FILE_ENV, "").strip()
     if explicit:
         return Path(explicit)
-    state = os.getenv("SAFETY_STATE_DB", "").strip()
-    old = Path(state).with_name(POLICY_NAME) if state else None
+    old = _old_path()
     if company_files.folders_on():
-        return company_files.company_file(POLICY_NAME, source=old, extras=(".history.jsonl",))
+        return company_files.peek_company_file(POLICY_NAME, source=old)
     return old
+
+
+def prepare() -> None:
+    """안전 서버가 켤 때 한 번: 회사 폴더로 옮기기, 또는 off면 회사 폴더 값으로 옛 경로 되살리기.
+
+    되살리지 못해 옛 경로에 `.moved`만 남았으면 경고를 한 번 남긴다
+    (`describe`의 `moved_unrestored`).
+    """
+    global _cache
+    if os.getenv(FILE_ENV, "").strip():
+        return
+    old = _old_path()
+    if company_files.folders_on():
+        company_files.company_file(POLICY_NAME, source=old, extras=(HISTORY_SUFFIX,))
+    elif old is not None and company_files.folders_off():
+        company_files.restore_old(POLICY_NAME, target=old, extras=(HISTORY_SUFFIX,))
+        company_files.warn_unrestored(old, "비용 정책")
+    _cache = None
+
+
+def moved_unrestored() -> bool:
+    """off인데 옛 경로에 `.moved`만 있고 되살리지 못했다(승인해 바꾼 값 대신 기본값을 쓰는 중)."""
+    if os.getenv(FILE_ENV, "").strip() or not company_files.folders_off():
+        return False
+    return company_files.moved_unrestored(_old_path())
 
 
 def in_range(key: str, value: object) -> bool:
@@ -154,6 +194,7 @@ def describe(base: ThresholdTable) -> dict[str, Any]:
         )
     return {
         "editable": policy_path() is not None,
+        "moved_unrestored": moved_unrestored(),
         "items": items,
         "history": history(),
     }

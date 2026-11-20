@@ -4,6 +4,7 @@
   (`{"shop_api_url", "enabled", "verified_at", "updated_at", "updated_by"}`).
   회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 설계 1-4) `<회사 폴더>/catbooks/company_connection.json`에
   두고, `AX_COMPANY_CONNECTION_FILE` 자리에 옛 파일이 있으면 처음 읽을 때 옮긴다(`company_files`).
+  `AX_COMPANY_FOLDERS=off`면 이 자리를 다시 쓰고, 비어 있으면 회사 폴더 값으로 되살린다.
   `AX_COMPANY_CONNECTION_FILE`은 그대로 설치 기준 자리다: 계정·연결 키·설치 기록처럼 회사 밖
   파일이 그 옆에 있다(`connection_file()`). 연결 파일을 읽고 쓰는 곳은 `connection_path()`.
   쓰는 곳은 dashboard-api 한 곳이다 (시스템 관리 > 회사 연결, 사람 토큰).
@@ -95,6 +96,8 @@ def connection_path() -> str:
     from ax_agent_template import company_files
 
     if not company_files.folders_on():
+        # 되돌리기(off): 옛 자리가 비어 있으면 회사 폴더 값으로 되살린다
+        company_files.restore_old(CONNECTION_NAME, target=Path(anchor), extras=(HISTORY_SUFFIX,))
         return anchor
     path = company_files.company_file(
         CONNECTION_NAME, source=Path(anchor), extras=(HISTORY_SUFFIX,)

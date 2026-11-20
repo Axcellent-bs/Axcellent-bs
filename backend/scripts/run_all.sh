@@ -313,9 +313,12 @@ _company_file() {
 }
 ENABLED_FILE_SHOWN=$(_company_file "${AX_ENABLED_SERVICES_FILE:-}" enabled_services.json)
 CONNECTION_FILE_SHOWN=$(_company_file "" company_connection.json)
-# 회사 폴더로 처음 옮기기 전 백업: 옛 자리 파일을 묶어 $DATA/backup-before-companies-<시각>.tgz로 둔다
+# 회사 폴더로 옮기기 전 백업: 아직 안 옮긴 옛 자리 파일을 묶어
+# $DATA/backup-before-companies-<시각>-<내용 확인값>.tgz로 둔다 (만든 사용자만 읽게 umask 077).
+# 옮길 옛 파일이 없으면 만들지 않고, 같은 내용의 묶음이 이미 있으면 건너뛰고, 최근 5개만 남긴다.
 # (옮긴 뒤에도 옛 파일은 .moved로 남는다. 이 묶음은 한 번 더 둔 것)
-# 회사 폴더를 껐으면(되돌리기) 켠 서비스·도구 연결도 예전 기본 자리로 정한다
+# 회사 폴더를 껐으면(되돌리기) 켠 서비스·도구 연결도 예전 기본 자리로 정한다. 옛 자리가 비어 있으면
+# 각 서버가 켤 때 회사 폴더 값으로 되살린다 (ax_agent_template.company_files.restore_old)
 case "${AX_COMPANY_FOLDERS:-}" in
 off|0|false|no)
   export AX_ENABLED_SERVICES_FILE="${AX_ENABLED_SERVICES_FILE:-$PWD/$DATA/enabled_services.json}"
@@ -329,9 +332,24 @@ off|0|false|no)
     if [ -e "$PWD/$DATA/$_f" ] && [ ! -e "$AX_COMPANIES_DIR/catbooks/$_f" ]; then _old="$_old $_f"; fi
   done
   if [ -n "$_old" ]; then
-    _bk="$PWD/$DATA/backup-before-companies-$(date +%Y%m%d%H%M%S).tgz"
+    # 내용 확인값: 묶을 파일들의 이름·크기·cksum (시각이 달라도 내용이 같으면 같은 값)
     # shellcheck disable=SC2086
-    tar czf "$_bk" -C "$PWD/$DATA" $_old && echo "회사 폴더로 옮기기 전 백업: $_bk ($_old )"
+    _sum=$(cd "$PWD/$DATA" && find $_old -type f | LC_ALL=C sort | while IFS= read -r _p; do cksum "$_p"; done | cksum | cut -d' ' -f1)
+    if ls "$PWD/$DATA"/backup-before-companies-*-"$_sum".tgz >/dev/null 2>&1; then
+      echo "회사 폴더로 옮기기 전 백업: 같은 내용의 묶음이 이미 있어 건너뜁니다 ($_sum)"
+    else
+      _bk="$PWD/$DATA/backup-before-companies-$(date +%Y%m%d%H%M%S)-$_sum.tgz"
+      # shellcheck disable=SC2086
+      if ( umask 077; tar czf "$_bk" -C "$PWD/$DATA" $_old ); then
+        echo "회사 폴더로 옮기기 전 백업: $_bk ($_old )"
+      else
+        rm -f "$_bk"
+        echo "경고: 회사 폴더로 옮기기 전 백업을 만들지 못했습니다 ($_bk). 옛 파일은 옮긴 뒤에도 .moved로 남습니다" >&2
+      fi
+    fi
+    # 최근 5개만 남긴다
+    # shellcheck disable=SC2012
+    ls -1t "$PWD/$DATA"/backup-before-companies-*.tgz 2>/dev/null | tail -n +6 | while IFS= read -r _p; do rm -f "$_p"; done
   fi
   ;;
 esac

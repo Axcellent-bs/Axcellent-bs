@@ -9,6 +9,7 @@
   없으면 환경변수 `AX_ENABLED_SERVICES` (쉼표 목록, 비어 있으면 전부 켬).
   `AX_ENABLED_SERVICES_FILE`을 정하지 않았고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 설계 1-4)
   `<회사 폴더>/catbooks/enabled_services.json`을 본다(옛 자리에 있으면 처음 읽을 때 옮긴다).
+  `AX_COMPANY_FOLDERS=off`면 정한 경로가 비어 있을 때 회사 폴더 값으로 되살린다.
   파일이 깨졌거나 읽을 수 없으면 환경변수 값을 쓴다(경고 로그).
   `services.py`의 서비스 13개만 이 목록을 따른다. 그 밖의 대상
   (safety·memory·shop-api·dashboard-api 같은 공통 서버, 주소로 부른 대상)은 늘 켜져 있다.
@@ -123,11 +124,13 @@ ENABLED_FILE_NAME = "enabled_services.json"
 
 def enabled_services_file() -> str:
     """켠 서비스 파일 경로. 환경변수 → 회사 폴더. 둘 다 없으면 빈 문자열."""
-    explicit = os.getenv(ENABLED_FILE_ENV, "").strip()
-    if explicit:
-        return explicit
     from ax_agent_template import company_files
 
+    explicit = os.getenv(ENABLED_FILE_ENV, "").strip()
+    if explicit:
+        # 되돌리기(off): 정한 경로가 비어 있으면 회사 폴더 값으로 되살린다
+        company_files.restore_old(ENABLED_FILE_NAME, target=Path(explicit))
+        return explicit
     if not company_files.folders_on():
         return ""
     return str(company_files.company_file(ENABLED_FILE_NAME))

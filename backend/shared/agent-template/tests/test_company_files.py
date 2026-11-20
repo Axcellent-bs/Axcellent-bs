@@ -4,7 +4,7 @@
 - 파일마다 경로 환경변수(`AX_TOOL_CONNECTIONS_FILE` 등)를 정했으면 그 경로를 그대로 쓴다
 - 옛 경로에 파일이 있으면 처음 읽을 때 캣북스 폴더로 한 번 옮기고, 옛 파일은 `.moved`로 남긴다
 - 옮기다 실패하면 옛 파일을 그대로 두고 옛 경로로 읽는다
-- 되돌리기: 새 파일을 지우고 `.moved`를 원래 이름으로, `AX_COMPANY_FOLDERS=off`
+- 되돌리기: `AX_COMPANY_FOLDERS=off`만 넣고 다시 켜면 회사 폴더 값으로 옛 경로를 되살린다
 """
 
 from __future__ import annotations
@@ -181,7 +181,7 @@ def test_existing_moved_backup_is_not_overwritten(data: Path) -> None:
 def test_rollback_restores_old_paths(data: Path, monkeypatch) -> None:  # noqa: ANN001
     legacy, history = _write_legacy_connection(data)
     cc.read_connection()
-    # 되돌리기: 새 파일을 지우고 .moved를 원래 이름으로, 회사 폴더 끄기
+    # 사람이 손으로 옛 파일을 되돌려 둔 경우: off면 그 옛 파일을 그대로 읽는다(덮어쓰지 않음)
     shutil.rmtree(data / "companies" / "catbooks")
     (data / "company_connection.json.moved").rename(legacy)
     (data / "company_connection.json.history.jsonl.moved").rename(history)
@@ -244,7 +244,7 @@ def test_stale_lock_is_broken(data: Path, monkeypatch) -> None:  # noqa: ANN001
 
 def test_tool_connections_move_with_history(data: Path) -> None:
     legacy = data / "tool_connections.json"
-    legacy.write_text(json.dumps({"connections": []}), encoding="utf-8")
+    legacy.write_text("[]", encoding="utf-8")
     (data / "tool_connections.json.history.jsonl").write_text("{}\n", encoding="utf-8")
     new = _catbooks(data, "tool_connections.json")
     assert tc.connections_file() == str(new)
@@ -309,3 +309,159 @@ def test_folder_moves_whole(data: Path) -> None:
     assert got == _catbooks(data, "site_adapter")
     assert sorted(p.name for p in got.iterdir()) == ["bookkeeping.jsonl", "mapping.json"]
     assert (data / "site_adapter.moved" / "mapping.json").exists() and not legacy.exists()
+
+
+# ---- 되돌리기: off만 넣고 다시 켜면 회사 폴더 값으로 옛 경로를 되살린다 (리뷰 #1537) ----
+
+
+def _migrated_then_changed(data: Path) -> tuple[Path, Path]:
+    """옮긴 뒤 화면에서 주소를 바꾼 상태 (옛 자리는 .moved뿐)."""
+    legacy, history = _write_legacy_connection(data)
+    cc.read_connection()
+    cc.save_connection("http://127.0.0.1:9100", verified_at=None, updated_by="admin")
+    assert not legacy.exists()
+    return legacy, history
+
+
+def test_off_restores_connection_from_company_folder(data: Path, monkeypatch, caplog) -> None:  # noqa: ANN001
+    legacy, history = _migrated_then_changed(data)
+    new = _catbooks(data, "company_connection.json")
+    monkeypatch.setenv(company_files.FOLDERS_ENV, "off")
+    caplog.set_level(logging.INFO, logger="ax.company_files")
+    cc._cache = None
+    found = cc.read_connection()
+    # 옮긴 뒤 바꾼 값(9100)이 살아 있다. .moved의 옛 값(8090)으로 돌아가지 않는다
+    assert found is not None and found.shop_api_url == "http://127.0.0.1:9100"
+    assert cc.connection_path() == str(legacy)
+    assert json.loads(legacy.read_text(encoding="utf-8"))["shop_api_url"] == "http://127.0.0.1:9100"
+    assert [r["action"] for r in cc.read_history()][:2] == ["save", "save"]
+    assert history.exists()
+    assert new.exists()  # 회사 폴더 파일은 지우지 않는다
+    assert (data / "company_connection.json.moved").exists()
+    restored = [r for r in caplog.records if "옛 경로를 되살렸다" in r.getMessage()]
+    assert len(restored) == 1
+    cc._cache = None
+    cc.read_connection()
+    assert len([r for r in caplog.records if "옛 경로를 되살렸다" in r.getMessage()]) == 1
+
+
+def test_off_restore_does_not_overwrite_existing_old_file(data: Path, monkeypatch) -> None:  # noqa: ANN001
+    legacy, _ = _migrated_then_changed(data)
+    legacy.write_text(json.dumps({**CONNECTION, "shop_api_url": "http://127.0.0.1:7000"}), "utf-8")
+    monkeypatch.setenv(company_files.FOLDERS_ENV, "off")
+    cc._cache = None
+    found = cc.read_connection()
+    assert found is not None and found.shop_api_url == "http://127.0.0.1:7000"
+
+
+def test_off_restore_failure_keeps_reading_old_path(data: Path, monkeypatch, caplog) -> None:  # noqa: ANN001
+    legacy, _ = _migrated_then_changed(data)
+    monkeypatch.setenv(company_files.FOLDERS_ENV, "off")
+
+    def boom(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+        raise OSError("disk full")
+
+    monkeypatch.setattr(company_files.shutil, "copy2", boom)
+    caplog.set_level(logging.WARNING, logger="ax.company_files")
+    assert cc.connection_path() == str(legacy)
+    assert not legacy.exists()
+    assert [p.name for p in data.iterdir() if p.name.endswith(".tmp")] == []
+    assert any("되살리지 못했다" in r.getMessage() for r in caplog.records)
+
+
+def test_off_restores_tool_connections_into_old_default(data: Path, monkeypatch) -> None:  # noqa: ANN001
+    legacy = data / "tool_connections.json"
+    legacy.write_text("[]", encoding="utf-8")
+    tc.connections_file()  # 옮긴다
+    tc._cache = None
+    tc.upsert(
+        "jenkins",
+        "빌드",
+        {"url": "http://ci.local"},
+        {"token": "t" * 20},
+        conn_id=None,
+        by="tester",
+    )
+    # run_all.sh는 off일 때 예전 기본 경로를 정한다
+    monkeypatch.setenv(company_files.FOLDERS_ENV, "off")
+    monkeypatch.setenv(tc.FILE_ENV, str(legacy))
+    tc._cache = None
+    assert [c.id for c in tc.read_all()] == ["jenkins-1"]
+    assert legacy.exists() and _catbooks(data, "tool_connections.json").exists()
+
+
+def test_off_restores_enabled_services(data: Path, monkeypatch) -> None:  # noqa: ANN001
+    legacy = data / "enabled_services.json"
+    legacy.write_text(json.dumps({"enabled": ["data"]}), encoding="utf-8")
+    routing.enabled_services()  # 옮긴다
+    _catbooks(data, "enabled_services.json").write_text(
+        json.dumps({"enabled": ["finance"]}), encoding="utf-8"
+    )
+    monkeypatch.setenv(company_files.FOLDERS_ENV, "off")
+    monkeypatch.setenv(routing.ENABLED_FILE_ENV, str(legacy))
+    monkeypatch.setenv(routing.ENABLED_ENV, "inquiry")
+    routing._enabled_cache = None
+    assert routing.enabled_services() == frozenset({"finance"})
+
+
+def test_off_restores_folder(data: Path, monkeypatch) -> None:  # noqa: ANN001
+    legacy = data / "site_adapter"
+    legacy.mkdir()
+    (legacy / "mapping.json").write_text("{}", encoding="utf-8")
+    company_files.company_file("site_adapter")
+    (_catbooks(data, "site_adapter") / "token").write_text("t", encoding="utf-8")
+    monkeypatch.setenv(company_files.FOLDERS_ENV, "off")
+    assert company_files.restore_old("site_adapter", target=legacy)
+    assert sorted(p.name for p in legacy.iterdir()) == ["mapping.json", "token"]
+    assert _catbooks(data, "site_adapter").exists()
+
+
+def test_restore_needs_off_switch(data: Path) -> None:
+    legacy, _ = _migrated_then_changed(data)
+    assert not company_files.restore_old("company_connection.json", target=legacy)
+    assert not legacy.exists()
+
+
+# ---- 없는 파일은 건너뛴다: 빈 파일·빈 폴더를 만들지 않는다 ----
+
+
+def test_missing_extras_are_skipped_on_move(data: Path) -> None:
+    legacy = data / "company_connection.json"
+    legacy.write_text(json.dumps(CONNECTION), encoding="utf-8")  # 이력 파일 없음
+    cc.read_connection()
+    folder = data / "companies" / "catbooks"
+    assert sorted(p.name for p in folder.iterdir() if p.name != company_files.LOCK_NAME) == [
+        "company_connection.json"
+    ]
+    assert not (data / "company_connection.json.history.jsonl.moved").exists()
+    assert sorted(p.name for p in data.iterdir()) == [
+        "companies",
+        "company_connection.json.moved",
+    ]
+
+
+def test_missing_extras_are_skipped_on_restore(data: Path, monkeypatch) -> None:  # noqa: ANN001
+    legacy = data / "company_connection.json"
+    legacy.write_text(json.dumps(CONNECTION), encoding="utf-8")
+    cc.read_connection()
+    monkeypatch.setenv(company_files.FOLDERS_ENV, "off")
+    cc._cache = None
+    cc.read_connection()
+    assert legacy.exists()
+    assert not (data / "company_connection.json.history.jsonl").exists()
+
+
+def test_off_with_nothing_anywhere_makes_nothing(data: Path, monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv(company_files.FOLDERS_ENV, "off")
+    monkeypatch.setenv(tc.FILE_ENV, str(data / "tool_connections.json"))
+    assert cc.read_connection() is None
+    assert tc.read_all() == []
+    assert sorted(p.name for p in data.iterdir()) == []
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="윈도는 권한 비트가 없다")
+def test_company_folder_is_private(data: Path) -> None:
+    _write_legacy_connection(data)
+    cc.read_connection()
+    for folder in (data / "companies", data / "companies" / "catbooks"):
+        assert folder.stat().st_mode & 0o777 == 0o700

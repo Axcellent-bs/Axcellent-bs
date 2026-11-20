@@ -60,3 +60,20 @@ def test_no_old_folder_reads_new_path(data: Path) -> None:
     assert m.adapter_dir() == data / "companies" / "catbooks" / "site_adapter"
     assert m.load_mapping() is None
     assert not (data / "companies").exists()
+
+
+def test_off_restores_old_folder_from_company_folder(
+    data: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """되돌리기: off만 넣고 켜면 옛 자리(.data/site_adapter)를 회사 폴더 값으로 되살린다."""
+    old = data / "site_adapter"
+    old.mkdir()
+    shutil.copy(FIXTURES / "nubi_mapping.json", old / "mapping.json")
+    new = m.adapter_dir()
+    (new / "bookkeeping.jsonl").write_text("{}\n", encoding="utf-8")  # 옮긴 뒤 쌓인 기록
+    monkeypatch.setenv(company_files.FOLDERS_ENV, "off")
+    monkeypatch.setattr(m, "DEFAULT_DIR", old)  # 서버에서는 backend/.data/site_adapter
+    assert m.adapter_dir() == old
+    assert m.load_mapping() is not None
+    assert (old / "bookkeeping.jsonl").exists()
+    assert new.exists()  # 회사 폴더는 지우지 않는다
