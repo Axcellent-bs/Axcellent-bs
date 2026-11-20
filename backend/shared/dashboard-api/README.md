@@ -235,6 +235,11 @@ AXcellent 규격(shop-api)이 아닌 고객사 자기 API를 AI들이 shop-api�
 | `POST /api/shop/admin/{inquiries\|claims\|ideas\|returns}/.../{synced\|failed\|view\|feedback-synced\|gone\|retry}` | 고객지원 접수 동기화: `bookkeeping.jsonl`에 기록만. 에이전트 토큰 또는 `AX_SHOP_CLIENT_KEYS` 키 |
 | 그 밖 | 404 `NOT_MAPPED` (환불·쿠폰·배너 쓰기와 문의·신청 읽기는 다음 PR) |
 
+판매 기록 내보내기(`/sales-export`)는 변화 감지기·데이터 수집기가 이어 읽는다.
+- 커서는 마지막으로 준 `(updated_at, order_id)`(`<시각>|<주문 번호>`). 중간 주문이 바뀌어도 빠지거나 두 번 나오지 않고, 바뀐 주문은 뒤에 다시 나온다. 예전 순번 커서(숫자)는 처음부터, 그 밖의 모양은 422
+- 이어 읽을 때 커서 시각 2분 전을 고객사 `updated_since`(짝의 `paging.since_param`)로 넘겨 바뀐 것만 받는다
+- 짝 `orders.fields`에 칸이 있을 때만 채운다(지어내지 않는다): `refunded_amount`(→ 환불 한 줄, `refund_id` 없음, 시각은 `refunded_at` 칸 또는 주문 `updated_at`), `cancel_reason_code`(+ `values` 값 표로 `buyer`·`seller`·`system`, 취소 주문에만), 상태 값 표가 `payment_failed`로 옮긴 주문은 `payment_status=failed`
+
 오류: 짝 없음·연결 아님 503 `NOT_CONFIGURED`, 짝이 응답과 안 맞음 502 `MAPPING_BROKEN`,
 고객사 키 거부 503 `UPSTREAM_AUTH`, 고객사 응답 없음·5xx 503 `UPSTREAM_UNAVAILABLE`.
 
@@ -250,7 +255,7 @@ AXcellent 규격(shop-api)이 아닌 고객사 자기 API를 AI들이 shop-api�
 
 ### 변화 감지기 (`change_detector.py`, 기본 꺼짐)
 
-고객사 판매 기록(`GET /api/shop/sales-export`)을 주기적으로 읽어, 바뀐 것만 `payment.refunded`·`order.cancelled` 이벤트로 만든다(설계: `docs/superpowers/specs/2026-11-19-customer-change-polling-design.md`). 지금은 캣북스(shop-api 직결)만 읽고, 변환기 고객사는 변환기 보완 뒤에 켠다.
+고객사 판매 기록(`GET /api/shop/sales-export`)을 주기적으로 읽어, 바뀐 것만 `payment.refunded`·`order.cancelled` 이벤트로 만든다(설계: `docs/superpowers/specs/2026-11-19-customer-change-polling-design.md`). 캣북스(shop-api 직결)와 사이트 변환기 고객사를 읽는다(변환기 고객사는 주문 상세로 결제 id를 찾지 않고 `pay_of_<주문>` 규칙).
 
 | 설정 | 기본 | 뜻 |
 | --- | --- | --- |

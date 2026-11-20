@@ -29,11 +29,13 @@
   `event_id`가 변화 내용으로 정해져 있어 버스가 같은 이벤트를 두 번 쌓지 않는다
   (`chg:<회사>:payment.refunded:<주문>:<환불>`, `chg:<회사>:order.cancelled:<주문>`)
 - 결제 id(`PaymentRefundedData.payment_id`, 필수)는 바뀐 주문만 `GET /api/shop/orders/{id}`로
-  읽어 채운다. 없으면 재무 `books.py`와 같은 규칙(`pay_of_<주문>`, `rfd_of_<주문>_<누적금액>`)
+  읽어 채운다. 없으면 재무 `books.py`와 같은 규칙(`pay_of_<주문>`, `rfd_of_<주문>_<누적금액>`).
+  사이트 변환기 고객사는 주문 상세에도 결제 id가 없고 상세 읽기가 고객사 전체 읽기라 부르지 않는다
 - 취소 사유(`reason_code`)는 판매 기록의 `cancel_reason_code`만 쓴다. 비어 있으면 이벤트를
   만들지 않고 `skipped_no_reason` 건수만 남긴다(지어내지 않는다)
-- 캣북스(shop-api 직결)만 읽는다. 사이트 변환기 고객사는 변환기 보완(PR 2: 커서·`updated_since`·
-  환불 줄) 전까지 읽지 않는다(`ADAPTER_NOT_YET`)
+- 캣북스(shop-api 직결)와 사이트 변환기 고객사를 읽는다. 변환기 고객사는 변환기 보완(PR 2:
+  `(updated_at, order_id)` 커서·`updated_since`·환불 줄) 뒤라 같은 모양을 받는다. 켜는 스위치는
+  위와 같다(기본 꺼짐)
 - 판매 서버에는 dashboard-api 토큰(`DASHBOARD_API_TOKEN` 또는 토큰 명부)을 붙인다
 - 실패해도 서버는 안 죽고 다음 회차에 다시 한다. 같은 오류가 연달아 나면 로그는 한 줄만.
   잘림(`UPSTREAM_TRUNCATED` 503) 등 실패한 회차는 커서를 옮기지 않는다
@@ -83,7 +85,6 @@ TOKEN_NAME = "dashboard-api"
 # 판매 기록의 취소 상태 (캣북스 상태 값). 변환기 고객사는 상태 값 표로 같은 값에 맞춘다
 CANCELLED_STATUSES = frozenset({"cancelled"})
 
-ADAPTER_NOT_YET = "사이트 변환기 고객사는 변환기 보완 전이라 읽지 않아요"
 NO_TENANT = "회사가 정해지지 않아 읽지 않아요 (회사 연결 확인)"
 TOKEN_NOT_SET = "dashboard-api 토큰이 없어 판매 서버를 부를 수 없어요"
 
@@ -269,11 +270,14 @@ def _payment_id(order_id: str, refund: _Refund, detail: dict[str, Any] | None) -
 class _Shop:
     """판매 서버 호출 (호출 수를 센다)."""
 
-    def __init__(self, client: httpx.AsyncClient, base: str, token: str) -> None:
+    def __init__(
+        self, client: httpx.AsyncClient, base: str, token: str, *, details: bool = True
+    ) -> None:
         self.client = client
         self.base = base.rstrip("/")
         self.headers = {"Authorization": f"Bearer {token}"}
         self.calls = 0
+        self.details = details  # 주문 상세로 결제 id를 찾을지 (변환기 고객사는 아니다)
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
         self.calls += 1
@@ -306,6 +310,8 @@ class _Shop:
             raise DetectorError("판매 기록 응답 형식이 계약과 달라요") from None
 
     async def order_detail(self, order_id: str) -> dict[str, Any] | None:
+        if not self.details:
+            return None
         res = await self._get(f"/api/shop/orders/{order_id}")
         if res.status_code == 404:
             return None
@@ -399,8 +405,7 @@ async def _run(now: datetime | None) -> RunResult:
     result = RunResult(attempted)
     state = _load()
     connection = store.read_connection()
-    if connection is not None and connection.kind == "adapter":
-        return _fail(state, result, ADAPTER_NOT_YET)
+    adapter = connection is not None and connection.kind == "adapter"
     tenant = tenants.current()
     if not tenant:
         return _fail(state, result, NO_TENANT)
@@ -418,7 +423,7 @@ async def _run(now: datetime | None) -> RunResult:
     limit = max_calls()
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=TRANSPORT) as client:
-            shop = _Shop(client, config.agent_url("shop-api"), token)
+            shop = _Shop(client, config.agent_url("shop-api"), token, details=not adapter)
             try:
                 await _pages(shop, state, result, tenant, publish, limit)
             finally:

@@ -14,7 +14,7 @@ import hmac
 import logging
 import os
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request
@@ -67,8 +67,14 @@ def _mapping() -> SiteMapping:
     return found
 
 
-async def _rows(resource: Resource, since: str | None = None) -> list[dict[str, Any]]:
-    """자원을 읽어 shop-api 모양으로 바꾼다. 오류는 shop-api 오류 모양으로.
+async def _rows(
+    resource: Resource,
+    since: str | None = None,
+    convert: Callable[[dict[str, Any], Any], dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """자원을 읽어 shop-api 모양으로 바꾼다(`convert`가 없으면 주문·상품 모양).
+
+    오류는 shop-api 오류 모양으로.
 
     고객사 쪽 수가 상한(`AX_SITE_ADAPTER_MAX_PAGES`)에 닿으면 일부만 주지 않고 503
     `UPSTREAM_TRUNCATED`로 실패한다(빠진 장부·합계를 만들지 않는다).
@@ -77,9 +83,8 @@ async def _rows(resource: Resource, since: str | None = None) -> list[dict[str, 
     res = m.resources.get(resource)
     if res is None:
         raise ApiError(503, "NOT_CONFIGURED", f"{resource} 짝이 아직 없어요")
-    convert: Callable[[dict[str, Any], Any], dict[str, Any]] = (
-        resources.to_order if resource == "orders" else resources.to_product
-    )
+    if convert is None:
+        convert = resources.to_order if resource == "orders" else resources.to_product
     try:
         raw, truncated = await upstream.fetch_all(m, res, since=since)
         if truncated:
@@ -194,14 +199,64 @@ async def sales_summary(
         raise ApiError(422, "INVALID_REQUEST", str(exc)) from exc
 
 
+# 고객사 시계가 `updated_at`을 조금 늦게 찍거나 `updated_since` 경계를 다르게 셀 때를 위해
+# 커서 시각보다 앞당겨 묻는다. 이미 준 줄은 커서 비교로 거른다 (설계 "누락 막기")
+SINCE_LEAD = timedelta(minutes=2)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _sales_cursor(cursor: str | None) -> tuple[datetime, str] | None:
+    """판매 기록 커서 `<updated_at ISO>|<order_id>` → 자리.
+
+    비었거나 예전 순번 커서(숫자)면 처음부터(None).
+
+    예전 순번 커서는 이 변환기가 전에 준 값이다. 처음부터 다시 주면 받는 쪽이 같은 주문을
+    덮어쓰므로 안전하다. 그 밖의 모양은 422.
+    """
+    if not cursor or cursor.isdigit():
+        return None
+    at, sep, order_id = cursor.partition("|")
+    parsed = _at(at) if sep and order_id else None
+    if parsed is None:
+        raise ApiError(422, "INVALID_REQUEST", "판매 기록 커서 모양이 아니에요")
+    return parsed, order_id
+
+
+def _sales_key(row: dict[str, Any]) -> tuple[datetime, str]:
+    return _at(row["updated_at"], upstream_value=True) or _EPOCH, row["order_id"]
+
+
 @router.get("/api/shop/sales-export")
 async def sales_export(limit: int | None = None, cursor: str | None = None) -> dict[str, Any]:
-    """`ShopSalesExportResult` 모양. `(updated_at, order_id)` 순."""
-    rows = sorted(
-        (resources.to_sales_row(o) for o in await _rows("orders")),
-        key=lambda r: (r["updated_at"] or "", r["order_id"]),
+    """`ShopSalesExportResult` 모양. `(updated_at, order_id)` 순, 커서 뒤의 줄만.
+
+    커서는 마지막으로 준 `(updated_at, order_id)`라 중간 주문이 바뀌어도 빠지거나 두 번 나오지
+    않는다(바뀐 주문은 `updated_at`이 바뀌어 뒤에 다시 나온다). 이어 읽을 때는 커서 시각을
+    고객사 `updated_since`(짝의 `paging.since_param`)로 넘겨 바뀐 것만 받는다.
+    """
+    after = _sales_cursor(cursor)
+    since = (after[0] - SINCE_LEAD).isoformat().replace("+00:00", "Z") if after else None
+    keyed = sorted(
+        ((_sales_key(r), r) for r in await _rows("orders", since, resources.sales_row)),
+        key=lambda kr: kr[0],
     )
-    return _ok(_export("orders", rows, limit, cursor))
+    if after:
+        keyed = [kr for kr in keyed if kr[0] > after]
+    size = max(1, min(limit or 500, MAX_LIMIT))
+    chunk = keyed[:size]
+    if chunk:
+        last_at, last_id = chunk[-1][0]
+        nxt: str | None = f"{last_at.astimezone(UTC).isoformat()}|{last_id}"
+    else:
+        nxt = cursor
+    return _ok(
+        {
+            "orders": [r for _, r in chunk],
+            "next_cursor": nxt,
+            "has_more": len(keyed) > size,
+            "collected_at": datetime.now(UTC).isoformat(),
+        }
+    )
 
 
 @router.get("/api/shop/customers-export")

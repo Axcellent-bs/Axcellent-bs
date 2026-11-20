@@ -11,6 +11,10 @@
   없으면 끊은 토큰 목록 옆 `session_generations.json`). 토큰은 만들 때의 세대(`gen`)를 담고,
   계정의 지금 세대보다 낮은 토큰은 받지 않는다. 그 계정의 기존 세션을 한 번에 끊는 방법
 - 서명 키가 없거나 짧으면(32자 미만) 세션 토큰을 하나도 받지 않는다(fail-closed)
+- 회사(여러 회사 설계 1-3): 토큰 내용에 회사 ID `cid`·회사 역할 `crole`(`admin`·`member`)을
+  담는다. 형식은 `axs1` 그대로(칸 추가만). 회사가 없는 옛 토큰은 1단계에서는 캣북스로 보고,
+  회사 역할은 계정 역할(`admin`·`member`)을 캣북스의 그 역할로 읽는다(운영자는 회사 역할 없음).
+  옛 토큰 거절은 4단계에서 한다
 - 공용 사람 토큰(`*_HUMAN_TOKENS`)은 `AX_ALLOW_SHARED_HUMAN_TOKEN=0`이 되기 전까지 받는다.
   받을 때마다 경고 로그를 남긴다
 
@@ -32,6 +36,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ax_agent_template import company_connection
+from ax_agent_template.companies import canonical_company_id
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 
 SESSION_SECRET_ENV = "AX_SESSION_SECRET"
 ALLOW_SHARED_ENV = "AX_ALLOW_SHARED_HUMAN_TOKEN"
@@ -44,6 +50,9 @@ SESSION_TTL_SECONDS = 12 * 60 * 60  # 정한 것: 12시간 (설계 문서)
 MIN_SECRET_LENGTH = 32
 ROLES: tuple[str, ...] = ("operator", "admin", "member")
 SHARED_ROLE = "shared"
+COMPANY_ROLES: tuple[str, ...] = ("admin", "member")  # 계약 `CompanyRole`
+# 회사가 없는 옛 토큰의 회사(1단계: 회사가 캣북스 하나). 4단계에서 옛 토큰을 거절한다
+LEGACY_COMPANY_ID = TENANT_ID_CATBOOKS
 
 logger = logging.getLogger("ax.human_auth")
 _revoked_in_memory: dict[str, int] = {}
@@ -63,13 +72,18 @@ class HumanAuthError(Exception):
 
 @dataclass(frozen=True)
 class Human:
-    """쓰기를 한 사람. 공용 토큰이면 role은 `shared`(어느 역할 검사도 통과하지 않는다)."""
+    """쓰기를 한 사람. 공용 토큰이면 role은 `shared`(어느 역할 검사도 통과하지 않는다).
+
+    company_id·company_role: 세션 토큰의 회사와 그 회사 안의 역할. 공용·목 토큰은 회사가 없다(None).
+    """
 
     name: str
     role: str
     account_id: str | None = None
     session_id: str | None = None
     expires_at: int | None = None
+    company_id: str | None = None
+    company_role: str | None = None
 
     @property
     def shared(self) -> bool:
@@ -124,16 +138,27 @@ def issue_session(
     now: int | None = None,
     ttl: int | None = None,
     gen: int | None = None,
+    company_id: str | None = None,
+    company_role: str | None = None,
 ) -> tuple[str, int]:
     """세션 토큰과 만료 시각(유닉스 초)을 만든다. 서명 키가 없으면 RuntimeError.
 
     gen을 안 주면 그 계정의 지금 세대 번호를 담는다.
+    company_id를 주면 정식 회사 ID로 `cid`에, company_role은 `crole`에 담는다.
+    회사 없이 회사 역할만 주거나, 형식이 맞지 않으면 ValueError.
     """
     secret = _secret()
     if secret is None:
         raise RuntimeError(f"{SESSION_SECRET_ENV}가 없거나 {MIN_SECRET_LENGTH}자보다 짧다")
     if role not in ROLES:
         raise ValueError(f"role은 {', '.join(ROLES)} 중 하나여야 한다")
+    cid = None
+    if company_id is not None:
+        cid = canonical_company_id(company_id)
+        if cid is None:
+            raise ValueError("company_id가 회사 ID 형식이 아니다")
+    if company_role is not None and (cid is None or company_role not in COMPANY_ROLES):
+        raise ValueError(f"company_role은 회사와 같이, {', '.join(COMPANY_ROLES)} 중 하나여야 한다")
     issued = int(time.time()) if now is None else now
     exp = issued + (SESSION_TTL_SECONDS if ttl is None else ttl)
     payload = {
@@ -145,6 +170,10 @@ def issue_session(
         "jti": secrets.token_hex(12),
         "gen": account_generation(account_id) if gen is None else gen,
     }
+    if cid is not None:
+        payload["cid"] = cid
+        if company_role is not None:
+            payload["crole"] = company_role
     body = _b64(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     return f"{PREFIX}.{body}.{_sign(secret, body)}", exp
 
@@ -186,13 +215,34 @@ def verify_session(token: str, *, now: int | None = None) -> Human:
         raise HumanAuthError(
             401, "SESSION_ENDED", "비밀번호가 바뀌어 로그인이 끊겼어요. 다시 로그인해 주세요"
         )
+    company_id, company_role = _session_company(payload, str(role))
     return Human(
         name=name,
         role=str(role),
         account_id=sub if isinstance(sub, str) else None,
         session_id=jti,
         expires_at=exp,
+        company_id=company_id,
+        company_role=company_role,
     )
+
+
+def _session_company(payload: dict, role: str) -> tuple[str, str | None]:
+    """토큰 내용의 회사·회사 역할. 서명은 이미 확인했다. 형식이 깨졌으면 받지 않는다.
+
+    `cid`가 없는 옛 토큰은 캣북스로 보고, 회사 역할은 계정 역할을 그대로 읽는다(1단계).
+    """
+    if "cid" not in payload:
+        if "crole" in payload:
+            raise _invalid()
+        return LEGACY_COMPANY_ID, role if role in COMPANY_ROLES else None
+    cid = canonical_company_id(payload["cid"])
+    if cid is None:
+        raise _invalid()
+    crole = payload.get("crole")
+    if crole is not None and crole not in COMPANY_ROLES:
+        raise _invalid()
+    return cid, crole
 
 
 def verify_human(

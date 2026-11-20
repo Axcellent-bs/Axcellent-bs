@@ -15,6 +15,12 @@
   `limit_editor`·`policy_editor`는 운영자·고객사 관리자 계정에만 켤 수 있다(일반회원은 못 켠다,
   일반회원으로 내리면 꺼진다). `policy_editor`는 운영자 또는 `policy_editor`인 관리자만 준다.
   열람 담당 값은 화면 `members.ts`의 `ReaderArea`와 같다
+- 회사 소속 `memberships: [{company_id, role}]`(여러 회사 설계 1-3, 계약 `Membership`).
+  계정은 회사 밖(전역)에 있고, 회사 안의 역할은 `admin`·`member`다. 칸이 없는 옛 계정은
+  읽을 때만 캣북스 소속으로 본다(관리자·일반회원 → 캣북스의 그 역할, 운영자 → 소속 없음).
+  파일을 고쳐 쓰지 않으므로 이 기능을 되돌려도 계정 파일은 그대로다. 칸이 있으면 그 값을 쓰고
+  (별칭은 정식 회사 ID로, 형식이 깨진 줄·회사 목록에 없는 회사는 버린다), 칸이 목록이 아니면
+  소속 없음으로 본다. 권한 검사는 1단계에서는 지금처럼 계정 역할(`role`)로 한다
 - 첫 계정: 계정이 하나도 없을 때 `AX_BOOTSTRAP_ADMIN="이메일:초기 비밀번호"`로 운영자 1명을 만든다
 - 같은 이메일로 연속 5번 틀리면 15분 동안 로그인을 막는다(맞는 비밀번호여도).
   이 프로세스 메모리에 센다
@@ -23,9 +29,10 @@
 경로
 - `GET  /api/dashboard/auth/status` → {login_enabled}
   (화면이 서버 로그인과 데모 로그인 중 무엇을 쓸지 고른다)
-- `POST /api/dashboard/auth/login` {email, password} → {token, expires_at, account}
+- `POST /api/dashboard/auth/login` {email, password} → {token, expires_at, account, companies}
+  (companies = 소속 목록. 토큰은 첫 소속 회사로 서명한다(`cid`·`crole`), 소속이 없으면 회사 없이)
 - `POST /api/dashboard/auth/logout` (세션 토큰) → 끊은 토큰 목록에 올린다
-- `GET  /api/dashboard/auth/me` (세션 토큰) → 내 계정
+- `GET  /api/dashboard/auth/me` (세션 토큰) → 내 계정, companies, 지금 회사(company_id·company_role)
 - `GET  /api/dashboard/auth/accounts`
   (운영자: 모든 계정 / 고객사 관리자: 고객사 계정(admin·member)만) → 계정 목록
   (공개 칸만. 비밀번호 해시·세대 번호 같은 내부 값은 내보내지 않는다)
@@ -62,10 +69,13 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Header
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+from ax_agent_template import companies as company_list
 from ax_agent_template import company_connection as store
 from ax_agent_template import human_auth
+from ax_contracts.schemas import Membership
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 from ax_dashboard_api.envelope import ApiError, ok
 from ax_secret_store.service import TENANT_RE
 
@@ -207,6 +217,67 @@ def secret_tenants_of(row: dict[str, Any]) -> list[str]:
     if not isinstance(raw, list):
         return []
     return list(dict.fromkeys(t for t in raw if isinstance(t, str) and TENANT_RE.match(t)))
+
+
+def memberships_of(row: dict[str, Any]) -> list[Membership]:
+    """계정의 회사 소속. 회사 목록에 있는 회사만, 같은 회사는 한 번만(파일 줄 순서대로).
+
+    칸이 없는 옛 계정은 캣북스 소속으로 본다(관리자·일반회원 → 그 역할, 운영자 → 없음).
+    """
+    if "memberships" not in row:
+        role = row.get("role")
+        if role not in CUSTOMER_ROLES:
+            return []
+        raw: Any = [{"company_id": TENANT_ID_CATBOOKS, "role": role}]
+    else:
+        raw = row.get("memberships")
+        if not isinstance(raw, list):
+            logger.warning("계정 %s의 소속 칸 모양이 달라 소속 없음으로 본다", row.get("id"))
+            return []
+    known = set(company_list.company_ids())
+    out: list[Membership] = []
+    for item in raw:
+        try:
+            m = Membership.model_validate(item)  # 계약 TenantId가 별칭을 정식 id로 바꾼다
+        except ValidationError:
+            continue
+        if m.company_id in known and all(o.company_id != m.company_id for o in out):
+            out.append(m)
+    return out
+
+
+def _companies_out(memberships: list[Membership]) -> list[dict[str, Any]]:
+    return [m.model_dump(mode="json") for m in memberships]
+
+
+def _issue_for(row: dict[str, Any]) -> tuple[str, int, list[Membership]]:
+    """계정의 세션 토큰. 첫 소속 회사로 서명한다(회사 고르기는 뒤 단계에서)."""
+    memberships = memberships_of(row)
+    first = memberships[0] if memberships else None
+    token, exp = human_auth.issue_session(
+        account_id=str(row["id"]),
+        name=str(row["name"]),
+        role=str(row["role"]),
+        company_id=first.company_id if first else None,
+        company_role=first.role if first else None,
+    )
+    return token, exp, memberships
+
+
+def _sync_catbooks_membership(row: dict[str, Any], new_role: str) -> None:
+    """계정 역할이 고객사 역할로 바뀌면, 적어 둔 캣북스 소속의 역할도 같이 바꾼다(1단계).
+
+    소속 칸이 없는 계정은 역할에서 읽으므로 손대지 않는다.
+    """
+    stored = row.get("memberships")
+    if new_role not in CUSTOMER_ROLES or not isinstance(stored, list):
+        return
+    for item in stored:
+        if (
+            isinstance(item, dict)
+            and company_list.canonical_company_id(item.get("company_id")) == TENANT_ID_CATBOOKS
+        ):
+            item["role"] = new_role
 
 
 def _buyer_id_of(row: dict[str, Any]) -> str | None:
@@ -402,10 +473,15 @@ def login(body: LoginIn) -> dict:
         _record_failure(email, now)
         raise ApiError(401, "LOGIN_FAILED", "이메일이나 비밀번호가 맞지 않아요")
     _clear_failures(email)
-    token, exp = human_auth.issue_session(
-        account_id=str(row["id"]), name=str(row["name"]), role=str(row["role"])
+    token, exp, memberships = _issue_for(row)
+    return ok(
+        {
+            "token": token,
+            "expires_at": exp,
+            "account": _public(row),
+            "companies": _companies_out(memberships),
+        }
     )
-    return ok({"token": token, "expires_at": exp, "account": _public(row)})
 
 
 @router.post("/logout")
@@ -421,7 +497,15 @@ def me(authorization: str | None = Header(None)) -> dict:
     row = next((r for r in load_accounts() if r.get("id") == human.account_id), None)
     if row is None:
         raise ApiError(401, "ACCOUNT_GONE", "계정이 없어졌어요. 다시 로그인해 주세요")
-    return ok({"account": _public(row), "expires_at": human.expires_at})
+    return ok(
+        {
+            "account": _public(row),
+            "expires_at": human.expires_at,
+            "companies": _companies_out(memberships_of(row)),
+            "company_id": human.company_id,
+            "company_role": human.company_role,
+        }
+    )
 
 
 @router.get("/accounts")
@@ -486,11 +570,16 @@ def change_password(body: PasswordChangeIn, authorization: str | None = Header(N
         _set_password(row, body.new_password)
         _write(path, rows)
     human_auth.end_account_sessions(str(row["id"]))
-    token, exp = human_auth.issue_session(
-        account_id=str(row["id"]), name=str(row["name"]), role=str(row["role"])
-    )
+    token, exp, memberships = _issue_for(row)
     logger.info("비밀번호를 바꿨다: %s", row["id"])
-    return ok({"token": token, "expires_at": exp, "account": _public(row)})
+    return ok(
+        {
+            "token": token,
+            "expires_at": exp,
+            "account": _public(row),
+            "companies": _companies_out(memberships),
+        }
+    )
 
 
 @router.post("/accounts/{account_id}/reset-password")
@@ -613,6 +702,8 @@ def update_account(
         if "role" in patch:
             _check_role_change(human, row, patch["role"], rows)
             row["role"] = patch["role"]
+            if role_changed:
+                _sync_catbooks_membership(row, patch["role"])
         if "name" in patch:
             name = patch["name"].strip()
             if not name:

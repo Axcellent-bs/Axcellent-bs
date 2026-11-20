@@ -198,10 +198,14 @@ export default function AgentOffice() {
   ) : undefined;
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 xl:overflow-hidden lg:p-6">
+    // xl 이상: 왼쪽 칸(제목·의뢰 넘김·사무실)과 오른쪽 칸(단톡방) 두 칸. 단톡방이 제목 옆에서 맨 아래까지 쓰고 대화만 안에서 스크롤된다.
+    // 왼쪽 칸이 길어지면 왼쪽만 안에서 스크롤된다. xl 미만은 위에서 아래로 쌓고 페이지가 스크롤된다.
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 xl:flex-row xl:overflow-hidden lg:p-6">
       <style>{"@keyframes officePop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}"}</style>
+      <div className="flex min-w-0 shrink-0 flex-col gap-4 xl:min-h-0 xl:flex-1 xl:shrink xl:overflow-y-auto">
       <header className="flex flex-wrap items-start gap-x-6 gap-y-3">
-        <div className="min-w-0 flex-1">
+        {/* 왼쪽 칸이 좁아져도 설명 글이 가늘게 접히지 않게, 22rem보다 좁아지면 보기 방식 버튼이 아래 줄로 내려간다 */}
+        <div className="min-w-[min(100%,22rem)] flex-1">
           <h1 className="text-xl font-semibold tracking-tight">AI 오피스</h1>
           <p className="mt-1 text-sm text-ink-500">
             부서 AI가 지금 무슨 일을 하는지 사무실로 봅니다. 총괄 AI가 일을 맡기면 그 부서가 총괄 AI에게 와서 받아 가고, 일하는 동안 불꽃이 일어납니다. 사람 승인이 필요하면 🚩 승인 대기로 깜빡입니다.
@@ -253,8 +257,7 @@ export default function AgentOffice() {
 
       {mode === "live" && <RequestHandoffCard />}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 xl:flex-row">
-        <section aria-label="부서 AI 사무실" className="card flex min-w-0 shrink-0 flex-col gap-3 p-4 xl:min-h-0 xl:flex-1 xl:shrink xl:overflow-y-auto">
+        <section aria-label="부서 AI 사무실" className="card flex min-w-0 shrink-0 flex-col gap-3 p-4">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="card-title">부서 AI 사무실</h2>
             <span className="text-xs text-ink-500">{DESKS.length}자리 · 총괄 AI·안전 처리 로그 포함</span>
@@ -283,6 +286,7 @@ export default function AgentOffice() {
             })}
           </ul>
         </section>
+      </div>
 
         {direct ? (
           <div className="chat-round card flex min-h-[460px] min-w-0 xl:min-h-0 flex-1 flex-col overflow-hidden xl:w-[580px] xl:flex-none">
@@ -305,7 +309,6 @@ export default function AgentOffice() {
             big={mode === "live"}
           />
         )}
-      </div>
     </div>
   );
 }
