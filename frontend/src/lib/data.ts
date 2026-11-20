@@ -1978,9 +1978,55 @@ export interface TrendReportListItem {
   caller: TrendReportCaller;
   product: string | null;
   summary_line: string | null;
+  // 아래는 예전 응답은 없다 (v3, 11/20)
+  /** 기획에 보낼 인사이트를 뽑을 수 있는 보고서인지 (모르면 null) */
+  has_insight?: boolean | null;
+  /** 마지막으로 기획에 보낸 결과 (보낸 적 없으면 null) */
+  handoff?: TrendReportHandoffOutput | null;
 }
 export interface TrendReportListOutput {
   items: TrendReportListItem[];
+}
+
+// ---- 보고서 → 기획 (trend_report_insight · trend_report_handoff, 11/20 공통 계약)
+// 기획 쪽 연결 키: 보고서 인사이트 insight_id = "trend_report:" + report_id
+
+/** 인사이트 근거 한 줄 (기획 InsightFact, 서버 모양 그대로) */
+export interface ReceiveInsightFact { label: string; value: string; source: string; link?: string | null }
+/** 기획 receive_insight에 보내는 꾸러미 그대로 (기획 계약 ReceiveInsightInput, snake_case). 기획 화면용 lib/proposals.ts 타입과 다르다 */
+export interface ReceiveInsightInput {
+  schema_version?: string;
+  insight_id: string;
+  title: string;
+  summary: string;
+  skill: string;
+  facts: ReceiveInsightFact[];
+  products?: string[];
+  audience?: string | null;
+  shorts_format?: string | null;
+  generated_at?: string | null;
+  body_md?: string | null;
+  past?: unknown[];
+  product_ids?: string[];
+  content_category?: string | null;
+  content_format?: string | null;
+}
+/** trend_report_insight 출력: 보고서에서 뽑은 인사이트 (뽑지 못하면 insight null + reason) */
+export interface TrendReportInsightOutput {
+  report_id: string;
+  insight: ReceiveInsightInput | null;
+  reason: string | null;
+}
+export type TrendReportHandoffOutcome = "created" | "duplicate" | "rejected" | "not_sent";
+/** trend_report_handoff 출력: 기획에 보낸 결과 */
+export interface TrendReportHandoffOutput {
+  report_id: string;
+  outcome: TrendReportHandoffOutcome;
+  /** PROP-n (created·duplicate) */
+  proposal_id: string | null;
+  reason: string | null;
+  sent_at: string | null;
+  by: string | null;
 }
 
 export interface InstagramRadarOutput {
@@ -2117,7 +2163,20 @@ export interface RisingKeyword {
   products: number | null;
   product_names: string[];
   products_reason: string | null;
+  // 아래는 예전 응답은 없다 (v3, 11/20). level이 없으면 화면은 status로 대신한다
+  /** rising = 2배 이상 급상승, warming = 1.5배 이상 오르는 중, normal = 평범, unknown = 판정 못 함 */
+  level?: RisingLevel;
+  /** 작은 그래프용 값 (최대 35, 데이터랩 상대값) */
+  points?: number[];
+  /** 평소 값 (그 전 56일 중앙값) */
+  baseline?: number | null;
+  candidate_sources?: KeywordCandidateSource[];
+  /** 왜 오르나 한 줄 (뉴스·YouTube·연관어 근거, 코드가 만든 문장. 외부 글이라 글자로만) */
+  why_line?: string | null;
 }
+export type RisingLevel = "rising" | "warming" | "normal" | "unknown";
+/** 후보를 어디서 골랐나: 새로 나타난 말 · 연관어 검색량 증가 · YouTube 인기 · Google 인기 · 회사 기본 키워드 · 검색량 상위 */
+export type KeywordCandidateSource = "new" | "related_up" | "youtube" | "google" | "company" | "pool";
 export interface NewKeyword {
   keyword: string;
   monthly_volume: number | null;
@@ -2172,6 +2231,13 @@ export interface KeywordTrendOutput {
   summary_reason: string | null;
   naver_calls: number;
   limits: string[];
+  // 아래는 예전 응답은 없다 (v3, 11/20)
+  /** 급상승 판정을 한 날 ("YYYY-MM-DD"). 한도에 닿으면 직전 판정을 다시 써서 오늘보다 이를 수 있다 */
+  judged_on?: string | null;
+  /** 직전 판정을 다시 쓴 이유 (있으면 노란 띠) */
+  stale_reason?: string | null;
+  /** 후보 출처별 개수 (KeywordCandidateSource → 개수) */
+  candidate_counts?: Record<string, number>;
 }
 
 // ---------------------------------------------------------------- 숏츠 통계 (shorts_stats)
@@ -2624,6 +2690,12 @@ export const dataAi = {
   trendReportGet: (reportId: string) => askData<TrendReport>("trend_report_get", "분석 보고서", { report_id: reportId }, TREND_DEADLINE_MS),
   /** 지난 의뢰 목록 (최신순) */
   trendReportList: (limit = 20) => askData<TrendReportListOutput>("trend_report_list", "지난 의뢰", { limit }, TREND_DEADLINE_MS),
+  /** 보고서에서 뽑은 인사이트 (기획 receive_insight 꾸러미 그대로). 읽기 */
+  trendReportInsight: (reportId: string) =>
+    askData<TrendReportInsightOutput>("trend_report_insight", "보고서 인사이트", { report_id: reportId }, TREND_DEADLINE_MS),
+  /** 보고서 인사이트를 기획에 보낸다 (safety 관문을 지나는 일). 게이트웨이 허용 목록에 없으면 403 → "준비 중" */
+  trendReportHandoff: (reportId: string) =>
+    askData<TrendReportHandoffOutput>("trend_report_handoff", "기획에 보내기", { report_id: reportId }, TREND_DEADLINE_MS),
   /** 검색 트렌드 · 도서 분야 (서버가 미리 계산한 결과를 읽는다) */
   keywordTrend: (window: KeywordWindow) => askData<KeywordTrendOutput>("keyword_trend", "검색 트렌드", { window }, TREND_DEADLINE_MS),
   /** 인스타 인기 오디오 (서버가 미리 계산한 목록을 읽는다) */

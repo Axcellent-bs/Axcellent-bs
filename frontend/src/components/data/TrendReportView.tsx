@@ -5,20 +5,29 @@ import { when } from "@/components/data/Sources";
 import { AD, times } from "@/components/data/TrendMemes";
 import { safeLink } from "@/lib/safeLink";
 import { PostCard } from "@/components/data/InstagramRadar";
-import { dataAi, type SectionStatus, type TrendReport, type TrendReportBeat, type TrendReportBrief, type TrendReportCompetitorRow, type TrendReportSections } from "@/lib/data";
+import {
+  dataAi, type SectionStatus, type TrendReport, type TrendReportBeat, type TrendReportBrief, type TrendReportCompetitorRow, type TrendReportHandoffOutput,
+  type TrendReportSections,
+} from "@/lib/data";
+import { useCompany } from "@/demo/company";
+import { DeliveryBadge, HandoffButton, ReportInsightCard, usePlanningRecord } from "@/components/data/ReportInsights";
+import { deliveryOf, handoffChip, proposalFor, reportInsightId } from "@/lib/handoffView";
 import { thumbSrc } from "@/lib/igRadarGrid";
 import { sectionState, type SectionState } from "@/lib/segmentView";
 import {
   BEAT_LABEL, CALLER_LABEL, EVIDENCE, HASHTAG_HIDDEN_NOTE, REPORT_POLL_MS, REPORT_STATUS, SECTION_EVIDENCE, SECTION_STATUS,
   barPct, beatEvidence, beatWidths, competitorChip, competitorSummary, evidenceDomId, evidenceExpanded, evidenceListClass, hashtagMeta,
-  headerRows, keepPolling, keyEvidence, limitGroups, reportLabel, searchMain, searchNotes, shareText, sortBeats, sortCompetitors, sortSearchRows,
+  headerRows, keepPolling, keyEvidence, limitGroups, printHeaderLine, reportLabel, searchMain, searchNotes, shareText, sortBeats, sortCompetitors, sortSearchRows,
   traitLines, type ChipTone, type EvidenceKind, type ReportPart,
 } from "@/lib/trendReportView";
 
 // 트렌드 분석 의뢰 보고서 하나 (trend_report_get). 주소 #request?id=<report_id> (분석 의뢰 탭, TrendRequest.tsx가 연다).
 // - 진행 중(queued·running)이면 섹션별 진행 칩을 보여 주고 5초마다 다시 읽는다. 완료·부분·실패·중단이면 멈춘다
 // - 헤더: "항목 | 칩" 목록(추정·프리셋 출처만 꼬리표) · "의뢰 고쳐서 다시 만들기"(TrendRequest가 폼을 연다)
-// - 위에서 아래로: 헤더 → AI 추천(콘티 타임라인) → "근거 데이터"(범례 칩 + 1 검색 · 2 해시태그 · 3 콘텐츠 · 4 경쟁사) → 근거와 한계
+// - 위에서 아래로: 헤더 → AI 추천(콘티 타임라인) → "근거 데이터"(범례 칩 + 1 검색 · 2 해시태그 · 3 콘텐츠 · 4 경쟁사)
+//   → 다음 단계(보고서 인사이트 카드: 기획에 보내기, ReportInsights.tsx) → 근거와 한계
+// - 머리 "기획에 보내기"(trend_report_handoff)와 맨 아래 카드는 결과를 같이 쓴다. 기획 기록에 이미 있으면 버튼 대신 전달 칩
+// - 인쇄(PDF): 맨 위에 인쇄 때만 머리글 한 줄("TR-xxxx · 회사 · 만든 시각 · 상태"), 콘티는 2×2 (styles.css)
 // - 근거 id("search:1")는 근거 데이터 행의 DOM id(tr-ev-search-1)로 이어진다. 인쇄할 때는 근거 목록을 펼친다
 // - 섹션 status가 known이 아니면 내용 대신 서버 이유(대기·진행이면 진행 표시)
 // - 숫자는 서버 값 그대로. 외부 글(캡션·밈 설명)은 텍스트로만, 링크는 safeLink 통과한 것만
@@ -106,7 +115,7 @@ function BriefList({ brief: b }: { brief: TrendReportBrief }) {
   return (
     <dl className="space-y-2">
       {headerRows(b).map((row) => (
-        <div key={row.key} className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-1">
+        <div key={row.key} className="print-keep-grid grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-1">
           <dt className="pt-0.5 text-xs text-ink-500">{row.label}</dt>
           <dd className="flex min-w-0 flex-wrap items-center gap-1.5">
             {row.key === "product" ? (
@@ -377,7 +386,7 @@ function AiPick({ s, summaryReason }: { s: TrendReportSections["recommendation"]
         </ul>
       )}
       {beats.length > 0 && (
-        <ol className="flex flex-col gap-2 sm:flex-row sm:items-stretch" aria-label="콘티">
+        <ol className="trend-print-beats flex flex-col gap-2 sm:flex-row sm:items-stretch" aria-label="콘티">
           {beats.map((b, i) => <BeatCell key={b.slot} b={b} width={widths[i]} />)}
         </ol>
       )}
@@ -398,8 +407,17 @@ export function TrendReportBody({ report, onRebuild }: { report: TrendReport; on
   const st = REPORT_STATUS[report.status];
   const sec = report.sections;
   const groups = limitGroups(report);
+  const company = useCompany();
+  // 기획에 보내기: 머리 버튼과 맨 아래 인사이트 카드가 결과를 같이 쓴다. 기획 기록에 이미 있으면 버튼 대신 칩
+  const planning = usePlanningRecord();
+  const [sent, setSent] = useState<TrendReportHandoffOutput | null>(null);
+  const proposal = proposalFor(planning, reportInsightId(report.report_id));
+  const delivery = sent && !proposal ? handoffChip(sent) : deliveryOf(proposal, null);
+  const finished = report.status === "done" || report.status === "partial";
   return (
     <article className="trend-report-print space-y-4" aria-label="트렌드 분석 보고서">
+      {/* 인쇄(PDF) 때만 보이는 머리글 한 줄 */}
+      <p className="hidden border-b border-ink-100 pb-1 text-xs text-ink-500 print:block">{printHeaderLine(report, company?.name)}</p>
       <header className="card space-y-3 p-4 sm:p-5 trend-report-section">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-lg font-bold text-ink-900">트렌드 분석 보고서{report.brief.product ? ` · ${report.brief.product}` : ""}</h2>
@@ -411,7 +429,8 @@ export function TrendReportBody({ report, onRebuild }: { report: TrendReport; on
           <span className="ml-auto flex flex-wrap gap-2 print-hide">
             {onRebuild && <button type="button" className="btn-ghost" onClick={() => onRebuild(report.brief)}>의뢰 고쳐서 다시 만들기</button>}
             <button type="button" className="btn-primary" onClick={printReport}>PDF로 저장</button>
-            <button type="button" className="btn-ghost" disabled title="다음 단계">기획으로 넘기기</button>
+            {finished && (delivery.sent || sent) && <DeliveryBadge chip={delivery} />}
+            {finished && <HandoffButton reportId={report.report_id} already={delivery.sent || !!sent} onSent={setSent} className="btn-ghost" />}
           </span>
         </div>
         {keepPolling(report.status) && <Progress report={report} />}
@@ -430,10 +449,13 @@ export function TrendReportBody({ report, onRebuild }: { report: TrendReport; on
       </div>
       <ContentPart s={sec.content} />
       <CompetitorPart s={sec.competitors} brief={report.brief} />
-      <section className="card space-y-1 border-dashed p-4 opacity-70 print-hide" aria-label="다음 단계">
-        <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink-700">영상 안쪽 분석 · 유료 광고 — 담당자 업로드 <PreparingChip /></p>
-        <p className="text-xs text-ink-500">다음 단계에서 담당자가 올린 영상·광고 자료로 채웁니다.</p>
-      </section>
+      {/* 다음 단계: 이 보고서에서 뽑은 기획 인사이트 (인사이트 탭과 같은 카드). 영상 안쪽 분석은 아직 준비 중이라 한 줄로만 */}
+      {finished && (
+        <section className="space-y-1.5 print-hide" aria-label="다음 단계 · 기획 인사이트">
+          <ul><ReportInsightCard reportId={report.report_id} createdAt={report.created_at} sent={sent} onSent={setSent} /></ul>
+          <p className="flex flex-wrap items-center gap-2 text-xs text-ink-500">영상 안쪽 분석 · 유료 광고 — 담당자 업로드 <PreparingChip /></p>
+        </section>
+      )}
 
       <section className="card space-y-3 p-4 sm:p-5 trend-report-section" aria-label="근거와 한계">
         <h3 className="text-base font-semibold text-ink-900">근거와 한계</h3>

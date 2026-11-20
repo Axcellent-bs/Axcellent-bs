@@ -11,11 +11,17 @@ import {
   searchNotes, shareText, sortBeats, sortCompetitors, sortSearchRows, sourceLabel, sourceTag, targetText, traitLines, traitSentence,
 } from "./trendReportView.ts";
 
-test("하위 탭 순서: 감지 · 인사이트 · 넘김 · 성과 · 분석 의뢰 · 데이터 출처", () => {
-  assert.deepEqual(TREND_TABS.map((t) => t.title), ["감지", "인사이트", "넘김", "성과", "분석 의뢰", "데이터 출처"]);
+test("하위 탭 순서: 감지 · 분석 의뢰 · 인사이트 · 기획 전달 · 성과 · 데이터 출처(오른쪽 끝)", () => {
+  assert.deepEqual(TREND_TABS.map((t) => t.title), ["감지", "분석 의뢰", "인사이트", "기획 전달", "성과", "데이터 출처"]);
+  assert.deepEqual(TREND_TABS.map((t) => t.key), ["detect", "request", "recommend", "handoff", "result", "sources"]);
   const request = TREND_TABS.find((t) => t.key === "request")!;
   assert.deepEqual(request.stages, []); // 루프 단계와 별개
   assert.equal(trendTabHash(request), "#request");
+  // 데이터 출처만 오른쪽 끝(side), 루프 단계와 별개
+  assert.deepEqual(TREND_TABS.filter((t) => t.side).map((t) => t.key), ["sources"]);
+  assert.deepEqual(TREND_TABS.find((t) => t.key === "sources")!.stages, []);
+  // 넘김 → 기획 전달: 주소는 #handoff 그대로
+  assert.equal(trendTabHash(TREND_TABS.find((t) => t.title === "기획 전달")!), "#handoff");
 });
 
 test("탭 주소 변환: #request · 보고서 id가 붙어도 분석 의뢰 탭, 다른 탭은 그대로", () => {
@@ -24,6 +30,9 @@ test("탭 주소 변환: #request · 보고서 id가 붙어도 분석 의뢰 탭
   assert.equal(trendTabFromHash("#sources").key, "sources");
   assert.equal(trendTabFromHash("#detect?view=instagram").key, "detect");
   assert.equal(trendTabFromHash("#trend/campaign").key, "result"); // 옛 주소
+  assert.equal(trendTabFromHash("#trend/video").key, "handoff"); // 옛 주소
+  for (const key of ["detect", "request", "recommend", "handoff", "result", "sources"]) assert.equal(trendTabFromHash(`#${key}`).key, key);
+  assert.equal(trendTabFromHash("#recommend?from=report").key, "recommend"); // 인사이트 필터
   assert.equal(trendTabFromHash("#nope").key, "detect");
   assert.equal(reportHash("rpt 1/a"), "#request?id=rpt%201%2Fa");
   assert.equal(reportIdFromHash(reportHash("rpt 1/a")), "rpt 1/a");

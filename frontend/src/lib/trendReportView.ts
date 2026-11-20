@@ -20,6 +20,18 @@ export function reportLabel(id: string): string {
   return `TR-${id.replace(/^tr_/, "").slice(0, 4).toUpperCase()}`;
 }
 
+/** 인쇄(PDF) 때만 보이는 머리글 한 줄: "TR-xxxx · 회사 이름 · 만든 시각(한국) · 상태". 회사·시각을 모르면 그 칸은 뺀다 */
+export function printHeaderLine(r: { report_id: string; created_at: string | null; status: ReportStatus }, company?: string | null): string {
+  const t = r.created_at ? Date.parse(r.created_at) : NaN;
+  let at: string | null = null;
+  if (Number.isFinite(t)) {
+    const d = new Date(t + 9 * 3600_000);
+    const p = (n: number) => String(n).padStart(2, "0");
+    at = `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+  }
+  return [reportLabel(r.report_id), company?.trim() || null, at, REPORT_STATUS[r.status]?.label ?? r.status].filter(Boolean).join(" · ");
+}
+
 // ---- 주소: 보고서는 #request?id=<report_id>
 
 export function reportHash(id: string): string {

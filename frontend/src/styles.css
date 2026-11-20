@@ -100,16 +100,34 @@ body { @apply bg-canvas text-ink-900 antialiased; }
 @media (prefers-reduced-motion: reduce) { .row-expand { animation: none; } }
 
 /*
-  트렌드 분석 보고서 "PDF로 저장"(window.print, components/data/TrendReportView.tsx).
-  누른 동안만 body에 print-trend-report가 붙는다: 보고서(.trend-report-print)와 그 조상만 남기고
-  앱 메뉴·탭·의뢰 폼·버튼(.print-hide)은 숨긴다. 섹션 중간에서 페이지를 나누지 않고 배경은 흰색.
+  트렌드 분석 보고서 "PDF로 저장"(window.print, components/data/TrendReportView.tsx · 대화 완료 카드 autoPrint도 같은 printReport).
+  누른 동안만 body에 print-trend-report가 붙는다. 그때만:
+  - 보고서(.trend-report-print)와 그 조상만 남기고 앱 메뉴·탭·의뢰 폼·버튼(.print-hide)은 숨긴다
+  - 조상(AdminShell `flex h-screen overflow-hidden`, main `overflow-y-auto`)의 높이 제한·스크롤을 푼다.
+    풀지 않으면 보고서 3,692px 중 첫 화면(863px)만 PDF에 들어간다 (11/19 서버 확인)
+  - A4 · 여백 14mm(이름 붙인 쪽), 보고서 안 grid는 한 칸(콘티 4칸은 2×2), 배경 흰색. 링크 색·밑줄은 그대로
+  - 쪽 나눔: 섹션 전체가 아니라 행·카드 안 작은 묶음·표 행만 중간에서 나누지 않는다(큰 빈칸 방지). 섹션 제목은 다음 내용과 같은 쪽
 */
+@page trend-report { size: A4; margin: 14mm; }
 @media print {
   body.print-trend-report,
   body.print-trend-report .trend-report-print { background: #fff !important; }
   body.print-trend-report *:not(:has(.trend-report-print)):not(.trend-report-print):not(.trend-report-print *) { display: none !important; }
+  body.print-trend-report *:has(.trend-report-print) {
+    height: auto !important; max-height: none !important; min-height: 0 !important;
+    overflow: visible !important; display: block !important; position: static !important;
+  }
+  body.print-trend-report .trend-report-print { page: trend-report; }
   body.print-trend-report .trend-report-print .print-hide { display: none !important; }
-  body.print-trend-report .trend-report-print .trend-report-section,
-  body.print-trend-report .trend-report-print section { break-inside: avoid; page-break-inside: avoid; }
+  body.print-trend-report .trend-report-print .grid:not(.print-keep-grid) { grid-template-columns: minmax(0, 1fr) !important; }
+  body.print-trend-report .trend-report-print .trend-print-beats { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  body.print-trend-report .trend-report-print .trend-print-beats > li { width: auto !important; flex: none !important; }
+  body.print-trend-report .trend-report-print li,
+  body.print-trend-report .trend-report-print tr,
+  body.print-trend-report .trend-report-print .card > div,
+  body.print-trend-report .trend-report-print .card > dl,
+  body.print-trend-report .trend-report-print .card > p { break-inside: avoid; page-break-inside: avoid; }
+  body.print-trend-report .trend-report-print h2,
+  body.print-trend-report .trend-report-print h3 { break-after: avoid; page-break-after: avoid; }
   body.print-trend-report .trend-report-print .card { box-shadow: none; background: #fff; }
 }

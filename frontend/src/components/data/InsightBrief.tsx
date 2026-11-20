@@ -7,6 +7,8 @@ import { Sources, when } from "@/components/data/Sources";
 import { OpportunityCards } from "@/components/data/OpportunityCards";
 import { AgeBars } from "@/components/data/AgeBars";
 import { useCompany } from "@/demo/company";
+import { DeliveryBadge, usePlanningRecord } from "@/components/data/ReportInsights";
+import { deliveryOf, proposalFor } from "@/lib/handoffView";
 import { useSession } from "@/demo/session";
 import { CopyId, FoldRow, RestFacts, ShortsCard, TileRow, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
 import { DATA_SERVER, dataAi, kpiLive, type BriefGate, type DataFact, type HeldBack, type InsightPastResult, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
@@ -154,6 +156,14 @@ function PastBand({ list }: { list: InsightPastResult[] | undefined }) {
   );
 }
 
+/** 전달 상태 칩: 기획 기록 중 from data이고 insightId가 이 카드 insight_id(또는 바뀌기 전 id)인 제안이 있을 때만 (v3) */
+function useDelivered(i: Pick<TrendInsight, "insight_id" | "legacy_insight_id">): ReactNode {
+  const planning = usePlanningRecord();
+  const ids = [i.insight_id, i.legacy_insight_id].filter((x): x is string => !!x);
+  const p = ids.map((id) => proposalFor(planning, id)).find(Boolean) ?? null;
+  return p ? <DeliveryBadge chip={deliveryOf(p, null)} /> : null;
+}
+
 function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefined }) {
   const m = material(i);
   const season = seasonText(i.evidence);
@@ -167,13 +177,19 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
     note: typeof bf.median_views === "number" ? `숏츠 형식 ${bf.name} 중앙값 ${COMPACT_VIEWS.format(bf.median_views)}회` : null,
   }] : [];
   const cautions = i.cautions ?? [];
+  const delivered = useDelivered(i);
   return (
     <ShortsCard
       verdict={borrow ? { label: "형식 빌리기", tone: "bg-brand-50 text-brand-700", title: i.company_relevance_reason ?? null }
         : verdictOf(i.shorts_fit, i.shorts_fit_status, i.shorts_fit_reason)}
       kicker={kicker || null}
-      badges={borrow && cautions.length > 0 ? (
-        <span className={`chip text-xs ${TONE.warn}`} title={i.caution_note ?? undefined}>{cautions.map((c) => CAUTION_NAME[c]).join("·")} 주의</span>
+      badges={(borrow && cautions.length > 0) || delivered ? (
+        <>
+          {borrow && cautions.length > 0 && (
+            <span className={`chip text-xs ${TONE.warn}`} title={i.caution_note ?? undefined}>{cautions.map((c) => CAUTION_NAME[c]).join("·")} 주의</span>
+          )}
+          {delivered}
+        </>
       ) : null}
       title={i.topic}
       line={i.line || null}
@@ -394,10 +410,12 @@ function PromoCard({ i, facts, gate }: { i: TrendInsight; facts: DataFact[]; gat
     const age = i.target_age && i.target_age_ratio != null ? ` · ${i.target_age} ${num(i.target_age_ratio, 2)}배` : "";
     rows.push({ label: "네이버 검색 (같은 형식 주제)", value: `${times(i.evidence.naver_ratio)}${age}`, source: `네이버 데이터랩${naverAt ? ` · ${naverAt}까지` : ""}` });
   }
+  const delivered = useDelivered(i);
   return (
     <li className="card space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Chip label="홍보 영상" tone={TONE.info} />
+        {delivered}
         {i.promo_views_per_hour_ratio != null && <Chip label={`숏츠 전체 대비 ${num(i.promo_views_per_hour_ratio, 2)}배`} tone={chipTone(i.promo_views_per_hour_ratio, gate?.vs_all_ratio)} />}
         {i.promo_recent_count != null && <Chip label={`${days} 게시 ${num(i.promo_recent_count)}개`} tone={chipTone(i.promo_recent_count, gate?.recent_min)} />}
       </div>
