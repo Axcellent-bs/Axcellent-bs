@@ -56,9 +56,17 @@ def test_promo_video_runs_trend_then_insight_then_plan_then_a_person_then_market
         "trend_report_insight",
         "receive_insight",
         "human_check",
+        "prepare_video_draft_from_plan",
         "generate_media",
     ]
-    assert [s.dept for s in promo.steps] == ["data", "data", "planning", None, "marketing"]
+    assert [s.dept for s in promo.steps] == [
+        "data",
+        "data",
+        "planning",
+        None,
+        "marketing",
+        "marketing",
+    ]
     assert promo.blocked_by is None  # 데이터분석·기획 연결이 끝나 실행할 수 있다
     assert promo.changes_state
 
@@ -103,6 +111,9 @@ def test_plan_of_has_what_work_requests_needs() -> None:
         "takes_carry": True,
         "fill": None,
         "human_gate": False,
+        "carry_keys": ["proposal_id", "video_plan"],
+        "carry_from": None,
+        "on_missing": "skip",
     }
     assert plan[0]["ref_key"] == "report_id"  # 트렌드 보고서는 번호(report_id)만 다음 부서에 넘긴다
 

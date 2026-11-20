@@ -216,7 +216,39 @@ def ticket_text(text: str, now: datetime, request_id: str | None = None) -> Fill
     return Fill(payload)
 
 
+TOPIC_MAX = 100  # 마케팅 `draft_sns_post.topic` 길이 상한
+TOPIC_ASK = "어떤 주제로 쓸까요? 숫자·링크·#·@ 없이 주제를 짧게 알려 주세요. 예: '신간 그림책 소개'"
+_TOPIC_BAD = re.compile(r"https?:|www\.|[#@]|\d", re.IGNORECASE)
+_TOPIC_TRIM = (
+    r"(인스타그램|인스타|SNS|sns|에스엔에스)",
+    r"(?<![가-힣])(글|문구|캡션|게시물|포스트|문장|초안)(?![가-힣])",
+    r"(에\s*올릴|올릴|올려)",
+    r"(?<![가-힣])(만들어|써|작성|부탁|제작)\S*",
+    r"(?<![가-힣])(주세요|주실래요|주시겠어요|줘|드려요|해줘|해요)\S*",
+    r"(?<![가-힣])(하나|좀|한\s*개)(?![가-힣])",
+)
+
+
+def sns_topic(text: str, now: datetime, request_id: str | None = None) -> Fill:
+    """SNS 글 초안: 문장에서 요청 말투를 덜어 낸 주제 구절만 `topic`에 넣는다(문장 전체가 아니다).
+
+    마케팅은 주제 문장을 글자 그대로 본문에 쓰고 해석하지 않으며 숫자·링크·#·@는 거절한다.
+    그래서 주제를 못 가리거나 그런 글자가 들어 있으면 부서에 보내지 않고 되묻는다.
+    """
+    topic = text
+    for pattern in _TOPIC_TRIM:
+        topic = re.sub(pattern, " ", topic)
+    topic = re.sub(
+        r"\s*(을|를)?\s*(알리는|소개하는|홍보하는|에\s*대한|관련)\s*$", "", topic.strip()
+    )
+    topic = re.sub(r"[.!?~\s]+$", "", re.sub(r"\s+", " ", topic)).strip()
+    if len(topic) < 2 or len(topic) > TOPIC_MAX or _TOPIC_BAD.search(topic):
+        return Fill(ask=TOPIC_ASK)
+    return Fill({"topic": topic}, note=f"주제 '{topic}'로 작성")
+
+
 RULES: dict[str, Callable[..., Fill]] = {
+    "sns_topic": sns_topic,
     "notice_kind": notice_kind,
     "ticket_text": ticket_text,
     "sales_period": sales_period,
