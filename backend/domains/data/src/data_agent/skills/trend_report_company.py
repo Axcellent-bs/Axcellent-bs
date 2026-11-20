@@ -12,6 +12,9 @@
 - shopping_category: 프로필 업종 → 쇼핑인사이트 분야 짝(`INDUSTRY_SHOPPING`), 짝이 없으면 비움
 - 타깃 나이에 10대 미만이 없으면 어린이 낱말(`[report] child_words`)이 든 회사 키워드는 뺀다
 - competitors: 확인된 계정 팔로워 큰 순 최대 7, 섹션 2·3 계정 목록도 같은 저장분
+- 확인된 계정이 `[report.accounts] min_accounts`(6)보다 적으면 레이더 업종 표시
+  (`[instagram.radar_industries]`)가 회사 업종과 같은 이미 읽은 레이더 계정을 더한다. 표시가 없으면
+  건너뛴다. 그래도 모자라면 한계 문장
 - 회사 연결이 없거나 프로필이 unknown이면 채우지 않고 이유만
 """
 
@@ -202,13 +205,24 @@ async def gather(brief: Any, request_text: str | None, note: Any, *, env: Mappin
     favorites, why = await favorites_fn(brief)
     pool = await pool_fn()
     found = await accounts_fn(profile, note)
-    from data_agent.skills.company_accounts import apply_overrides
+    from data_agent.skills import company_accounts as ca
 
-    accounts = apply_overrides(found, env)
+    accounts = ca.apply_overrides(found, env)
+    # 목표(min_accounts)보다 적으면 같은 업종 표시가 있는 레이더 계정(이미 읽은 것)을 더한다
+    need = ca.min_accounts(env)
+    _, exclude = ca.overrides(env)
+    extra = [a for a in ca.radar_fill(accounts, profile.industry, env, need)
+             if a["account"] not in exclude]  # fmt: skip
+    accounts = [*accounts, *extra]
     ctx = build_context(profile, favorites=favorites, favorites_reason=why, pool=pool,
                         accounts=accounts, accounts_reason=found.deferred,
                         request_text=request_text, env=env,
                         ages=list(getattr(brief, "target_ages", []) or []))  # fmt: skip
+    if extra:
+        ctx.limits.append(f"확인된 계정이 목표({need}곳)보다 적어 같은 업종 표시가 있는 인스타"
+                          f" 레이더 계정 {len(extra)}곳을 더함 (이미 읽은 것)")  # fmt: skip
+    if short := ca.short_note(len(accounts), need):
+        ctx.limits.append(short)
     return ctx, found.llm_calls if not found.reused else 0, found.ig_calls
 
 

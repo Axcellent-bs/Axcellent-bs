@@ -67,6 +67,7 @@ export const SECTION_STATUS: Record<SectionStatus, { label: string; tone: ChipTo
   unknown: { label: "자료 없음", tone: "warn" },
   failed: { label: "실패", tone: "bad" },
   skipped: { label: "해당 없음", tone: "muted" },
+  empty: { label: "확인함 · 없음", tone: "muted" },
 };
 
 export const CALLER_LABEL: Record<TrendReportCaller, string> = { human: "사람", orchestrator: "총괄", planning: "기획" };
@@ -275,6 +276,27 @@ export function showThemeSection(r: Pick<TrendReport, "sections"> & { brief?: Pi
 export function countedSections(r: Pick<TrendReport, "sections"> & { brief?: Pick<TrendReportBrief, "theme" | "theme_mode"> }): ("theme" | "search" | "hashtags" | "content" | "competitors" | "recommendation")[] {
   const base = ["search", "hashtags", "content", "competitors", "recommendation"] as const;
   return showThemeSection(r) ? ["theme", ...base] : [...base];
+}
+
+export const SECTION_TITLE: Record<ReturnType<typeof countedSections>[number], string> = {
+  theme: "주제 후보", search: "검색", hashtags: "해시태그", content: "콘텐츠", competitors: "경쟁사", recommendation: "추천",
+};
+
+export interface SectionNote { key: ReturnType<typeof countedSections>[number]; title: string; reason: string }
+
+/** 끝난 보고서의 칸 나누기: missing = 확인 못 한 칸(unknown·failed, 일부 완료 이유),
+ *  empty = 확인했지만 없던 칸(완료로 셈, 접어서 따로). 이유가 없으면 "이유를 받지 못했어요" */
+export function sectionNotes(r: Pick<TrendReport, "sections"> & { brief?: Pick<TrendReportBrief, "theme" | "theme_mode"> }): { missing: SectionNote[]; empty: SectionNote[] } {
+  const missing: SectionNote[] = [];
+  const empty: SectionNote[] = [];
+  for (const key of countedSections(r)) {
+    const s = r.sections[key];
+    if (!s) continue;
+    const note = { key, title: SECTION_TITLE[key], reason: s.reason ?? "이유를 받지 못했어요" };
+    if (s.status === "empty") empty.push(note);
+    else if (s.status === "unknown" || s.status === "failed") missing.push(note);
+  }
+  return { missing, empty };
 }
 
 export const SEEN_IN_LABEL: Record<TrendThemeSeenIn, string> = { radar: "인스타 레이더", youtube: "YouTube 인기", llm: "AI 제안" };

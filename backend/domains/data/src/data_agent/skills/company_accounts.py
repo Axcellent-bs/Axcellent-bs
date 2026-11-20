@@ -1,10 +1,12 @@
 """연결된 회사의 경쟁사·참고 인스타 계정을 알아서 찾는다 (회사가 바뀌어도 사람이 손대지 않음).
 
 1. 회사 프로필(domain_profile: 업종·상품군·씨앗 키워드)로 LLM 1번: 같은 업종·고객의 한국 브랜드·
-   서비스·매체 **이름**(한글·영문 표기, 최대 15) + 이유 한 줄씩. LLM이 아이디를 줘도 후보에 넣는다
+   서비스·매체 **이름**(한글·영문 표기, 최대 15) + 이유 한 줄씩. LLM이 아이디를 줘도 후보에 넣는다.
+   한 갈래에 몰리지 않게 파는 곳·만드는 곳·매체·커뮤니티를 고루 (업종 글자는 프롬프트에 없음)
 2. 아이디 후보는 코드가 만든다(`id_candidates`): 영문 표기 소문자에서 공백·하이픈을 지우거나
    밑줄·점으로 바꾸고, 원형·_official·.official·_kr·official 꼴을 붙인다. 같은 아이디는 하나로,
-   확인은 회사당 최대 `[report.accounts] max_checks`(30)번
+   확인은 회사당 최대 `[report.accounts] max_checks`(30)번. 브랜드마다 첫 꼴 → 둘째 꼴 순으로
+   돌아가며 확인한다 (한 브랜드의 꼴들이 상한을 먼저 다 쓰지 않게)
 3. 후보마다 business_discovery(공식 API)로 확인한다. 응답이 오면 프로페셔널 계정이다.
    이름·팔로워 수·게시물 수를 남기고, 없거나 못 읽은 것은 이유와 함께 버린다(지어낸 계정 막기).
    한 브랜드에서 여러 아이디가 확인되면 팔로워가 가장 큰 것 하나만
@@ -37,13 +39,23 @@ TENANT_CONFIG_ENV = "DATA_TENANT_CONFIG"
 REUSE = timedelta(days=30)
 MAX_CANDIDATES = 15  # LLM이 내는 브랜드 수
 MAX_CHECKS = 30  # 회사당 business_discovery 확인 상한 (설정 [report.accounts] max_checks)
-RULE_VERSION = 2  # 11/20: 이름 → 코드가 아이디 후보를 만든다 (저장분 버전이 다르면 다시 찾음)
+MIN_REPORT_ACCOUNTS = 6  # 보고서가 읽을 확인된 계정 목표 (설정 [report.accounts] min_accounts)
+# 2(11/20): 이름 → 코드가 아이디 후보를 만든다. 3(11/20): 업종 안 여러 갈래를 고루 + 브랜드를
+# 돌아가며 확인 (저장분 버전이 다르면 다시 찾음)
+RULE_VERSION = 3
 STOP_CODES = frozenset({"RATE_LIMITED", "KEY_MISSING", "TOKEN_EXPIRED"})
 SUFFIXES = ("", "_official", ".official", "_kr", "official")
+TREND_CONFIG_ENV = "DATA_TREND_CONFIG"
+RADAR_REASON = "인스타 레이더에서 더함 (같은 업종 표시 [instagram.radar_industries])"
 
+# 업종 글자는 넣지 않는다 (데이터 블록의 domain_profile 값만 쓴다)
 PROMPT = (
     "데이터 블록은 한 회사의 업종·상품군·씨앗 키워드다. 이 회사와 같은 업종·같은 고객을 가진 한국의"
     " 브랜드·서비스·매체를 최대 15개 고른다.\n"
+    "- 한 갈래에 몰지 말고 같은 업종 안의 서로 다른 갈래를 고루 섞는다: 파는 곳(판매처·유통),"
+    " 만드는 곳(제조·브랜드), 그 업종을 다루는 매체, 그 업종 고객이 모이는 커뮤니티·앱."
+    " 갈래마다 2개 이상\n"
+    "- 인스타그램 공식 계정을 운영할 만한 이름을 앞에 둔다\n"
     "- name_ko: 한글 이름, name_en: 영문 표기(로마자·브랜드 표기 그대로)\n"
     "- account: 인스타그램 아이디를 확실히 알 때만(@ 없이). 모르면 빈 칸\n"
     "- reason: 왜 이 회사의 경쟁사·참고 브랜드인지 한 줄\n"
@@ -180,6 +192,67 @@ def max_checks(env: Mapping[str, str]) -> int:
     return max(1, min(100, raw)) if isinstance(raw, int) else MAX_CHECKS
 
 
+def min_accounts(env: Mapping[str, str]) -> int:
+    """보고서가 읽을 확인된 계정 목표 (`[report.accounts] min_accounts`, 기본 6)."""
+    raw = _accounts_config(env).get("min_accounts", MIN_REPORT_ACCOUNTS)
+    return max(1, min(50, raw)) if isinstance(raw, int) else MIN_REPORT_ACCOUNTS
+
+
+def radar_industry_accounts(env: Mapping[str, str], industry: str | None) -> list[str]:
+    """레이더 업종 표시 (회사 trends.toml `[instagram.radar_industries]` 업종 = [계정…]).
+
+    표시가 없거나 그 업종 칸이 없으면 [] (뷰티 계정을 책 보고서에 넣지 않는다)."""
+    from data_agent.skills.trend_report_brief import clean_account
+
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
+    if not industry or not path or not Path(path).is_file():
+        return []
+    try:
+        with Path(path).open("rb") as f:
+            raw = (tomllib.load(f).get("instagram") or {}).get("radar_industries")
+    except (OSError, tomllib.TOMLDecodeError, AttributeError):
+        return []
+    listed = raw.get(industry) if isinstance(raw, dict) else None
+    if not isinstance(listed, list):
+        return []
+    return list(dict.fromkeys(a for x in listed if isinstance(x, str) and (a := clean_account(x))))
+
+
+def radar_fill(accounts: Sequence[Mapping[str, Any]], industry: str | None,
+               env: Mapping[str, str], need: int) -> list[dict[str, Any]]:  # fmt: skip
+    """확인된 계정이 `need`보다 적으면 같은 업종 표시가 있는 레이더 계정 중 공식 API로 이미 읽은
+    (레이더 저장소에 게시물과 이름이 있는) 것을 더한다. 외부 호출 없음. 더할 것만 돌려준다."""
+    from data_agent import instagram_store as st
+    from data_agent.connectors.instagram_graph import OWNER_NAME
+
+    if len(accounts) >= need:
+        return []
+    wanted = radar_industry_accounts(env, industry)
+    if not wanted:
+        return []
+    _, media, _ = st.radar_latest(st.path_of(env, st.RADAR_ENV))
+    have = {str(a["account"]) for a in accounts}
+    out: list[dict[str, Any]] = []
+    for account in wanted:
+        items = media.get(account) or []
+        name = next((m.get(OWNER_NAME) for m in items if isinstance(m.get(OWNER_NAME), str)), None)
+        if account in have or not items or not name:
+            continue
+        out.append({"account": account, "name": name, "followers_count": None,
+                    "media_count": None, "reason": RADAR_REASON})  # fmt: skip
+        if len(accounts) + len(out) >= need:
+            break
+    return out
+
+
+def short_note(count: int, need: int) -> str | None:
+    """목표보다 적을 때 한계 문장."""
+    if count >= need:
+        return None
+    return (f"확인된 인스타 계정 {count}곳 (목표 {need}곳) · 회사 설정 [report.accounts] include로"
+            " 더할 수 있어요")
+
+
 def overrides(env: Mapping[str, str]) -> tuple[list[str], set[str]]:
     """테넌트 설정 `[report.accounts]` (include, exclude). 없으면 빈 값."""
     from data_agent.skills.trend_report_brief import clean_account
@@ -247,6 +320,7 @@ async def find(profile: Any, llm: Any, graph: Any, *, env: Mapping[str, str],
             return out
         reasons: dict[str, str] = {}
         brand_of: dict[str, int] = {}  # 아이디 → 브랜드 번호 (한 브랜드는 팔로워 큰 것 하나만)
+        rank_of: dict[str, int] = {}  # 아이디 → 그 브랜드 안의 순번 (돌아가며 확인)
         for n, item in enumerate(got.items[:MAX_CANDIDATES]):
             ids = []
             if item.account.strip():
@@ -262,7 +336,10 @@ async def find(profile: Any, llm: Any, graph: Any, *, env: Mapping[str, str],
                 if account not in reasons:
                     reasons[account] = f"{label}: {reason}" if label else reason
                     brand_of[account] = n
-        out.candidates = list(reasons)[:max_checks(env)]
+                    rank_of[account] = sum(1 for b in brand_of.values() if b == n) - 1
+        # 브랜드마다 첫 아이디 → 둘째 아이디 … 순으로 돌아가며 (한 브랜드 꼴 5개가 상한을 먹지 않게)
+        ordered = sorted(reasons, key=lambda a: (rank_of[a], brand_of[a]))
+        out.candidates = ordered[:max_checks(env)]
         verified: list[dict[str, Any]] = []
         for account in out.candidates:
             if graph is None or not getattr(graph, "configured", False):

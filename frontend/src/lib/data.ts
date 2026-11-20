@@ -1823,8 +1823,9 @@ export interface InstagramRadarGroup {
 // ---- 트렌드 분석 의뢰 보고서 (trend_report_create · trend_report_get · trend_report_list). 백엔드 data skill과 같은 공통 계약.
 // 화면: 트렌드&콘텐츠 "분석 의뢰" 탭 (components/data/TrendRequest.tsx · TrendReportView.tsx)
 export type ReportStatus = "queued" | "running" | "done" | "partial" | "failed" | "interrupted";
-/** skipped(#1540): 이 의뢰에는 계산하지 않는 섹션 (주제 후보가 find 의뢰가 아닐 때) */
-export type SectionStatus = "waiting" | "running" | "known" | "unknown" | "failed" | "skipped";
+/** skipped(#1540): 이 의뢰에는 계산하지 않는 섹션 (주제 후보가 find 의뢰가 아닐 때).
+ *  empty: 봤지만 이번 기간에 해당하는 것이 없음 (볼 수 없었던 unknown과 다름, 완료로 센다) */
+export type SectionStatus = "waiting" | "running" | "known" | "unknown" | "failed" | "skipped" | "empty";
 /** 의뢰 요약 칸의 출처: 직접 입력 · 의뢰문에서 추정 · 프리셋 · 회사 정보(#1491) · 주제 후보(#1540) */
 export type FieldSource = "input" | "request_text" | "preset" | "company" | "theme";
 /** find: 주제 안의 대상을 찾아 순위 · use: 주제를 그대로 씀 (#1540) */

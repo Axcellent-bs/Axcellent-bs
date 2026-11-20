@@ -4411,7 +4411,9 @@ class InstagramMemoListOutput(AxModel):
 
 ReportStatus = Literal["queued", "running", "done", "partial", "failed", "interrupted"]
 # skipped(11/20 추가): 이 의뢰에는 계산하지 않는 섹션 (주제 섹션이 theme_mode find가 아닐 때)
-SectionStatus = Literal["waiting", "running", "known", "unknown", "failed", "skipped"]
+# empty(11/20 추가): 봤지만 이번 기간에 해당하는 것이 없음 (볼 수 없었던 unknown과 다르다).
+# 보고서 완료 판정에서 known과 같이 센다
+SectionStatus = Literal["waiting", "running", "known", "unknown", "failed", "skipped", "empty"]
 # company(11/20 추가): 연결된 회사(tenant)의 domain_profile·판매 집단·키워드 풀·확인된 인스타
 # 계정으로 채운 칸 (값 우선순위: 폼 > 의뢰문 > 프리셋 > 회사)
 # theme(11/20 추가): 주제 섹션이 데이터랩으로 확인해 순위를 매긴 후보를 키워드 앞에 넣은 칸

@@ -244,10 +244,11 @@ class TrendReportService:
                 names = tr.counted_sections(r)  # 주제 후보(find 의뢰)도 섹션 하나로
                 done = {name for name in names
                         if getattr(r.sections, name).status not in LIVE_SECTION}  # fmt: skip
-                if done - seen:  # 섹션 하나가 끝날 때마다
+                if fresh := done - seen:  # 섹션 하나가 끝날 때마다
                     seen.update(done)
+                    note = hooks_mod.section_note(r, len(done), len(names), fresh)
                     await self.hooks.progress(report_id, percent=hooks_mod.section_percent(r),
-                                              note=f"섹션 {len(done)}/{len(names)}")  # fmt: skip
+                                              note=note)  # fmt: skip
 
             async def accounts(read: int, total: int) -> None:
                 if read % ACCOUNT_STEP == 0 or read == total:

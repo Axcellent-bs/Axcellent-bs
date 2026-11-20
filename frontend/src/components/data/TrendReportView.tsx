@@ -18,7 +18,7 @@ import { sectionState, type SectionState } from "@/lib/segmentView";
 import {
   BEAT_LABEL, CALLER_LABEL, EVIDENCE, HASHTAG_HIDDEN_NOTE, REPORT_POLL_MS, REPORT_STATUS, SECTION_EVIDENCE, SECTION_STATUS,
   barPct, beatEvidence, beatWidths, competitorChip, competitorSummary, countedSections, evidenceDomId, evidenceExpanded, evidenceListClass, hashtagMeta,
-  headerRows, keepPolling, keyEvidence, limitGroups, printHeaderLine, reportLabel, searchMain, searchNotes, shareText, showThemeSection, sortBeats,
+  headerRows, keepPolling, keyEvidence, limitGroups, printHeaderLine, reportLabel, searchMain, searchNotes, sectionNotes, SECTION_TITLE, shareText, showThemeSection, sortBeats,
   sortCompetitors, sortSearchRows, themeRowView, traitLines, type ChipTone, type EvidenceKind, type ReportPart,
 } from "@/lib/trendReportView";
 
@@ -92,19 +92,42 @@ function Part({ no, title, part, status, reason, children }: {
   );
 }
 
-const SECTION_LABEL: Record<ReturnType<typeof countedSections>[number], string> = {
-  theme: "주제 후보", search: "검색", hashtags: "해시태그", content: "콘텐츠", competitors: "경쟁사", recommendation: "추천",
-};
-
 /** 섹션별 진행 칩 (주제 후보는 보일 때만, lib/trendReportView countedSections) */
 function Progress({ report }: { report: TrendReport }) {
   return (
     <ul className="flex flex-wrap gap-2 print-hide" aria-label="섹션별 진행">
       {countedSections(report).map((k) => {
         const s = SECTION_STATUS[report.sections[k]?.status ?? "waiting"];
-        return <li key={k}><span className={`chip text-xs ${tone(s.tone)}`}>{SECTION_LABEL[k]} · {s.label}</span></li>;
+        return <li key={k}><span className={`chip text-xs ${tone(s.tone)}`}>{SECTION_TITLE[k]} · {s.label}</span></li>;
       })}
     </ul>
+  );
+}
+
+/** 끝난 보고서: 일부 완료 이유(확인 못 한 칸)와 접힌 "확인했지만 없던 칸" (empty는 완료로 셈) */
+function SectionNotes({ report }: { report: TrendReport }) {
+  const { missing, empty } = sectionNotes(report);
+  const partial = report.status === "partial" || report.status === "failed";
+  if (!(partial && missing.length) && !empty.length) return null;
+  return (
+    <div className="space-y-2 text-sm">
+      {partial && missing.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-ink-700">확인 못 한 칸</p>
+          <ul className="mt-1 space-y-0.5 text-ink-500">
+            {missing.map((m) => <li key={m.key}><span className="font-medium text-ink-700">{m.title}</span> · {m.reason}</li>)}
+          </ul>
+        </div>
+      )}
+      {empty.length > 0 && (
+        <details className="group">
+          <summary className="cursor-pointer text-xs font-semibold text-ink-500">확인했지만 없던 칸 {empty.length}개 (완료로 셈)</summary>
+          <ul className="mt-1 space-y-0.5 text-ink-500">
+            {empty.map((m) => <li key={m.key}><span className="font-medium text-ink-700">{m.title}</span> · {SECTION_STATUS.empty.label} · {m.reason}</li>)}
+          </ul>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -481,6 +504,7 @@ export function TrendReportBody({ report, onRebuild }: { report: TrendReport; on
           </span>
         </div>
         {keepPolling(report.status) && <Progress report={report} />}
+        {!keepPolling(report.status) && <SectionNotes report={report} />}
         <BriefList brief={report.brief} theme={sec.theme} />
       </header>
 
