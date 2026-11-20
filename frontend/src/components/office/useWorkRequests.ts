@@ -50,7 +50,7 @@ function stop() {
   if (users <= 0 && timer) { clearInterval(timer); timer = null; users = 0; }
 }
 
-/** enabled=false면 읽기를 시작하지 않는다(AI 오피스 리플레이 모드). 읽은 값은 같은 페이지가 함께 쓴다 */
+/** enabled=false면 읽기를 시작하지 않는다(useChatRooms의 enabled를 따른다). 읽은 값은 같은 페이지가 함께 쓴다 */
 export function useWorkRequests(enabled = true): WorkRequestsState {
   useEffect(() => {
     if (!enabled) return;

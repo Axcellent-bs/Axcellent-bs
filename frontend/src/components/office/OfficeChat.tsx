@@ -12,8 +12,8 @@ import { Link } from "@/lib/nav";
 
 export interface Typing { key: string; name: string; what: string }
 
-export function OfficeChat({ items, typing, freshIds, title, sub, longTitle, status, inc, room = ALL_ROOM, talk, tabs, big = true }: {
-  items: ChatItem[]; typing: Typing[]; freshIds: ReadonlySet<string>; title: string; sub?: string; status?: string;
+export function OfficeChat({ items, typing, freshIds, title, longTitle, status, inc, room = ALL_ROOM, talk, tabs, big = true }: {
+  items: ChatItem[]; typing: Typing[]; freshIds: ReadonlySet<string>; title: string; status?: string;
   /** 장애 방의 긴 문장 이름 (방 머리 아래 보조 줄) */
   longTitle?: string;
   /** 장애 방이면 그 사건 (맨 위 고정 공지) */
@@ -23,7 +23,7 @@ export function OfficeChat({ items, typing, freshIds, title, sub, longTitle, sta
   talk?: OfficeTalk;
   /** 방 탭 (위에 붙인다) */
   tabs?: ReactNode;
-  /** "대화 기록에서 크게 보기" 링크 (리플레이에는 두지 않는다) */
+  /** "대화 기록에서 크게 보기" 링크 */
   big?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -56,7 +56,6 @@ export function OfficeChat({ items, typing, freshIds, title, sub, longTitle, sta
             <h2 className="min-w-0 truncate text-sm font-semibold">{title}</h2>
             {people && <span className="text-xs text-ink-700">{people}</span>}
             <StatusChip status={status} />
-            {sub && <span className="truncate text-xs text-ink-500">{sub}</span>}
           </div>
           {longTitle && <p className="mt-0.5 truncate text-xs text-ink-500">{longTitle}</p>}
         </div>
