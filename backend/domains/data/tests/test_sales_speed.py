@@ -26,7 +26,20 @@ from data_agent.sales_cache import CACHE, ResultCache, cached
 from data_agent.sales_store import VERSION_SOURCE, SalesStore
 
 TENANT = "shop-demo"
-NOW = datetime(2026, 11, 16, 3, 0, tzinfo=UTC)
+NOW = datetime(2026, 11, 16, 3, 0, tzinfo=UTC)  # 한국 시각 정오
+CLOCK = NOW  # handlers가 보는 현재 시각 (한국 00~01시에 "오늘" 판매가 비는 일을 막는다, #1467)
+
+
+class _FixedClock(datetime):
+    @classmethod
+    def now(cls, tz: Any = None) -> datetime:  # type: ignore[override]
+        return CLOCK if tz is None else CLOCK.astimezone(tz)
+
+
+@pytest.fixture
+def fixed_clock(monkeypatch: pytest.MonkeyPatch) -> datetime:
+    monkeypatch.setattr(handlers, "datetime", _FixedClock)
+    return CLOCK
 
 
 def order(n: int, when: datetime | None = None) -> SalesOrderRow:
@@ -166,10 +179,10 @@ def test_stale_is_not_taken_from_another_store_id() -> None:
     assert got.value == "새" and not got.stale and not got.hit
 
 
-def test_handler_marks_stale_in_basis_then_refreshes() -> None:
+def test_handler_marks_stale_in_basis_then_refreshes(fixed_clock: datetime) -> None:
     CACHE.clear()
     store = SalesStore(":memory:")
-    now = datetime.now(UTC)
+    now = fixed_clock
     store.upsert(TENANT, [order(i, now - timedelta(hours=1)) for i in range(30)], now)
     store.finish_sync(TENANT, "shop-api", now, None)
     catalog.use_catalog(catalog.load_catalog("catbooks"))
@@ -205,10 +218,10 @@ def _request(skill: str, **inp: Any) -> AgentRequest:
     return AgentRequest(meta=meta, skill=skill, input=inp)
 
 
-def test_handlers_stamp_calculation_time_and_cache_hit() -> None:
+def test_handlers_stamp_calculation_time_and_cache_hit(fixed_clock: datetime) -> None:
     CACHE.clear()
     store = SalesStore(":memory:")
-    now = datetime.now(UTC)
+    now = fixed_clock
     store.upsert(TENANT, [order(i, now - timedelta(hours=1)) for i in range(30)], now)
     store.finish_sync(TENANT, "shop-api", now, None)
     catalog.use_catalog(catalog.load_catalog("catbooks"))
