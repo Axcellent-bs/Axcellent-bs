@@ -244,6 +244,8 @@ class DevService(PlanningCore):
                     # 앞 요청을 오래 기다리는 대화에 알린다 (상태가 안 바뀌어도 시간이 지나면)
                     await dev_chat.notice_long_waits(self)
                     await dev_chat.close_idle(self)  # 30분 말이 없는 대화를 끝낸다
+                    await dev_chat.release_stuck(self)  # 답이 너무 오래 안 오는 대화를 되돌린다
+                    await dev_chat.link_confirmed(self)  # 확정된 기획서 작업을 넘긴 대화에 잇기
                 except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
                     continue  # 다음 차례에 다시
 
@@ -2381,6 +2383,11 @@ class DevService(PlanningCore):
         result = await self._apply(run)
         self._idempotent[idempotency_key] = result
         self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
+        from dev_agent import dev_chat
+
+        # 이 요청을 넘긴 개발 AI 대화가 있으면 받은 작업과 잇는다 (사람이 다시 말하지 않아도).
+        # 잇기 실패는 안에서 로그만 남긴다 (받기는 그대로 성공, 주기 루프가 다시 잇는다)
+        await dev_chat.link_confirmed(self, req.id)
         return result
 
     # ---------------------------------------------------------------- 코딩 에이전트 (개발팀 기획)
@@ -2503,6 +2510,7 @@ class DevService(PlanningCore):
                 th.waiting_for = list(waiting_for)
             if mode:
                 th.mode = mode  # type: ignore[assignment]
+            th.last_error = None  # 새 메시지가 적혔으면 지난번에 못 적은 답 표시는 지난 일
             th.updated_at = t
             return ActionResult(outcome="chat", output={"thread_id": th.id})
 
@@ -2512,9 +2520,14 @@ class DevService(PlanningCore):
         return found
 
     async def chat_set(
-        self, thread_id: str, *, status: str | None = None, waiting_for: list[str] | None = None
+        self,
+        thread_id: str,
+        *,
+        status: str | None = None,
+        waiting_for: list[str] | None = None,
+        last_error: str | None = None,
     ) -> ChatThread:
-        """메시지 없이 대화 상태만 바꾼다 (답 뒤 되돌리기·끝내기).
+        """메시지 없이 대화 상태만 바꾼다 (답 뒤 되돌리기·끝내기·답을 적지 못함 표시).
 
         대화 기록일 뿐이라 관문을 다시 타지 않는다 (메시지는 chat_add가 dev_chat 관문을 탄다)."""
 
@@ -2526,6 +2539,8 @@ class DevService(PlanningCore):
                 th.status = status  # type: ignore[assignment]
             if waiting_for is not None:
                 th.waiting_for = list(waiting_for)
+            if last_error is not None:
+                th.last_error = last_error[:300]
             th.updated_at = self.clock()
             return ActionResult(outcome="chat", output={"thread_id": th.id})
 
