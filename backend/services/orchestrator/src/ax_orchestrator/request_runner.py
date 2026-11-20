@@ -38,7 +38,7 @@ from ax_contracts.schemas import (
     RequestMeta,
     TaskStatus,
 )
-from ax_orchestrator import request_tasks
+from ax_orchestrator import request_inputs, request_tasks
 from ax_orchestrator.engine import TRANSFER_CODES, Engine
 from ax_orchestrator.models import now
 from ax_orchestrator.work_requests import OPEN_STATES, READ_GRADE, WorkRequests, ready_steps
@@ -56,6 +56,7 @@ HUMAN_CHECK = "human_check"
 NO_AGENT = "no_agent"
 NO_REF = "no_ref"
 APPROVED = "approved"
+NO_INPUT = "no_input"  # 고객 문장에서 부서가 요구하는 입력을 찾지 못해 부서에 보내지 않음
 NO_INSIGHT = "no_insight"  # 기획에 넘길 근거(facts)가 없어 영상 제작안을 건너뜀
 ASYNC_SILENT = "async_silent"
 ASYNC_SILENCE = 300.0  # 긴 작업 알림이 이만큼(초) 없으면 응답 끊김 (엔진의 기준과 같다)
@@ -89,7 +90,9 @@ class RequestRunner:
         notify: Notifier | None = None,
         escalate: Escalator | None = None,
         scope_check: ScopeCheck = in_catalog,
+        clock: Callable[[], datetime] = now,
     ) -> None:
+        self._clock = clock
         self._requests = requests
         self._get_engine = get_engine
         self._step_timeout = step_timeout
@@ -237,6 +240,22 @@ class RequestRunner:
                     finished_at=stamp(),
                 )
                 return
+        filled = None
+        if spec.get(
+            "fill"
+        ):  # 고객 문장에서 기간 같은 입력을 채운다. 못 채우면 부서에 보내지 않는다
+            filled = request_inputs.fill(spec["fill"], row["text"], self._clock())
+            if filled.ask:
+                self._update(
+                    rid,
+                    step_id,
+                    status="failed",
+                    reason_code=NO_INPUT,
+                    note="필요한 입력(기간 등)을 고객 문장에서 찾지 못해 부서에 보내지 않았다",
+                    started_at=stamp(),
+                    finished_at=stamp(),
+                )
+                return
         step = row["steps"][step_id]
         grade = entry.grade or step.get("grade")
         if grade != READ_GRADE and step.get("reason_code") != APPROVED:  # 승인 없이는 시키지 않는다
@@ -250,7 +269,7 @@ class RequestRunner:
                 started_at=stamp(),
             )
             return
-        payload = carried if carried is not None else self._input_of(row, spec)
+        payload = carried if carried is not None else self._input_of(row, spec, filled)
         if payload is None:
             self._update(
                 rid,
@@ -268,12 +287,16 @@ class RequestRunner:
 
     # ---- 부서 호출 ----------------------------------------------------------------
     @staticmethod
-    def _input_of(row: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any] | None:
+    def _input_of(
+        row: dict[str, Any], spec: dict[str, Any], filled: request_inputs.Fill | None = None
+    ) -> dict[str, Any] | None:
         """부서에 보낼 입력: 일 목록의 고정 입력, 고객 문장 칸(있으면), 앞 단계 결과 번호.
 
         앞 단계 결과는 번호(`result_ref`)만 넘긴다. 필요한데 없으면 None.
         """
         payload: dict[str, Any] = dict(spec.get("fixed_input") or {})
+        if filled is not None:
+            payload.update(filled.payload)
         text_key = spec.get("text_key")
         if text_key:  # 부서가 문장을 `input` 칸으로만 읽는 일이다 (문장은 데이터로만 쓰인다)
             payload[text_key] = row["text"]
