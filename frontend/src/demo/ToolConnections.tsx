@@ -12,6 +12,8 @@ import { useDejafixStatus } from '@/components/connect/DejafixConnect'
 import { appChoices, deployRows, dejafixCard, dejafixSummary } from '@/lib/toolForms'
 import { EMPTY_REPO_FORM, repoAppLabel, repoBody, repoFormError, repoFormOf, type RepoForm } from '@/lib/repoForm'
 import { useSession } from './session'
+import AiConnectionView from '@/components/connect/AiConnectionView'
+import { PreparingChip } from '@/components/Preparing'
 
 // 도구 연결 (/system/tools, 모두 연다): 고객사 개발팀이 쓰는 형상관리·배포·문서 도구와 AI 연결을 잇는 창구.
 // 관리자·일반회원 모두 같은 화면을 쓰고 바꿀 수 있다(관리자만 다른 건 회사 연결·회원·서버 관리 두 화면, 11/19 결정).
@@ -432,7 +434,7 @@ function ReadOnlyNotice() {
 
 // 연결 창 왼쪽 메뉴 (설정 창처럼 묶음 › 항목). 고른 항목만 오른쪽에 보인다
 type AiPart = 'mode' | 'all'
-type PanelItem = 'repos' | 'others' | 'deploy' | 'notion' | 'ai'
+type PanelItem = 'repos' | 'others' | 'deploy' | 'notion' | 'ai' | 'mine'
 const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }[] = [
   { label: '형상관리', items: [
     { id: 'repos', label: '레포 연결' },
@@ -440,7 +442,8 @@ const PANEL_GROUPS: { label: string; items: { id: PanelItem; label: string }[] }
   ] },
   { label: '배포', items: [{ id: 'deploy', label: '배포 도구' }] }, // 공용 도구 연결 보관함 (components/connect/DeployTools.tsx)
   { label: '문서', items: [{ id: 'notion', label: '노션' }] }, // 기획 영역 (components/planning/notion.tsx)
-  { label: 'AI', items: [{ id: 'ai', label: 'AI 연결' }] },
+  // AI 연결: 회사 AI 상태·사용량(보기만, components/connect/AiConnectionView.tsx). 내 연결: 개인 연결 토큰(준비 중) + 예전 AI 연결 내용(코딩 방식·서버 AI 설정·개발자 PC AI 도구)
+  { label: 'AI', items: [{ id: 'ai', label: 'AI 연결' }, { id: 'mine', label: '내 연결' }] },
 ]
 const PANEL_IDS = PANEL_GROUPS.flatMap((g) => g.items.map((i) => i.id))
 const TAB_KEY = 'ax.connections.item'
@@ -665,7 +668,18 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
           {!canEdit && <ReadOnlyNotice />}
           <NotionConnect readOnly={!canEdit} />
         </div>
-      ) : tab === 'ai' ? <CodingModeSection part="all" /> : tab === 'deploy' ? (
+      ) : tab === 'ai' ? <AiConnectionView /> : tab === 'mine' ? (
+        <div className="space-y-8">
+          <section className="space-y-3">
+            <SectionHead title="내 AI 도구로 AXcellent 쓰기" right={<PreparingChip />}
+              desc="내 AI 도구(Claude Code 등)에서 AXcellent AI 직원에게 일을 맡기는 개인 연결 토큰이에요. 나만 보이고, 내 도구 요금은 내 계정에서 나가요." />
+            <p role="status" className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
+              개인 연결 토큰을 만드는 서버 기능이 아직 없어 만들 수 없어요. 서버가 준비되면 여기서 토큰을 만들고 끊을 수 있어요.
+            </p>
+          </section>
+          <CodingModeSection part="all" />
+        </div>
+      ) : tab === 'deploy' ? (
         tools.data ? <DeployTools data={tools.data} admin={canEdit} onChanged={tools.reload} /> : <ToolsLoading error={tools.error} />
       ) : tab === 'repos' ? (
       <section className="space-y-4">
