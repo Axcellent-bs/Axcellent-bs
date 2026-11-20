@@ -6,11 +6,14 @@
 - facts(최대 12): 콘티 근거가 가리키는 행 먼저, 그다음 섹션 1 상위 3(basis filtered만, small_base
   제외), 섹션 2 상위 3, 섹션 3 상위 2(link = permalink), 섹션 4 상위 2. 근거가 0개면 insight 없음
 - 캡션 등 외부 글은 body_md·facts에 넣지 않는다(태그·계정 이름·숫자만)
+- body_md의 숫자는 facts(label·value)·제목에 같은 값이 있을 때만 (기획 숫자 검사와 같은 규칙).
+  콘티 칸 이름은 훅·전환·증거·마무리, 섹션 요약·한계는 숫자 없는 말
 - products·product_ids·content_category·content_format은 비운다(고객사 상품을 모름)
 """
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Callable
 
@@ -137,32 +140,94 @@ def shorts_format(report: TrendReport) -> str | None:
     return seen.most_common(1)[0][0] if seen else None
 
 
-def body_md(report: TrendReport) -> str:
+# 기획은 설명(body_md)의 숫자가 근거(facts label·value)·제목에 없으면 경고한다
+# (11/20 PROP-12 경고 2개).
+# 그래서 body_md의 숫자는 facts에 같은 값이 있을 때만 남기고, 섹션 요약·한계는 숫자 없는 말로 쓴다
+_NUM = re.compile(r"\d[\d,]*(?:\.\d+)?")
+SLOT_WORD = {"0-3": "훅", "3-15": "전환", "15-25": "증거", "25-30": "마무리"}
+# 고정 한계 문장 → 숫자 없는 말 (보고서 화면에는 원문 그대로)
+PLAIN_LIMITS = {
+    "숫자는": "숫자는 전부 코드가 계산했고, AI는 결론 한 줄과 콘티 문장만 숫자 없이 썼다",
+    "검색·쇼핑은": "검색·쇼핑은 최근 한 주 평균을 직전 네 주 평균과 견줬다. 네이버 값은 요청 안의"
+                  " 상대값이라 키워드끼리 크기는 비교하지 않는다",
+    "터짐 =": "터짐은 그 계정 최근 게시물 중앙값보다 크게 뜨고 최근 한 주 안에 올린 것",
+    "인스타는": "인스타는 공식 API로 프로페셔널 계정의 최근 게시물만 본다. 개인 계정·해시태그 전체"
+                " 게시물은 볼 수 없다",
+}
+OTHER_LIMITS = "그 밖의 주의는 보고서 화면 근거와 한계 칸에서 확인"
+
+
+def numbers(text: str) -> set[str]:
+    """기획 숫자 검사와 같은 규칙 (쉼표를 지운 숫자 덩어리)."""
+    return {m.replace(",", "") for m in _NUM.findall(text or "")}
+
+
+def allowed_numbers(report: TrendReport, facts: list[InsightFact]) -> set[str]:
+    title = f"트렌드 분석: {report.brief.product}" if report.brief.product else ""
+    got = numbers(title)
+    for f in facts:
+        got |= numbers(f"{f.label} {f.value}")
+    return got
+
+
+def _plain_limit(text: str, allowed: set[str]) -> str | None:
+    if numbers(text) <= allowed:
+        return text
+    return next((v for k, v in PLAIN_LIMITS.items() if text.startswith(k)), None)
+
+
+def _part(done: int, total: int, unit: str) -> str:
+    if total == 0 or done == 0:
+        return f"{unit} 없음"
+    return f"{unit} 대부분 있음" if done * 2 > total else f"{unit} 일부만 있음"
+
+
+def body_md(report: TrendReport, facts: list[InsightFact] | None = None) -> str:
+    """기획에 넘기는 설명. 숫자는 `facts`(label·value)·제목에 같은 값이 있을 때만 남긴다."""
+    from data_agent.skills.trend_report import evidence_catalog
+
     s = report.sections
     rec = s.recommendation
+    ok = allowed_numbers(report, pick_facts(report) if facts is None else facts)
+
+    def safe(text: str) -> bool:
+        return numbers(text) <= ok
+
     none = f"(결론 없음: {report.summary_reason or '이유 모름'})"
-    lines = ["## 결론", report.summary_line or none]
+    conclusion = report.summary_line or none
+    lines = ["## 결론", conclusion if safe(conclusion) else "(결론 문장은 보고서 화면에서 확인)"]
     if rec.beats:
+        words = {k: v[1] for k, v in evidence_catalog(report).items()}
         lines.append("## 콘티")
         for beat in rec.beats:
-            lines.append(f"- {beat.slot}초: {beat.text}")
-            lines += [f"  - 근거: {e}" for e in beat.evidence]
-        if rec.music_note:
+            text = beat.text if safe(beat.text) else "(장면 문장은 보고서 화면에서 확인)"
+            lines.append(f"- {SLOT_WORD.get(beat.slot, '장면')}: {text}")
+            for item in beat.evidence_items:
+                if safe(item.text):
+                    lines.append(f"  - 근거: {item.text}")
+                elif (word := words.get(item.id)) and safe(word):
+                    lines.append(f"  - 근거: {word}")
+        if rec.music_note and safe(rec.music_note):
             lines.append(f"- 음악: {rec.music_note}")
     lines.append("## 섹션 요약")
-    known = [r for r in s.search.rows if r.search_change_pct is not None]
-    lines.append(f"- 검색: 키워드 {len(s.search.rows)}개 중 변화율 {len(known)}개"
-                 + (f" ({s.search.reason})" if s.search.reason else ""))  # fmt: skip
-    lines.append(f"- 해시태그: {', '.join(h.tag for h in s.hashtags.rows[:5]) or '없음'}"
-                 + (f" ({s.hashtags.reason})" if s.hashtags.reason else ""))  # fmt: skip
-    lines.append(f"- 콘텐츠: 터진 게시물 {len(s.content.posts)}개, 밈 {len(s.content.memes)}개")
-    lines.append(f"- 경쟁사: {len(s.competitors.rows)}곳 읽음, "
-                 f"{len(s.competitors.accounts_failed)}곳 못 읽음")  # fmt: skip
+    known = sum(1 for r in s.search.rows if r.search_change_pct is not None)
+    lines.append(f"- 검색: {_part(known, len(s.search.rows), '키워드 변화율')}")
+    tags = [h.tag for h in s.hashtags.rows[:5] if safe(h.tag)]
+    lines.append(f"- 해시태그: {', '.join(tags) or '없음'}")
+    lines.append("- 콘텐츠: " + ("터진 게시물 있음" if s.content.posts else "터진 게시물 없음")
+                 + (", 같이 뜬 밈 있음" if s.content.memes else ""))  # fmt: skip
+    read, failed = len(s.competitors.rows), len(s.competitors.accounts_failed)
+    state = ("읽은 계정 없음" if not read else
+             "일부 계정만 읽음" if failed else "고른 계정 모두 읽음")  # fmt: skip
+    lines.append(f"- 경쟁사: {state}")
     groups = report.limit_groups
     limits = [*groups.method, *groups.cannot_see, *groups.this_report] or report.limits
+    plain = [p for x in limits if (p := _plain_limit(x, ok))]
     if limits:
         lines.append("## 한계")
-        lines += [f"- {x}" for x in limits]
+        lines += [f"- {x}" for x in dict.fromkeys(plain)]
+        if len(plain) < len(limits):
+            lines.append(f"- {OTHER_LIMITS}")
     text = "\n".join(lines)
     return text if len(text) <= BODY_MAX else text[: BODY_MAX - 1] + "…"
 
@@ -189,5 +254,5 @@ def build_insight(report: TrendReport | None) -> tuple[ReceiveInsightInput | Non
         audience=audience(report),
         shorts_format=shorts_format(report),
         generated_at=report.finished_at or report.created_at,
-        body_md=body_md(report),
+        body_md=body_md(report, facts),
     ), None

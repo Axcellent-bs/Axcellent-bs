@@ -816,10 +816,11 @@ def evidence_catalog(report: TrendReport) -> Catalog:
     for n, p in enumerate(s.content.posts, start=1):
         metric = "조회수" if p.metric == "view_count" else "좋아요"
         extra = f" · {p.standout}" if p.standout else ""
-        cap = f" (캡션: {p.caption_excerpt})" if p.caption_excerpt else ""
+        # 추천 LLM에 넘기는 말(word)에는 캡션을 넣지 않는다(외부 글. 11/20 콘티에 경쟁사 캡션의
+        # "펀딩 소식"이 들어감). 캡션 발췌는 보고서 화면 콘텐츠 칸에만 있다
         out[f"content:{n}"] = (
             f"{p.account} {_fmt_word(p)}: {metric} {p.value:,} · 평소의 {p.ratio:g}배{extra}",
-            f"{p.account}의 {_fmt_word(p)}가 평소보다 크게 뜸{cap}",
+            f"{p.account}의 {_fmt_word(p)}가 평소보다 크게 뜸",
             short_of(f"{p.account} {_fmt_word(p)} {metric} ×{p.ratio:g}"))  # fmt: skip
     for n, m in enumerate(s.content.memes, start=1):
         desc = f": {m.description}" if m.description else ""
@@ -838,8 +839,8 @@ def evidence_catalog(report: TrendReport) -> Catalog:
         style = ("릴스 위주" if (c.reels_share or 0) >= 0.5 else "사진·캐러셀 위주"
                  if c.reels_share is not None else "형식 모름")  # fmt: skip
         words = [f"경쟁사 {c.account}는 {style}"]
-        if c.best_post and c.best_post.caption_excerpt:
-            words.append(f"가장 잘 된 게시물 캡션: {c.best_post.caption_excerpt}")
+        if c.best_post is not None:  # 캡션은 넘기지 않는다 (형식만)
+            words.append(f"가장 잘 된 게시물은 {_fmt_word(c.best_post)}")
         who_c = c.name or c.account
         brief_num = (f"릴스 {round(c.reels_share * 100)}%" if c.reels_share is not None
                      else "지표")  # fmt: skip

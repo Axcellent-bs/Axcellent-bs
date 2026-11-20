@@ -595,6 +595,14 @@ def keyword_facts(o: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def token_line(env: Mapping[str, str], now: datetime) -> str:
+    """ "만료까지 N일(확인|추정)" (14일 이하면 경고). 토큰 값은 읽지 않는다."""
+    from data_agent.skills.instagram import token_expiry
+
+    got = token_expiry(env, now)
+    return got.line if got.basis != "unknown" else f"모름 ({got.reason})"
+
+
 def read_instagram(env: Mapping[str, str], now: datetime) -> dict | None:
     """인스타 레이더 수집 상태: 커서·바퀴·출처별 마지막 기록·레이더 판정 저장분.
 
@@ -638,7 +646,7 @@ def read_instagram(env: Mapping[str, str], now: datetime) -> dict | None:
                               "읽은 계정": judged.get("accounts_read"),
                               "터진 게시물": judged.get("bursts"),
                               "계산 시각": kst(judged.get("generated_at"))}  # fmt: skip
-    facts["토큰 만료까지"] = "모름 (저장된 만료일 없음)"
+    facts["토큰 만료"] = token_line(env, now)
     times = [last for *_, last in cursor if last] + [judged.get("generated_at") if judged else None]
     at = max((t for t in times if t), default=None)
     name = "인스타 레이더"
@@ -652,6 +660,12 @@ def _percent(sections: Mapping[str, Any]) -> int:
     done = sum(1 for n in SECTION_NAMES
                if (sections.get(n) or {}).get("status") not in ("waiting", "running"))  # fmt: skip
     return round(done * 100 / len(SECTION_NAMES))
+
+
+# 보고서 섹션 → 대화 칸 이름 (final_status: 5칸이 모두 known이어야 done)
+SECTION_LABELS = {"search": "검색", "hashtags": "해시태그", "content": "콘텐츠",
+                  "competitors": "경쟁사", "recommendation": "AI 추천"}  # fmt: skip
+PARTIAL_RULE = "5칸 중 다 채운 칸이 일부라 일부 완료"
 
 
 def read_report(env: Mapping[str, str], now: datetime) -> dict | None:
@@ -683,6 +697,16 @@ def read_report(env: Mapping[str, str], now: datetime) -> dict | None:
         if handoff:
             item["기획 전달"] = {"결과": handoff.get("outcome"),
                               "제안 id": handoff.get("proposal_id")}  # fmt: skip
+        sections = r.get("sections") or {}
+        if r.get("status") in ("partial", "failed"):
+            missing = [{"칸": label, "이유": ((sections.get(key) or {}).get("reason") or
+                                             "이유 기록 없음")[:120]}
+                       for key, label in SECTION_LABELS.items()
+                       if (sections.get(key) or {}).get("status") != "known"]  # fmt: skip
+            if missing:
+                item["다 못 채운 칸"] = missing
+            if r.get("status") == "partial":
+                item["판정 규칙"] = PARTIAL_RULE
         items.append(item)
     if not items:
         return None

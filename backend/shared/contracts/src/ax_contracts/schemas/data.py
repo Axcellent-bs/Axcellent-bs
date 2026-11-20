@@ -2642,6 +2642,22 @@ class YouTubeChartFailure(AxModel):
     fallback_day: dt.date | None = None  # 대신 검색 상태의 날 (한국 날짜)
 
 
+class InstagramTokenExpiry(AxModel):
+    """인스타 토큰 만료 (11/20 추가). 토큰 값은 담지 않는다.
+
+    basis checked = 공식 debug_token으로 하루 한 번 읽은 만료 시각, estimated = 키 저장소에 토큰을
+    넣은 시각 + 60일(추정), unknown = 둘 다 없음."""
+
+    basis: Literal["checked", "estimated", "unknown"] = "unknown"
+    expires_at: UtcDatetime | None = None  # None이면 모름 (checked인데 None이면 만료 없음)
+    never_expires: bool = False  # debug_token expires_at 0
+    days_left: int | None = None  # 한국 날짜 기준 남은 날 (지났으면 음수)
+    checked_at: UtcDatetime | None = None  # debug_token을 읽은 시각 (checked만)
+    line: str = ""  # 화면·대화 문장: "만료까지 N일(확인)" · 14일 이하면 경고 덧붙임
+    warning: bool = False  # 14일 이하
+    reason: str | None = None  # 확인 실패·추정 이유
+
+
 class DataSourcesOutput(AxModel):
     sources: list[DataSource] = Field(default_factory=list)
     checked_at: UtcDatetime | None = None
@@ -2658,6 +2674,8 @@ class DataSourcesOutput(AxModel):
     youtube_chart_failures: list[YouTubeChartFailure] = Field(default_factory=list)
     # 아래는 예전 응답은 없다. 새 숏츠 추적 상태 (수집기 상태 화면에 같이 보인다)
     fresh_track: FreshTrackStatus | None = None
+    # 아래는 예전 응답은 없다 (11/20). 인스타 토큰 만료 (데이터 출처 화면 인스타 칸)
+    instagram_token: InstagramTokenExpiry | None = None
 
 
 class YouTubeCallerUsage(AxModel):

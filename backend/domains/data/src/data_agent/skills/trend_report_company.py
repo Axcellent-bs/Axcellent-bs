@@ -9,7 +9,8 @@
   (회사 trends.toml, 기본 "릴스")
 - keywords(최대 5): ① 타깃 성별·나이의 우리 쇼핑몰 장르·분류 순위(최근 90일, 모자라면 건너뜀)
   ② 프로필 씨앗 키워드 ③ 키워드 풀 최신 날 검색량 큰 순. 겹치는 것은 뺀다
-- shopping_category: 프로필 업종이 쇼핑인사이트 분야 이름과 정확히 같을 때만
+- shopping_category: 프로필 업종 → 쇼핑인사이트 분야 짝(`INDUSTRY_SHOPPING`), 짝이 없으면 비움
+- 타깃 나이에 10대 미만이 없으면 어린이 낱말(`[report] child_words`)이 든 회사 키워드는 뺀다
 - competitors: 확인된 계정 팔로워 큰 순 최대 7, 섹션 2·3 계정 목록도 같은 저장분
 - 회사 연결이 없거나 프로필이 unknown이면 채우지 않고 이유만
 """
@@ -72,15 +73,61 @@ def product_of(profile: Any) -> str | None:
     return f"{profile.tenant} ({profile.industry})" if profile.industry else str(profile.tenant)
 
 
+# 프로필 업종(domain_profile.INDUSTRIES) → 네이버 쇼핑인사이트 분야 이름(naver_shopping.
+# CATEGORY_CANDIDATES). 짝이 없는 업종은 None (쇼핑 칸 건너뜀). INDUSTRIES 값은 전부 여기 있어야
+# 한다(테스트가 막는다)
+INDUSTRY_SHOPPING: dict[str, str | None] = {
+    "출판·교육": "도서",
+    "패션": "패션의류",
+    "식품": "식품",
+    "뷰티": "화장품/미용",
+    "디지털·가전": "디지털/가전",
+    "생활·리빙": "생활/건강",
+    "스포츠·레저": "스포츠/레저",
+    "유아·출산": "출산/육아",
+    "여가·취미": "여가/생활편의",
+    "반려동물": None,
+    "기타": None,
+}
+# 타깃에 10대 미만이 없으면 빼는 회사 키워드 낱말 (회사 trends.toml `[report] child_words`)
+CHILD_WORDS = ("어린이", "유아", "아동", "초등", "키즈", "영유아", "그림책")
+UNDER_TEN = "0"  # 사람 나이 구간 "0" = 10대 미만
+
+
 def shopping_category_of(industry: str | None) -> str | None:
-    """업종이 쇼핑인사이트 분야 이름과 정확히 같을 때만 그 cid (아니면 None, 쇼핑 칸은 건너뜀)."""
+    """프로필 업종 → 쇼핑인사이트 분야 cid (`INDUSTRY_SHOPPING` 짝, 업종이 분야 이름과 같아도 됨).
+
+    짝이 없으면 None (쇼핑 칸은 건너뜀)."""
     from data_agent.connectors.naver_shopping import CATEGORY_CANDIDATES
 
-    return next((cid for name, cid in CATEGORY_CANDIDATES if industry and name == industry), None)
+    if not industry:
+        return None
+    name = INDUSTRY_SHOPPING.get(industry, industry)
+    return next((cid for n, cid in CATEGORY_CANDIDATES if name and n == name), None)
 
 
-def merge_keywords(*groups: Sequence[str], limit: int = MAX_KEYWORDS) -> list[str]:
-    """순서대로 채우고 같은 말(공백·대소문자 무시)은 한 번만. 30자 넘는 말은 뺀다(칸 규칙)."""
+def child_words(env: Mapping[str, str]) -> tuple[str, ...]:
+    """회사 trends.toml `[report] child_words` (없으면 기본 목록)."""
+    path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
+    if not path or not Path(path).is_file():
+        return CHILD_WORDS
+    try:
+        with Path(path).open("rb") as f:
+            raw = (tomllib.load(f).get("report") or {}).get("child_words")
+    except (OSError, tomllib.TOMLDecodeError, AttributeError):
+        return CHILD_WORDS
+    if not isinstance(raw, list):
+        return CHILD_WORDS
+    words = tuple(w.strip() for w in raw if isinstance(w, str) and w.strip())
+    return words or CHILD_WORDS
+
+
+def merge_keywords(*groups: Sequence[str], limit: int = MAX_KEYWORDS,
+                   blocked: Sequence[str] = (), dropped: list[str] | None = None,
+                   ) -> list[str]:  # fmt: skip
+    """순서대로 채우고 같은 말(공백·대소문자 무시)은 한 번만. 30자 넘는 말은 뺀다(칸 규칙).
+
+    `blocked` 낱말이 든 말은 빼고(뺀 말은 `dropped`에) 다음 순위로 채운다."""
     out: list[str] = []
     seen: set[str] = set()
     for group in groups:
@@ -90,6 +137,10 @@ def merge_keywords(*groups: Sequence[str], limit: int = MAX_KEYWORDS) -> list[st
             if not key or key in seen or len(word) > 30:
                 continue
             seen.add(key)
+            if any(b in word for b in blocked):
+                if dropped is not None:
+                    dropped.append(word)
+                continue
             out.append(word)
             if len(out) >= limit:
                 return out
@@ -99,8 +150,11 @@ def merge_keywords(*groups: Sequence[str], limit: int = MAX_KEYWORDS) -> list[st
 def build_context(profile: Any, *, favorites: Sequence[str], favorites_reason: str | None,
                   pool: Sequence[str], accounts: Sequence[Mapping[str, Any]],
                   accounts_reason: str | None, request_text: str | None,
-                  env: Mapping[str, str]) -> CompanyContext:  # fmt: skip
-    """회사 정보 → 채울 값. 프로필이 없거나 unknown이면 값 없이 이유만."""
+                  env: Mapping[str, str], ages: Sequence[str] = ()) -> CompanyContext:  # fmt: skip
+    """회사 정보 → 채울 값. 프로필이 없거나 unknown이면 값 없이 이유만.
+
+    타깃 나이(`ages`)가 있는데 10대 미만이 없으면 어린이 낱말이 든 회사 키워드는 뺀다(의뢰문·폼·
+    프리셋 키워드는 여기 오지 않으니 건드리지 않는다)."""
     out = CompanyContext()
     if profile is None or getattr(profile, "status", "unknown") != "known":
         why = getattr(profile, "reason", None) if profile is not None else None
@@ -111,10 +165,14 @@ def build_context(profile: Any, *, favorites: Sequence[str], favorites_reason: s
     if favorites_reason:
         out.limits.append(f"회사 키워드: 타깃 집단 순위를 건너뜀 ({favorites_reason})")
     seeds = [s.keyword for s in profile.seed_keywords]
-    out.keywords = merge_keywords(favorites, seeds, pool)
+    blocked = child_words(env) if ages and UNDER_TEN not in ages else ()
+    dropped: list[str] = []
+    out.keywords = merge_keywords(favorites, seeds, pool, blocked=blocked, dropped=dropped)
+    if dropped:
+        out.limits.append(f"타깃과 맞지 않아 뺀 키워드: {', '.join(dropped[:5])}")
     out.shopping_category = shopping_category_of(profile.industry)
     if out.shopping_category is None:
-        out.limits.append(f"회사 업종({profile.industry})이 쇼핑인사이트 분야 이름과 달라"
+        out.limits.append(f"회사 업종({profile.industry})에 맞는 쇼핑인사이트 분야가 없어"
                           " 쇼핑 칸은 건너뜀")  # fmt: skip
     out.accounts = [str(a["account"]) for a in accounts]
     out.competitors = out.accounts[:MAX_COMPETITORS]
@@ -149,7 +207,8 @@ async def gather(brief: Any, request_text: str | None, note: Any, *, env: Mappin
     accounts = apply_overrides(found, env)
     ctx = build_context(profile, favorites=favorites, favorites_reason=why, pool=pool,
                         accounts=accounts, accounts_reason=found.deferred,
-                        request_text=request_text, env=env)  # fmt: skip
+                        request_text=request_text, env=env,
+                        ages=list(getattr(brief, "target_ages", []) or []))  # fmt: skip
     return ctx, found.llm_calls if not found.reused else 0, found.ig_calls
 
 
