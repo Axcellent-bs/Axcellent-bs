@@ -10,10 +10,20 @@ from typing import Any
 
 RECENT = 12
 TEXT_CHARS = 120
+# 제안을 보낸 부서 (사람이 "데이터분석에서 넘어온 제안"처럼 부르면 찾을 수 있게)
+FROM_LABEL = {"data": "데이터분석", "marketing": "마케팅", "finance": "재무"}
 
 
 def _short(text: Any) -> str:
     return " ".join(str(text or "").split())[:TEXT_CHARS]
+
+
+def _when(value: Any) -> str | None:
+    return value.isoformat() if hasattr(value, "isoformat") else None
+
+
+def _created(p: Any) -> str:
+    return _when(getattr(p, "created_at", None)) or ""
 
 
 def collect(state: Any) -> dict[str, Any]:
@@ -63,8 +73,12 @@ def collect(state: Any) -> dict[str, Any]:
                     "spec": p.spec,
                     "products": p.products[:5],
                     "result": p.result.direction if p.result else None,
+                    "from": getattr(p, "from_", None),
+                    "from_label": FROM_LABEL.get(getattr(p, "from_", None) or "", None),
+                    "created_at": _when(getattr(p, "created_at", None)),
+                    "angle": getattr(p, "angle", None),
                 }
-                for p in props[-RECENT:]
+                for p in sorted(props, key=_created)[-RECENT:]
             ],  # fmt: skip
         },
         "decisions": [
