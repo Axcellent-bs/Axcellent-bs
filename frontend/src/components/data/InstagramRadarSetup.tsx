@@ -3,10 +3,11 @@ import { More, Notice, SectionHead, StatusChip } from '@/components/connect/part
 import { ApiError } from '@/lib/apiError'
 import { HUMAN_TOKEN_SET } from '@/lib/env'
 import { instagramRadar, splitAccounts, type RadarState } from '@/lib/instagramRadar'
+import { RADAR_SOURCE as SOURCE } from '@/lib/radarSource'
 
 // 인스타 레이더 계정: 데이터 AI가 반응을 지켜볼 인스타 계정(업계·경쟁·참고 계정). 데이터분석 › 트렌드 › 인스타의 레이더 아래에서 정한다.
 // 저장하면 회사 설정 파일(trends.toml)의 목록 대신 이 목록을 쓴다. "회사 설정 파일로 되돌리기"로 저장 목록을 지운다.
-const SOURCE: Record<RadarState['source'], string> = { screen: '화면에서 저장한 목록', tenant: '회사 설정 파일', none: '없음' }
+// 둘 다 없으면 경쟁사 찾기로 확인한 계정(자동)을 칸에 보여 주고 레이더도 그 목록을 쓴다.
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
 
 export default function InstagramRadarSetup() {
@@ -59,6 +60,7 @@ export default function InstagramRadarSetup() {
       </div>
       <More summary="어떻게 쓰이나요">
         <p>저장하면 회사 설정 파일(trends.toml)에 적힌 목록 대신 이 목록을 써요. 한 번에 많이 부르지 않게 묶음으로 나눠 읽어요.</p>
+        <p>둘 다 없으면 분석 보고서의 경쟁사 찾기가 공식 API로 확인한 계정을 자동으로 써요.</p>
         <p>인스타 API 키(데이터용 계정)는 서버 설정에 있어야 실제로 읽혀요.</p>
       </More>
       {done && <p role="status" className="text-sm text-emerald-800">{done}</p>}

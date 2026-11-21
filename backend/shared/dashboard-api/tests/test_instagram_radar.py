@@ -55,6 +55,29 @@ def test_bad_handles_and_too_many_are_refused(client) -> None:
     assert res.status_code == 422 and res.json()["error"]["code"] == "TOO_MANY"
 
 
+def test_auto_list_shows_without_saved_list_or_tenant_file(client, tmp_path, monkeypatch) -> None:
+    # 누비투어처럼 trends.toml이 없는 회사: 경쟁사 찾기가 남긴 자동 목록을 보여 준다
+    monkeypatch.delenv(tenant.IG_RADAR_AUTO_FILE_ENV, raising=False)
+    monkeypatch.delenv("DATA_TREND_CONFIG")
+    monkeypatch.delenv(tenant.TENANT_ENV, raising=False)
+    assert client.get(BASE).json()["data"]["source"] == "none"
+    auto = tmp_path / tenant.IG_RADAR_AUTO_FILE
+    auto.write_text('{"accounts": ["hanatour", "modetour"], "industry": "여행·숙박"}', "utf-8")
+    data = client.get(BASE).json()["data"]
+    assert data["source"] == "auto" and data["accounts"] == ["hanatour", "modetour"]
+    assert data["tenant_count"] == 0 and data["editable"] is True
+    # 저장하면 화면 목록이 먼저, 지우면 자동으로 돌아간다
+    saved = client.post(BASE + "/save", json={"accounts": ["mine"]}).json()["data"]
+    assert saved["source"] == "screen"
+    assert client.post(BASE + "/clear").json()["data"]["source"] == "auto"
+
+
+def test_tenant_file_comes_before_the_auto_list(client, tmp_path) -> None:
+    (tmp_path / tenant.IG_RADAR_AUTO_FILE).write_text('{"accounts": ["auto_a"]}', "utf-8")
+    data = client.get(BASE).json()["data"]
+    assert data["source"] == "tenant" and data["accounts"] == ["catbooks_a", "catbooks_b"]
+
+
 @pytest.mark.parametrize("path", ["/save", "/clear"])
 def test_writes_need_a_human_token(client, path) -> None:
     client.headers.pop("authorization")
