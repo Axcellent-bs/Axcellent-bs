@@ -290,6 +290,31 @@ def test_same_industry_radar_accounts_already_read_are_added(tmp_path: Path) -> 
     assert any("확인된 인스타 계정 4곳 (목표 6곳)" in x for x in ctx.limits)
 
 
+CATBOOKS_TRENDS = Path(__file__).resolve().parents[3] / "config/tenants/catbooks/trends.toml"
+
+
+def test_catbooks_radar_industry_marking_fills_book_accounts(tmp_path: Path) -> None:
+    import tomllib
+
+    from data_agent.skills.domain_profile import INDUSTRIES
+
+    assert "출판·교육" in INDUSTRIES  # 업종 이름이 도메인 프로필과 글자까지 같다
+    ig = tomllib.loads(CATBOOKS_TRENDS.read_text(encoding="utf-8"))["instagram"]
+    env = {ca.TREND_CONFIG_ENV: str(CATBOOKS_TRENDS), st.RADAR_ENV: str(tmp_path / "radar.db")}
+    marked = ca.radar_industry_accounts(env, "출판·교육")
+    assert len(marked) == 27  # 출판사 16 · 서점 4 · 책·웹소설 7
+    assert set(marked) <= set(ig["radar_accounts"])  # 레이더 목록에 있는 계정만
+    assert list(ig["radar_industries"]) == ["출판·교육"]  # 밈·브랜드·해외 묶음은 넣지 않음
+    assert not {"9gag", "oliveyoung_official", "netflixkr"} & set(marked)
+    # 레이더가 이미 읽은 책 계정만 목표까지 더한다 (안 읽은 계정·다른 묶음 계정은 빼고)
+    env[st.RADAR_ENV] = _radar(tmp_path, ["yes24_official", "kyobobook_official", "munhakdongne",
+                                          "kakaopage", "oliveyoung_official"])  # fmt: skip
+    have = [{"account": "yes24_official"}]
+    added = ca.radar_fill(have, "출판·교육", env, 4)
+    assert [a["account"] for a in added] == ["munhakdongne", "kyobobook_official", "kakaopage"]
+    assert all(a["reason"] == ca.RADAR_REASON for a in added)
+
+
 def test_min_accounts_setting_and_full_target_has_no_limit(tmp_path: Path) -> None:
     env = _env(tmp_path, "[instagram]\nradar_accounts = []\n", [])
     Path(env[ca.TENANT_CONFIG_ENV]).write_text("[report.accounts]\nmin_accounts = 2\n",
