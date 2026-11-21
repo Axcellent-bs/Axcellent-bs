@@ -1,0 +1,61 @@
+# 자동 배포 (ax-autodeploy)
+
+운영 서버(Tencent)에서 `origin/dev` 를 90초마다 확인해 **프론트엔드(`/var/www/axcellent`, `/var/www/axcellent-admin`)와 홍보 사이트 정적 파일(`/var/www/promo`)만** 다시 배포한다. 백엔드·nginx·`.env`·서비스 재시작은 대상이 아니다(새 커밋에 `backend/` 변경이 섞이면 프론트만 배포하고 로그에 `backend-changed: manual deploy needed`).
+
+- 스크립트: `ax-autodeploy` (서버에 `/usr/local/sbin/ax-autodeploy`, root:root 755, 실행은 ubuntu)
+- 유닛: 서버에 이미 있는 `ax-autodeploy.service`(oneshot) / `ax-autodeploy.timer`(부팅 3분 뒤, 이전 실행 끝나고 90초마다). 이 폴더는 유닛을 바꾸지 않는다.
+
+## 매 주기 순서
+
+1. `flock` 으로 중복 실행 방지(이미 돌고 있으면 `busy` 로 건너뜀)
+2. 정지 표시 확인: `AX_PAUSE_FILE` 이 설정되고 `/usr/local/sbin/ax-gate-autodeploy-paused` 가 있으면 호출해, 멈춰 있으면 `paused` 로 건너뜀(아래 "정지")
+3. 빌드 전용 트리(`/opt/axcellent/autodeploy-src`, 별도 clone)에서 `git fetch origin dev`. **운영 트리 `/opt/axcellent/Axcellent-bs` 는 건드리지 않는다**(backend/.env 값을 읽기만 한다)
+4. `last-deployed-ref` 이후 `git diff --name-only` 로 변경 판단
+   - `frontend/`(문서·`*.test.ts(x)` 제외) 변경 -> 프론트 두 곳 재배포
+   - `docs/promo/` 변경 -> 이미 `/var/www/promo` 에 있는 파일 갱신 + `assets/` 아래 새 파일 추가. `*.mjs *.md *.sh *.py *.json INTAKE* README* content.* build.*` 는 배포 안 함
+   - 웹 변경이 없으면 기준 ref 만 갱신하고 끝(빌드 안 함)
+   - 변경 파일 500개 초과면 중단(`abort`)
+5. CI: `/etc/ax-autodeploy/gh-readonly-token` 이 있으면 GitHub check-runs 가 모두 끝났고 success(skipped·neutral 허용)일 때만 배포. 진행 중이면 다음 주기에 다시, 실패면 배포 안 함. 파일이 없으면 CI 확인 없이 진행하고 로그에 `ci-check=off`. 토큰은 이 스크립트가 만들지 않는다(읽기 전용 토큰을 사람이 둔다)
+6. `/opt/axcellent/deploy.sh` 재사용(`AXCELLENT_REPO=빌드 전용 트리`, 두 웹 루트에 한 번씩). 열람 전용 토큰은 운영 `backend/.env` 의 `SHOP_VIEWER_TOKEN` 만 읽어 `VITE_SHOP_VIEWER_TOKEN` 으로 넘긴다(값 출력 없음), 사람 토큰은 자리표시자 `human-via-nginx`
+7. 검증: index.html 이 가리키는 파일 존재 + HTTP 200 + **토큰 검사**(nginx 사람 토큰 맵·`.env` 의 HUMAN/WORK/ADMIN 토큰 실제 값이 번들에 없고 자리표시자만 있는지)
+8. 실패(빌드 실패·시간 초과(1200초)·200 아님·토큰 검사 실패·예상 못 한 종료)면 배포 직전 백업(`/var/lib/ax-autodeploy/prev/`)으로 즉시 복원하고 기준 ref 는 갱신하지 않는다. 같은 커밋으로 3회 연속 실패하면 그 커밋은 `skipped-ref` 에 적고 다음 새 커밋을 기다린다
+
+비밀값은 로그에 적지 않는다. 로그: `/var/log/ax-autodeploy.log`(실행 결과만, 변화 없는 주기는 안 적음), 빌드 출력: `/var/log/ax-autodeploy-build.log`(매 배포마다 덮어씀), journald 에도 같은 내용. 마지막 실행 요약: `/var/lib/ax-autodeploy/last-run`.
+
+## 설치 (서버 책임자, sudo 필요)
+
+```bash
+# 1) 스크립트
+sudo install -o root -g root -m 755 ax-autodeploy /usr/local/sbin/ax-autodeploy
+# 2) 로그·상태 폴더(실행 계정 ubuntu 가 쓴다)
+sudo install -d -o ubuntu -g ubuntu -m 755 /var/lib/ax-autodeploy
+sudo install -o ubuntu -g ubuntu -m 640 /dev/null /var/log/ax-autodeploy.log
+sudo install -o ubuntu -g ubuntu -m 640 /dev/null /var/log/ax-autodeploy-build.log
+# 3) 빌드 전용 트리(운영 트리와 분리된 별도 clone)
+git clone /opt/axcellent/Axcellent-bs /opt/axcellent/autodeploy-src
+git -C /opt/axcellent/autodeploy-src remote set-url origin https://github.com/Axcellent-bs/Axcellent-bs.git
+git -C /opt/axcellent/autodeploy-src fetch origin dev
+# 4) 기준 ref 시드: 지금 화면에 실제로 배포돼 있는 커밋(전체 40자)
+echo <배포된 커밋 40자> > /var/lib/ax-autodeploy/last-deployed-ref
+# 5) 확인 후 타이머 켜기(재헌 확인 뒤에만)
+/usr/local/sbin/ax-autodeploy --dry-run
+sudo systemctl enable --now ax-autodeploy.timer
+```
+
+CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-autodeploy/gh-readonly-token`(600)에 둔다. 없으면 `ci-check=off`.
+
+## 정지
+
+- 급히 멈춤: `sudo systemctl disable --now ax-autodeploy.timer`
+- 게이트 연결(`docs/ops/ssh-gate/INSTALL.md` 7-1): 게이트 정책 `[autodeploy] pause_file` 경로를 `/etc/ax-autodeploy/env` 에 `AX_PAUSE_FILE=<경로>` 로 적는다(root 소유, 그룹·기타 쓰기 없음). 그러면 매 주기 맨 앞에서 `ax-gate-autodeploy-paused` 를 불러 `autodeploy-pause` 중이면 건너뛴다. 연결 전에는 dry-run 이 `게이트 정지 연결: NOT-CONNECTED` 를 보여 준다
+
+## 롤백
+
+- 직전 배포 직후 화면만 되돌리기: `/var/lib/ax-autodeploy/prev/axcellent`·`axcellent-admin` 이 배포 직전 복사본이다(마지막 배포 1회분). `sudo rm -rf /var/www/axcellent && sudo cp -a /var/lib/ax-autodeploy/prev/axcellent /var/www/axcellent` (admin 도 같게). 롤백 전에 타이머를 먼저 멈추고, 기준 ref 를 되돌린 커밋으로 고쳐 다시 배포되지 않게 한다.
+- 특정 커밋으로 고정: 타이머 정지 후 수동 배포(`AXCELLENT_REF=<sha>` + `/opt/axcellent/deploy.sh`)와 `last-deployed-ref` 갱신.
+- 홍보 파일: `/var/lib/ax-autodeploy/prev-promo/` 에 직전 파일 복사본, `prev-promo.added` 에 새로 더한 파일 목록.
+- 3회 실패로 건너뛴 커밋 풀기: `sudo rm /var/lib/ax-autodeploy/skipped-ref /var/lib/ax-autodeploy/fail-count` (ubuntu 소유라 sudo 없이도 됨).
+
+## 시험
+
+`--dry-run` 은 상태·화면을 바꾸지 않고(fetch 만) 대상 커밋, 변경 영역, CI 상태, 정지 연결을 출력한다. 시험용 환경 변수: `AX_STATE_DIR AX_SRC AX_DEPLOY_SH AX_WEB_ROOT_90 AX_WEB_ROOT_91 AX_URL_90 AX_URL_91 AX_PROMO_ROOT AX_URL_PROMO(off 가능) AX_LOG_FILE AX_BUILD_LOG AX_SUDO AX_PAUSE_FILE AX_GATE_BIN`.

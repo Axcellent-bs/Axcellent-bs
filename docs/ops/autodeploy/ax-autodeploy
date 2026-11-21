@@ -1,0 +1,416 @@
+#!/usr/bin/env bash
+# ax-autodeploy — origin/dev 를 폴링해 "프론트엔드 두 곳 + 홍보 사이트 정적 파일"만 자동 재배포한다.
+# 서버의 /usr/local/sbin/ax-autodeploy (root:root 755)로 설치하고, ax-autodeploy.timer 가 90초마다 부른다.
+# 설치·정지·롤백은 같은 폴더의 README.md.
+#
+# 하는 일:  flock -> 정지 표시 확인 -> git fetch origin dev -> 기준 ref 이후 frontend/·docs/promo 변경 판단
+#           -> (CI 확인) -> 빌드 전용 트리에서 /opt/axcellent/deploy.sh 재사용 -> 토큰 검사 -> 기준 ref 갱신
+# 하지 않는 일: 백엔드·nginx·.env·서비스 재시작, 운영 트리(/opt/axcellent/Axcellent-bs) 변경, 비밀값 출력.
+#
+# 사용:  ax-autodeploy [--dry-run]     (--dry-run: 아무것도 바꾸지 않고 무엇을 할지만 출력)
+# 끝 코드: 0 정상(건너뜀 포함), 1 실패, 2 사용법 오류
+set -Eeuo pipefail
+IFS=$' \t\n'
+export LC_ALL=C.UTF-8 2>/dev/null || export LC_ALL=C
+
+# ---- 설정(환경 변수로 바꿀 수 있다. 시험은 임시 경로로 한다) --------------------------------------
+CONF_FILE="${AX_AUTODEPLOY_CONF:-/etc/ax-autodeploy/env}"   # 선택. root 소유 KEY=값 파일(AX_PAUSE_FILE, AX_MAX_FILES 만 읽는다)
+GITHUB_REPO="${AX_GITHUB_REPO:-Axcellent-bs/Axcellent-bs}"
+BRANCH="${AX_BRANCH:-dev}"
+PROD_REPO="${AX_PROD_REPO:-/opt/axcellent/Axcellent-bs}"     # 운영 트리: backend/.env 의 값을 읽기만 한다
+SRC="${AX_SRC:-/opt/axcellent/autodeploy-src}"               # 빌드 전용 트리(별도 clone). 여기서만 fetch/checkout/빌드
+DEPLOY_SH="${AX_DEPLOY_SH:-/opt/axcellent/deploy.sh}"
+STATE_DIR="${AX_STATE_DIR:-/var/lib/ax-autodeploy}"
+LOG_FILE="${AX_LOG_FILE:-/var/log/ax-autodeploy.log}"
+BUILD_LOG="${AX_BUILD_LOG:-/var/log/ax-autodeploy-build.log}"
+CI_TOKEN_FILE="${AX_CI_TOKEN_FILE:-/etc/ax-autodeploy/gh-readonly-token}"
+GATE_BIN="${AX_GATE_BIN:-/usr/local/sbin/ax-gate-autodeploy-paused}"
+PAUSE_FILE="${AX_PAUSE_FILE:-}"            # 게이트 정책 [autodeploy] pause_file 경로. 비어 있으면 '미연결'
+WEB_ROOT_90="${AX_WEB_ROOT_90:-/var/www/axcellent}"
+WEB_ROOT_91="${AX_WEB_ROOT_91:-/var/www/axcellent-admin}"
+URL_90="${AX_URL_90:-http://localhost:3090/}"
+URL_91="${AX_URL_91:-http://localhost:3090/}"  # 3091 은 허용 IP 만 열려 있어 수동 배포와 같이 3090 으로 확인한다
+PROMO_ROOT="${AX_PROMO_ROOT:-/var/www/promo}"
+URL_PROMO="${AX_URL_PROMO:-http://localhost:3095/}"
+HUMAN_MAP_FILE="${AX_HUMAN_MAP_FILE:-/etc/nginx/conf.d/00-axcellent-human-map.conf}"
+MAX_FILES="${AX_MAX_FILES:-500}"
+MAX_FAILS="${AX_MAX_FAILS:-3}"
+DEPLOY_TIMEOUT="${AX_DEPLOY_TIMEOUT:-1200}"   # 초. 유닛 TimeoutStartSec(1500)보다 짧게
+SUDO="${AX_SUDO-sudo}"
+HUMAN_PLACEHOLDER="human-via-nginx"
+
+LAST_REF_FILE="${STATE_DIR}/last-deployed-ref"
+FAIL_FILE="${STATE_DIR}/fail-count"      # "<sha> <횟수>"
+SKIP_FILE="${STATE_DIR}/skipped-ref"     # 3회 연속 실패로 건너뛰는 커밋
+HEARTBEAT_FILE="${STATE_DIR}/last-run"
+PREV_DIR="${STATE_DIR}/prev"
+
+DRY=0
+case "${1:-}" in
+  "") ;;
+  --dry-run) DRY=1 ;;
+  *) printf '사용법: %s [--dry-run]\n' "${0##*/}" >&2; exit 2 ;;
+esac
+
+# ---- 로그(비밀값은 절대 적지 않는다) --------------------------------------------------------------
+log() {
+  local tag=""
+  [[ ${DRY} == 1 ]] && tag=" [dry-run]"
+  local line
+  line="$(date '+%Y-%m-%d %H:%M:%S%z') [$$]${tag} $*"
+  printf '%s\n' "${line}"
+  if [[ ${DRY} == 0 ]]; then printf '%s\n' "${line}" >> "${LOG_FILE}" 2>/dev/null || true; fi
+}
+heartbeat() { [[ ${DRY} == 1 ]] || printf '%s %s\n' "$(date '+%F %T%z')" "$*" > "${HEARTBEAT_FILE}" 2>/dev/null || true; }
+say() { printf '%s\n' "$*"; }   # dry-run 보고용(로그 파일에 안 남는다)
+
+# 설정 파일: root 소유이고 다른 사람이 쓸 수 없을 때만, 알려진 키만 읽는다(내용을 실행하지 않는다).
+load_conf() {
+  [[ -f "${CONF_FILE}" && ! -L "${CONF_FILE}" ]] || return 0
+  local owner mode k v
+  owner="$(stat -c %u "${CONF_FILE}")"; mode="$(stat -c %a "${CONF_FILE}")"
+  if [[ "${owner}" != 0 && "${AX_CONF_ALLOW_NONROOT:-}" != 1 ]]; then return 0; fi
+  [[ "${mode}" =~ [2367]$ || "${mode}" =~ [2367].$ ]] && return 0
+  while IFS='=' read -r k v || [[ -n "${k}" ]]; do
+    v="${v%\"}"; v="${v#\"}"
+    case "${k}" in
+      AX_PAUSE_FILE) [[ -n "${AX_PAUSE_FILE:-}" ]] || PAUSE_FILE="${v}" ;;
+      AX_MAX_FILES) [[ "${v}" =~ ^[0-9]{1,6}$ ]] && MAX_FILES="${v}" ;;
+    esac
+  done < "${CONF_FILE}"
+  return 0
+}
+load_conf
+
+# ---- 중복 실행 방지 -------------------------------------------------------------------------------
+mkdir -p "${STATE_DIR}" 2>/dev/null || true
+exec 9> "${STATE_DIR}/lock"
+if ! flock -n 9; then
+  log "busy: 다른 ax-autodeploy 가 실행 중이라 건너뜀"
+  exit 0
+fi
+
+# ---- 정지 표시 확인 -------------------------------------------------------------------------------
+GATE_STATE="NOT-CONNECTED (pause_file 설정 또는 ${GATE_BIN} 없음)"
+if [[ -n "${PAUSE_FILE}" && -x "${GATE_BIN}" ]]; then
+  PAUSE_MSG="$(mktemp)"
+  if "${GATE_BIN}" "${PAUSE_FILE}" 2>"${PAUSE_MSG}"; then
+    log "paused: $(head -c 200 "${PAUSE_MSG}" | tr -d '\n') -> 이번 주기 건너뜀"
+    rm -f "${PAUSE_MSG}"
+    heartbeat "paused"
+    [[ ${DRY} == 1 ]] && say "정지 중이라 이번 주기는 건너뛴다"
+    exit 0
+  fi
+  rm -f "${PAUSE_MSG}"
+  GATE_STATE="connected (정지 아님)"
+fi
+
+# ---- 다른 배포가 돌고 있으면 건너뜀 ---------------------------------------------------------------
+# 앱의 배포 도구·사람이 /opt/axcellent/deploy.sh 를 직접 돌리는 중이면 같은 웹 루트(.new/.old 이름까지 같다)를 건드리지 않는다.
+OTHER_DEPLOY_PATTERN="${AX_OTHER_DEPLOY_PATTERN:-^(/bin/|/usr/bin/)?bash .*/opt/axcellent/deploy\.sh}"
+if pgrep -f "${OTHER_DEPLOY_PATTERN}" >/dev/null 2>&1; then
+  log "other-deploy-running: /opt/axcellent/deploy.sh 가 이미 돌고 있어 이번 주기 건너뜀"
+  heartbeat "other-deploy-running"
+  exit 0
+fi
+
+# ---- 상태 읽기·fetch ------------------------------------------------------------------------------
+[[ -d "${SRC}/.git" ]] || { log "error: 빌드 전용 트리 ${SRC} 가 없다(README 설치 3번)"; exit 1; }
+[[ -r "${LAST_REF_FILE}" ]] || { log "error: ${LAST_REF_FILE} 가 없다(README 설치 4번: 현재 배포된 커밋으로 시드)"; exit 1; }
+LAST="$(tr -d ' \r\n' < "${LAST_REF_FILE}")"
+[[ "${LAST}" =~ ^[0-9a-f]{40}$ ]] || { log "error: ${LAST_REF_FILE} 내용이 커밋 해시가 아니다"; exit 1; }
+
+git_src() { git -C "${SRC}" "$@"; }
+if ! timeout 120 git -C "${SRC}" fetch --quiet origin "${BRANCH}" 2>>"${BUILD_LOG}"; then
+  log "error: git fetch origin ${BRANCH} 실패(다음 주기에 다시)"
+  heartbeat "fetch-failed"
+  exit 1
+fi
+TARGET="$(git_src rev-parse --verify "origin/${BRANCH}^{commit}")"
+git_src cat-file -e "${LAST}^{commit}" 2>/dev/null || { log "error: 기준 ref ${LAST:0:8} 가 저장소에 없다(수동 확인 필요)"; exit 1; }
+
+if [[ "${TARGET}" == "${LAST}" ]]; then
+  heartbeat "up-to-date ${TARGET:0:8}"
+  [[ ${DRY} == 1 ]] && say "배포할 것 없음: origin/${BRANCH}=${TARGET:0:8} 가 기준과 같다"
+  exit 0
+fi
+if [[ -f "${SKIP_FILE}" && "$(tr -d ' \r\n' < "${SKIP_FILE}")" == "${TARGET}" ]]; then
+  heartbeat "skipped-ref ${TARGET:0:8}"
+  [[ ${DRY} == 1 ]] && say "건너뜀: ${TARGET:0:8} 는 ${MAX_FAILS}회 연속 실패로 건너뛰는 커밋(다음 새 커밋을 기다림)"
+  exit 0
+fi
+
+# ---- 변경 판단 ------------------------------------------------------------------------------------
+mapfile -t ALL_FILES < <(git_src diff --name-only "${LAST}" "${TARGET}")
+NALL="${#ALL_FILES[@]}"
+if (( NALL > MAX_FILES )); then
+  log "abort: 변경 파일 ${NALL}개(> ${MAX_FILES}) 비정상. 배포하지 않음 ${LAST:0:8}..${TARGET:0:8}"
+  heartbeat "abort-too-many-files"
+  exit 1
+fi
+
+FE_FILES=(); PROMO_FILES=(); BACKEND_N=0
+# 홍보 사이트 배포 대상: 이미 PROMO_ROOT 에 있는 파일 + assets/ 아래 새 파일. 내부 문서·소스는 배포하지 않는다.
+promo_allowed() { # $1=docs/promo 아래 상대 경로
+  local rel="$1"
+  case "${rel}" in *.mjs|*.md|*.sh|*.py|*.json|*.test.*|INTAKE*|README*|content.*|build.*) return 1 ;; esac
+  [[ -f "${PROMO_ROOT}/${rel}" ]] && return 0
+  [[ "${rel}" == assets/* ]] && return 0
+  return 1
+}
+for f in "${ALL_FILES[@]}"; do
+  case "${f}" in
+    frontend/*.md|frontend/*.test.ts|frontend/*.test.tsx) ;;           # 문서·시험만 바뀐 것은 화면과 무관
+    frontend/*) FE_FILES+=("${f}") ;;
+    docs/promo/*)
+      rel="${f#docs/promo/}"
+      # 저장소에서 지워진 파일은 건드리지 않는다(서버 파일 삭제 안 함)
+      if git_src cat-file -e "${TARGET}:${f}" 2>/dev/null && promo_allowed "${rel}"; then PROMO_FILES+=("${rel}"); fi ;;
+    backend/*) BACKEND_N=$((BACKEND_N + 1)) ;;
+  esac
+done
+
+# frontend/ 또는 docs/promo 를 건드린 커밋 목록(보고용)
+mapfile -t FE_COMMITS < <(git_src log --format='%h %s' --no-merges "${LAST}..${TARGET}" -- frontend docs/promo | cut -c1-150)
+
+if (( BACKEND_N > 0 )); then
+  log "backend-changed: manual deploy needed (backend/ 변경 ${BACKEND_N}개 ${LAST:0:8}..${TARGET:0:8}; 자동 배포는 프론트만 한다)"
+fi
+
+advance_ref() { # 기준 ref 갱신(배포가 필요 없었거나, 배포가 검증까지 끝났을 때만)
+  [[ ${DRY} == 1 ]] && return 0
+  printf '%s\n' "$1" > "${LAST_REF_FILE}.tmp" && mv -f "${LAST_REF_FILE}.tmp" "${LAST_REF_FILE}"
+  rm -f "${FAIL_FILE}" "${SKIP_FILE}"
+}
+
+DO_FE=0; DO_PROMO=0
+if (( ${#FE_FILES[@]} > 0 )); then DO_FE=1; fi
+if (( ${#PROMO_FILES[@]} > 0 )); then DO_PROMO=1; fi
+
+if (( DO_FE == 0 && DO_PROMO == 0 )); then
+  log "no-web-change: ${LAST:0:8}..${TARGET:0:8} 변경 ${NALL}개 중 프론트·홍보 웹 파일 없음 -> 기준만 갱신"
+  advance_ref "${TARGET}"
+  heartbeat "no-web-change ${TARGET:0:8}"
+  [[ ${DRY} == 1 ]] && say "배포할 것 없음(웹 파일 변경 없음). 실제 실행이면 기준을 ${TARGET:0:8} 로 갱신한다"
+  exit 0
+fi
+
+# ---- CI 확인 --------------------------------------------------------------------------------------
+# 반환: 0 통과(또는 확인 꺼짐), 1 실패, 2 아직 진행 중/확인 불가(다음 주기에 다시)
+CI_STATE=""
+ci_check() {
+  if [[ ! -r "${CI_TOKEN_FILE}" ]]; then CI_STATE="ci-check=off"; return 0; fi
+  local tok body verdict
+  tok="$(tr -d ' \r\n' < "${CI_TOKEN_FILE}")"
+  [[ -n "${tok}" ]] || { CI_STATE="ci-check=off(empty token file)"; return 0; }
+  body="$(curl -fsS --max-time 30 -H "Authorization: Bearer ${tok}" -H 'Accept: application/vnd.github+json' \
+           "https://api.github.com/repos/${GITHUB_REPO}/commits/${TARGET}/check-runs?per_page=100" 2>/dev/null)" \
+    || { CI_STATE="ci-check=api-error(${TARGET:0:8})"; return 2; }
+  verdict="$(printf '%s' "${body}" | python3 -I -c '
+import json,sys
+d=json.load(sys.stdin); runs=d.get("check_runs",[])
+if not runs: print("none"); sys.exit()
+if any(r.get("status")!="completed" for r in runs): print("pending"); sys.exit()
+bad=[r for r in runs if r.get("conclusion") not in ("success","skipped","neutral")]
+print("fail" if bad else "ok")' 2>/dev/null || echo "parse-error")"
+  case "${verdict}" in
+    ok) CI_STATE="ci-check=pass(${TARGET:0:8})"; return 0 ;;
+    fail) CI_STATE="ci-check=FAILED(${TARGET:0:8})"; return 1 ;;
+    *) CI_STATE="ci-check=${verdict}(${TARGET:0:8})"; return 2 ;;
+  esac
+}
+ci_rc=0; ci_check || ci_rc=$?
+
+# ---- dry-run 보고 ---------------------------------------------------------------------------------
+if [[ ${DRY} == 1 ]]; then
+  say "== ax-autodeploy --dry-run =="
+  say "기준(last-deployed-ref): ${LAST}"
+  say "대상(origin/${BRANCH}):   ${TARGET}"
+  say "변경 파일 ${NALL}개: frontend(화면 관련) ${#FE_FILES[@]}개, 홍보 웹 ${#PROMO_FILES[@]}개, backend ${BACKEND_N}개"
+  say "게이트 정지 연결: ${GATE_STATE}"
+  say "CI: ${CI_STATE} (rc=${ci_rc}; 0이 아니면 이번 주기엔 배포하지 않는다)"
+  say "frontend/·docs/promo 를 건드린 커밋:"
+  if (( ${#FE_COMMITS[@]} > 0 )); then printf '  %s\n' "${FE_COMMITS[@]}"; fi
+  if (( DO_FE )); then say "할 일: 프론트 ${WEB_ROOT_90} 과 ${WEB_ROOT_91} 를 ${TARGET:0:8} 로 재빌드·교체(deploy.sh 2회), 이후 토큰 검사"; fi
+  if (( DO_PROMO )); then say "할 일: 홍보 파일 ${#PROMO_FILES[@]}개 갱신/추가(${PROMO_ROOT}):"; printf '  %s\n' "${PROMO_FILES[@]}"; fi
+  if (( BACKEND_N > 0 )); then say "주의: backend 변경 ${BACKEND_N}개는 배포하지 않는다(backend-changed: manual deploy needed)"; fi
+  exit 0
+fi
+
+if (( ci_rc != 0 )); then
+  log "wait: ${CI_STATE} -> 이번 주기엔 배포하지 않음"
+  heartbeat "ci-wait ${TARGET:0:8}"
+  exit 0
+fi
+log "start: ${LAST:0:8}..${TARGET:0:8} fe=${DO_FE}(${#FE_FILES[@]}) promo=${DO_PROMO}(${#PROMO_FILES[@]}) ${CI_STATE}"
+
+# ---- 실패 처리 ------------------------------------------------------------------------------------
+note_failure() { # $1=사유
+  local n=1 prev_sha="" prev_n=0
+  if [[ -f "${FAIL_FILE}" ]]; then
+    read -r prev_sha prev_n < "${FAIL_FILE}" || true
+    if [[ "${prev_sha}" == "${TARGET}" ]]; then n=$(( ${prev_n:-0} + 1 )); fi
+  fi
+  printf '%s %s\n' "${TARGET}" "${n}" > "${FAIL_FILE}"
+  log "FAIL(${n}/${MAX_FAILS}): $1 (기준 ref 는 그대로 ${LAST:0:8})"
+  if (( n >= MAX_FAILS )); then
+    printf '%s\n' "${TARGET}" > "${SKIP_FILE}"
+    log "skip-commit: ${TARGET:0:8} 가 ${MAX_FAILS}회 연속 실패 -> 다음 새 커밋을 기다림(상태: ${SKIP_FILE})"
+  fi
+  heartbeat "failed ${TARGET:0:8}"
+}
+
+# ---- 백업·복원 ------------------------------------------------------------------------------------
+BACKED=()      # 백업해 둔 웹 루트
+backup_root() { # $1=웹 루트
+  local r="$1" b="${PREV_DIR}/$(basename "$1")"
+  [[ -d "${r}" ]] || return 0
+  ${SUDO} rm -rf "${b}"; mkdir -p "${PREV_DIR}"
+  ${SUDO} cp -a "${r}" "${b}"
+  BACKED+=("${r}")
+}
+restore_root() { # $1=웹 루트
+  local r="$1" b="${PREV_DIR}/$(basename "$1")"
+  [[ -d "${b}" ]] || { log "restore: 백업 ${b} 없음, ${r} 복원 못함"; return 1; }
+  ${SUDO} rm -rf "${r}.restore" "${r}.bad"
+  ${SUDO} cp -a "${b}" "${r}.restore"
+  if [[ -d "${r}" ]]; then ${SUDO} mv "${r}" "${r}.bad"; fi
+  ${SUDO} mv "${r}.restore" "${r}"
+  ${SUDO} rm -rf "${r}.bad"
+  log "restore: ${r} 이전 화면으로 복원"
+}
+restore_all() { local r; for r in "${BACKED[@]}"; do restore_root "${r}" || true; done; }
+
+# 예상 못 한 오류·종료 신호(타임아웃 포함)에도 이전 화면으로 되돌린다
+DEPLOYING=0
+on_exit() {
+  local rc=$?
+  if (( DEPLOYING == 1 && rc != 0 )); then
+    DEPLOYING=0
+    log "unexpected-exit(rc=${rc}): 이전 화면으로 복원 시도"
+    restore_all
+    note_failure "예상 못 한 종료(rc=${rc})"
+  fi
+}
+trap on_exit EXIT
+trap 'exit 143' TERM INT
+
+# ---- 토큰 검사 ------------------------------------------------------------------------------------
+# 번들에 공용 사람·작업·관리자 토큰의 "실제 값"이 없고 자리표시자만 있는지 본다. 값은 출력하지 않는다.
+token_check() { # $1.. = 웹 루트
+  local list rc=0 r f
+  list="$(mktemp)"; chmod 600 "${list}"
+  {
+    # nginx 가 채워 넣는 실제 사람 토큰(Bearer 뒤 값)
+    ${SUDO} sed -n 's/.*"Bearer \([^"]*\)".*/\1/p' "${HUMAN_MAP_FILE}" 2>/dev/null || true
+    # 운영 .env·tokens.env 의 사람/작업/관리자 토큰(열람 전용 SHOP_VIEWER_TOKEN 은 번들에 들어가는 것이 정상이라 제외)
+    for f in "${PROD_REPO}/backend/.env" /opt/axcellent/tokens.env; do
+      if [[ -r "${f}" ]]; then
+        sed -n -E 's/^(HUMAN_TOKEN|WORK_TOKEN|[A-Z_]*ADMIN[A-Z_]*TOKEN|[A-Z_]*HUMAN[A-Z_]*TOKEN)=//p' "${f}" | tr -d '"' || true
+      fi
+    done
+  } | awk -v ph="${HUMAN_PLACEHOLDER}" 'length($0)>=16 && $0!=ph' | sort -u > "${list}.v" || true
+  mv -f "${list}.v" "${list}"
+  if [[ ! -s "${list}" ]]; then
+    log "token-check: 비교할 실제 토큰 값을 하나도 못 읽었다(검사 불가) -> 실패 처리"
+    rm -f "${list}"; return 1
+  fi
+  for r in "$@"; do
+    if grep -rIlF -f "${list}" "${r}" >/dev/null 2>&1; then
+      log "token-check: ${r} 번들에 실제 토큰 값이 들어 있다(값은 기록 안 함)"; rc=1
+    elif ! grep -rIlF -- "${HUMAN_PLACEHOLDER}" "${r}/assets" >/dev/null 2>&1; then
+      log "token-check: ${r} 번들에 자리표시자(${HUMAN_PLACEHOLDER})가 없다"; rc=1
+    fi
+  done
+  rm -f "${list}"
+  return "${rc}"
+}
+
+# ---- 화면 확인 ------------------------------------------------------------------------------------
+verify_root() { # $1=웹 루트 $2=URL
+  local r="$1" code a
+  [[ -f "${r}/index.html" ]] || { log "verify: ${r}/index.html 없음"; return 1; }
+  while read -r a; do
+    [[ -z "${a}" ]] && continue
+    [[ -f "${r}/${a}" ]] || { log "verify: ${r} 의 index.html 이 가리키는 ${a} 가 없다"; return 1; }
+  done < <(grep -oE '(src|href)="/assets/[^"]+"' "${r}/index.html" | sed -E 's/^[a-z]+="\/?//; s/"$//')
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$2" || true)"
+  [[ "${code}" == "200" ]] || { log "verify: $2 -> HTTP ${code:-000}"; return 1; }
+  return 0
+}
+
+# ---- 배포 -----------------------------------------------------------------------------------------
+if ! git_src checkout --quiet --force --detach "${TARGET}"; then note_failure "빌드 트리 checkout 실패"; exit 1; fi
+git_src clean -fdq || true
+: > "${BUILD_LOG}" 2>/dev/null || true
+DEPLOYING=1
+
+if (( DO_FE )); then
+  # 읽기 전용 열람 토큰만 운영 backend/.env 에서 읽어 빌드에 넘긴다(수동 배포와 같은 동작). 값은 출력하지 않는다.
+  VIEWER=""
+  if [[ -r "${PROD_REPO}/backend/.env" ]]; then
+    VIEWER="$(sed -n 's/^SHOP_VIEWER_TOKEN=//p' "${PROD_REPO}/backend/.env" | head -n1 | tr -d '"')" || true
+  fi
+  [[ -n "${VIEWER}" ]] || log "warn: SHOP_VIEWER_TOKEN 을 못 읽음(열람 토큰 없이 빌드)"
+  backup_root "${WEB_ROOT_90}"; backup_root "${WEB_ROOT_91}"
+  fe_ok=1
+  for pair in "${WEB_ROOT_90}|${URL_90}" "${WEB_ROOT_91}|${URL_91}"; do
+    root="${pair%%|*}"; url="${pair##*|}"
+    if ! env AXCELLENT_REPO="${SRC}" AXCELLENT_REF="${TARGET}" \
+          VITE_SAFETY_HUMAN_TOKEN="${HUMAN_PLACEHOLDER}" VITE_SHOP_WEB_URL= VITE_SHOP_VIEWER_TOKEN="${VIEWER}" \
+          AXCELLENT_WEB_ROOT="${root}" AXCELLENT_URL="${url}" \
+          timeout "${DEPLOY_TIMEOUT}" "${DEPLOY_SH}" >> "${BUILD_LOG}" 2>&1; then
+      log "deploy.sh 실패 또는 시간 초과(root=${root}; 출력은 ${BUILD_LOG}, 비밀값 없음)"; fe_ok=0; break
+    fi
+  done
+  VIEWER=""
+  if (( fe_ok )); then
+    if ! { verify_root "${WEB_ROOT_90}" "${URL_90}" && verify_root "${WEB_ROOT_91}" "${URL_91}"; }; then fe_ok=0; fi
+  fi
+  if (( fe_ok )); then token_check "${WEB_ROOT_90}" "${WEB_ROOT_91}" || fe_ok=0; fi
+  if (( ! fe_ok )); then
+    DEPLOYING=0
+    restore_all
+    note_failure "프론트 배포/검증 실패"
+    exit 1
+  fi
+  log "frontend: ${TARGET:0:8} 배포·검증 완료(${WEB_ROOT_90}, ${WEB_ROOT_91})"
+fi
+
+if (( DO_PROMO )); then
+  PBK="${STATE_DIR}/prev-promo"; ${SUDO} rm -rf "${PBK}" "${PBK}.added"; mkdir -p "${PBK}"; : > "${PBK}.added"
+  promo_ok=1
+  for rel in "${PROMO_FILES[@]}"; do
+    src_f="${SRC}/docs/promo/${rel}"; dst="${PROMO_ROOT}/${rel}"
+    if [[ -f "${dst}" ]]; then
+      mkdir -p "${PBK}/$(dirname "${rel}")"; ${SUDO} cp -a "${dst}" "${PBK}/${rel}"
+    else
+      echo "${rel}" >> "${PBK}.added"
+    fi
+    if ! ${SUDO} install -D -o root -g root -m 644 "${src_f}" "${dst}" || ! cmp -s "${src_f}" "${dst}"; then promo_ok=0; break; fi
+  done
+  if [[ "${URL_PROMO}" != "off" ]]; then
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${URL_PROMO}" || true)"
+    [[ "${code}" == "200" ]] || { log "verify: 홍보 사이트 HTTP ${code:-000}"; promo_ok=0; }
+  fi
+  if (( ! promo_ok )); then
+    DEPLOYING=0
+    for rel in "${PROMO_FILES[@]}"; do
+      if [[ -f "${PBK}/${rel}" ]]; then ${SUDO} cp -a "${PBK}/${rel}" "${PROMO_ROOT}/${rel}"; fi
+    done
+    while read -r rel; do
+      if [[ -n "${rel}" ]]; then ${SUDO} rm -f "${PROMO_ROOT}/${rel}"; fi
+    done < "${PBK}.added"
+    log "restore: 홍보 파일 이전 상태로 복원"
+    # 프론트는 이미 배포·검증됐으므로 되돌리지 않는다. 기준 ref 는 그대로라 다음 주기에 다시 시도한다.
+    note_failure "홍보 파일 배포/검증 실패"
+    exit 1
+  fi
+  log "promo: ${#PROMO_FILES[@]}개 파일 갱신 완료(${PROMO_ROOT})"
+fi
+
+DEPLOYING=0
+advance_ref "${TARGET}"
+log "done: 기준 ref -> ${TARGET:0:8}"
+heartbeat "deployed ${TARGET:0:8}"
+exit 0
