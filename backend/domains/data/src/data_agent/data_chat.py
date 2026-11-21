@@ -662,10 +662,17 @@ def _percent(sections: Mapping[str, Any]) -> int:
     return round(done * 100 / len(SECTION_NAMES))
 
 
-# 보고서 섹션 → 대화 칸 이름 (final_status: 5칸이 모두 known이어야 done)
+# 보고서 섹션 → 대화 칸 이름 (final_status: 5칸이 모두 known 또는 empty여야 done)
 SECTION_LABELS = {"search": "검색", "hashtags": "해시태그", "content": "콘텐츠",
                   "competitors": "경쟁사", "recommendation": "AI 추천"}  # fmt: skip
 PARTIAL_RULE = "5칸 중 다 채운 칸이 일부라 일부 완료"
+# 다 한 칸 (완료로 센다): known = 찾음, empty = 봤지만 이번 기간에 없음. skipped는 세지 않음
+DONE_STATES = ("known", "empty")
+EMPTY_WORD = "확인함 · 없음"
+
+
+def _reason(sections: Mapping[str, Any], key: str) -> str:
+    return ((sections.get(key) or {}).get("reason") or "이유 기록 없음")[:120]
 
 
 def read_report(env: Mapping[str, str], now: datetime) -> dict | None:
@@ -708,11 +715,17 @@ def read_report(env: Mapping[str, str], now: datetime) -> dict | None:
                 item["주제 후보"] = [{"이름": t.get("name"), "관심(최대 100)": t.get("level"),
                                    "최근 7일 변화 %": t.get("change_pct")}
                                   for t in (theme.get("rows") or [])[:3]]  # fmt: skip
+        # 봤지만 없던 칸은 못 채운 칸이 아니다 (완료로 센다). 따로 "확인함 · 없음"으로 말한다
+        empty = [{"칸": label, "상태": EMPTY_WORD, "이유": _reason(sections, key)}
+                 for key, label in labels.items()
+                 if (sections.get(key) or {}).get("status") == "empty"]  # fmt: skip
+        if empty:
+            item["확인했지만 없던 칸"] = empty
         if r.get("status") in ("partial", "failed"):
-            missing = [{"칸": label, "이유": ((sections.get(key) or {}).get("reason") or
-                                             "이유 기록 없음")[:120]}
+            missing = [{"칸": label, "이유": _reason(sections, key)}
                        for key, label in labels.items()
-                       if (sections.get(key) or {}).get("status") != "known"]  # fmt: skip
+                       if (sections.get(key) or {}).get("status")
+                       not in (*DONE_STATES, "skipped")]  # fmt: skip
             if missing:
                 item["다 못 채운 칸"] = missing
             if r.get("status") == "partial":

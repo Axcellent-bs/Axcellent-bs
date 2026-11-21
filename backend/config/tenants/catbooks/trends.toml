@@ -298,6 +298,22 @@ hashtag_reserve = 5      # 해시태그 7일 30개 중 남은 수가 이 이하�
 hashtag_pages = 3        # 최근 24시간 게시 수를 셀 때 볼 페이지 수 (페이지당 50)
 memo_add_enabled = false # 메모 추가: safety registry에 add_instagram_memo를 사람이 등록한 뒤 true
 
+# 레이더 업종 표시: 업종 = [계정…]. 업종 이름은 도메인 프로필 업종(domain_profile INDUSTRIES)과 같게 적는다.
+# 분석 보고서가 확인된 경쟁사 계정이 목표([report.accounts] min_accounts)보다 적을 때, 회사 업종과 같은 칸의
+# 계정 중 레이더가 이미 읽은 것만 더한다(외부 호출 없음). 위 radar_accounts의 출판사·서점·책·웹소설 묶음 그대로
+[instagram.radar_industries]
+"출판·교육" = [
+  # 출판사
+  "minumsa_books", "munhakdongne", "changbi_insta", "moonji_books", "wisdomhouse_official",
+  "openbooks21", "gimmyoung", "maumsanchaek", "dasanbooks", "hyeonamsa",
+  "rhkorea_books", "sigongsa_books", "yolimwon", "jakkajungsin", "samnparkers", "hangilsa",
+  # 서점
+  "kyobobook_official", "yes24_official", "hottracks_official", "aladin_book",
+  # 책·웹소설
+  "kakaopage", "thanksbooks", "trevari_official", "naver_series", "wisdomhouse_kids",
+  "dasan_kids", "kyobo_ebook",
+]
+
 [search]
 pool_max = 300       # 키워드 풀 상한 (검색량 순)
 pool_hints = 40      # 검색광고 연관어 힌트 수 상한 (힌트 5개 = 검색광고 1번)

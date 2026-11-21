@@ -105,6 +105,20 @@ def section_percent(report: TrendReport) -> int:
     return round(done * 100 / len(names))
 
 
+SECTION_WORDS = {"search": "검색", "hashtags": "해시태그", "content": "콘텐츠",
+                 "competitors": "경쟁사", "recommendation": "AI 추천",
+                 "theme": "주제 후보"}  # fmt: skip
+EMPTY_WORD = "확인함 · 없음"
+
+
+def section_note(report: TrendReport, done: int, total: int, fresh: set[str]) -> str:
+    """진행 알림 글: "섹션 3/5". 방금 끝난 칸이 empty(봤지만 없음)면 "· 해시태그 확인함 · 없음"."""
+    empty = [SECTION_WORDS.get(n, n) for n in sorted(fresh)
+             if getattr(report.sections, n).status == "empty"]  # fmt: skip
+    head = f"섹션 {done}/{total}"
+    return f"{head} · {', '.join(empty)} {EMPTY_WORD}" if empty else head
+
+
 def completed_output(report: TrendReport) -> dict[str, Any]:
     from data_agent.skills.trend_report_insight import build_insight
 

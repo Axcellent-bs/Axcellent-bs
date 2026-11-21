@@ -147,7 +147,7 @@ export function submitView(s: SubmitState): SubmitView {
 
 /** 주제 후보 섹션이 없는 보고서의 칸 수 (주제 후보가 보이는 find 의뢰면 6) */
 export const SECTION_COUNT = 5;
-const FINISHED = new Set(["known", "unknown", "failed"]);
+const FINISHED = new Set(["known", "unknown", "failed", "empty"]);
 
 /** 진행 칸 수: 보고서 화면과 같은 규칙(주제 후보는 보일 때만 센다) */
 export function sectionCount(r: Pick<TrendReport, "sections"> & { brief?: TrendReport["brief"] }): number {

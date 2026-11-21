@@ -227,6 +227,10 @@ async def theme_section(brief: TrendReportBrief, llm: Any, search: Any, env: Map
     out.rows = rows
     if rows:
         out.status = "known"
+    elif out.dropped and all(d.reason == NO_VALUE for d in out.dropped):
+        # 후보를 전부 데이터랩으로 봤는데 모두 검색량이 적음 = 봤지만 없음 (한도·기준 실패는 아님)
+        out.status = "empty"
+        out.reason = f"후보 {len(out.dropped)}개를 모두 확인했지만 데이터랩 값이 있는 후보가 없음"
     else:
         out.status, out.reason = "unknown", "데이터랩에서 값이 나온 후보가 없음"
     if out.dropped:

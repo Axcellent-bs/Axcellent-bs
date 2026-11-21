@@ -88,7 +88,11 @@ SMALL_BASE = 2.0  # 직전 28일 평균이 이보다 작으면 변화율을 "급
 SHOP_EXTRA_DAYS = 7  # 쇼핑인사이트 늦게 채워짐 대비: 이만큼 더 앞부터 받아 창 끝을 당긴다
 # 해시태그 "쓴 계정 수"에서 빼는 표기용 태그 (인스타 레이더 묶음과 같은 상수, caption_noise)
 HIDDEN_TAGS = caption_noise.HIDDEN_TAGS
-NO_SHARED_TAG = "뷰티 계정이 같이 쓴 태그 없음"
+NO_SHARED_TAG = "같이 쓴 태그가 없음"
+# 같이 쓴 태그를 셀 수 있는 최소 읽은 계정 수 (매체 제외). 이보다 적으면 unknown(셀 수 없음)
+TAG_COUNTABLE = FEW_TAG_ACCOUNTS
+# 완료 판정에서 "다 한" 상태: known(찾음)·empty(봤지만 이번 기간에 없음)
+DONE_STATES = frozenset({"known", "empty"})
 MAX_USED_BY = 5
 SHORT_MAX = 30
 MUSIC_NOTE = "저작권 문제없는 라이브러리 음원 중 선택"
@@ -558,7 +562,13 @@ def hashtag_section(media: Mapping[str, Sequence[Mapping[str, Any]]],
     cur_from, prev_from = now - WEEK, now - 2 * WEEK
     burst_ids = {p.media_id for p in posts}
     skip = set(media_accounts)
-    need = min_tag_accounts(sum(1 for a in media if a not in skip))
+    readable = sum(1 for a, items in media.items() if a not in skip and items)
+    if readable < TAG_COUNTABLE:
+        out.status = "unknown"
+        out.reason = (f"읽은 계정이 {readable}곳뿐이라 같이 쓴 태그를 셀 수 없음"
+                      f" ({TAG_COUNTABLE}곳 이상 필요)")  # fmt: skip
+        return out, []
+    need = min_tag_accounts(readable)
     stats: dict[str, dict[str, Any]] = {}
     short = 0
     for account, items in media.items():
@@ -597,7 +607,7 @@ def hashtag_section(media: Mapping[str, Sequence[Mapping[str, Any]]],
         names = account_names(media)
         out.account_names = {a: names[a] for r in out.rows for a in r.used_by if a in names}
     else:
-        out.status, out.reason = "unknown", NO_SHARED_TAG
+        out.status, out.reason = "empty", f"읽은 계정 {readable}곳이 {NO_SHARED_TAG}"
     limits = []
     if short:
         limits.append(f"최근 20개가 직전 7일까지 닿지 않은 계정 {short}곳: 해시태그의 직전 7일"
@@ -622,20 +632,23 @@ def memes_from(stored: Any) -> tuple[list[TrendReportMeme], str | None]:
 
 
 def content_section(posts: Sequence[InstagramRadarPost], read_any: bool, stored_memes: Any,
-                    why_none: str | None) -> tuple[TrendContentSection, list[str]]:  # fmt: skip
+                    why_none: str | None, read_count: int | None = None,
+                    ) -> tuple[TrendContentSection, list[str]]:  # fmt: skip
+    """터진 게시물·ok 밈. 계정을 읽었는데 둘 다 없으면 empty(봤지만 없음), 못 읽었으면 unknown."""
     out = TrendContentSection(status="running")
     memes, meme_why = memes_from(stored_memes)
     out.posts, out.memes = list(posts[:MAX_POSTS]), memes
     limits = [meme_why] if meme_why else []
+    where = f"읽은 계정 {read_count}곳에" if read_count else "읽은 계정에"
+    no_burst = f"{where} 이번 7일 터진 게시물이 없음"
     if out.posts or out.memes:
         out.status = "known"
         if not out.posts:
-            out.reason = ("이번 7일 터진 게시물이 없음" if read_any
-                          else why_none or "읽은 인스타 계정이 없음")  # fmt: skip
+            out.reason = no_burst if read_any else why_none or "읽은 인스타 계정이 없음"
+    elif read_any:
+        out.status, out.reason = "empty", no_burst
     else:
-        out.status = "unknown"
-        out.reason = ("이번 7일 터진 게시물이 없음" if read_any
-                      else why_none or "읽은 인스타 계정이 없음")  # fmt: skip
+        out.status, out.reason = "unknown", why_none or "읽은 인스타 계정이 없음"
     return out, limits
 
 
@@ -1025,11 +1038,15 @@ def counted_sections(report: TrendReport) -> tuple[str, ...]:
 
 
 def final_status(report: TrendReport) -> str:
-    names = counted_sections(report)
-    known = sum(1 for name in names if getattr(report.sections, name).status == "known")
-    if known == len(names):
+    """known·empty(봤지만 없음)를 다 한 칸으로 센다. skipped 칸(주제 후보, find 아님)은
+    `counted_sections`가 이미 뺀다 (find 의뢰인데 skipped면 못 한 칸).
+
+    모든 칸이 다 했으면 done, 하나라도 unknown·failed면 partial, 하나도 못 했으면 failed."""
+    states = [getattr(report.sections, name).status for name in counted_sections(report)]
+    done = sum(1 for s in states if s in DONE_STATES)
+    if done == len(states):
         return "done"
-    return "partial" if known else "failed"
+    return "partial" if done else "failed"
 
 
 async def _guard(report: TrendReport, name: str, run: Callable[[], Awaitable[None]]) -> None:
@@ -1143,7 +1160,7 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
 
     async def run_content() -> None:
         stored = deps.memes() if deps.memes is not None else None
-        section, more = content_section(posts, bool(ig.media), stored, why_none)
+        section, more = content_section(posts, bool(ig.media), stored, why_none, len(ig.media))
         report.sections.content = section
         limits.extend(more)
 

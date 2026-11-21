@@ -760,7 +760,9 @@ def test_hashtags_new_tag_and_unknown_when_only_hidden() -> None:
     assert section.rows[0].is_new is True and section.rows[0].previous_accounts == 0
     only_ads = {a: _account(a, tag="#광고 #이벤트 #giveaway") for a in ("a", "b", "c")}
     section, _ = tr.hashtag_section(only_ads, [], NOW, None)
-    assert section.status == "unknown" and section.reason == tr.NO_SHARED_TAG
+    # 11/20: 3곳을 읽었는데 같이 쓴 태그가 없음 = 봤지만 없음(empty), 이유에 읽은 계정 수
+    assert section.status == "empty" and section.reason == f"읽은 계정 3곳이 {tr.NO_SHARED_TAG}"
+    assert section.rows == [] and "뷰티" not in (section.reason or "")
 
 
 def st_owner() -> str:
