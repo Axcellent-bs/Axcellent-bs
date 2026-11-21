@@ -38,7 +38,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from ax_agent_template.tenant import ig_radar_accounts
+from ax_agent_template.tenant import ig_radar_accounts, ig_radar_auto_accounts
 from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
@@ -71,6 +71,7 @@ TREND_CONFIG_ENV = "DATA_TREND_CONFIG"
 AUDIO_TYPES = ("music", "original_sound")
 HASHTAG_LIMIT = 30  # 문서: 7일 동안 고유 해시태그 30개
 RADAR_MAX_ACCOUNTS = 200
+NO_RADAR = "레이더 계정이 없음 (회사 설정 radar_accounts · 경쟁사 찾기 목록 없음)"
 # 회차를 멈추고 커서를 그대로 두는 오류 (다음 회차에 같은 계정부터): 앱 시간당 한도(code 4 등)·
 # 하루 호출 상한(DATA_IG_DAILY_LIMIT)·키 없음·토큰 만료. 그 밖(권한·데이터 없음 등)은 그 계정만
 STOP_CODES = frozenset({"RATE_LIMITED", "KEY_MISSING", "TOKEN_EXPIRED"})
@@ -98,28 +99,55 @@ class IgConfig:
     # (메타 앱 시간당 한도 약 200을 넘지 않게). 다음 회차는 커서를 이어받는다
     radar_batch_size: int = 50
     radar_batch_interval_min: int = 20
+    # 레이더 계정 출처 (screen · tenant · auto · none)와 비었을 때 무엇이 없는지
+    radar_source: str = "none"
+    radar_missing: str = NO_RADAR
+
+
+def _clean_list(listed: Any) -> tuple[str, ...]:
+    if not isinstance(listed, list):
+        return ()
+    accounts = [str(a).strip().lstrip("@") for a in listed]
+    return tuple(dict.fromkeys(a for a in accounts if a))[:RADAR_MAX_ACCOUNTS]  # 상한 200
+
+
+def _radar_list(raw: Mapping[str, Any], has_file: bool) -> tuple[tuple[str, ...], str, str]:
+    """(레이더 계정, 출처, 비었을 때 이유). 우선순위: 화면 저장 > 회사 trends.toml > 자동 > 없음.
+
+    출처: screen · tenant · auto · none.
+    자동 = 경쟁사 찾기가 확인한 계정 (tenant.ig_radar_auto_accounts)"""
+    saved = ig_radar_accounts()
+    if saved is not None:
+        got = _clean_list(saved)
+        return got, "screen", "" if got else "레이더 계정이 없음 (화면에 저장한 목록이 비어 있음)"
+    if got := _clean_list(raw.get("radar_accounts", [])):
+        return got, "tenant", ""
+    auto = ig_radar_auto_accounts()
+    if got := _clean_list(auto or []):
+        return got, "auto", ""
+    parts = [
+        "회사 설정 파일 없음" if not has_file else "회사 설정 radar_accounts 비어 있음",
+        "경쟁사 찾기 전" if auto is None else "경쟁사 찾기에서 확인된 계정 없음",
+    ]
+    return (), "none", f"레이더 계정이 없음 ({' · '.join(parts)})"
 
 
 def load_config(env: Mapping[str, str]) -> IgConfig:
     path = env.get(TREND_CONFIG_ENV) or tenant_setting(TREND_CONFIG_ENV)
     has_file = bool(path) and Path(path).is_file()
-    # 회사 설정 파일이 없어도 화면에서 저장한 레이더 계정은 쓴다
-    # (누비투어처럼 키워드 파일이 없는 회사)
-    if not has_file and ig_radar_accounts() is None:
-        return IgConfig()
     try:
         raw: dict = {}
         if has_file:
             with Path(path).open("rb") as f:
                 raw = tomllib.load(f).get("instagram") or {}
+        # 회사 설정 파일이 없어도 화면 저장·자동 목록은 쓴다 (누비투어처럼 키워드 파일이 없는
+        # 회사). 그때 나머지 값은 IgConfig 기본값
+        accounts, source, missing = _radar_list(raw, has_file)
         base = IgConfig()
-        # 회사 연결 화면에서 저장한 목록이 있으면 그것이 먼저다(tenant.ig_radar_accounts)
-        saved = ig_radar_accounts()
-        listed = saved if saved is not None else raw.get("radar_accounts", [])
-        accounts = [str(a).strip().lstrip("@") for a in listed]
         return IgConfig(
-            # 상한 200 (묶음으로 나눠 부른다)
-            radar_accounts=tuple(dict.fromkeys(a for a in accounts if a))[:RADAR_MAX_ACCOUNTS],
+            radar_accounts=accounts,
+            radar_source=source,
+            radar_missing=missing,
             media_per_account=max(1, min(50, int(raw.get("media_per_account", 20)))),
             burst_ratio=max(1.0, float(raw.get("burst_ratio", base.burst_ratio))),
             burst_days=max(1, int(raw.get("burst_days", base.burst_days))),
@@ -199,8 +227,7 @@ async def radar_batch(config: IgConfig, graph: Any, store: st.RadarStore,
     accounts = list(config.radar_accounts)
     total, today = len(accounts), _today(now)
     if not accounts:
-        why = "레이더 계정이 없음 (trends.toml [instagram] radar_accounts)"
-        return RadarBatch(0, 0, 0, "failed", why, None)
+        return RadarBatch(0, 0, 0, "failed", config.radar_missing or NO_RADAR, None)
     digest = _accounts_hash(accounts)
     cur = store.cursor()
     cycle_day, pos, last = (today, 0, None) if cur is None else cur[:3]
@@ -745,7 +772,7 @@ async def instagram_radar(
     out.accounts_failed = sorted(failed)
     out.limits = [f"{a}: {why}" for a, why in sorted(failed.items())]
     if not config.radar_accounts:
-        out.reason = "레이더 계정이 없음 (trends.toml [instagram] radar_accounts)"
+        out.reason = config.radar_missing or NO_RADAR
     elif not media:
         pos = st.radar_position(st.path_of(env, st.RADAR_ENV))
         first = (f"첫 바퀴를 모으는 중 ({pos}/{len(config.radar_accounts)}곳)"

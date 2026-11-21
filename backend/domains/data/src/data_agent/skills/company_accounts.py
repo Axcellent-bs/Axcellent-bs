@@ -15,6 +15,10 @@
 - 사람 덮어쓰기: 테넌트 설정 `[report.accounts]` include(넣음, 확인 안 함)·exclude(뺌)
 - LLM 하루 상한·설정 없음, 인스타 한도·키 없음이면 저장하지 않고 다음 회차로 미룬다(이유를 돌려준다)
 - 다른 화면은 `company_accounts(env)`로 읽기만 한다(새 skill 없음)
+- 인스타 레이더 자동 목록: 찾거나 재사용할 때 확인된 아이디(팔로워 큰 순) + 사람 include
+  (exclude 뺌)를 회사 연결 파일 옆 `instagram_radar_auto.json`에 쓴다(`write_radar_auto`).
+  화면 저장 목록도 회사 trends.toml 목록도 없을 때만 레이더가 쓴다. 회사 연결 파일이 없으면
+  쓰지 않는다. 외부 호출 없음
 """
 
 from __future__ import annotations
@@ -307,6 +311,8 @@ async def find(profile: Any, llm: Any, graph: Any, *, env: Mapping[str, str],
     try:
         if (hit := store.fresh(tenant, key, now)) is not None:
             hit.reused = True
+            # 다른 회사로 바꿨다 돌아온 경우에도 자동 목록이 이 회사 것이 되게 (외부 호출 없음)
+            write_radar_auto(hit, profile, env, now)
             return hit
         out = FoundAccounts(llm_calls=1)
         try:
@@ -373,10 +379,39 @@ async def find(profile: Any, llm: Any, graph: Any, *, env: Mapping[str, str],
                 best[n] = a["account"]
         out.accounts = [a for a in verified if best.get(brand_of[a["account"]]) == a["account"]]
         store.put(tenant, key, out, now)
+        write_radar_auto(out, profile, env, now)
         return out
     finally:
         if own:
             store.close()
+
+
+def radar_auto_accounts(found: FoundAccounts, env: Mapping[str, str]) -> list[str]:
+    """레이더 자동 목록: 확인된 아이디(팔로워 큰 순) + 사람 include, exclude 뺌, 최대 200."""
+    from data_agent.skills.instagram import RADAR_MAX_ACCOUNTS
+
+    include, exclude = overrides(env)
+    ranked = sorted(found.accounts, key=lambda a: (-(a.get("followers_count") or 0),
+                                                   str(a["account"])))  # fmt: skip
+    ids = [str(a["account"]) for a in ranked] + include
+    return [a for a in dict.fromkeys(ids) if a not in exclude][:RADAR_MAX_ACCOUNTS]
+
+
+def write_radar_auto(found: FoundAccounts, profile: Any, env: Mapping[str, str],
+                     now: datetime) -> Path | None:  # fmt: skip
+    """회사 연결 파일 옆 `instagram_radar_auto.json`을 쓴다 (tenant.write_ig_radar_auto).
+
+    회사 연결 파일이 없으면 쓰지 않는다(None). 쓰다 실패해도 경쟁사 찾기는 그대로 끝낸다."""
+    from ax_agent_template.tenant import current, write_ig_radar_auto
+
+    payload = {"accounts": radar_auto_accounts(found, env),
+               "industry": getattr(profile, "industry", None),
+               "tenant": current(),  # 회사 id (config/tenants 폴더 이름). 회사를 바꾸면 안 읽는다
+               "at": now.isoformat(), "rule_version": RULE_VERSION}  # fmt: skip
+    try:
+        return write_ig_radar_auto(payload)
+    except OSError:
+        return None
 
 
 def company_accounts(env: Mapping[str, str]) -> list[dict[str, Any]]:

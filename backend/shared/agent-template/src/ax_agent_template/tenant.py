@@ -213,3 +213,54 @@ def ig_radar_accounts() -> list[str] | None:
     if not isinstance(accounts, list):
         return None
     return [a for a in accounts if isinstance(a, str) and a]
+
+
+# ---------------------------------------------------------------- 인스타 레이더 자동 목록
+# data 경쟁사 찾기(company_accounts.find)가 business_discovery로 확인한 계정 + 사람 include
+# (exclude 뺌, 팔로워 큰 순). 화면 저장 목록도 회사 trends.toml 목록도 없을 때만 레이더가 쓴다.
+# 파일: `AX_IG_RADAR_AUTO_FILE` → 회사 연결 파일 옆 `instagram_radar_auto.json`
+# (ig_radar_file과 같은 자리 규칙). 회사 연결 파일이 없으면 None이고 쓰지 않는다.
+# data가 쓰고 data·dashboard-api가 읽는다
+IG_RADAR_AUTO_FILE_ENV = "AX_IG_RADAR_AUTO_FILE"
+IG_RADAR_AUTO_FILE = "instagram_radar_auto.json"
+
+
+def ig_radar_auto_file() -> Path | None:
+    raw = os.getenv(IG_RADAR_AUTO_FILE_ENV, "").strip()
+    if raw:
+        return Path(raw)
+    conn = os.getenv("AX_COMPANY_CONNECTION_FILE", "").strip()
+    return Path(conn).with_name(IG_RADAR_AUTO_FILE) if conn else None
+
+
+def ig_radar_auto_accounts() -> list[str] | None:
+    """경쟁사 찾기가 남긴 자동 목록. 파일이 없거나 깨졌거나 다른 회사 것이면 None."""
+    import json
+
+    path = ig_radar_auto_file()
+    if path is None:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("accounts"), list):
+        return None
+    owner = data.get("tenant")
+    if isinstance(owner, str) and owner and owner != (current() or owner):
+        return None  # 회사를 바꿨으면 예전 회사의 경쟁사를 쓰지 않는다
+    return [a for a in data["accounts"] if isinstance(a, str) and a]
+
+
+def write_ig_radar_auto(payload: dict[str, Any]) -> Path | None:
+    """자동 목록 파일을 쓴다(통째로 바꿈). 자리가 없으면 쓰지 않고 None."""
+    import json
+
+    path = ig_radar_auto_file()
+    if path is None:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+    return path

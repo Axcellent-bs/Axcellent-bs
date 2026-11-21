@@ -1,7 +1,9 @@
 """인스타 레이더 계정: 회사 연결에서 데이터 AI 레이더가 읽을 계정 목록을 정한다.
 
 - `GET  /api/dashboard/instagram-radar`: 지금 쓰는 목록과 출처
-  (`screen` 화면 저장 · `tenant` 회사 설정 파일 · `none` 없음), 회사 설정 파일의 계정 수
+  (`screen` 화면 저장 · `tenant` 회사 설정 파일 · `auto` 경쟁사 찾기로 확인한 계정 · `none` 없음),
+  회사 설정 파일의 계정 수. 자동 목록은 `tenant.ig_radar_auto_accounts()`로만 읽는다
+  (data를 import 하지 않음)
 - `POST /api/dashboard/instagram-radar/save`: 목록 저장(사람 토큰).
   `@`·공백은 떼고 중복은 하나로, 최대 200곳
 - `POST /api/dashboard/instagram-radar/clear`: 화면 저장 목록을 지우고 회사 설정 파일로 돌아간다
@@ -53,10 +55,13 @@ def _tenant_accounts() -> list[str]:
 def _state() -> dict[str, Any]:
     saved = tenant.ig_radar_accounts()
     from_tenant = _tenant_accounts()
+    auto = tenant.ig_radar_auto_accounts() or []
     if saved is not None:
         source, accounts = "screen", saved
     elif from_tenant:
         source, accounts = "tenant", from_tenant
+    elif auto:  # data 경쟁사 찾기가 확인한 계정 (data 레이더와 같은 우선순위)
+        source, accounts = "auto", auto
     else:
         source, accounts = "none", []
     return {

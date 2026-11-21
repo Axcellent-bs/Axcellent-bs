@@ -4,8 +4,8 @@ import { call } from "./companyConnection";
 // 화면에서 저장한 목록이 회사 설정 파일(trends.toml [instagram] radar_accounts)보다 먼저다. 쓰기는 사람 토큰(POST).
 export interface RadarState {
   accounts: string[];
-  /** screen: 화면에서 저장 · tenant: 회사 설정 파일 · none: 없음 */
-  source: "screen" | "tenant" | "none";
+  /** screen: 화면에서 저장 · tenant: 회사 설정 파일 · auto: 경쟁사 찾기로 확인한 계정 · none: 없음 */
+  source: "screen" | "tenant" | "auto" | "none";
   /** 회사 설정 파일에 적힌 계정 수 */
   tenant_count: number;
   max: number;

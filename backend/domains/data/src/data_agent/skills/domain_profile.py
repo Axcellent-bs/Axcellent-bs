@@ -56,7 +56,7 @@ DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "domain_profile.db"
 # 업종 태그 (출처 목록 `data_sources`의 업종 태그와 같은 값). 회사 이름이 아니라 업종으로만 나눈다
 INDUSTRIES: tuple[str, ...] = (
     "출판·교육", "패션", "식품", "뷰티", "디지털·가전", "생활·리빙", "반려동물", "스포츠·레저",
-    "유아·출산", "여가·취미", "기타",
+    "유아·출산", "여행·숙박", "여가·취미", "기타",
 )  # fmt: skip
 CUSTOMER_AXES: tuple[str, ...] = (
     "연령대", "성별", "지역", "구매 목적(선물·자기용)", "가족 구성", "반려동물 보유", "관심 취미",
@@ -72,6 +72,7 @@ PROMPT = (
     " 회사 프로필을 정해진 칸에 써라.\n"
     "규칙:\n"
     f"- industry는 다음 중 하나: {', '.join(INDUSTRIES)}\n"
+    "  (여행 상품·숙소·항공을 파는 회사는 여행·숙박, 그 밖의 취미·여가 활동 상품은 여가·취미)\n"
     f"- customer_axes는 다음 중에서만 고른다: {', '.join(CUSTOMER_AXES)}\n"
     f"- subtopic_axes: 고른 고객 축에 맞춰, 이 회사 상품의 하위 주제를 나눌 축 이름"
     f" {MIN_AXES}~{MAX_AXES}개 (이 업종에 맞는 짧은 명사구, 숫자 없이, 기타는 쓰지 말 것)\n"
