@@ -9,7 +9,12 @@
 - SNS 글 초안(릴스, 캡션만)을 만들어 보관하고 `post_draft_id`를 돌려준다. 문안은 기존
   `draft_sns_post`의 기획안 템플릿과 같은 방식(고정 템플릿, LLM 없음)이고 `video_plan`의
   concept·script 첫 문장만 옮긴다. 숫자를 만들지 않는다. 금칙 문구·과장·개인정보는 거절한다.
-- `scene_template_id`는 기획이 정하지 않는다. 마케팅이 `media_kind=video`로 기존 매핑
+- 11/22: `video_plan.scenes[].prompt`(최대 4)가 있으면 `plan_story_video` 템플릿에 plan_* 필드
+  (회사 [brand] 주인공·배경, concept, 장면 1~4)로 넣는다. 정리·금칙에 걸린 필드는 이름만
+  `rejected_plan_fields`에 남기고, 장면이 하나도 안 남으면 아래 예전 템플릿으로 돌아가
+  `template_fallback: "plan_fields_rejected"`를 남긴다. 사람이 `fields`를 주면 예전 템플릿이다.
+  초안 id에는 의뢰 `context_id`를 넣는다(같은 제안을 다시 쓴 의뢰도 자기 초안·영상)
+- 장면이 없을 때 `scene_template_id`는 기획이 정하지 않는다. 마케팅이 `media_kind=video`로 기존 매핑
   (`brief_handoff.SCENE_TEMPLATES["video"]`)에서 고른다. 매핑 템플릿이 없고 영상 템플릿이
   여럿이면 지어내지 않고 `scene_template_ambiguous`와 후보 목록을 돌려준다.
 - 템플릿 필드(season·color_theme·category) 값의 우선순위: 호출자가 준 `fields`(`admin`) >
@@ -35,18 +40,22 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
+from ax_agent_template import tenant
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
 from ax_contracts.schemas.common import AxModel
 from ax_contracts.schemas.planning import CampaignBriefInput
 from marketing_agent import sns
-from marketing_agent.brief_handoff import SCENE_TEMPLATES
+from marketing_agent.brief_handoff import PLAN_VIDEO_TEMPLATE, SCENE_TEMPLATES
 from marketing_agent.media.prompts import (
+    PLAN_SCENE_FIELDS,
     PromptRejected,
     SceneTemplate,
     check_field_value,
     contains_pii,
     field_choices,
+    get_template,
     list_templates,
+    render_prompt_detailed,
 )
 from marketing_agent.media_recommend import recommend_fields
 
@@ -61,10 +70,19 @@ SCRIPT_LINE_MAX = 120
 HOOK_MAX = 50
 
 
+class SceneIn(BaseModel):
+    """`video_plan.scenes[]` 한 칸. 쓰는 값은 prompt(영문 장면 프롬프트)뿐이다."""
+
+    model_config = ConfigDict(extra="allow")
+
+    prompt: str = Field(default="", max_length=800)
+
+
 class VideoPlanIn(BaseModel):
     """총괄이 넘기는 `video_plan`. 계약(`VideoPlan`)이 바뀌어도 받도록 알 수 없는 키를 허용한다.
 
-    쓰는 값은 concept·script·duration_s·aspect·media_hints뿐이다. 나머지는 읽지 않는다."""
+    쓰는 값은 concept·script·duration_s·aspect·media_hints·scenes[].prompt다(11/22 scenes·style을
+    받는다, 계약 VideoPlan에 이미 있는 칸). style은 받기만 하고 프롬프트에는 회사 [brand]를 쓴다."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -73,6 +91,8 @@ class VideoPlanIn(BaseModel):
     duration_s: StrictInt = Field(ge=1, le=120)
     aspect: str | None = Field(default=None, max_length=10)
     media_hints: dict[str, Any] | None = None  # 선택. season·color_theme·category(짧은 문자열)
+    scenes: list[SceneIn] = Field(default_factory=list, max_length=8)
+    style: str | None = Field(default=None, max_length=300)
 
 
 class PrepareVideoDraftInput(AxModel):
@@ -103,6 +123,10 @@ class PreparedVideoDraft(AxModel):
     # 필드마다 출처: admin | media_hints | recommended (추천 안의 기본값도 recommended)
     field_sources: dict[str, str]
     rejected_hints: list[str] = Field(default_factory=list)  # 검사에 걸려 안 쓴 힌트 필드 이름
+    # 11/22 기획 장면 경로: 정리·금칙·길이 상한으로 빠진 plan_* 필드 이름(값은 남기지 않는다)
+    rejected_plan_fields: list[str] = Field(default_factory=list)
+    # 장면이 있었지만 모두 빠져 예전 템플릿으로 돌아갔으면 "plan_fields_rejected"
+    template_fallback: str | None = None
     resolution: str
     duration_s: int  # 템플릿 값(우선)
     duration_adjusted: DurationAdjusted | None = None
@@ -125,7 +149,11 @@ def resolve_template(
     templates_path: Path | None = None, mapping: dict[str, str] | None = None
 ) -> SceneTemplate | tuple[str, list[str]]:
     """영상 장면 템플릿 하나. 못 정하면 (이유 코드, 후보 id 목록)."""
-    videos = [t for t in list_templates(templates_path) if t.kind == MEDIA_KIND]
+    videos = [
+        t
+        for t in list_templates(templates_path)
+        if t.kind == MEDIA_KIND and t.template_id != PLAN_VIDEO_TEMPLATE  # 장면 경로 전용
+    ]
     mapped = (mapping or SCENE_TEMPLATES)[MEDIA_KIND]
     by_id = {t.template_id: t for t in videos}
     if mapped in by_id:
@@ -134,6 +162,36 @@ def resolve_template(
         return videos[0]
     candidates = [t.template_id for t in videos]
     return ("scene_template_ambiguous" if candidates else "unknown_scene_template", candidates)
+
+
+def plan_story(
+    plan: VideoPlanIn, templates_path: Path | None = None
+) -> tuple[SceneTemplate | None, dict[str, str], list[str]]:
+    """기획 장면 경로: (plan_story_video, 넘길 plan_* 필드, 빠진 필드 이름).
+
+    장면 프롬프트(최대 4) · concept · 회사 [brand] 주인공·배경을 plan_* 필드로 만들고, 마케팅
+    `render_prompt_detailed`와 같은 정리·검사·길이 상한으로 남는 것만 넘긴다(값은 그대로, 넘긴 뒤
+    generate_media가 같은 규칙으로 다시 만든다). 장면이 없거나 모두 빠지면 템플릿 None."""
+    prompts = [s.prompt for s in plan.scenes if s.prompt.strip()][: len(PLAN_SCENE_FIELDS)]
+    if not prompts:
+        return None, {}, []
+    try:
+        template = get_template(PLAN_VIDEO_TEMPLATE, templates_path)
+    except PromptRejected:
+        return None, {}, []
+    b = tenant.brand()
+    raw = {
+        "plan_character": b["character_en"],
+        "plan_setting": b["setting_en"],
+        "plan_concept": plan.concept,
+    }
+    raw |= dict(zip(PLAN_SCENE_FIELDS, prompts, strict=False))
+    rendered = render_prompt_detailed(template.template_id, raw, templates_path)
+    used = [u["field"] for u in rendered.plan_used]
+    rejected = [s["field"] for s in rendered.plan_skipped]
+    if not any(name in PLAN_SCENE_FIELDS for name in used):
+        return None, {}, rejected  # 기획 장면이 하나도 안 남았다: 지어내지 않는다
+    return template, {name: raw[name] for name in used}, rejected
 
 
 def _plan_text(plan: VideoPlanIn) -> str:
@@ -232,17 +290,30 @@ def prepare_video_draft(
     if sns.has_forbidden_claim(text):
         return _fail(request, "forbidden_claim")
 
-    chosen = resolve_template(templates_path, scene_mapping)
-    if isinstance(chosen, tuple):
-        return _fail(request, chosen[0], candidates=chosen[1])
-    template = chosen
-
-    resolved = _resolve_fields(
-        plan, data.proposal_id, data.fields, template, templates_path, _now()
+    # 11/22: 장면 프롬프트가 있으면 plan_story_video.
+    # 사람이 템플릿 필드를 정했으면(admin) 예전 템플릿
+    story, plan_fields, rejected_plan = (
+        plan_story(plan, templates_path) if not data.fields else (None, {}, [])
     )
-    if resolved[0] == "invalid_field":
-        return _fail(request, "invalid_field", field=resolved[1], field_code=resolved[2])
-    fields, sources, rejected = resolved  # type: ignore[misc]
+    fallback = "plan_fields_rejected" if story is None and rejected_plan else None
+    rejected: list[str] = []
+    if story is not None:
+        template = story
+        fields = dict(plan_fields)
+        sources = {
+            n: "brand" if n in ("plan_character", "plan_setting") else "video_plan" for n in fields
+        }
+    else:
+        chosen = resolve_template(templates_path, scene_mapping)
+        if isinstance(chosen, tuple):
+            return _fail(request, chosen[0], candidates=chosen[1])
+        template = chosen
+        resolved = _resolve_fields(
+            plan, data.proposal_id, data.fields, template, templates_path, _now()
+        )
+        if resolved[0] == "invalid_field":
+            return _fail(request, "invalid_field", field=resolved[1], field_code=resolved[2])
+        fields, sources, rejected = resolved  # type: ignore[misc]
     missing = [n for n in template.fields if n not in fields]
     if missing:
         options: dict[str, list[str] | None] = {}
@@ -256,6 +327,8 @@ def prepare_video_draft(
             missing_fields=missing,
             field_options=options,
             rejected_hints=rejected,
+            rejected_plan_fields=rejected_plan,
+            template_fallback=fallback,
         )
 
     body, meta = _caption_body(plan, data.proposal_id)
@@ -264,9 +337,14 @@ def prepare_video_draft(
         return _fail(request, "caption_too_long")
     options_meta = {"share_to_feed": True}
     caption_sha = sns._sha(caption)  # noqa: SLF001
+    # 11/22: 초안 id에 의뢰 context_id를 넣는다.
+    # 같은 제안을 다시 쓴 의뢰도 자기 초안·자기 영상이 된다
+    # (예전에는 내용만으로 정해져 영상이 예전 의뢰 밑에 붙었다).
+    # 게시 옵션(platform_options)은 그대로
+    id_options = {**options_meta, "context_id": request.meta.context_id}
     draft = sns.SnsPostDraft(
         post_draft_id=sns.content_id(
-            caption_sha, None, DRAFT_MEDIA_KIND, "instagram", options_meta
+            caption_sha, None, DRAFT_MEDIA_KIND, "instagram", id_options
         ),
         source_kind="brief",
         source_ref=data.proposal_id,
@@ -301,6 +379,8 @@ def prepare_video_draft(
         fields=fields,
         field_sources=sources,
         rejected_hints=rejected,
+        rejected_plan_fields=rejected_plan,
+        template_fallback=fallback,
         resolution=template.resolution,
         duration_s=used_s,
         duration_adjusted=(

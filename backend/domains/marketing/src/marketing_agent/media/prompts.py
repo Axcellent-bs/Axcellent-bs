@@ -24,6 +24,10 @@ _FREE_WORD = re.compile(r"[A-Za-z0-9가-힣 ]+")
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 PLAN_SLOT = "plan_clause"  # 기획 데이터 자리. 템플릿 fields에는 없고 선택이다
 _PLAN_STRIP = re.compile(r"[^A-Za-z0-9가-힣 ]+")
+# 영상 모델 프롬프트 길이 상한 (가장 짧은 공급자: runway gen4.5 promptText 1000자).
+# 넘으면 plan_scene_4 → 3 → 2 → 1 순서로 뺀다(render_prompt_detailed, 순서는 테스트로 고정)
+VIDEO_PROMPT_MAX = 1000
+PLAN_SCENE_FIELDS = ("plan_scene_1", "plan_scene_2", "plan_scene_3", "plan_scene_4")
 
 
 class PromptRejected(Exception):
@@ -266,9 +270,22 @@ def render_prompt_detailed(
         if name not in fields:
             raise PromptRejected("field_missing", name)
     values = {name: _check_value(config, name, fields[name]) for name in template.fields}
-    clause, used, skipped = _plan_clause(config, plan_in) if template.plan_clause else ("", [], [])
-    values[PLAN_SLOT] = clause
-    prompt = _PLACEHOLDER.sub(lambda m: values[m.group(1)], template.sentence)
+    dropped: list[str] = []
+    while True:
+        kept = {k: v for k, v in plan_in.items() if k not in dropped}
+        clause, used, skipped = _plan_clause(config, kept) if template.plan_clause else ("", [], [])
+        values[PLAN_SLOT] = clause
+        prompt = _PLACEHOLDER.sub(lambda m: values[m.group(1)], template.sentence)
+        if template.kind != "video" or len(prompt) <= VIDEO_PROMPT_MAX:
+            break
+        # 길이 상한: 뒤 장면부터 하나씩 뺀다
+        # (장면 밖 필드는 빼지 않는다. 그래도 넘으면 공급자가 자른다)
+        names = {u["field"] for u in used}
+        last = next((n for n in reversed(PLAN_SCENE_FIELDS) if n in names), None)
+        if last is None:
+            break
+        dropped.append(last)
+    skipped = skipped + [{"field": n, "reason": "too_long"} for n in dropped]
     return RenderedPrompt(prompt, tuple(used), tuple(skipped))
 
 

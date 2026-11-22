@@ -73,6 +73,10 @@ SCENE_TEMPLATES = {
     "video": "cat_bookstore_video",
     "carousel": "cat_bookstore_image",
 }
+# 기획 영상 제작안(video_plan) 경로 전용 영상 템플릿 (11/22, video_draft).
+# 장면 프롬프트를 plan_* 필드로 받는다.
+# 캠페인 브리프 경로(위 SCENE_TEMPLATES, 화면에서 만드는 영상)는 지금 템플릿 그대로다
+PLAN_VIDEO_TEMPLATE = "plan_story_video"
 # 초안(draft_sns_post)의 media_kind. 캐러셀 초안은 이미지가 2장 이상 있어야 만들 수 있어
 # 넘길 때는 캡션만 있는 이미지 초안으로 둔다
 DRAFT_MEDIA_KIND = {"image": "image", "video": "reel", "carousel": "image"}

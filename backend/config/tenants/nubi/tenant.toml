@@ -18,3 +18,11 @@ timezone = "Asia/Seoul"
 about = "누비투어는 해외 패키지 여행 상품(투어)을 온라인으로 예약받아 판매하는 여행사다."
 
 [profile.override]
+
+# 홍보 영상 브랜드 (기획 영상 제작안·마케팅 영상 프롬프트). 모두 선택, 영문 120자·한글 60자 안.
+# 글자·실존 인물·실제 브랜드·숫자는 쓰지 않는다(걸리면 그 칸은 기본값). 화풍은 기본값
+[brand]
+character_en = "original illustrated travelers, not real people"
+character_ko = "원본 일러스트 여행자"
+setting_en = "scenic overseas travel destinations"
+setting_ko = "해외 여행지 풍경"
