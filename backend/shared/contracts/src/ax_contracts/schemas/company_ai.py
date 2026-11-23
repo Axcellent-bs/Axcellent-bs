@@ -34,6 +34,8 @@ COMPANY_AI_KEY_NAMES: tuple[str, ...] = (
     "MARKETING_IG_ACCESS_TOKEN",
     "MARKETING_IG_USER_ID",
     "MARKETING_YOUTUBE_REFRESH_TOKEN",
+    # Higgsfield(영상) 계정 키 `<ID>:<SECRET>` — 회사에 없으면 설치 기본 키(11/23)
+    "MARKETING_HIGGSFIELD_API_KEY",
 )
 
 CompanyAiCoderMode = Literal["company", "separate"]
