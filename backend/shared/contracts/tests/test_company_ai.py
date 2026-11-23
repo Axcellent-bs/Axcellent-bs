@@ -74,6 +74,7 @@ def test_key_names_are_the_three_from_the_design() -> None:
         "MARKETING_IG_ACCESS_TOKEN",
         "MARKETING_IG_USER_ID",
         "MARKETING_YOUTUBE_REFRESH_TOKEN",
+        "MARKETING_HIGGSFIELD_API_KEY",
     )
 
 

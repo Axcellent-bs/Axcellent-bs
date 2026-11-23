@@ -7,10 +7,7 @@ import { shortDateTime, won } from "@/lib/format";
 import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
 import { BriefMediaMaker } from "./BriefMediaMaker";
-import { PublishControlCard } from "./PublishControlCard";
 import { SnsAccountsCard } from "./SnsAccountsCard";
-import { HiggsfieldStatusCard } from "./HiggsfieldStatusCard";
-import { YoutubeStatusCard } from "./YoutubeStatusCard";
 import { CharacterSheetMaker } from "./CharacterSheetMaker";
 import { RequestVideos } from "./RequestVideos";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, type StoredBrief } from "@/lib/briefs";
@@ -114,11 +111,8 @@ export function SnsMedia() {
 
       {view === "make" && (
         <div className="space-y-6" role="tabpanel" aria-label="이미지 시트 · 스토리보드">
-          {/* 로그인한 회사의 연결 상태대로 보인다(회사마다 다른 키·채널, 11/23) */}
-          <div className="grid gap-4 lg:grid-cols-2">
-            <HiggsfieldStatusCard />
-            <YoutubeStatusCard />
-          </div>
+          {/* 로그인한 회사의 연결 상태(Higgsfield·유튜브·인스타)를 한 줄로. 바꾸기는 계정·연결 탭 */}
+          <SnsAccountsCard compact onManage={() => pick("accounts")} />
           <CharacterSheetMaker />
         </div>
       )}
@@ -128,11 +122,6 @@ export function SnsMedia() {
       {view === "accounts" && (
         <div className="space-y-6" role="tabpanel" aria-label="계정·연결">
           <SnsAccountsCard />
-          <PublishControlCard />
-          <div className="grid gap-4 lg:grid-cols-2">
-            <HiggsfieldStatusCard />
-            <YoutubeStatusCard />
-          </div>
         </div>
       )}
 
