@@ -1549,6 +1549,23 @@ async def issue_coupon(request: AgentRequest) -> AgentResult:
                 )
                 STATE.coupons.record(context_id, key, request.sequence, failed, cache=False)
                 return failed
+            if coupon.get("applied") == "pending_human":
+                # 사이트 변환기가 쿠폰 발급을 할 일함에 넣었다: 아직 발급되지 않았다.
+                # 발급 완료로 적지 않고 이벤트도 보내지 않는다(다시 불러도 같은 할 일이다)
+                pending = _result(
+                    request,
+                    TaskStatus.INPUT_REQUIRED,
+                    reason_code=InputReason.HUMAN_INPUT,
+                    outcome="site_pending_human",
+                    output={
+                        "applied": "pending_human",
+                        "handoff_task_id": coupon.get("handoff_task_id"),
+                        "execution_id": decision.execution_id,
+                    },
+                    evidence=evidence,
+                )
+                STATE.coupons.record(context_id, key, request.sequence, pending, cache=False)
+                return pending
             coupon_id = str(coupon["coupon_id"])
         else:
             coupon_id = STATE.coupons.new_coupon_id()
