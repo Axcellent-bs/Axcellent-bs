@@ -1,0 +1,9 @@
+{
+  "inquiry_answer": {
+    "method": "POST",
+    "path": "/api/v1/inquiries/{site_id}/answer",
+    "path_params": { "site_id": "link:inquiries.seq" },
+    "body": { "answer": "view.answer" },
+    "ok": [200]
+  }
+}

@@ -3,7 +3,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { Loading, OFFLINE, Stat, StatusChip } from "@/components/admin/bits";
 import { api } from "@/lib/api";
 import { ago, shortDateTime, won } from "@/lib/format";
-import { AUDIT_KO, CLAIM_REASON_KO, CLAIM_STATUS_KO, CLAIM_TYPE_KO, INSPECTION_KO, OUTCOME_KO, RULE_KO } from "@/lib/labels";
+import { AUDIT_KO, CLAIM_REASON_KO, CLAIM_STATUS_KO, CLAIM_TYPE_KO, INSPECTION_KO, OUTCOME_KO, RULE_KO, paidOrderNote } from "@/lib/labels";
 import type { Claim, ClaimDetail, ClaimStats } from "@/lib/types";
 import { useRouter, useSearchParams } from "@/lib/nav";
 import { TriagePanel } from "@/components/support/TriagePanel";
@@ -186,7 +186,7 @@ function Claims() {
                     <li key={i}><span className="font-semibold">{AUDIT_KO[a.action] ?? a.action}</span> <span className="text-ink-500">· {a.actor} · {shortDateTime(a.at)}</span>
                       {a.action === "decided" && <span className="ml-1 text-ink-500">→ {OUTCOME_KO[String(a.detail.outcome)] ?? String(a.detail.outcome)}{Number(a.detail.abuse_score) > 0 && ` (점검 ${String(a.detail.abuse_score)})`}</span>}
                       {a.action === "agent_override" && <span className="ml-1 text-ink-500">규칙: {OUTCOME_KO[String(a.detail.system_outcome)] ?? String(a.detail.system_outcome)} → 상담원 {String(a.detail.agent_action) === "approve" ? "승인" : "거절"}</span>}
-                      {a.action === "paid" && <span className="ml-1 text-ink-500">환불 {won(Number(a.detail.refund_cash))} · 보상 {won(Number(a.detail.compensation))}</span>}</li>
+                      {a.action === "paid" && <span className="ml-1 text-ink-500">환불 {won(Number(a.detail.refund_cash))} · 보상 {won(Number(a.detail.compensation))}{paidOrderNote(a.detail) && ` · ${paidOrderNote(a.detail)}`}</span>}</li>
                   ))}
                 </ol>
               </section>

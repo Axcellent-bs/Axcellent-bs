@@ -224,3 +224,42 @@ def test_youtube_draft_and_request_go_to_marketing(client: TestClient, fake: Fak
         {"message": "x"},
     )
     assert client.post(YT).status_code == 409
+
+
+RYT = "/api/dashboard/marketing/request-videos/spd_abc/youtube"
+
+
+def test_request_video_youtube_draft_and_request_go_to_marketing(
+    client: TestClient, fake: Fake
+) -> None:
+    fake.output = {"post_draft_id": "spd_abc", "request_id": "wr_1", "youtube": {"status": "draft"}}
+    res = client.post(f"{RYT}/draft", json={"title": "제목", "privacy": "public"})
+    assert res.status_code == 200 and res.json()["data"]["youtube"]["status"] == "draft"
+    _, request = fake.calls[-1]
+    assert request.skill == "request_video_youtube_draft"
+    assert request.input == {
+        "post_draft_id": "spd_abc",
+        "regenerate": False,
+        "title": "제목",
+        "privacy": "public",
+    }
+    # 의뢰 영상은 늘 AI 라벨 영상이라 올릴 영상(part)을 고르지 않는다
+    assert client.post(f"{RYT}/draft", json={"privacy": "secret"}).status_code == 422
+    bad = "/api/dashboard/marketing/request-videos/..%2Fx/youtube"
+    assert client.post(bad).status_code in (404, 422)
+    fake.output = {"post_draft_id": "spd_abc", "youtube": {"status": "awaiting_approval"}}
+    assert client.post(RYT).status_code == 200
+    _, request = fake.calls[-1]
+    assert (request.skill, request.input) == (
+        "request_video_youtube_request",
+        {"post_draft_id": "spd_abc", "who": "tester"},
+    )
+    fake.status, fake.outcome, fake.output = (
+        TaskStatus.FAILED,
+        "video_not_ready",
+        {"message": "x"},
+    )
+    assert client.post(RYT).status_code == 409
+    fake.outcome = "not_found"
+    missing = client.post(RYT)
+    assert missing.status_code == 404 and "의뢰" in missing.json()["error"]["message"]

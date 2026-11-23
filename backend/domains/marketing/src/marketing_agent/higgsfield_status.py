@@ -28,7 +28,7 @@ PROBE_URL = "https://api.higgsfield.ai/requests/00000000-0000-0000-0000-00000000
 TIMEOUT_S = 8.0
 CACHE_S = 20.0
 
-_cache: tuple[float, HiggsfieldStatusOutput] | None = None
+_cache: dict[str, tuple[float, HiggsfieldStatusOutput]] = {}  # 회사 ID → (시각, 결과)
 
 
 def _image_model() -> str | None:
@@ -48,9 +48,23 @@ def _out(
     )
 
 
+def higgsfield_key() -> str:
+    """로그인한 회사의 Higgsfield 키(키 저장소 tenant=회사 ID). 회사에 없으면 설치 기본 키.
+
+    회사마다 자기 Higgsfield 계정을 쓴다(SNS·미디어 › 계정·연결, 11/23). env 모드는 환경변수와 같다.
+    """
+    from ax_agent_template import company_ai
+
+    try:
+        own = get_secret(HIGGSFIELD_API_KEY_ENV, tenant=company_ai.company_id()).strip()
+    except Exception:  # noqa: BLE001 - 키 저장소 장애는 기본 키로
+        own = ""
+    return own or get_secret(HIGGSFIELD_API_KEY_ENV).strip()
+
+
 async def probe(client: httpx.AsyncClient | None = None) -> HiggsfieldStatusOutput:
     """키를 Higgsfield에 한 번 보여 주고 연결 상태를 돌려준다."""
-    key = get_secret(HIGGSFIELD_API_KEY_ENV).strip()
+    key = higgsfield_key()
     if not key:
         return _out(False, "not_configured", "Higgsfield 키가 설정돼 있지 않아요")
     headers = {"Authorization": f"Key {key}"}
@@ -73,15 +87,17 @@ async def probe(client: httpx.AsyncClient | None = None) -> HiggsfieldStatusOutp
 
 async def status(now: float | None = None) -> HiggsfieldStatusOutput:
     """`CACHE_S` 동안은 지난 결과를 돌려준다."""
-    global _cache
+    from ax_agent_template import company_ai
+
     t = time.monotonic() if now is None else now
-    if _cache is not None and t - _cache[0] < CACHE_S:
-        return _cache[1]
+    cid = company_ai.company_id() or ""
+    hit = _cache.get(cid)
+    if hit is not None and t - hit[0] < CACHE_S:
+        return hit[1]
     out = await probe()
-    _cache = (t, out)
+    _cache[cid] = (t, out)
     return out
 
 
 def reset_cache() -> None:
-    global _cache
-    _cache = None
+    _cache.clear()

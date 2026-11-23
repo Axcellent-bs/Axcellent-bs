@@ -292,11 +292,29 @@ export interface DeploySignal { kind: 'incident' | 'anomaly' | 'unavailable'; so
 export interface DeployCheck { deployment: string; at: string; window_minutes: number; verdict: 'ok' | 'watch' | 'suspect'; evidence: string[]; candidate_prs: string[]; rollback: RollbackSuggestion | null; signals?: DeploySignal[] }
 export interface Deployment {
   id: string; pr_numbers: number[]; version: string | null; env: 'dev' | 'prod'; at: string
-  // approved: 배포 허가됨. 배포 도구가 연결되지 않아 실제 배포는 하지 않았다 (executed false)
-  status: 'requested' | 'approved' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
+  // ready: 승인 이유는 없지만 배포 실행은 사람이 눌러야 한다 (운영 배포 도구)
+  // approved: 사람이 승인함. 실제로 나갔는지는 run을 본다 (executed)
+  status: 'requested' | 'ready' | 'approved' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
   approved_by: string | null; approval_reasons: string[]; protected_paths: string[]; check: DeployCheck | null
   /** 배포 도구가 실제로 배포했나. 예전 서버 응답에는 없을 수 있다 (없으면 status로 본다) */
   executed?: boolean; note?: string | null
+  /** 배포 실행 기록 (infra deploy_version으로 보낸 결과). 보내기 전·예전 응답이면 없다 */
+  run?: DeployRun | null
+}
+
+/** 배포 실행 한 번. 값은 서버(dev 배포 기록)가 준 것만 쓴다 */
+export interface DeployRun {
+  // sending 보내는 중 · dispatched 도구가 띄움 · no_tool 배포 도구 없음 · held 안전 확인 대기
+  // rejected 관문 거절 · failed 못 띄움 · unknown 결과 모름(도구에서 확인)
+  // handed 사람 할 일함으로 넘어감 · not_sent 승인했지만 보내지 않음('배포 실행'을 눌러야 함)
+  state: 'sending' | 'dispatched' | 'no_tool' | 'held' | 'rejected' | 'failed' | 'unknown' | 'handed' | 'not_sent'
+  service: string | null; version: string | null
+  tool: string | null; run_id: string | null; url: string | null
+  run_status: 'dispatched' | 'running' | 'succeeded' | 'failed' | 'unknown' | null
+  code: string | null; reason: string | null; review_id: string | null
+  at: string; checked_at: string | null
+  /** infra에 보낸 요청 id · Jenkins 대기열이라 빌드 번호를 아직 모름. 예전 응답에는 없다 */
+  request_id?: string | null; resolving?: boolean
 }
 
 export const deployApi = (base: string) => ({
@@ -304,6 +322,10 @@ export const deployApi = (base: string) => ({
   /** 승인자 이름이 꼭 있어야 한다 (서버가 없으면 400 APPROVER_REQUIRED) */
   approve: (id: string, approvedBy: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/approve`, post({ approved_by: approvedBy })),
   check: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/check`, post()),
+  /** 배포 도구 실행 상태 다시 읽기 (읽기만, 끝났으면 배포됨·실패로 바뀐다) */
+  refresh: (id: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/refresh`, post()),
+  /** '배포 실행' (사람만): 승인 대기면 그 사람 승인으로 보내고, 보내지 않은 승인 배포면 한 번 보낸다 */
+  dispatch: (id: string, by: string) => call<Deployment>(base, `/deployments/${encodeURIComponent(id)}/dispatch`, post({ approved_by: by })),
 })
 
 // ---- 형상관리 연결 목록 (dev 서비스 `/api/planning/vcs/connections`). 레포 여러 개를 잇고 PR마다 대상 레포를 고른다

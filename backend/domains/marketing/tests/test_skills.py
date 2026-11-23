@@ -556,6 +556,34 @@ def test_coupon_is_not_created_in_shop_api_unless_executed(monkeypatch: pytest.M
     assert seen == []
 
 
+def _pending_human(request: httpx.Request) -> httpx.Response:
+    """사이트 변환기: 쿠폰 발급을 할 일함에 넣고 `coupon_id`를 할 일 id로 채워 답한다."""
+    body = json.loads(request.content)
+    coupon = {
+        "coupon_id": "hof_site2",
+        "buyer_id": body["buyer_id"],
+        "count": body["count"],
+        "applied": "pending_human",
+        "handoff_task_id": "hof_site2",
+    }
+    return httpx.Response(200, json={"data": coupon, "meta": {"source": "site_adapter"}})
+
+
+def test_pending_human_coupon_is_not_recorded_as_issued(monkeypatch: pytest.MonkeyPatch) -> None:
+    """할 일함에 들어간 쿠폰은 아직 발급되지 않았다: 완료·발급 이벤트 없이 사람 반영 대기."""
+    _fake_execute(monkeypatch, _decision())
+    seen = _shop(monkeypatch, _pending_human)
+    result = _coupon()
+    assert (result["status"], result["outcome"]) == ("input-required", "site_pending_human")
+    assert result["output"]["handoff_task_id"] == "hof_site2"
+    assert "coupon_id" not in result["output"]
+    assert not any(e.type.value == "coupon.issued" for e in events.MOCK_PUBLISHED)
+    again = _coupon()  # 다시 불러도 같은 키로 보내고 여전히 대기
+    assert again["outcome"] == "site_pending_human"
+    keys = {json.loads(r.content)["idempotency_key"] for r in seen}
+    assert len(keys) == 1
+
+
 @pytest.mark.parametrize(
     ("answer", "code"),
     [
@@ -1185,3 +1213,27 @@ def test_banner_list_failure_does_not_block_a_resolved_banner(
     result = _resolved_banner()
     assert result["status"] == "completed"
     assert len(_posted_bodies(seen)) == 1
+
+
+@pytest.mark.asyncio
+async def test_banner_calls_accept_site_adapter_pending_human(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """사이트 변환기는 배너 게시·내림을 할 일함에 넣고 200 + `applied`로 답한다(돈과 무관).
+
+    마케팅은 예전처럼 받고 넘어가며 사람이 사이트에 올리고 내린다.
+    """
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        data = {"notice_id": "ntc_1", "applied": "pending_human", "handoff_task_id": "hof_3"}
+        return httpx.Response(200, json={"data": data, "meta": {"source": "site_adapter"}})
+
+    monkeypatch.setattr(
+        shop_client, "_client", httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    )
+    posted = await shop_client.post_banner(
+        notice_id="ntc_1", text="공지", valid_from=None, valid_to=None, context_id="ctx_a"
+    )
+    ended = await shop_client.end_banner("ntc_1")
+    assert posted["applied"] == "pending_human"
+    assert ended is not None and ended["applied"] == "pending_human"

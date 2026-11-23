@@ -18,7 +18,7 @@ from typing import Any
 from ax_agent_template import config
 from ax_agent_template.client import call_agent
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
-from ax_dashboard_api.envelope import ApiError
+from ax_dashboard_api.envelope import ApiError, tenant_meta
 
 AGENT_NAME = "dashboard-api"
 TARGET = "marketing"
@@ -45,6 +45,7 @@ async def call(
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=deadline_s),
             idempotency_key=key,
+            **tenant_meta(),
         ),
         skill=skill,
         input=payload,
@@ -655,7 +656,7 @@ async def chat_call(
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=CHAT_DEADLINE_SECONDS),
             idempotency_key=f"ui:chat:{uuid.uuid4().hex}",
-            **({"tenant_id": tenant_id} if tenant_id else {}),  # 개인 MCP 창구: 토큰의 회사
+            **tenant_meta(tenant_id),  # 명시 값 먼저, 없으면 세션 회사
         ),
         skill=skill,
         input=payload,
@@ -704,6 +705,7 @@ async def character_sheet_call(
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=CHARACTER_SHEET_DEADLINE_SECONDS),
             idempotency_key=f"ui:charsheet:{uuid.uuid4().hex}",
+            **tenant_meta(),
         ),
         skill="character_sheet_prompt",
         input={},
@@ -756,6 +758,7 @@ async def storyboard_call(
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=STORYBOARD_DEADLINE_SECONDS),
             idempotency_key=f"ui:storyboard:{uuid.uuid4().hex}",
+            **tenant_meta(),
         ),
         skill="storyboard_prompt",
         input={},
@@ -782,6 +785,7 @@ async def higgsfield_status_call() -> dict[str, Any]:
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=20),
             idempotency_key=f"ui:hfstatus:{uuid.uuid4().hex}",
+            **tenant_meta(),
         ),
         skill="higgsfield_status",
         input={},
@@ -802,6 +806,7 @@ async def _creative_read(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=20),
             idempotency_key=f"ui:creative:{uuid.uuid4().hex}",
+            **tenant_meta(),
         ),
         skill=skill,
         input=payload,
@@ -1044,6 +1049,32 @@ async def youtube_request_call(record_id: str, who: str | None) -> dict[str, Any
     if who:
         payload["who"] = who
     return await _creative_read("creative_youtube_request", payload)
+
+
+async def _request_video_youtube(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return await _creative_read(skill, payload)
+    except ApiError as error:
+        if error.status_code == 404:
+            raise ApiError(404, "NOT_FOUND", "의뢰로 만든 영상이 없다") from error
+        raise
+
+
+async def request_video_youtube_draft_call(
+    post_draft_id: str, body: dict[str, Any]
+) -> dict[str, Any]:
+    """의뢰로 만든 영상의 유튜브 제목·설명 초안(마케팅 `request_video_youtube_draft`)."""
+    return await _request_video_youtube(
+        "request_video_youtube_draft", {"post_draft_id": post_draft_id, **body}
+    )
+
+
+async def request_video_youtube_request_call(post_draft_id: str, who: str | None) -> dict[str, Any]:
+    """의뢰로 만든 영상(AI 라벨 입힌 파일)의 유튜브 올리기를 사람 승인에 올린다."""
+    payload: dict[str, Any] = {"post_draft_id": post_draft_id}
+    if who:
+        payload["who"] = who
+    return await _request_video_youtube("request_video_youtube_request", payload)
 
 
 async def youtube_status_call() -> dict[str, Any]:

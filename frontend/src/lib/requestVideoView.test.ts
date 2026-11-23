@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 의뢰로 만든 영상: 영상 열기 링크(완료일 때만) · 필터 · 칸 표시(라벨 없으면 재생 안 함) · 정렬.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { durationKo, isRequestId, requestFilterOf, requestVideoLink, sortForRequest, statusKo, videoPane, type RequestVideo } from "./requestVideoView.ts";
+import { canUploadToYoutube, durationKo, isRequestId, requestFilterOf, requestVideoLink, sortForRequest, statusKo, videoPane, type RequestVideo } from "./requestVideoView.ts";
 import type { StepStatus, WorkRequestStep } from "./workRequests.ts";
 
 const RID = "wr_732efb95e9";
@@ -15,12 +15,12 @@ const req = (status: StepStatus | null, task: string | null = "promo_video", id 
   steps: (status ? { s6: { status } as WorkRequestStep } : {}) as Record<string, WorkRequestStep>,
 });
 
-test("영상 열기 링크: 영상 제작 단계가 완료일 때만 /marketing/sns?request=", () => {
-  assert.equal(requestVideoLink(req("completed")), `/marketing/sns?request=${RID}`);
+test("영상 열기 링크: 영상 제작 단계가 완료일 때만 제작 기록의 의뢰 영상 탭(?view=videos&request=)", () => {
+  assert.equal(requestVideoLink(req("completed")), `/marketing/records?view=videos&request=${RID}`);
   for (const s of ["running", "waiting_async", "failed", "held", "pending"] as StepStatus[]) assert.equal(requestVideoLink(req(s)), null);
   assert.equal(requestVideoLink(req(null)), null);
   assert.equal(requestVideoLink(req("completed", "trend_report")), null);
-  assert.equal(requestVideoLink(req("completed", null)), `/marketing/sns?request=${RID}`);
+  assert.equal(requestVideoLink(req("completed", null)), `/marketing/records?view=videos&request=${RID}`);
   assert.equal(requestVideoLink(req("completed", "promo_video", "wr_bad")), null);
 });
 
@@ -62,4 +62,11 @@ test("길이·상태 문구, 의뢰 필터 정렬", () => {
   const b = vid({ post_draft_id: "b" });
   assert.deepEqual(sortForRequest([a, b], RID).map((v) => v.post_draft_id), ["b", "a"]);
   assert.deepEqual(sortForRequest([a, b], null).map((v) => v.post_draft_id), ["a", "b"]);
+});
+
+test("유튜브 칸: AI 표시를 입힌(재생되는) 영상만", () => {
+  assert.equal(canUploadToYoutube(vid()), true);
+  assert.equal(canUploadToYoutube(vid({ status: "check_rejected" })), true);
+  assert.equal(canUploadToYoutube(vid({ labeled: false, preview_path: null })), false);
+  assert.equal(canUploadToYoutube(vid({ status: "label_missing" })), false);
 });

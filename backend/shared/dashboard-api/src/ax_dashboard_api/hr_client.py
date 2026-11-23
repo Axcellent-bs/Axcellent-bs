@@ -18,7 +18,7 @@ from typing import Any
 from ax_agent_template import config
 from ax_agent_template.client import call_agent
 from ax_contracts.schemas import AgentRequest, AgentResult, ErrorCode, RequestMeta, TaskStatus
-from ax_dashboard_api.envelope import ApiError, ServiceDisabled
+from ax_dashboard_api.envelope import ApiError, ServiceDisabled, tenant_meta
 from ax_dashboard_api.support_client import UI_CONTEXT_PREFIX
 
 AGENT_NAME = "dashboard-api"
@@ -117,6 +117,7 @@ async def call(
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=DEADLINE_SECONDS),
             idempotency_key=key or (f"{context}:{skill}:{target}" if target else None),
+            **tenant_meta(),
         ),
         skill=skill,
         input=input or {},

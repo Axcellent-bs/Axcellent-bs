@@ -76,6 +76,15 @@ uv run python -m ax_secret_store retenant --from default --to catbooks
 - 이력에는 `retenant_from_default`(새 tenant 쪽)·`retenant_drop_duplicate`가 남는다.
 - 되돌리기: 같은 명령을 `--from catbooks --to default`로 돌리고 `AX_SECRET_DEFAULT_TENANT`를 되돌린다(또는 0번 백업 파일).
 
+## OAuth 토큰 칸 (`store_oauth_token`, 연결 유형 B·유튜브)
+
+- 사람 승인 없이 기계가 넣고 바꾸는 유일한 길이다. 이름이 `_REFRESH_TOKEN`으로 끝나는 칸만 받는다(`not_oauth_name`). 회사 AI 키·에이전트 토큰은 이 길로 못 바꾼다.
+- 사람 승인은 연결 시작(플랫폼 동의 화면, 회사 관리자)과 끊기에서 받는다. 토큰은 플랫폼이 몇 시간마다 새로 주고, 카페24처럼 갱신할 때마다 갱신 토큰도 바뀌는 곳이 있어서 매번 사람을 거칠 수 없다.
+- 갱신할 때는 `expect=지금 값`을 준다. 다른 곳이 먼저 갱신했으면 `stale_token`으로 거절해 새 토큰을 옛 토큰 기준으로 덮어쓰지 않는다(한 프로세스 안에서만 잠근다. 갱신은 한 서비스가 맡는다).
+- 짧게 쓰는 접근 토큰(access token)은 여기 저장하지 않고 메모리에만 둔다.
+- 이력에는 `oauth_store`·`oauth_rotate`와 누가만 남는다(값 없음).
+- 콜백에서 어느 회사의 누가 시작한 연결인지 묶는 것은 dashboard-api `oauth_link.py`가 맡는다.
+
 ## 마스터 키 — 분실하면 복구할 수 없다
 
 - 마스터 키를 잃으면 DB의 모든 값을 복호화할 수 없다. 복구 수단이 없다(다시 넣어야 한다).

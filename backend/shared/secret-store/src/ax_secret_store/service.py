@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import secrets
+import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -26,6 +27,9 @@ from ax_secret_store.repository import (
 )
 
 TENANT_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+# 기계(OAuth 콜백·토큰 갱신)가 사람 승인 없이 바꿀 수 있는 이름의 끝 (store_oauth_token)
+OAUTH_NAME_SUFFIX = "_REFRESH_TOKEN"
+_OAUTH_LOCK = threading.Lock()
 NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 MIN_VALUE_LENGTH = 8
 MAX_VALUE_LENGTH = 4096
@@ -275,6 +279,47 @@ class SecretService:
         history = {"at": stamp, "by": who[:64], "action": "migrate", "tenant": tenant, "name": name}
         self.repo.commit(upsert=row, history=history)
         return "imported"
+
+    # ---- OAuth 토큰 칸(기계가 바꾸는 유일한 길) ----
+
+    def store_oauth_token(
+        self, tenant: str, name: str, value: str, who: str, *, expect: str | None = None
+    ) -> str:
+        """OAuth 갱신 토큰을 사람 승인 없이 넣거나 바꾼다. 반환: stored | rotated.
+
+        - 사람 승인은 연결 시작(동의 화면)과 끊기에서 받는다. 토큰은 플랫폼이 몇 시간마다 새로 주고
+          (카페24처럼) 갱신할 때마다 갱신 토큰도 바뀌어서, 매번 사람을 거칠 수 없다
+        - 이름은 `OAUTH_NAME_SUFFIX`로 끝나는 것만 받는다.
+          다른 키(회사 AI 키 등)는 이 길로 못 바꾼다
+        - `expect`를 주면(갱신) 지금 저장된 값이 그것일 때만 바꾼다. 다른 곳이 먼저 갱신했으면
+          `stale_token`(새 토큰을 덮어써서 연결이 끊기는 것을 막는다). 한 프로세스 안에서만 잠근다
+        - 이력에는 `oauth_store`·`oauth_rotate`와 누가만 남는다(값 없음)
+        """
+        check_tenant(tenant)
+        check_name(name)
+        check_value(value)
+        if not name.endswith(OAUTH_NAME_SUFFIX):
+            raise SecretStoreError(errors.NOT_OAUTH_NAME)
+        with _OAUTH_LOCK:
+            current = self.repo.get(tenant, name)
+            if expect is not None:
+                have = self.decrypt_row(current) if current is not None else None
+                if have is None or not secrets.compare_digest(have, expect):
+                    raise SecretStoreError(errors.STALE_TOKEN)
+            stamp = _now()
+            kid, nonce, blob = self.keyring.encrypt(tenant, name, value)
+            row = SecretRow(
+                tenant=tenant, name=name, kid=kid, nonce=nonce, ciphertext=blob,
+                hint=hint_of(value), version=(current.version + 1) if current else 1,
+                created_at=current.created_at if current else stamp,
+                updated_by=who[:64], updated_at=stamp,
+            )  # fmt: skip
+            action = "oauth_rotate" if expect is not None else "oauth_store"
+            history = {
+                "at": stamp, "by": who[:64], "action": action, "tenant": tenant, "name": name,
+            }  # fmt: skip
+            self.repo.commit(upsert=row, history=history)
+        return "rotated" if expect is not None else "stored"
 
     def rewrap_all(self, who: str) -> int:
         """모든 값을 현재 키 버전으로 다시 암호화한다(마스터 키 교체 뒤). 바뀐 개수."""

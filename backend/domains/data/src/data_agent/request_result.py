@@ -10,6 +10,7 @@
   그 사이 같음, 못 잼·low_sample 확인 불가. LLM 안 씀
 - summary: "의뢰 영상 7일 조회 N회 · 우리 릴스 중앙값의 X배" 고정형
 - facts: 시점별 조회·좋아요·댓글, 배수(기준 포함), 한계 한 줄. 출처 "instagram business_discovery"
+  (보낼 때 마케팅에서 읽은 광고 숫자·유튜브 성과 두 줄은 한계 줄 바로 앞, `marketing_reads`)
 - 다음 인사이트 "지난번 결과": 보낸 의뢰 영상 결과를 최근 3개까지 `past_of`로 (trend_report_insight)
 """
 
@@ -30,6 +31,7 @@ SALES_LIMIT = "매출은 프로모션 링크가 없어 측정 불가"
 SEVEN: vp.VideoCheckpointName = "7d"
 PAST_MAX = 3
 LABEL_MAX, VALUE_MAX = 120, 80
+FACTS_MAX = 12  # ReceiveCampaignUpdateInput.facts 최대
 
 
 def is_request_video(v: vp.Video) -> bool:
@@ -83,8 +85,11 @@ def _clip(text: str, n: int) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
-def facts_of(v: vp.Video, store: vp.VideoStore) -> list[InsightFact]:
-    """시점별 조회·좋아요·댓글과 배수 (잰 시점만), 마지막에 한계 한 줄. 최대 12."""
+def facts_of(
+    v: vp.Video, store: vp.VideoStore, extras: Sequence[InsightFact] = ()
+) -> list[InsightFact]:
+    """시점별 조회·좋아요·댓글과 배수 (잰 시점만), `extras`(광고 숫자·유튜브 성과), 마지막에 한계
+    한 줄. 최대 12."""
     points = store.points(v.key)
     bases = store.baselines(v.key)
     rows: list[tuple[str, str]] = []
@@ -105,14 +110,17 @@ def facts_of(v: vp.Video, store: vp.VideoStore) -> list[InsightFact]:
             rows.append((f"{name} 우리 릴스 대비 배수", ratio))
         else:
             rows.append((f"{name} 우리 릴스 대비 배수", f"low_sample (릴스 {n}개, 3개 미만)"))
-    rows = rows[:11]
+    rows = rows[: FACTS_MAX - 1 - len(extras)]
     facts = [InsightFact(label=_clip(a, LABEL_MAX), value=_clip(b, VALUE_MAX), source=SOURCE,
                          link=v.video_url) for a, b in rows]  # fmt: skip
+    facts.extend(extras)
     facts.append(InsightFact(label="한계", value=SALES_LIMIT, source="data.request_result"))
     return facts
 
 
-def build_update(v: vp.Video, store: vp.VideoStore) -> ReceiveCampaignUpdateInput:
+def build_update(
+    v: vp.Video, store: vp.VideoStore, extras: Sequence[InsightFact] = ()
+) -> ReceiveCampaignUpdateInput:
     views, median, n = seven_day(v, store)
     return ReceiveCampaignUpdateInput(
         proposal_id=v.proposal_id or "",
@@ -120,7 +128,7 @@ def build_update(v: vp.Video, store: vp.VideoStore) -> ReceiveCampaignUpdateInpu
         stage="result",
         direction=direction_of(views, median),  # type: ignore[arg-type]  # 네 값 중 하나
         summary=summary_of(views, median, n),
-        facts=facts_of(v, store),
+        facts=facts_of(v, store, extras),
     )
 
 

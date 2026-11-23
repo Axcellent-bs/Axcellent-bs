@@ -35,6 +35,20 @@ def test_execute_over_http(client: Any, coupon: Any) -> None:
     assert [r["execution_id"] for r in listed["data"]] == [data["execution_id"]]
 
 
+def test_get_one_execution(client: Any, coupon: Any) -> None:
+    """실행 기록 하나: 목록과 같은 모양, 없으면 404 `NOT_FOUND`."""
+    data = _post(client, coupon().model_dump(mode="json")).json()["data"]
+    listed = client.get("/api/safety/executions").json()["data"]
+    one = client.get(f"/api/safety/executions/{data['execution_id']}")
+    assert one.status_code == 200
+    assert one.json()["data"] == listed[0]
+    assert one.json()["data"]["decision"]["status"] == "executed"
+    assert one.json()["data"]["request"]["action"] == "issue_coupon"
+    missing = client.get("/api/safety/executions/exe_nope")
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "NOT_FOUND"
+
+
 @pytest.mark.parametrize("headers", [None, {"Authorization": "Bearer "}, {"Authorization": "x"}])
 def test_request_without_token_is_refused(client: Any, coupon: Any, headers: Any) -> None:
     """SAF-07: 토큰 없는 요청은 판정까지 가지 않는다."""

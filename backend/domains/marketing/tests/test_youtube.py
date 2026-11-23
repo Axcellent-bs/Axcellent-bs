@@ -200,3 +200,68 @@ def test_status_reports_missing_keys_and_channel(
     monkeypatch.delenv(yt.KEYS[0])
     missing = asyncio.run(yt.status(force=True))
     assert missing["connection"] == "missing_keys" and "DUMMY" not in str(missing)
+
+
+# ---------------------------------------------------------------- 설명 끝 해시태그
+def _tags_in(body: str) -> list[str]:
+    return [t.casefold() for t in yt.HASHTAG_RE.findall(body)]
+
+
+def test_description_gets_three_to_five_hashtags_from_the_tags() -> None:
+    tags = ["AI직원", "AI 직원", "업무자동화", "axcellent", "AI", "Shorts", "추가"]
+    _title, body, _tags = yt._clean("제목", "AXcellent AI 직원 소개", tags)  # noqa: SLF001
+    assert yt.AI_NOTICE in body  # AI 표시는 그대로
+    assert body.endswith(f"{yt.AI_NOTICE}\n#AI직원 #업무자동화 #AI #Shorts")
+    found = _tags_in(body)
+    assert len(found) == 5 and len(set(found)) == 5  # #AXcellent 포함, 중복 없음
+    assert "axcellent" in found and "ai 직원" not in found  # 공백 있는 태그는 빼고
+
+
+def test_hashtags_are_not_added_again_on_a_second_clean_or_human_edit() -> None:
+    _t, body, tags = yt._clean("제목", "본문", ["AI직원", "업무자동화"])  # noqa: SLF001
+    _t, again, _ = yt._clean("제목", body, tags)  # noqa: SLF001
+    assert again == body
+    edited = "사람이 고친 설명 #AI직원"  # 사람이 AI 표시를 지우고 해시태그 하나를 넣었다
+    _t, fixed, _ = yt._clean("제목", edited, tags)  # noqa: SLF001
+    assert yt.AI_NOTICE in fixed  # AI 표시는 다시 붙는다
+    found = _tags_in(fixed)
+    assert found.count("ai직원") == 1 and found.count("axcellent") == 1
+    assert 3 <= len(found) <= 5
+
+
+def test_few_tags_still_give_at_least_three_hashtags() -> None:
+    _t, body, _ = yt._clean("제목", "본문", ["공백 있는 태그", "#!?"])  # noqa: SLF001
+    assert _tags_in(body) == ["axcellent", "ai직원", "ai"]
+
+
+def test_long_description_keeps_the_notice_and_hashtags() -> None:
+    _t, body, _ = yt._clean("제목", "가" * 6000, ["업무자동화"])  # noqa: SLF001
+    assert len(body) <= 5000 and yt.AI_NOTICE in body and "#업무자동화" in body
+
+
+def test_draft_description_carries_hashtags(env: dict[str, Any]) -> None:
+    draft = _run(lambda: yt.write_draft(env["rid"], lambda: None, "ctx"))
+    found = _tags_in(draft["description"])
+    assert 3 <= len(found) <= 5 and len(set(found)) == len(found)
+    assert yt.AI_NOTICE in draft["description"]
+
+
+def test_app_values_fall_back_to_env_in_db_mode(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """db 모드에 앱 값(클라이언트 ID·비밀)이 없으면 .env 값을 쓴다. 연결 값은 회사 것만."""
+    store = {("catbooks", yt.KEYS[2]): "DUMMY-REFRESH"}
+
+    def fake(name: str, *, tenant: str | None = None, **_: object) -> str:
+        return store.get((tenant, name), "")
+
+    import ax_secret_store
+
+    monkeypatch.setattr(ax_secret_store, "get_secret", fake)
+    from ax_agent_template import company_ai
+
+    monkeypatch.setattr(company_ai, "company_id", lambda: "catbooks")
+    assert yt._secret(yt.KEYS[0]) == f"DUMMY-{yt.KEYS[0]}"  # noqa: SLF001 - env 값
+    assert yt._secret(yt.KEYS[2]) == "DUMMY-REFRESH"  # noqa: SLF001
+    monkeypatch.setattr(company_ai, "company_id", lambda: "nubi")
+    assert yt._secret(yt.KEYS[2]) == ""  # noqa: SLF001 - 다른 회사 연결 값은 env로 대신하지 않는다

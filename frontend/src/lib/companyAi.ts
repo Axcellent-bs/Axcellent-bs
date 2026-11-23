@@ -10,10 +10,10 @@ export type Tone = "ok" | "wait" | "bad" | "off";
 export type KeyName =
   | "LLM_API_KEY" | "DEV_CODER_LLM_API_KEY" | "MARKETING_VIDEO_API_KEY"
   // SNS 계정 연결(회사마다 다름, 11/23)
-  | "MARKETING_IG_ACCESS_TOKEN" | "MARKETING_IG_USER_ID" | "MARKETING_YOUTUBE_REFRESH_TOKEN";
+  | "MARKETING_IG_ACCESS_TOKEN" | "MARKETING_IG_USER_ID" | "MARKETING_YOUTUBE_REFRESH_TOKEN" | "MARKETING_HIGGSFIELD_API_KEY";
 export const KEY_NAMES: readonly KeyName[] = [
   "LLM_API_KEY", "DEV_CODER_LLM_API_KEY", "MARKETING_VIDEO_API_KEY",
-  "MARKETING_IG_ACCESS_TOKEN", "MARKETING_IG_USER_ID", "MARKETING_YOUTUBE_REFRESH_TOKEN",
+  "MARKETING_IG_ACCESS_TOKEN", "MARKETING_IG_USER_ID", "MARKETING_YOUTUBE_REFRESH_TOKEN", "MARKETING_HIGGSFIELD_API_KEY",
 ];
 
 export type CoderMode = "company" | "separate";
@@ -278,10 +278,18 @@ export function videoView(hasKey: boolean, enabled: boolean): { tone: Tone; labe
   return enabled ? { tone: "ok", label: "켜짐" } : { tone: "off", label: "꺼짐" };
 }
 
+/** 유튜브 동의에서 돌아온 주소의 `#` 뒤(youtube_code·youtube_state). 둘 다 있어야 마치기를 부른다 */
+export function readYoutubeReturn(hash: string): { code: string; state: string } | null {
+  const p = new URLSearchParams(hash.replace(/^#/, ""));
+  const code = p.get("youtube_code") ?? "";
+  const state = p.get("youtube_state") ?? "";
+  return code && state && code.length <= 2000 && state.length <= 2000 ? { code, state } : null;
+}
+
 export const keyHintKo = (hint: string) => (hint ? `••••${hint}` : "—");
 export const KEY_LABEL: Record<KeyName, string> = {
   LLM_API_KEY: "회사 AI 키", DEV_CODER_LLM_API_KEY: "코딩 에이전트 키", MARKETING_VIDEO_API_KEY: "영상 생성 키",
-  MARKETING_IG_ACCESS_TOKEN: "인스타 토큰", MARKETING_IG_USER_ID: "인스타 계정 ID", MARKETING_YOUTUBE_REFRESH_TOKEN: "유튜브 채널 연결",
+  MARKETING_IG_ACCESS_TOKEN: "인스타 토큰", MARKETING_IG_USER_ID: "인스타 계정 ID", MARKETING_YOUTUBE_REFRESH_TOKEN: "유튜브 채널 연결", MARKETING_HIGGSFIELD_API_KEY: "Higgsfield 키",
 };
 const keyLabel = (name?: string) => (name && KEY_LABEL[name as KeyName]) || name || "키";
 const OP_LABEL: Record<string, string> = { add: "등록", replace: "교체", delete: "삭제" };

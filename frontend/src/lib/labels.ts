@@ -133,3 +133,11 @@ export const tenantName = (id: string | undefined | null): string => (id ? TENAN
 export const TRIAGE_REASON_KO: Record<string, string> = {
   no_error_code: "오류 코드 없음", unclassified: "분류에 안 맞음", manual: "상담원이 올림",
 };
+
+/** 지급 기록의 주문 취소 결과 (#1591): 취소 클레임 지급 때 판매 서버가 주문도 취소했는지.
+ * 값이 없으면(옛 기록·반품·교환 지급) 아무것도 적지 않는다. */
+export const paidOrderNote = (detail: Record<string, unknown>): string | null => {
+  if (detail.order_cancelled === true) return "주문 취소됨";
+  if (detail.order_cancelled === false) return "주문은 취소되지 않음(발송 뒤·부분 환불)";
+  return null;
+};

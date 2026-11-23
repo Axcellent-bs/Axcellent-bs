@@ -1466,3 +1466,28 @@ def test_the_read_only_reason_is_config_for_the_switch(monkeypatch: pytest.Monke
     assert shop_client.read_only_reason() is None
     monkeypatch.setenv(shop_client.ENV_MODE, "read")
     assert shop_client.read_only_reason() == "config"
+
+
+@pytest.mark.asyncio
+async def test_site_adapter_pending_human_writes_do_not_break_the_client() -> None:
+    """사이트 변환기는 신청 결과·문의 화면 값을 할 일함에 넣고 200 + `applied`로 답한다.
+
+    돈과 상관없는 되돌려 쓰기라 고객지원은 예전처럼 성공으로 받고 넘어간다(사람이 사이트에 반영).
+    """
+    data = {"ok": True, "applied": "pending_human", "handoff_task_id": "hof_1"}
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"data": data, "meta": {"source": "site_adapter"}})
+
+    shop_client.use_client(httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    try:
+        await shop_client.write_claim_result(1, 7, "approved", {})
+        await shop_client.write_inquiry_view(1, {}, "d")
+    finally:
+        shop_client.use_client(None)
+    assert [r.url.path for r in requests] == [
+        "/api/shop/admin/claims/1/result",
+        "/api/shop/admin/inquiries/1/view",
+    ]
