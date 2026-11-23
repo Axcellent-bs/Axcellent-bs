@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Skeleton } from "@/components/finance/bits";
 import { useAuthedMedia } from "@/lib/authedMedia";
 import { shortDateTime } from "@/lib/format";
 import { listRequestVideos, requestVideoPreviewUrl } from "@/lib/requestVideos";
-import { AI_LABEL_NOTE_KO, VIDEOS_EMPTY_KO, durationKo, requestFilterOf, sortForRequest, statusKo, videoPane, type RequestVideo } from "@/lib/requestVideoView";
+import { AI_LABEL_NOTE_KO, REQUEST_VIDEOS_PATH, VIDEOS_EMPTY_KO, canUploadToYoutube, durationKo, requestFilterOf, sortForRequest, statusKo, videoPane, type RequestVideo } from "@/lib/requestVideoView";
+import { YoutubePanel } from "./YoutubePanel";
 
-// SNS·미디어 › 의뢰로 만든 영상. 총괄 홍보 영상 의뢰(wr_…)가 만든 reel 초안 중 AI 라벨을 입힌 영상을 본다.
-// 읽기만 한다. 게시·승인은 기획안 카드의 승인 패널에서 한다. ?request=wr_… 이면 그 의뢰 영상을 맨 앞에 두고 강조한다.
+// 제작 기록 › 의뢰로 만든 영상 (/marketing/records?view=videos). 총괄 홍보 영상 의뢰(wr_…)가 만든 reel 초안 중
+// AI 라벨을 입힌 영상을 본다. 영상마다 회사 유튜브에 올릴 수 있다(AI 제목·설명 초안 → 사람 승인 C → 올리기).
+// Instagram 게시·승인은 기획안 카드의 승인 패널에서 한다. ?request=wr_… 이면 그 의뢰 영상을 맨 앞에 두고 강조한다.
 
 function Player({ v }: { v: RequestVideo }) {
   const url = requestVideoPreviewUrl(v.post_draft_id);
@@ -17,7 +19,7 @@ function Player({ v }: { v: RequestVideo }) {
   return <video className="max-h-96 rounded-xl bg-black" src={src} controls preload="metadata" aria-label="AI 표시가 들어간 영상" />;
 }
 
-function Item({ v, focus }: { v: RequestVideo; focus: boolean }) {
+function Item({ v, focus, onChanged }: { v: RequestVideo; focus: boolean; onChanged: () => void }) {
   const pane = videoPane(v);
   return (
     <li className={`space-y-2 px-4 py-3 text-xs ${focus ? "bg-brand-50" : ""}`} aria-current={focus ? "true" : undefined}>
@@ -29,6 +31,9 @@ function Item({ v, focus }: { v: RequestVideo; focus: boolean }) {
       </div>
       {v.caption_ko && <p className="whitespace-pre-line break-words text-sm text-ink-900">{v.caption_ko}</p>}
       {pane.kind === "play" ? <Player v={v} /> : <p className="rounded-xl bg-ink-50 px-3 py-2 text-ink-700">{pane.text}</p>}
+      {canUploadToYoutube(v)
+        ? <YoutubePanel requestVideoId={v.post_draft_id} youtube={v.youtube} onChanged={onChanged} />
+        : <p className="text-ink-500">AI 표시가 입혀진 뒤에 회사 유튜브에 올릴 수 있어요.</p>}
     </li>
   );
 }
@@ -38,31 +43,33 @@ export function RequestVideos() {
   const requestId = requestFilterOf(params.get("request"));
   const [items, setItems] = useState<RequestVideo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    setItems(null);
-    setError(null);
-    listRequestVideos(requestId).then(
-      (x) => live && setItems(x),
-      (e: unknown) => live && setError(e instanceof Error ? e.message : "의뢰로 만든 영상을 읽지 못했어요"),
-    );
-    return () => { live = false; };
+  const load = useCallback(async () => {
+    try {
+      setItems(await listRequestVideos(requestId));
+      setError(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "의뢰로 만든 영상을 읽지 못했어요");
+    }
   }, [requestId]);
+  useEffect(() => {
+    setItems(null);
+    void load();
+  }, [load]);
 
   return (
-    <section id="request-videos" className="card space-y-4 p-6" aria-labelledby="request-videos-h">
+    <section id="request-videos" className="space-y-4" aria-labelledby="request-videos-h">
       <div>
         <h2 id="request-videos-h" className="text-lg font-semibold">의뢰로 만든 영상</h2>
-        <p className="mt-1 text-xs text-ink-500">총괄에 맡긴 홍보 영상 의뢰가 만든 SNS 영상 초안입니다. AI 표시가 입혀진 영상만 재생하고, 게시는 하지 않습니다. {AI_LABEL_NOTE_KO}</p>
+        <p className="mt-1 text-xs text-ink-500">총괄에 맡긴 홍보 영상 의뢰가 만든 SNS 영상 초안입니다. AI 표시가 입혀진 영상만 재생하고, 회사 유튜브에는 사람 승인을 거쳐 그 영상 그대로 올라갑니다. {AI_LABEL_NOTE_KO}</p>
         {requestId && (
-          <p className="mt-1 text-xs text-ink-700">의뢰 <span className="font-mono">{requestId}</span>의 영상을 보고 있어요. <Link to="/marketing/sns" className="underline">전체 보기</Link></p>
+          <p className="mt-1 text-xs text-ink-700">의뢰 <span className="font-mono">{requestId}</span>의 영상을 보고 있어요. <Link to={REQUEST_VIDEOS_PATH} className="underline">전체 보기</Link></p>
         )}
       </div>
       {error ? <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{error}</p>
         : items === null ? <Skeleton stats={0} lines={2} />
           : items.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">{requestId ? "이 의뢰로 만든 영상이 아직 없어요." : VIDEOS_EMPTY_KO}</p> : (
             <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100" aria-label="의뢰로 만든 영상 목록">
-              {sortForRequest(items, requestId).map((v) => <Item key={v.post_draft_id} v={v} focus={!!requestId && v.request_id === requestId} />)}
+              {sortForRequest(items, requestId).map((v) => <Item key={v.post_draft_id} v={v} focus={!!requestId && v.request_id === requestId} onChanged={() => void load()} />)}
             </ul>
           )}
     </section>

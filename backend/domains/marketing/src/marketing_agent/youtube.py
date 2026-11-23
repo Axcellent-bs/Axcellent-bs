@@ -384,6 +384,36 @@ def _body(cur: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def send_video(cur: dict[str, Any], data: bytes) -> str:
+    """승인된 초안(`cur`)대로 mp4 바이트를 resumable upload로 올리고 video_id를 돌려준다.
+
+    제작 기록과 의뢰로 만든 영상(`request_video_youtube`)이 같이 쓴다. 실패는 YoutubeError.
+    """
+    async with CLIENT() as client:
+        token = await _access_token(client)
+        start = await client.post(
+            UPLOAD_URL,
+            params={"uploadType": "resumable", "part": "snippet,status"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Upload-Content-Type": "video/mp4",
+                "X-Upload-Content-Length": str(len(data)),
+            },
+            json=_body(cur),
+        )
+        if start.status_code >= 400 or not start.headers.get("location"):
+            raise YoutubeError(f"upload_start_http_{start.status_code}")
+        sent = await client.put(
+            start.headers["location"], content=data, headers={"Content-Type": "video/mp4"}
+        )
+        if sent.status_code >= 400:
+            raise YoutubeError(f"upload_http_{sent.status_code}")
+        video_id = sent.json().get("id")
+        if not video_id:
+            raise YoutubeError("upload_no_id")
+        return str(video_id)
+
+
 async def _upload(record_id: str) -> None:
     cur = _get(record_id)
     part = cur.get("part") or "video"
@@ -394,28 +424,7 @@ async def _upload(record_id: str) -> None:
             raise YoutubeError("video_not_ready")
         # 같은 기록 폴더(creative/<기록>/)의 파일만 읽는다(직접 올린 완성 영상은 final.mp4)
         data = (_render.asset_path(record_id, "video").parent / name).read_bytes()
-        async with CLIENT() as client:
-            token = await _access_token(client)
-            start = await client.post(
-                UPLOAD_URL,
-                params={"uploadType": "resumable", "part": "snippet,status"},
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "X-Upload-Content-Type": "video/mp4",
-                    "X-Upload-Content-Length": str(len(data)),
-                },
-                json=_body(cur),
-            )
-            if start.status_code >= 400 or not start.headers.get("location"):
-                raise YoutubeError(f"upload_start_http_{start.status_code}")
-            sent = await client.put(
-                start.headers["location"], content=data, headers={"Content-Type": "video/mp4"}
-            )
-            if sent.status_code >= 400:
-                raise YoutubeError(f"upload_http_{sent.status_code}")
-            video_id = sent.json().get("id")
-            if not video_id:
-                raise YoutubeError("upload_no_id")
+        video_id = await send_video(cur, data)
     except Exception as error:  # noqa: BLE001 - 어떤 실패든 기록에 남긴다(올리는 중으로 멈추지 않게)
         code = str(error) if isinstance(error, YoutubeError) else type(error).__name__
         logger.warning("youtube upload 실패: %s (%s)", code, record_id)

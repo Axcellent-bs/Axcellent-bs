@@ -52,6 +52,9 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeYoutubeDraftInput,
     CreativeYoutubeOutput,
     CreativeYoutubeRequestInput,
+    RequestVideoYoutubeDraftInput,
+    RequestVideoYoutubeOutput,
+    RequestVideoYoutubeRequestInput,
     YoutubeStatusOutput,
 )
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
@@ -74,6 +77,7 @@ from marketing_agent import character_sheet as _character_sheet
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import higgsfield_status as _higgsfield_status
+from marketing_agent import request_video_youtube as _request_youtube
 from marketing_agent import storyboard as _storyboard
 from marketing_agent import youtube as _youtube
 from marketing_agent.brief_handoff import (
@@ -1611,7 +1615,68 @@ async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentRes
 
 
 async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
-    return await request_video.list_request_videos(request, STATE.sns)
+    """의뢰 영상 목록. 유튜브 승인 대기는 관문을 다시 묻고, 항목마다 유튜브 상태를 붙인다."""
+    await _request_youtube.refresh(request.meta, STATE.sns)
+    result = await request_video.list_request_videos(request, STATE.sns)
+    if result.status != TaskStatus.COMPLETED or not result.output:
+        return result
+    items = _request_youtube.attach_states(list(result.output.get("items") or []))
+    return result.model_copy(update={"output": result.output | {"items": items}})
+
+
+async def request_video_youtube_draft(request: AgentRequest) -> AgentResult:
+    """의뢰로 만든 영상의 유튜브 제목·설명·태그 초안(AI) 또는 사람이 고친 값 저장. 올리지 않는다."""
+    from marketing_agent.chat import default_llm
+
+    data = _parse(request, RequestVideoYoutubeDraftInput)
+    if isinstance(data, AgentResult):
+        return data
+    edits = data.model_dump(include={"title", "description", "tags", "privacy"})
+    try:
+        youtube = await _request_youtube.write_draft(
+            STATE.sns,
+            data.post_draft_id,
+            YOUTUBE_LLM or default_llm,
+            request.meta.context_id,
+            edits=edits,
+            regenerate=data.regenerate,
+        )
+    except _request_youtube.YoutubeError as error:
+        return _youtube_failed(request, error)
+    return _request_youtube_done(request, data.post_draft_id, youtube, "초안")
+
+
+async def request_video_youtube_request(request: AgentRequest) -> AgentResult:
+    """의뢰 영상(AI 라벨 입힌 파일)의 유튜브 올리기를 사람 승인(C publish_youtube)에 올린다."""
+    data = _parse(request, RequestVideoYoutubeRequestInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        youtube = await _request_youtube.request_upload(
+            request.meta, STATE.sns, data.post_draft_id, data.who
+        )
+    except _request_youtube.YoutubeError as error:
+        return _youtube_failed(request, error)
+    return _request_youtube_done(request, data.post_draft_id, youtube, "올리기 요청")
+
+
+def _request_youtube_done(
+    request: AgentRequest, post_draft_id: str, youtube: dict[str, Any], what: str
+) -> AgentResult:
+    request_id = youtube.get("request_id")
+    out = RequestVideoYoutubeOutput(
+        post_draft_id=post_draft_id, request_id=request_id, youtube=youtube
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill],
+            f"의뢰 영상 유튜브 {what} {post_draft_id}: {youtube.get('status')}",
+            [],
+        ),
+    )
 
 
 async def draft_outage_sns_post_skill(request: AgentRequest) -> AgentResult:
@@ -1992,6 +2057,8 @@ HANDLERS = {
     "draft_outage_sns_post": draft_outage_sns_post_skill,
     "list_outage_sns_drafts": list_outage_sns_drafts_skill,
     "list_request_videos": list_request_videos_skill,
+    "request_video_youtube_draft": request_video_youtube_draft,
+    "request_video_youtube_request": request_video_youtube_request,
     "merge_outage_sns_drafts": merge_outage_sns_drafts_skill,
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,

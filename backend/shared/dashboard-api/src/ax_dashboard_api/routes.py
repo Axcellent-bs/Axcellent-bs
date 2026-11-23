@@ -1643,6 +1643,41 @@ async def marketing_youtube_request(
     return ok(await marketing_client.youtube_request_call(record_id, who))
 
 
+class RequestVideoYoutubeDraftBody(BaseModel):
+    """의뢰로 만든 영상의 유튜브 초안. 비운 칸은 그대로 둔다(올릴 영상은 늘 AI 라벨 입힌 파일)."""
+
+    regenerate: bool = False
+    title: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=5000)
+    tags: list[str] | None = Field(default=None, max_length=15)
+    privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
+
+
+@router.post("/marketing/request-videos/{post_draft_id}/youtube/draft")
+async def marketing_request_video_youtube_draft(
+    body: RequestVideoYoutubeDraftBody,
+    request: Request,
+    post_draft_id: str = Path(pattern=_DRAFT_ID),
+) -> dict:
+    """의뢰로 만든 영상의 AI 유튜브 제목·설명·태그 초안 또는 사람이 고친 값 저장. 사람 토큰."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "유튜브 초안은 실제 모드에서만 된다")
+    human_from_authorization(request.headers.get("authorization"))
+    payload = body.model_dump(exclude_none=True)
+    return ok(await marketing_client.request_video_youtube_draft_call(post_draft_id, payload))
+
+
+@router.post("/marketing/request-videos/{post_draft_id}/youtube")
+async def marketing_request_video_youtube_request(
+    request: Request, post_draft_id: str = Path(pattern=_DRAFT_ID)
+) -> dict:
+    """의뢰로 만든 영상(AI 라벨 입힌 파일)의 유튜브 올리기를 사람 승인(C publish_youtube)에."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "유튜브 올리기는 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.request_video_youtube_request_call(post_draft_id, who))
+
+
 class MarketingChatSendBody(BaseModel):
     thread_id: str | None = Field(default=None, min_length=1, max_length=64)
     message: str = Field(min_length=1, max_length=2000)
