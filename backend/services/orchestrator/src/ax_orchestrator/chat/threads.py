@@ -18,6 +18,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from ax_agent_template import company_scope as request_company
 from ax_orchestrator import company_scope
 
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
@@ -265,17 +266,33 @@ class ChatStore:
         return [r["id"] for r in rows]
 
 
-_store: ChatStore | None = None
+_store: ChatStore | None = None  # 기본 회사(catbooks)의 대화 저장소. 요청 밖은 늘 이것
+_company_stores: dict[str, ChatStore] = {}  # 기본 회사 밖 회사 ID → 그 회사 대화 저장소
+
+
+def _path() -> str:
+    path = os.getenv("ORCHESTRATOR_CHAT_DB", "").strip()
+    state_file = os.getenv("ORCHESTRATOR_DB", "").strip()
+    if not path and state_file and state_file != ":memory:":
+        path = os.path.join(os.path.dirname(os.path.abspath(state_file)), FILE_NAME)
+    return path
 
 
 def get_store() -> ChatStore:
+    """지금 요청 회사의 대화 저장소 (여러 회사 5단계). 요청 밖이면 기본 회사(catbooks) 것.
+
+    회사마다 같은 파일을 가리키되 저장소가 `tenant_id` 칸으로 그 회사 대화만 본다.
+    """
     global _store
+    cid = request_company.active()
+    if cid is not None and cid != company_scope.TENANT_ID_CATBOOKS:
+        found = _company_stores.get(cid)
+        if found is None:
+            found = _company_stores[cid] = ChatStore(_path(), company_id=cid)
+            found.recover_orphans()
+        return found
     if _store is None:
-        path = os.getenv("ORCHESTRATOR_CHAT_DB", "").strip()
-        state_file = os.getenv("ORCHESTRATOR_DB", "").strip()
-        if not path and state_file and state_file != ":memory:":
-            path = os.path.join(os.path.dirname(os.path.abspath(state_file)), FILE_NAME)
-        _store = ChatStore(path)
+        _store = ChatStore(_path())
         _store.recover_orphans()
     return _store
 
