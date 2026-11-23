@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import threading
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -51,6 +52,10 @@ CATBOOKS = Company(
 
 logger = logging.getLogger("ax.companies")
 _legacy_warned = False
+# 회사 목록 파일에서 "회사가 정확히 하나"인지 본 결과의 캐시.
+# 열쇠는 (경로, mtime_ns, 크기). mtime만으로는 거친 시계(Windows)에서 바뀐 걸 놓친다
+_single_cache: tuple[tuple[str, int, int], str | None] | None = None
+_single_lock = threading.Lock()
 
 
 def canonical_company_id(value: Any) -> str | None:
@@ -134,6 +139,29 @@ def _env_default() -> str | None:
     return cid
 
 
+def _single_company_in_file(path: Path | None) -> str | None:
+    """목록 파일에 회사가 정확히 하나면 그 id, 아니면 None. 파일이 안 바뀌었으면 다시 읽지 않는다
+    (경로·mtime_ns·크기가 같으면 캐시). 파일이 없으면 stat만 하고 캐시하지 않는다."""
+    global _single_cache
+    if path is None:
+        return None
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    with _single_lock:
+        cached = _single_cache
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    rows = _read_rows(path)
+    found = _valid_companies(rows, path) if rows is not None else []
+    result = found[0].company_id if len(found) == 1 else None
+    with _single_lock:
+        _single_cache = (key, result)
+    return result
+
+
 def default_company_id() -> str:
     """이 설치의 기본 회사 ID(정식 id). 절대 raise하지 않는다.
 
@@ -144,12 +172,9 @@ def default_company_id() -> str:
     cid = _env_default()
     if cid is not None:
         return cid
-    path = companies_file()
-    rows = _read_rows(path) if path is not None else None
-    if rows is not None:
-        found = _valid_companies(rows, path)
-        if len(found) == 1:
-            return found[0].company_id
+    single = _single_company_in_file(companies_file())
+    if single is not None:
+        return single
     if not _legacy_warned:
         _legacy_warned = True
         logger.warning(

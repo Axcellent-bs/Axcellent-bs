@@ -235,6 +235,8 @@ def test_a_new_account_without_a_company_joins_the_default_company(client, tmp_p
 def test_the_default_company_follows_the_install_setting(client, tmp_path, monkeypatch) -> None:
     _two_companies(tmp_path)
     monkeypatch.setenv(company_list.DEFAULT_COMPANY_ENV, "nubi")
+    # 운영자 토큰은 회사 칸이 없는 옛 토큰이라 AX_LEGACY_COMPANY를 따른다(기본 회사가 아니라)
+    monkeypatch.setenv("AX_LEGACY_COMPANY", "nubi")
     op = _login(client)["token"]
     data = _make(client, op, "member", "m@example.com")
     assert data["companies"] == [{"company_id": "nubi", "role": "member"}]

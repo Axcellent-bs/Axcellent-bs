@@ -5,6 +5,7 @@
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -179,6 +180,7 @@ def test_company_path_refuses_names_that_leave_the_folder(data: Path, bad: str) 
 def clean_default(data: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv(companies.DEFAULT_COMPANY_ENV, raising=False)
     monkeypatch.setattr(companies, "_legacy_warned", False)
+    monkeypatch.setattr(companies, "_single_cache", None)
     return data
 
 
@@ -224,4 +226,79 @@ def test_default_env_beats_single_company_list(
 
 def test_default_two_companies_uses_legacy(clean_default: Path) -> None:
     _write(clean_default / "companies.json", [ROW_A, {**ROW_A, "company_id": "other-co"}])
+    assert companies.default_company_id() == "catbooks"
+
+
+# --- 목록 파일 읽기 캐시 ---
+
+
+def _count_reads(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    reads: list[Path] = []
+    real = companies._read_rows
+
+    def spy(path: Path):  # noqa: ANN202
+        reads.append(path)
+        return real(path)
+
+    monkeypatch.setattr(companies, "_read_rows", spy)
+    return reads
+
+
+def test_default_cache_hit_does_not_reread(
+    clean_default: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(clean_default / "companies.json", [ROW_A])
+    reads = _count_reads(monkeypatch)
+    assert [companies.default_company_id() for _ in range(3)] == ["nubi"] * 3
+    assert len(reads) == 1
+
+
+def test_default_cache_invalidated_by_size_change(
+    clean_default: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = clean_default / "companies.json"
+    _write(path, [ROW_A])
+    reads = _count_reads(monkeypatch)
+    assert companies.default_company_id() == "nubi"
+    before = path.stat()
+    _write(path, [{**ROW_A, "company_id": "other-co"}])  # 글자 수가 달라진다
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))  # mtime은 그대로
+    assert path.stat().st_size != before.st_size
+    assert companies.default_company_id() == "other-co"
+    assert len(reads) == 2
+
+
+def test_default_cache_invalidated_by_mtime_ns_change(
+    clean_default: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = clean_default / "companies.json"
+    _write(path, [ROW_A])
+    reads = _count_reads(monkeypatch)
+    assert companies.default_company_id() == "nubi"
+    before = path.stat()
+    _write(path, [{**ROW_A, "company_id": "nubo"}])  # 같은 크기
+    assert path.stat().st_size == before.st_size
+    os.utime(
+        path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000)
+    )  # 윈도 시계 단위(100ns)보다 크게
+    assert companies.default_company_id() == "nubo"
+    assert len(reads) == 2
+
+
+def test_default_env_still_wins_over_cached_file(
+    clean_default: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(clean_default / "companies.json", [ROW_A])
+    assert companies.default_company_id() == "nubi"  # 캐시를 채운다
+    monkeypatch.setenv(companies.DEFAULT_COMPANY_ENV, "catbooks")
+    assert companies.default_company_id() == "catbooks"
+    monkeypatch.delenv(companies.DEFAULT_COMPANY_ENV)
+    assert companies.default_company_id() == "nubi"
+
+
+def test_default_cache_follows_file_removal(clean_default: Path) -> None:
+    path = clean_default / "companies.json"
+    _write(path, [ROW_A])
+    assert companies.default_company_id() == "nubi"
+    path.unlink()
     assert companies.default_company_id() == "catbooks"
