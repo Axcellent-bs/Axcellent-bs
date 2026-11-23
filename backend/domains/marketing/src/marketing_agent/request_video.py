@@ -205,8 +205,11 @@ async def attach_label_after_generate(
     process: Process = _convert_and_label,
     preflight: Callable[[], str | None] = preflight_tools,
     check: Check = sns.check_sns_post,
+    covers: Callable[[SnsStore, str], dict[str, Any]] | None = None,
 ) -> AgentResult:
-    """`generate_media` 결과에 필요하면 라벨·초안 연결 사실을 덧붙인다(생성 결과는 그대로)."""
+    """`generate_media` 결과에 필요하면 라벨·초안 연결 사실을 덧붙인다(생성 결과는 그대로).
+
+    초안이 `draft_ready`면 썸네일 후보 3장도 만든다(`request_video_cover.make_covers`)."""
     if (
         result.outcome != "generated"
         or result.output is None
@@ -232,7 +235,19 @@ async def attach_label_after_generate(
         )
     except Exception as error:  # noqa: BLE001 - 생성은 끝났다. 라벨 실패 사실만 알린다
         extra = _label_failed(type(error).__name__)
+    if extra.get("draft_stage") == "draft_ready":  # 초안이 준비되면 썸네일 후보 3장(크레딧 0)
+        try:
+            maker = covers or _default_covers
+            extra = extra | await asyncio.to_thread(maker, store, draft_id)
+        except Exception as error:  # noqa: BLE001 - 후보를 못 만들어도 영상·초안은 그대로
+            extra = extra | {"covers_skipped": type(error).__name__}
     return result.model_copy(update={"output": result.output | extra})
+
+
+def _default_covers(store: SnsStore, post_draft_id: str) -> dict[str, Any]:
+    from marketing_agent.request_video_cover import make_covers  # 순환 import를 피한다
+
+    return make_covers(store, post_draft_id)
 
 
 # --- 의뢰 영상 목록 --------------------------------------------------------------
@@ -312,7 +327,20 @@ def _item(root: Path, draft: SnsPostDraft, created_at: datetime) -> dict[str, An
         "status": status,
         # 파일 확인용(dashboard-api가 읽고 응답에서 뺀다). 라벨 없는 파일은 넣지 않는다
         "prepared": prepared,
+    } | _covers_of(draft, prepared is not None)
+
+
+def _covers_of(draft: SnsPostDraft, labeled: bool) -> dict[str, Any]:
+    """썸네일 후보(covers[{media_id, at_s}])·고른 것. 라벨 영상이 아니면 후보를 보이지 않는다."""
+    from marketing_agent.request_video_cover import public  # 순환 import를 피한다
+
+    if not labeled:
+        return {"covers": [], "cover_media_id": None, "cover_picked": False, "cover_files": {}}
+    files = {  # 파일 확인용(dashboard-api가 읽고 응답에서 뺀다)
+        str(c.get("media_id")): {"asset_ref": c.get("asset_ref"), "asset_sha256": c.get("sha256")}
+        for c in draft.cover_candidates
     }
+    return public(draft) | {"cover_files": files}
 
 
 async def list_request_videos(request: AgentRequest, store: SnsStore) -> AgentResult:

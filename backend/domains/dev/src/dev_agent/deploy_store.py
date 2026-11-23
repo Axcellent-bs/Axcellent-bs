@@ -385,6 +385,26 @@ class DeployStore:
     def get(self, dep_id: str) -> Deployment | None:
         return next((d for d in self.deployments if d.id == dep_id), None)
 
+    def verify_request(
+        self, rid: str, service: str, version: str, approved_by: str | None
+    ) -> tuple[bool, str, Deployment | None]:
+        """infra `deploy_version`(B) 교차검증 (read). (승인 여부, 이유 코드, 찾은 기록).
+
+        요청 id(배포 id + 고유 꼬리)로 기록을 찾고, 사람이 승인한(`approved`) 기록인지, 승인자·
+        서비스·버전이 기록과 같은지 코드로 본다. 하나라도 다르면 거절한다 (상태는 바꾸지 않는다).
+        """
+        dep = next((d for d in self.deployments if request_id(d) == rid), None)
+        if dep is None:
+            return False, "deploy_not_found", None
+        if dep.status != "approved":
+            return False, "deploy_not_approved", dep
+        recorded = (dep.approved_by or "").strip()
+        if not recorded or recorded != (approved_by or "").strip():
+            return False, "approver_mismatch", dep
+        if service_version(dep.version) != (service, version):
+            return False, "target_mismatch", dep
+        return True, "deploy_approved", dep
+
     def latest_check(self, dep_id: str) -> PostDeployCheck | None:
         rows = self.checks.get(dep_id) or []
         return rows[-1] if rows else None

@@ -23,6 +23,21 @@ export interface RequestVideo {
   status: string;
   /** 이 영상의 유튜브 올리기 상태(제작 기록 render.youtube와 같은 모양). 아직 없으면 null */
   youtube?: YoutubeState | null;
+  /** 썸네일 후보 3장(라벨 입힌 영상에서 뽑은 AI 표시 포함 그림). 라벨 없는 영상은 빈 목록 */
+  covers?: RequestVideoCover[];
+  /** 고른 후보, 고르지 않았으면 첫 후보(기본값). 후보가 없으면 null */
+  cover_media_id?: string | null;
+  /** 사람이 직접 골랐나(false면 첫 후보가 기본값) */
+  cover_picked?: boolean;
+  /** 승인 대기·승인됨(게시 전)인 게시·유튜브 요청이 있나. 있으면 썸네일을 바꾸기 전에 확인을 묻는다 */
+  approval_waiting?: boolean;
+}
+
+/** 썸네일 후보 한 장 (백엔드 request_video_cover.public) */
+export interface RequestVideoCover {
+  media_id: string;
+  /** 영상에서 뽑은 시각(초) */
+  at_s: number | null;
 }
 
 export const REQUEST_ID = /^wr_[0-9a-f]{10}$/;
@@ -65,6 +80,54 @@ export const sortForRequest = (items: RequestVideo[], requestId: string | null):
 
 export const VIDEOS_EMPTY_KO = "아직 영상이 없어요. 홍보 영상 의뢰가 끝나면 여기에 나타나요.";
 export const AI_LABEL_NOTE_KO = "이 영상은 AI가 만들었어요. AI 기본법에 따라 영상 파일과 게시 글에 AI 생성 표시가 들어가며, 게시는 사람 승인(C 등급)을 거쳐요.";
+
+// ---- 썸네일 후보 3장 → 사람이 고르기 (11/23)
+
+export const COVER_CONFIRM_KO = "썸네일을 바꾸면 게시 승인을 다시 받아야 해요.";
+export const VIDEO_NOT_FOUND_KO = "이 의뢰의 영상을 아직 찾지 못했어요. 영상 제작이 끝났는지 의뢰 진행을 확인해 주세요.";
+export const COVER_ID = /^cov_[0-9a-f]{12}$/;
+
+export interface CoverCell {
+  media_id: string;
+  /** "0:03" 같은 영상 속 시각 (모르면 빈 글자) */
+  at: string;
+  /** 지금 정해진 썸네일(체크 표시) */
+  chosen: boolean;
+  /** 화면에서 눌러 둔 후보(아직 [이걸로 정하기] 전) */
+  selected: boolean;
+}
+
+const clock = (s: number | null | undefined) => {
+  if (s == null || !Number.isFinite(s) || s < 0) return "";
+  const whole = Math.floor(s);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+};
+
+/** 후보 칸: 형식이 맞는 후보만, 지금 정해진 것은 chosen, 눌러 둔 것은 selected (기본은 정해진 것) */
+export function coverCells(v: Pick<RequestVideo, "covers" | "cover_media_id">, selected: string | null): CoverCell[] {
+  const covers = (v.covers ?? []).filter((c) => COVER_ID.test(c.media_id));
+  const chosen = covers.some((c) => c.media_id === v.cover_media_id) ? v.cover_media_id : covers[0]?.media_id ?? null;
+  const pick = selected && covers.some((c) => c.media_id === selected) ? selected : chosen;
+  return covers.map((c) => ({ media_id: c.media_id, at: clock(c.at_s), chosen: c.media_id === chosen, selected: c.media_id === pick }));
+}
+
+/** [이걸로 정하기]를 누를 수 있나: 눌러 둔 후보가 지금 정해진 것과 다를 때, 또는 아직 사람이 고르지 않았을 때 */
+export function canCommitCover(cells: CoverCell[], picked: boolean): boolean {
+  const sel = cells.find((c) => c.selected);
+  return !!sel && (!sel.chosen || !picked);
+}
+
+/** 바꾸기 전에 확인 상자를 띄우나: 다른 후보로 바꾸고, 승인 대기·승인된 요청이 있을 때 */
+export function needsCoverConfirm(cells: CoverCell[], v: Pick<RequestVideo, "approval_waiting">): boolean {
+  const sel = cells.find((c) => c.selected);
+  return !!sel && !sel.chosen && v.approval_waiting === true;
+}
+
+/** ?request=로 들어왔을 때 표시할 카드: 그 의뢰의 가장 최근 영상 번호, 목록에 없으면 null */
+export function focusDraftId(items: Pick<RequestVideo, "post_draft_id" | "request_id">[], requestId: string | null): string | null {
+  if (!requestId) return null;
+  return items.find((v) => v.request_id === requestId)?.post_draft_id ?? null;
+}
 
 /** 유튜브 칸을 보여 줄 수 있나: AI 표시를 입힌 영상(재생되는 영상)만 올릴 수 있다 */
 export const canUploadToYoutube = (v: Pick<RequestVideo, "labeled" | "preview_path" | "status">): boolean => videoPane(v).kind === "play";

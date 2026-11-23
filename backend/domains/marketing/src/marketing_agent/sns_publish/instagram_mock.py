@@ -59,6 +59,7 @@ class _Container:
 class MockInstagramAdapter:
     name = "mock"
     supports_carousel = True
+    supports_cover = True
 
     def __init__(self, in_progress_polls: int = 0) -> None:
         self.in_progress_polls = in_progress_polls

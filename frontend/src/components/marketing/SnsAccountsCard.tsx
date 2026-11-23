@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { KEY_LABEL, keyHintKo, keyResultKo, readYoutubeReturn, type CompanyAiAdmin, type KeyName } from "@/lib/companyAi";
-import { deleteCompanyAiKey, errText, getCompanyAi, putCompanyAiKey, youtubeComplete, youtubeConnectUrl, youtubeDisconnect } from "@/lib/companyAiApi";
+import { KEY_LABEL, keyHintKo, keyResultKo, readHiggsfieldReturn, readYoutubeReturn, type CompanyAiAdmin, type HiggsfieldAccount, type KeyName } from "@/lib/companyAi";
+import {
+  deleteCompanyAiKey, errText, getCompanyAi, getHiggsfieldAccount, higgsfieldComplete, higgsfieldConnectUrl, higgsfieldDisconnect,
+  putCompanyAiKey, youtubeComplete, youtubeConnectUrl, youtubeDisconnect,
+} from "@/lib/companyAiApi";
 import { fetchHiggsfieldStatus, type HiggsfieldStatus } from "@/lib/higgsfield";
 import { fetchInstagramStatus, fetchYoutubeStatus, type InstagramStatus, type YoutubeStatus } from "@/lib/youtube";
 import { useVisibleInterval } from "@/lib/visibleInterval";
@@ -8,7 +11,9 @@ import { useVisibleInterval } from "@/lib/visibleInterval";
 // 마케팅 › SNS·미디어의 "SNS 계정 연결". 회사마다 자기 Higgsfield·유튜브·인스타 계정을 쓴다(로그인한 회사 기준, 11/23).
 // - 연결 상태는 서버가 실제로 확인한 값(Higgsfield: 키를 한 번 보여 봄, 유튜브: 채널 이름을 읽어 봄). 1분마다 다시 본다
 // - 값은 그 회사의 키 저장소에만 들어간다(tenant=회사 ID). 화면에는 끝 4자리만 보인다
-// - Higgsfield: 회사 키(`<ID>:<SECRET>`)를 넣는다. 없으면 설치 기본 키를 쓴다
+// - Higgsfield: [Higgsfield 연결 (구독 크레딧)] → Higgsfield 동의 화면(이 회사 계정) → 돌아오면 ?higgsfield=finish#코드 →
+//   유튜브와 같이 complete. 연결하면 그림·영상을 그 계정의 구독 크레딧으로 만든다(회사마다 자기 계정)
+//   연결이 없으면 예전처럼 회사 키(`<ID>:<SECRET>`, API 크레딧), 그것도 없으면 설치 기본 키를 쓴다
 // - 유튜브: [유튜브 채널 연결] → 구글 동의 화면(채널 주인 계정) → 돌아오면 ?youtube=finish#코드 →
 //   이 화면이 로그인한 계정으로 complete를 부른다(연결을 시작한 계정·회사일 때만 서버가 넣는다)
 // - 인스타: Meta에서 받은 토큰·계정 ID. 게시는 늘 사람 승인을 거친다(자동 게시 없음)
@@ -19,6 +24,11 @@ const IG_USER: KeyName = "MARKETING_IG_USER_ID";
 const YT: KeyName = "MARKETING_YOUTUBE_REFRESH_TOKEN";
 const HF: KeyName = "MARKETING_HIGGSFIELD_API_KEY";
 const REFRESH_MS = 60_000;
+const HF_BACK_KO: Record<string, string> = {
+  connected: "Higgsfield 계정을 연결했어요. 이제 이 계정의 구독 크레딧으로 만들어요",
+  denied: "Higgsfield 동의를 취소해서 연결하지 않았어요",
+  bad_state: "연결 시간이 지났거나 주소가 맞지 않아요. 다시 눌러 주세요",
+};
 const BACK_KO: Record<string, string> = {
   connected: "유튜브 채널을 연결했어요",
   denied: "구글 동의를 취소해서 연결하지 않았어요",
@@ -33,8 +43,9 @@ const DOT: Record<Tone, string> = { ok: "bg-emerald-500", bad: "bg-red-500", wai
 
 function hfView(s: HiggsfieldStatus | null): { tone: Tone; label: string } {
   if (!s) return { tone: "off", label: "확인 중" };
-  if (s.connection === "ok") return { tone: "ok", label: "연결됨" };
-  if (s.connection === "invalid_key") return { tone: "bad", label: "키 거절" };
+  const mcp = s.source === "mcp";
+  if (s.connection === "ok") return { tone: "ok", label: mcp ? `계정 연결됨${s.plan ? ` · ${s.plan}` : ""}` : "연결됨" };
+  if (s.connection === "invalid_key") return { tone: "bad", label: mcp ? "다시 연결 필요" : "키 거절" };
   if (s.connection === "unreachable") return { tone: "wait", label: "닿지 않음" };
   return { tone: "off", label: "연결 전" };
 }
@@ -77,6 +88,7 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [hfKey, setHfKey] = useState("");
+  const [hfAcct, setHfAcct] = useState<HiggsfieldAccount | null>(null);
   const [token, setToken] = useState("");
   const [userId, setUserId] = useState("");
 
@@ -92,31 +104,37 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
       setDenied(null);
     } catch (e) {
       setDenied(errText(e));
+      return;
     }
+    setHfAcct(await getHiggsfieldAccount().catch(() => null));
   }, []);
 
   useVisibleInterval(loadStatus, REFRESH_MS);
   useEffect(() => {
     if (compact) return;
     void loadAdmin();
-    const back = new URLSearchParams(window.location.search).get("youtube");
+    const search = new URLSearchParams(window.location.search);
+    const flow = search.has("higgsfield")
+      ? { param: "higgsfield", ko: HF_BACK_KO, fail: "Higgsfield 연결을 마치지 못했어요", read: readHiggsfieldReturn, complete: higgsfieldComplete }
+      : { param: "youtube", ko: BACK_KO, fail: "유튜브 연결을 마치지 못했어요", read: readYoutubeReturn, complete: youtubeComplete };
+    const back = search.get(flow.param);
     if (back !== "finish") {
-      if (back) setMsg(BACK_KO[back] ?? "유튜브 연결을 마치지 못했어요");
+      if (back) setMsg(flow.ko[back] ?? flow.fail);
       return;
     }
-    // 구글에서 돌아왔다: 코드는 주소의 # 뒤에만 있다. 주소에서 바로 지우고, 로그인한 이 계정으로 마친다
-    const got = readYoutubeReturn(window.location.hash);
+    // 동의 화면에서 돌아왔다: 코드는 주소의 # 뒤에만 있다. 주소에서 바로 지우고, 로그인한 이 계정으로 마친다
+    const got = flow.read(window.location.hash);
     const url = new URL(window.location.href);
     url.hash = "";
-    url.searchParams.delete("youtube");
+    url.searchParams.delete(flow.param);
     window.history.replaceState(null, "", url.toString());
     if (!got) {
-      setMsg(BACK_KO.bad_state);
+      setMsg(flow.ko.bad_state);
       return;
     }
     setBusy(true);
-    youtubeComplete(got.code, got.state)
-      .then(() => setMsg(BACK_KO.connected))
+    flow.complete(got.code, got.state)
+      .then(() => setMsg(flow.ko.connected))
       .catch((e: unknown) => setMsg(errText(e)))
       .finally(() => {
         setBusy(false);
@@ -192,9 +210,27 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
         <div className="space-y-2 rounded-xl border border-ink-100 p-4">
           <Status name="Higgsfield" {...hfLook} />
           <p className="text-xs text-ink-500">스토리보드로 영상을 만들 때 써요. {hf?.message_ko}{hf?.image_model ? ` · 이미지 모델 ${hf.image_model}` : ""}</p>
+          {hf?.source === "mcp" && typeof hf.credits === "number" && (
+            <p className="text-xs text-ink-700">남은 크레딧 {hf.credits.toLocaleString("ko-KR")}{hf.plan ? ` · 요금제 ${hf.plan}` : ""} (이 회사 계정의 구독 크레딧)</p>
+          )}
           {canEdit && (
             <>
-              <p className="text-xs text-ink-500">이 회사 키 {keyHintKo(row(HF)?.hint ?? "")}{row(HF)?.has_key ? "" : " (없으면 설치 기본 키를 써요)"}</p>
+              <p className="text-xs text-ink-500">
+                회사 Higgsfield 계정 {hfAcct?.connected ? `연결됨${hfAcct.email ? ` · ${hfAcct.email}` : ""}` : "연결 전"}
+                {hfAcct?.connected ? "" : " · 연결하면 이 회사 계정의 구독 크레딧으로 만들어요"}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-primary text-xs" disabled={busy || blocked || hfAcct?.app_configured === false}
+                  onClick={() => void run(async () => { window.location.assign(await higgsfieldConnectUrl()); })}>
+                  {hfAcct?.connected ? "다른 계정으로 다시 연결" : "Higgsfield 연결 (구독 크레딧)"}
+                </button>
+                {hfAcct?.connected && (
+                  <button type="button" className="btn-ghost text-xs" disabled={busy}
+                    onClick={() => void run(async () => { await higgsfieldDisconnect(); return "Higgsfield 계정 연결을 끊었어요. Higgsfield 계정 설정에서 AXcellent 앱 권한도 지울 수 있어요"; })}>연결 끊기</button>
+                )}
+              </div>
+              {hfAcct?.app_configured === false && <p className="text-xs text-accent">서버에 AXcellent Higgsfield 연결 설정이 없어요</p>}
+              <p className="text-xs text-ink-500">또는 API 키(API 크레딧) · 이 회사 키 {keyHintKo(row(HF)?.hint ?? "")}{row(HF)?.has_key ? "" : " (없으면 설치 기본 키를 써요)"}</p>
               <input className="field text-sm" type="password" autoComplete="off" aria-label="Higgsfield 키" placeholder="Higgsfield 키 (ID:SECRET)" value={hfKey} onChange={(e) => setHfKey(e.target.value)} />
               <button type="button" className="btn-primary text-xs" disabled={busy || blocked || !hfKey.trim()} onClick={() => void run(saveHf)}>저장</button>
             </>

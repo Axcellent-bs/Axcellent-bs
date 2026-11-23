@@ -2,8 +2,8 @@
 // 키 값은 요청 본문으로만 나가고 어디에도 남기지 않는다. 실패하면 서버 문장(error.message)과 코드를 그대로 담아 던진다.
 import { ApiError, failureError } from "./apiError";
 import {
-  readCompanyAi, readSettings, readStatus, readUsage,
-  type AiStatus, type AiUsage, type CompanyAiAdmin, type CompanyAiSettings, type KeyName, type SettingsBody,
+  readCompanyAi, readHiggsfieldAccount, readSettings, readStatus, readUsage,
+  type AiStatus, type AiUsage, type CompanyAiAdmin, type CompanyAiSettings, type HiggsfieldAccount, type KeyName, type SettingsBody,
 } from "./companyAi";
 import { DASHBOARD_API_URL } from "./env";
 import { getSession } from "./humanSession";
@@ -68,3 +68,14 @@ export async function youtubeConnectUrl(): Promise<string> {
 }
 export const youtubeComplete = (code: string, state: string) => call(`${YT}/complete`, { code, state });
 export const youtubeDisconnect = () => call(`${YT}/disconnect`, {});
+
+// Higgsfield 계정 연결(원격 MCP OAuth, 회사 구독 크레딧). 유튜브와 같은 순서: 동의 화면 → 돌아오면 complete
+const HF = `${DASHBOARD_API_URL}/api/dashboard/marketing/higgsfield`;
+export async function higgsfieldConnectUrl(): Promise<string> {
+  const d = (await call(`${HF}/connect`, {})) as { url?: unknown };
+  if (typeof d.url !== "string" || !d.url.startsWith("https://mcp.higgsfield.ai/oauth2/authorize?")) throw new Error("Higgsfield 연결 주소를 받지 못했어요.");
+  return d.url;
+}
+export const higgsfieldComplete = (code: string, state: string) => call(`${HF}/complete`, { code, state });
+export const higgsfieldDisconnect = () => call(`${HF}/disconnect`, {});
+export const getHiggsfieldAccount = async (): Promise<HiggsfieldAccount> => must(readHiggsfieldAccount(await call(`${HF}/connection`)));

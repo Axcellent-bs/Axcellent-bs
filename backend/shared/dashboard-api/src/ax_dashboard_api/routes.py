@@ -1751,6 +1751,36 @@ async def marketing_request_video_youtube_request(
     return ok(await marketing_client.request_video_youtube_request_call(post_draft_id, who))
 
 
+class RequestVideoCoverBody(BaseModel):
+    """썸네일 후보 중 하나(`covers[].media_id`). 후보 밖 값은 마케팅이 거절한다(422)."""
+
+    media_id: str = Field(pattern=r"^cov_[0-9a-f]{12}$")
+
+
+@router.post("/marketing/request-videos/{post_draft_id}/cover")
+async def marketing_request_video_cover(
+    body: RequestVideoCoverBody, request: Request, post_draft_id: str = Path(pattern=_DRAFT_ID)
+) -> dict:
+    """의뢰로 만든 영상의 썸네일을 고른다. 사람 토큰.
+
+    승인 대기·승인 뒤에 바꾸면 그 승인은 무효다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "썸네일 고르기는 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.request_video_cover_call(post_draft_id, body.media_id, who))
+
+
+@router.get("/marketing/request-videos/{post_draft_id}/covers/{media_id}")
+async def marketing_request_video_cover_image(
+    post_draft_id: str = Path(pattern=_DRAFT_ID),
+    media_id: str = Path(pattern=r"^cov_[0-9a-f]{12}$"),
+) -> FileResponse:
+    """썸네일 후보 그림(라벨 입힌 영상에서 뽑은 AI 표시 포함 JPEG). 후보 기록과 같은 파일만."""
+    _no_org_in_mock()
+    path = await marketing_client.request_video_cover_file(post_draft_id, media_id)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
 class MarketingChatSendBody(BaseModel):
     thread_id: str | None = Field(default=None, min_length=1, max_length=64)
     message: str = Field(min_length=1, max_length=2000)

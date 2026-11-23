@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -551,7 +552,7 @@ async def request_videos_call(request_id: str | None, limit: int) -> dict[str, A
         raise ApiError(400, "INVALID_INPUT", f"영상 목록을 만들 수 없다 ({out['outcome']})")
     items: list[dict[str, Any]] = []
     for raw in (out.get("output") or {}).get("items") or []:
-        item = {k: v for k, v in raw.items() if k != "prepared"}
+        item = {k: v for k, v in raw.items() if k not in ("prepared", "cover_files")}
         labeled = bool(raw.get("labeled")) and isinstance(raw.get("prepared"), dict)
         item["labeled"] = labeled
         item["preview_path"] = (
@@ -575,6 +576,47 @@ async def sns_draft_media_preview(draft_id: str) -> tuple[Path, str]:
     if not isinstance(prepared, dict):
         raise missing
     return _preview_file(prepared.get("asset_ref"), prepared.get("asset_sha256"), missing)
+
+
+COVER_ID = re.compile(r"^cov_[0-9a-f]{12}$")
+
+
+async def request_video_cover_file(draft_id: str, media_id: str) -> Path:
+    """의뢰 영상 썸네일 후보 그림(AI 표시 포함 JPEG).
+
+    후보 기록과 이름·해시가 같은 파일만 내준다. 없으면 404."""
+    missing = ApiError(404, "NOT_FOUND", "썸네일 후보가 없다")
+    if not COVER_ID.match(media_id):
+        raise missing
+    out = await call(
+        "list_request_videos",
+        {"post_draft_id": draft_id, "limit": 1},
+        campaign_id="request_videos",
+        key=f"ui:request-video-cover:{draft_id}:{media_id}",
+    )
+    items = (out.get("output") or {}).get("items") or []
+    files = (items[0].get("cover_files") or {}) if items else {}
+    found = files.get(media_id) if isinstance(files, dict) else None
+    ref = found.get("asset_ref") if isinstance(found, dict) else None
+    sha = found.get("asset_sha256") if isinstance(found, dict) else None
+    raw_root = (os.getenv(MEDIA_DIR_ENV) or "").strip()
+    if not (isinstance(ref, str) and isinstance(sha, str) and ref and raw_root):
+        raise missing
+    root = Path(raw_root).resolve()
+    path = (root / ref).resolve()
+    if path.name != f"{media_id}.jpg" or not path.is_relative_to(root) or not path.is_file():
+        raise missing
+    if hashlib.sha256(path.read_bytes()).hexdigest() != sha:  # 기록 뒤 바뀐 파일은 내주지 않는다
+        raise missing
+    return path
+
+
+async def request_video_cover_call(post_draft_id: str, media_id: str, who: str) -> dict[str, Any]:
+    """의뢰 영상 썸네일 고르기(마케팅 `request_video_cover_select`). 후보 밖 값은 422."""
+    return await _request_video_youtube(
+        "request_video_cover_select",
+        {"post_draft_id": post_draft_id, "media_id": media_id, "who": who},
+    )
 
 
 async def outage_sns_merge_call(draft_ids: list[str] | None, dry_run: bool) -> dict[str, Any]:
@@ -840,6 +882,11 @@ VIDEO_REFUSALS = {
     "board_image_not_ready": (409, "BOARD_IMAGE_NOT_READY"),
     "model_not_configured": (409, "MODEL_NOT_CONFIGURED"),
     "higgsfield_key_missing": (409, "HIGGSFIELD_KEY_MISSING"),
+    # 회사 Higgsfield 계정 연결(MCP)로 만들 때
+    "credits_insufficient": (409, "HIGGSFIELD_CREDITS_INSUFFICIENT"),
+    "higgsfield_reconnect_needed": (409, "HIGGSFIELD_RECONNECT_NEEDED"),
+    "higgsfield_not_connected": (409, "HIGGSFIELD_NOT_CONNECTED"),
+    "higgsfield_app_missing": (409, "HIGGSFIELD_APP_MISSING"),
     "quota_exceeded": (409, "QUOTA_EXCEEDED"),
     "quota_not_configured": (409, "QUOTA_NOT_CONFIGURED"),
     "in_progress": (409, "IN_PROGRESS"),
@@ -848,6 +895,10 @@ VIDEO_REFUSALS = {
     "video_not_ready": (409, "VIDEO_NOT_READY"),
     "youtube_not_connected": (409, "YOUTUBE_NOT_CONNECTED"),
     "already_requested": (409, "ALREADY_REQUESTED"),
+    # 의뢰 영상 썸네일: 후보 밖 값 · 이미 올라간 영상 · 후보 파일이 기록과 다름
+    "cover_not_candidate": (422, "COVER_NOT_CANDIDATE"),
+    "cover_locked": (409, "COVER_LOCKED"),
+    "cover_missing": (409, "COVER_MISSING"),
     "bad_asset": (422, "BAD_ASSET"),
     "file_missing": (409, "FILE_MISSING"),
     "gate_held": (409, "GATE_HELD"),

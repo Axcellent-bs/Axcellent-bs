@@ -180,7 +180,8 @@ def test_resync_and_resume_really_run_when_the_server_starts(
 
     calls: list[str] = []
 
-    async def fake_resync() -> None:
+    async def fake_resync(wait_peer: bool = False) -> None:
+        assert wait_peer  # 켤 때는 개발이 뜰 때까지 기다린 뒤 맞춘다
         calls.append("resync")
 
     def fake_resume() -> int:

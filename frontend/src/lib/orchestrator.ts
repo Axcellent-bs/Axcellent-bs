@@ -74,6 +74,18 @@ export const orchestrator = {
   /** 잘못 골랐으면 일을 바꿔 다시 돌린다. 이전 선택은 기록에 남는다 */
   rerunRequest: (requestId: string, task: string) =>
     post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/rerun`, { task }, SAFETY_HUMAN_TOKEN),
+  /** 의뢰 삭제 = 멈추고 숨김 (11/23). 끝나지 않았으면 남은 단계를 멈추고, 기록은 남고 되돌릴 수 있다 */
+  hideRequest: (requestId: string) =>
+    post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/hide`, undefined, SAFETY_HUMAN_TOKEN),
+  /** 숨긴 의뢰를 되돌린다 (멈춘 단계는 그대로) */
+  unhideRequest: (requestId: string) =>
+    post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/unhide`, undefined, SAFETY_HUMAN_TOKEN),
+  /** 의뢰문 수정 = 고쳐서 다시 접수. 새 의뢰 번호를 돌려준다 (새 접수에 실패하면 지금 의뢰는 그대로) */
+  editRequest: (requestId: string, text: string) =>
+    post<{ ok: boolean; request_id: string; replaces: string }>(`/api/requests/${encodeURIComponent(requestId)}/edit`, { text }, SAFETY_HUMAN_TOKEN),
+  /** 숨긴(삭제한) 의뢰만 (최근 것부터, 최대 100건). 사람 토큰이 필요하다 */
+  hiddenRequests: () =>
+    getAuthed<WorkRequestRow[], { tasks: WorkRequestTask[] }>("/api/requests?hidden=1", SAFETY_HUMAN_TOKEN),
   /** 재무가 보낸 의견 (캠페인 손익·예산 의견·인사이트). 총괄은 보관만 한다 */
   financeOpinions: () => call<FinanceOpinionRow[]>("/api/finance-opinions"),
   incident: (contextId: string) => call<OrchIncident>(`/api/incidents/${encodeURIComponent(contextId)}`),

@@ -205,6 +205,19 @@ def _plan_text(plan: VideoPlanIn) -> str:
     return f"{plan.concept}\n{plan.script}"
 
 
+def scene_starts(plan: VideoPlanIn) -> list[float]:
+    """기획 장면의 시작 시각(초, 계약 `VideoScene.start_s`). 하나라도 없거나 이상하면 빈 목록.
+
+    썸네일 후보 시점을 고르는 데만 쓴다(`request_video_cover.pick_times`)."""
+    out: list[float] = []
+    for scene in plan.scenes:
+        raw = (scene.model_extra or {}).get("start_s")
+        if isinstance(raw, bool) or not isinstance(raw, int | float) or raw < 0:
+            return []
+        out.append(float(raw))
+    return out
+
+
 def _caption_body(plan: VideoPlanIn, proposal_id: str) -> tuple[str, dict[str, Any]]:
     hook = sns._first_sentence(plan.concept, HOOK_MAX)  # noqa: SLF001
     line = sns._first_sentence(plan.script, SCRIPT_LINE_MAX)  # noqa: SLF001
@@ -364,6 +377,8 @@ def prepare_video_draft(
         context_id=request.meta.context_id,
         platform_options=options_meta,
         caption_source=meta,
+        scene_starts_s=scene_starts(plan) if story is not None else [],
+        plan_duration_s=float(plan.duration_s),
     )
     existing = store.get(draft.post_draft_id)
     if existing is None or not existing.asset_ref:  # 영상이 이미 연결된 초안은 덮어쓰지 않는다
