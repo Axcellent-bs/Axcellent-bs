@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -119,7 +121,10 @@ def test_catbooks_connect_card_and_disconnect_stay_the_same(client, people, root
     public = TestClient(app, headers={"authorization": ""}).get("/api/dashboard/auth/company")
     assert public.json()["data"]["company"]["name"] == "캣북스"
     state = client.post(BASE + "/disconnect", headers=people["cat"]).json()["data"]
-    assert state["company"] is None and state["keys"][0]["status"] == "issued"
+    # 끊은 키 줄은 연결 전으로 돌아가 운영자만 본다(사후 리뷰 11/23: 연결 전 키 줄은 운영자만)
+    assert state["company"] is None and state["keys"] == []
+    [row] = _get(client, people["op"])["keys"]
+    assert row["status"] == "issued" and row["company"] is None
 
 
 # ---- 누비 관리자가 키를 넣어도 캣북스는 그대로 ----
@@ -192,9 +197,9 @@ def test_a_key_catbooks_left_does_not_prefill_catbooks_info_for_nubi(client, peo
     client.post(BASE + "/disconnect", headers=people["cat"])
     check = client.post(BASE + "/check", json={"key": fresh["key"]}, headers=people["nubi"])
     assert check.json()["data"] == {"ok": True, "reason": None, "company": None}
-    # 캣북스가 다시 넣으면 예전처럼 미리 채움
+    # 끊을 때 키 줄의 회사 정보를 지워서(사후 리뷰 11/23) 캣북스가 다시 넣어도 미리 채우지 않는다
     again = client.post(BASE + "/check", json={"key": fresh["key"]}, headers=people["cat"])
-    assert again.json()["data"]["company"]["name"] == "캣북스"
+    assert again.json()["data"] == {"ok": True, "reason": None, "company": None}
 
 
 def test_revoking_a_nubi_key_disconnects_only_nubi(client, people) -> None:
@@ -225,3 +230,99 @@ def test_old_file_without_company_ids_is_catbooks(client, people, root) -> None:
         BASE + "/connect", json={"key": "AXC-AAAA-BBBB-CCCC", **NUBI}, headers=people["nubi"]
     )
     assert res.status_code == 422 and res.json()["error"]["code"] == "KEY_IN_USE"
+
+
+# ---- 사후 리뷰 11/23 ----
+
+
+def test_a_key_issued_for_nubi_is_hidden_from_catbooks_until_connected(client, people) -> None:
+    """연결 전 키 줄(company_id 없음 + issued)은 운영자·공용 토큰만 본다."""
+    _cat_connected(client, people)
+    nubi_key = _issue(client, people, "누비 IT 담당")
+    cat = _get(client, people["cat"])
+    assert [r["memo"] for r in cat["keys"]] == ["캣북스 IT"]  # 누비용 메모·가린 키 안 보임
+    assert "누비 IT 담당" not in json.dumps(cat, ensure_ascii=False)
+    assert _get(client, people["nubi"])["keys"] == []  # 연결 전에는 누비 관리자 목록에도 없다
+    for who in ("op", "shared"):
+        memos = {r["memo"] for r in _get(client, people[who])["keys"]}
+        assert memos == {"캣북스 IT", "누비 IT 담당"}
+    # 누비가 연결하면 누비 관리자에게 보이고, 캣북스에는 여전히 안 보인다
+    client.post(BASE + "/connect", json={"key": nubi_key["key"], **NUBI}, headers=people["nubi"])
+    assert [r["memo"] for r in _get(client, people["nubi"])["keys"]] == ["누비 IT 담당"]
+    assert [r["memo"] for r in _get(client, people["cat"])["keys"]] == ["캣북스 IT"]
+
+
+def test_old_catbooks_key_rows_stay_visible_but_unused_ones_do_not(client, people, root) -> None:
+    """회사별 전 파일: 예전 칸 `company`의 키, 회사 정보가 남은 키(예전에 캣북스가 쓴 키)는
+    캣북스 것. 회사 정보도 `company_id`도 없는 발급만 한 키는 운영자만 본다."""
+    old = {
+        "keys": [
+            {"id": "k2", "key": "AXC-DDDD-EEEE-FFFF", "memo": "발급만", "issued_at": "2026-11-02",
+             "status": "issued"},
+            {"id": "k1", "key": "AXC-AAAA-BBBB-CCCC", "memo": "지금 키", "issued_at": "2026-11-01",
+             "status": "connected", "company": {**CAT, "site_url": ""}},
+            {"id": "k0", "key": "AXC-GGGG-HHHH-JJJJ", "memo": "예전 키", "issued_at": "2026-10-01",
+             "status": "issued", "company": {**CAT, "site_url": ""}},
+        ],
+        "company": {"id": "c-k1", **CAT, "site_url": "", "key_id": "k1",
+                    "connected_at": "2026-11-01"},
+    }  # fmt: skip
+    (root / ck.KEYS_FILE).write_text(json.dumps(old), encoding="utf-8")
+    assert [r["memo"] for r in _get(client, people["cat"])["keys"]] == ["지금 키", "예전 키"]
+    assert _get(client, people["nubi"])["keys"] == []
+    every = [r["memo"] for r in _get(client, people["op"])["keys"]]
+    assert every == ["발급만", "지금 키", "예전 키"]
+
+
+def test_switching_keys_clears_the_old_key_row(client, people, root) -> None:
+    first = _cat_connected(client, people)
+    second = _issue(client, people, "캣북스 새 키")
+    res = client.post(BASE + "/connect", json={"key": second["key"], **CAT}, headers=people["cat"])
+    assert res.status_code == 200, res.text
+    rows = {r["id"]: r for r in _file(root)["keys"]}
+    assert rows[first["id"]]["status"] == "issued"
+    assert "company_id" not in rows[first["id"]] and "company" not in rows[first["id"]]
+    assert rows[second["id"]]["company_id"] == "catbooks"
+    # 바꾼 예전 키는 연결 전 키라 캣북스 관리자 목록에서 빠진다
+    assert [r["id"] for r in res.json()["data"]["keys"]] == [second["id"]]
+
+
+def test_disconnect_clears_the_key_row_for_nubi_too(client, people, root) -> None:
+    nubi_key = _issue(client, people, "누비 IT")
+    client.post(BASE + "/connect", json={"key": nubi_key["key"], **NUBI}, headers=people["nubi"])
+    assert _file(root)["keys"][0]["company_id"] == "nubi"
+    client.post(BASE + "/disconnect", headers=people["nubi"])
+    [row] = _file(root)["keys"]
+    assert row["status"] == "issued" and "company_id" not in row and "company" not in row
+    assert "누비투어" not in json.dumps(_file(root), ensure_ascii=False)
+    # 그 키는 이제 아무 회사 것도 아니라 캣북스가 넣어도 누비 정보가 미리 채워지지 않는다
+    check = client.post(BASE + "/check", json={"key": nubi_key["key"]}, headers=people["cat"])
+    assert check.json()["data"] == {"ok": True, "reason": None, "company": None}
+
+
+def test_two_saves_at_once_both_stay(root, monkeypatch: pytest.MonkeyPatch) -> None:
+    """두 관리자가 동시에 저장해도 한쪽이 덮이지 않는다(잠금 + 임시 파일 교체)."""
+    real_load = ck._load
+
+    def slow_load() -> dict:
+        data = real_load()
+        time.sleep(0.2)  # 읽고 쓰기 사이를 벌려, 잠금이 없으면 뒤에 쓴 쪽이 앞의 저장을 덮게 한다
+        return data
+
+    monkeypatch.setattr(ck, "_load", slow_load)
+    errors: list[BaseException] = []
+
+    def run(memo: str) -> None:
+        try:
+            ck.issue(ck.IssueIn(memo=memo))
+        except BaseException as exc:  # noqa: BLE001 - 스레드 안 실패를 시험으로 돌려준다
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run, args=(memo,)) for memo in ("가", "나")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert {r["memo"] for r in _file(root)["keys"]} == {"가", "나"}
+    assert not (root / (ck.KEYS_FILE + ".tmp")).exists()  # 임시 파일은 바꿔 넣고 남지 않는다
