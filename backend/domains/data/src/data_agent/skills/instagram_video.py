@@ -100,6 +100,7 @@ async def measure_due(
 
     (저장한 시점 값 수, 문제). 연결이 없거나 게시 계정이 없으면 부르지 않는다 (이유는 화면에)."""
     want: list[vp.Video] = []
+    # 그 회사 영상만 (1-5): 게시 계정(publish_username)이 회사 설정이라 회사마다 따로 읽는다
     for v in store.videos():
         if v.platform != "instagram":
             continue

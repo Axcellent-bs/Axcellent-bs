@@ -345,6 +345,18 @@ def test_campaign_sends_are_per_company_and_the_meta_has_the_company(tmp_path: P
     assert "TENANT_ID_DEFAULT" not in inspect.getsource(cu)  # 기본값으로 새 요청을 만들지 않는다
 
 
+def test_sent_request_results_are_per_company(tmp_path: Path) -> None:
+    """의뢰 영상(#1568) 보낸 결과도 그 회사 것만 다음 인사이트 "지난번 결과"에 들어간다."""
+    from data_agent import campaign_update as cu
+
+    store = cu.SendStore(tmp_path / "campaign_sends.db")
+    with cs.using("nubi"):
+        store.save(cu.SendRow("wr_nubi000001", state="sent", direction="늘었음", sent_at=AT))
+        assert [c for c, _, _ in store.sent_with_prefix("wr_")] == ["wr_nubi000001"]
+    assert store.sent_with_prefix("wr_") == []
+    store.close()
+
+
 def test_meta_tenant_keeps_the_old_value_for_catbooks() -> None:
     """다른 부서·이벤트에 넣는 값: 캣북스는 예전 기본값(공통 로그가 그 값으로 거른다),
     다른 회사는 그 id."""

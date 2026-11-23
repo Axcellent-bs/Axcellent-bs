@@ -229,12 +229,12 @@ class SendStore:
 
     def sent_with_prefix(self, prefix: str) -> list[tuple[str, str | None, datetime | None]]:
         """보낸 줄 중 campaign_id가 prefix로 시작하는 것 (campaign_id, direction, sent_at).
-        최신순."""
+        최신순. 그 회사 것만 (1-5)."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT campaign_id, direction, sent_at FROM sends WHERE state = 'sent'"
-                " AND substr(campaign_id, 1, ?) = ? ORDER BY sent_at DESC",
-                (len(prefix), prefix),
+                " AND tenant_id = ? AND substr(campaign_id, 1, ?) = ? ORDER BY sent_at DESC",
+                (company_scope.active(), len(prefix), prefix),
             ).fetchall()
         return [(c, d, datetime.fromisoformat(at) if at else None) for c, d, at in rows]
 
