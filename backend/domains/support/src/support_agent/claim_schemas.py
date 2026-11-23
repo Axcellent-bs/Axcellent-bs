@@ -280,3 +280,5 @@ class InspectReturnInput(AxModel):
 class ProcessClaimQueueInput(AxModel):
     limit: int | None = Field(default=None, ge=1)
     claim_ids: list[int] | None = None
+    # 요청한 사람(dashboard-api가 채운다). 감사 기록에만 쓰고 판정에는 쓰지 않는다. 없어도 된다
+    requested_by: str | None = Field(default=None, max_length=200)

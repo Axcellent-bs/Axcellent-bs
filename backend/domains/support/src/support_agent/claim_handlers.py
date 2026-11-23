@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple
 
@@ -528,6 +529,20 @@ async def inspect_return(request: AgentRequest) -> AgentResult:
     )
 
 
+QUEUE_PROCESS_MAX_ENV = "CLAIM_QUEUE_PROCESS_MAX"
+QUEUE_PROCESS_MAX_DEFAULT = 20
+
+
+def _queue_process_cap() -> int:
+    """한 번에 지급을 시도할 수 있는 클레임 수(dashboard-api 상한과 별개의 안전망)."""
+    try:
+        raw = os.getenv(QUEUE_PROCESS_MAX_ENV) or os.getenv("DASHBOARD_QUEUE_PROCESS_MAX") or ""
+        value = int(raw.strip() or QUEUE_PROCESS_MAX_DEFAULT)
+    except ValueError:
+        return QUEUE_PROCESS_MAX_DEFAULT
+    return value if value >= 1 else QUEUE_PROCESS_MAX_DEFAULT
+
+
 async def process_claim_queue(request: AgentRequest) -> AgentResult:
     """준비된 큐 항목을 `refund_request`로 지급한다. 항목마다 따로 `execute()`를 거친다."""
     parsed = h._parse(request, ProcessClaimQueueInput)
@@ -535,6 +550,8 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
         return parsed
     results: list[QueueRunResult] = []
     paid = held = 0
+    attempted = 0  # 지급을 시도한(`execute` 호출) 건수. 건너뛴 항목은 세지 않는다
+    cap = _queue_process_cap()
     for entry in CLAIMS.queue().queue:
         if parsed.claim_ids is not None and entry.claim_id not in parsed.claim_ids:
             continue
@@ -560,6 +577,9 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
                 QueueRunResult(claim_id=claim.id, result="skipped", detail="already_paid")
             )
             continue
+        if attempted >= cap:  # 호출 쪽이 상한을 걸지 않았어도 한 번에 지급하는 수는 제한한다
+            break
+        attempted += 1
         # 만료로 닫힌 환불을 다시 요청하면 시도 번호가 붙은 새 키로 관문을 다시 지난다
         attempt = f":retry{claim.refund_attempt}" if claim.refund_attempt else ""
         meta = request.meta.model_copy(
@@ -664,8 +684,11 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
             refund_cash=claim.expected_refund,
             compensation=0,
             execution=decision.execution_id,
+            requested_by=parsed.requested_by,
         )
-        await _record_activity(request, claim, "claim_paid", amount=claim.refund_paid)
+        await _record_activity(
+            request, claim, "claim_paid", amount=claim.refund_paid, requested_by=parsed.requested_by
+        )
         # 문의를 이미 닫았다면 재무가 환불 0원으로 남기지 않게 금액을 채워 한 번 더 알린다
         if claim.conversation_id is not None:
             conversation = await h.load_inquiry(request, claim.conversation_id)

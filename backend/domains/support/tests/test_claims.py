@@ -788,3 +788,79 @@ def test_old_buyer_id_formats_are_read_as_buy_ids() -> None:
 
     assert Claim._read_legacy_buyer({"buyer_id": "usr_3"})["buyer_id"] == "buy_0003"
     assert Claim._read_legacy_buyer({"user_id": 5})["buyer_id"] == "buy_0005"
+
+
+# ---------------------------------------------------------------- 지급 상한·요청자 기록
+def _executed(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    paid: list[int] = []
+
+    async def ok(action: str, params: dict, meta: Any, evidence: Any) -> ExecuteDecision:
+        paid.append(params["claim_id"])
+        return ExecuteDecision(execution_id="exe_1", grade="B", status="executed")
+
+    monkeypatch.setattr(claim_handlers, "execute", ok)
+    return paid
+
+
+def test_one_run_pays_at_most_the_cap_even_without_a_limit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create(
+        client, "k-c1", order_id="102", buyer_id="buy_0002", type="cancel", reason="change_of_mind"
+    )
+    second = create(client, "k-c2")["output"]["id"]  # 주문 101 반품
+    call(client, "decide_claim", {"claim_id": second, "decision": "approve"}, key="k-d")
+    call(client, "receive_return", {"claim_id": second, "inspection": "pass"}, key="k-r")
+    ready = [e["claim_id"] for e in call(client, "claim_queue")["output"]["queue"] if e["ready"]]
+    assert len(ready) >= 2
+    paid = _executed(monkeypatch)
+    monkeypatch.setenv("CLAIM_QUEUE_PROCESS_MAX", "1")
+    run = call(client, "process_claim_queue", {}, key="k-p1")["output"]
+    assert run["paid"] == 1 and paid == ready[:1]
+    monkeypatch.setenv("CLAIM_QUEUE_PROCESS_MAX", "1")
+    again = call(client, "process_claim_queue", {}, key="k-p2")["output"]
+    assert again["paid"] == 1 and paid == ready[:2]  # 남은 건은 다음 호출에서
+
+
+def test_bad_cap_env_uses_the_default(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAIM_QUEUE_PROCESS_MAX", "abc")
+    assert claim_handlers._queue_process_cap() == 20
+    monkeypatch.setenv("CLAIM_QUEUE_PROCESS_MAX", "0")
+    assert claim_handlers._queue_process_cap() == 20
+    monkeypatch.delenv("CLAIM_QUEUE_PROCESS_MAX")
+    monkeypatch.setenv("DASHBOARD_QUEUE_PROCESS_MAX", "5")
+    assert claim_handlers._queue_process_cap() == 5
+
+
+def test_requested_by_is_kept_in_the_claim_audit_and_optional(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create(client, order_id="102", buyer_id="buy_0002", type="cancel", reason="change_of_mind")
+    _executed(monkeypatch)
+    who = "ops (account:acc_1, company:shop-demo)"
+    run = call(client, "process_claim_queue", {"requested_by": who}, key="k-p")["output"]
+    assert run["paid"] == 1
+    audit = call(client, "get_claim", {"claim_id": 1})["output"]["audit"]
+    assert audit[-1]["action"] == "pay" and audit[-1]["detail"]["requested_by"] == who
+
+
+def test_requested_by_is_recorded_in_the_inquiry_activity(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inquiry_id = call(
+        client,
+        "create_inquiry",
+        {"user_id": 1, "customer_name": "김하늘", "order_id": "102", "order_no": "ORD-1"},
+        {"subject": "취소해 주세요", "message": "주문을 취소하고 싶어요."},
+        key="k-i",
+    )["output"]["id"]
+    create(
+        client, order_id="102", buyer_id="buy_0002", type="cancel", reason="change_of_mind",
+        conversation_id=inquiry_id,
+    )  # fmt: skip
+    _executed(monkeypatch)
+    who = "ops (account:acc_1, company:shop-demo)"
+    call(client, "process_claim_queue", {"requested_by": who}, key="k-p")
+    activity = handlers.STORE.get(inquiry_id).activity
+    paid = [a for a in activity if a.kind == "claim_paid"]
+    assert paid and paid[-1].data["requested_by"] == who
