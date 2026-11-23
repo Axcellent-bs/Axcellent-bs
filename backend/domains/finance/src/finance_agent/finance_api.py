@@ -112,7 +112,11 @@ from finance_agent.handlers import (
     state,
     team_budget_data,
 )
-from finance_agent.human import human_from_authorization, label_fields
+from finance_agent.human import (
+    human_from_authorization,
+    label_fields,
+    session_human_from_authorization,
+)
 from finance_agent.planning_questions import STORE, human_answer_request, record_sent_request
 from finance_agent.rules import load_rules, refresh_applied
 
@@ -555,7 +559,7 @@ def add_finance_api(app: FastAPI) -> None:
         request: Request, authorization: str | None = Header(default=None)
     ) -> dict | JSONResponse:
         try:
-            person = human_from_authorization(authorization)
+            person = session_human_from_authorization(authorization)
         except PermissionError as exc:
             return error(401, "unauthorized", str(exc))
         body = await _body(request)
@@ -611,7 +615,7 @@ def add_finance_api(app: FastAPI) -> None:
     ) -> dict | JSONResponse:
         """잘못한 확정을 취소한다. 지우지 않고 누가 왜 취소했는지 남긴다."""
         try:
-            person = human_from_authorization(authorization)
+            person = session_human_from_authorization(authorization)
         except PermissionError as exc:
             return error(401, "unauthorized", str(exc))
         body = await _body(request)
@@ -771,7 +775,7 @@ def add_finance_api(app: FastAPI) -> None:
     ) -> dict | JSONResponse:
         """끝난 분기의 부가세 숫자를 고정한다. 세무사에게 넘길 기준이고 신고가 아니다."""
         try:
-            person = human_from_authorization(authorization)
+            person = session_human_from_authorization(authorization)
         except PermissionError as exc:
             return error(401, "unauthorized", str(exc))
         body = await _body(request)
@@ -809,7 +813,7 @@ def add_finance_api(app: FastAPI) -> None:
         request: Request, authorization: str | None = Header(default=None)
     ) -> dict | JSONResponse:
         try:
-            person = human_from_authorization(authorization)
+            person = session_human_from_authorization(authorization)
         except PermissionError as exc:
             return error(401, "unauthorized", str(exc))
         body = await _body(request)

@@ -6,7 +6,7 @@
 | `answer_planning_question` | read | planning | 기획 질문에 답함 (`planning_questions.py`) |
 | `record_campaign_result` | read | marketing, orchestrator, data | 캠페인 손익 기록·판단·의견 |
 | `review_campaign_budget` | read | marketing, orchestrator | 캠페인 예산 승인·조건부·거절 판단 |
-| `verify_campaign_budget` | read | safety | 관문 `start_campaign` 검증 |
+| `verify_campaign_budget` | read | safety | 예전 관문 검증. 통과 없이 의견만(advisory) |
 | `finance_insights` | read | orchestrator | 재무 인사이트와 근거 |
 | `cancel_campaign` | read | marketing, orchestrator | 시작한 캠페인 취소, 잡아 둔 예산 풀기 |
 
@@ -986,7 +986,10 @@ async def review_campaign_budget(request: AgentRequest) -> AgentResult:
 async def verify_campaign_budget(request: AgentRequest) -> AgentResult:
     """예전 관문 검증 skill. 재무는 비용을 승인·반려하지 않으므로 관문은 더 부르지 않는다.
 
-    계약상 skill은 남겨 두고, 불리면 막지 않고(approved) 재무 의견을 근거로 돌려준다.
+    계약상 skill은 남겨 두되, 불려도 통과(approved)를 주지 않는다(2026-11-23). 예전에는 늘
+    approved를 돌려줘서 검증 단계에 다시 연결되면 모든 캠페인을 통과시킬 위험이 있었다.
+    지금은 재무 의견만 담은 `advisory`를 돌려주고, 안전 관문은 approved가 아니면 검증 거절로 보고
+    사람 결정(보류)으로 넘긴다.
     """
     data = _parse(request, VerifyAmountInput)
     if isinstance(data, AgentResult):
@@ -1011,9 +1014,9 @@ async def verify_campaign_budget(request: AgentRequest) -> AgentResult:
     return _result(
         request,
         TaskStatus.COMPLETED,
-        outcome="approved",
+        outcome="advisory",
         output={
-            "decision": "approved",
+            "decision": "advisory",
             "reason_code": "finance_advisory_only",
             "review_id": review["review_id"],
             "opinion": cp.OPINION_OF[review["decision"]],

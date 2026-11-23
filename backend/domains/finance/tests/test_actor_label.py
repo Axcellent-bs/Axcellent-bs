@@ -103,15 +103,17 @@ def test_pg_clear_other_pnl_and_closing_record_the_label() -> None:
         "/api/finance/other-pnl", json={"month": "2026-10", "salary": 1000}, headers=_as("관리자")
     ).json()["data"]["entry"]
     assert (pnl["by"], pnl["by_label"]) == ("공용", "관리자(192.168.0.22)")
+    # 확정·확정 취소는 공용 토큰을 받지 않는다(11/23). 누가 했는지가 계정으로 남아야 해서다
     body = {"period": "day", "date": "2026-10-22"}
-    report = client.post("/api/finance/closing/confirm", json=body, headers=_as("관리자")).json()
-    assert report["data"]["confirmed_by"] == "공용"
-    assert report["data"]["confirmed_by_label"] == "관리자(192.168.0.22)"
-    client.post(
+    refused = client.post("/api/finance/closing/confirm", json=body, headers=_as("관리자"))
+    assert refused.status_code == 401
+    assert "2026-10-22" not in str(handlers.state().records.closings)
+    report = client.post("/api/finance/closing/confirm", json=body, headers=PERSONAL).json()
+    assert report["data"]["confirmed_by"] == "taeyoon"
+    cut = client.post(
         "/api/finance/closing/cancel", json=body | {"reason": "잘못 확정"}, headers=_as("관리자")
     )
-    cancel = handlers.state().records.closing_cancels[-1]
-    assert cancel["confirmed_by_label"] == cancel["canceled_by_label"] == "관리자(192.168.0.22)"
+    assert cut.status_code == 401 and not handlers.state().records.closing_cancels
 
 
 def test_personal_token_keeps_old_shape() -> None:
