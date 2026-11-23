@@ -35,24 +35,26 @@ export function RequestActions({ row, title, onDone }: { row: WorkRequestRow; ti
   };
 
   return (
-    <div className="min-w-0">
+    // 11/23: 좁은 칸(대화방 왼쪽 약 250px)에서도 버튼 줄·수정 칸·확인 상자가 칸 너비를 다 쓰고 글자가 한 자씩 꺾이지 않게
+    // (w-full·min-w-0·break-keep). [삭제][취소]·[고쳐서 다시 접수][취소]는 상자 바로 아래 줄에 따로 둔다
+    <div className="w-full min-w-0 break-keep">
       {mode === "closed" && (
         <button type="button" className="btn-ghost px-1.5 py-0 text-base leading-none text-ink-500" aria-label="의뢰 정리 메뉴" aria-expanded={false}
           onClick={() => setMode("menu")}>⋯</button>
       )}
       {mode === "menu" && (
-        <span className="flex flex-wrap gap-1.5" role="group" aria-label="의뢰 정리">
+        <span className="flex w-full min-w-0 flex-wrap gap-1.5" role="group" aria-label="의뢰 정리">
           <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => setMode("edit")}>의뢰문 수정</button>
           <button type="button" className="btn-ghost px-2.5 py-1 text-xs text-red-700" onClick={() => setMode("delete")}>의뢰 삭제</button>
           <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={close}>닫기</button>
         </span>
       )}
       {mode === "edit" && (
-        <div className="mt-1.5 space-y-1.5" role="group" aria-label="의뢰문 수정">
+        <div className="mt-1.5 w-full min-w-0 space-y-1.5" role="group" aria-label="의뢰문 수정">
           <b className="block text-[13px] text-ink-900">의뢰문 수정</b>
-          <textarea className="field min-h-24 w-full text-[13px]" value={text} maxLength={EDIT_MAX} onChange={(e) => setText(e.target.value)} aria-label="고칠 의뢰문" />
+          <textarea className="field min-h-24 w-full min-w-0 text-[13px]" value={text} maxLength={EDIT_MAX} onChange={(e) => setText(e.target.value)} aria-label="고칠 의뢰문" />
           <p className="text-xs text-ink-500">{EDIT_NOTE}</p>
-          <span className="flex flex-wrap gap-1.5">
+          <span className="flex w-full flex-wrap gap-1.5">
             <button type="button" className="btn-primary px-2.5 py-1 text-xs" disabled={busy || problem !== null}
               title={problem ?? undefined}
               onClick={() => run(() => orchestrator.editRequest(row.request_id, text).then((r) => r.request_id))}>고쳐서 다시 접수</button>
@@ -62,10 +64,12 @@ export function RequestActions({ row, title, onDone }: { row: WorkRequestRow; ti
         </div>
       )}
       {mode === "delete" && (
-        <div role="alertdialog" aria-label={confirm.head} className="mt-1.5 space-y-1.5 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-[12.5px] text-red-800">
-          <b className="block">{confirm.head}</b>
-          <p>{confirm.body}</p>
-          <span className="flex flex-wrap gap-1.5">
+        <div role="alertdialog" aria-label={confirm.head} className="mt-1.5 w-full min-w-0 space-y-1.5">
+          <div className="w-full min-w-0 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-[12.5px] text-red-800">
+            <b className="block">{confirm.head}</b>
+            <p>{confirm.body}</p>
+          </div>
+          <span className="flex w-full flex-wrap gap-1.5">
             <button type="button" className="btn-primary bg-red-700 px-2.5 py-1 text-xs hover:bg-red-800" disabled={busy}
               onClick={() => run(() => orchestrator.hideRequest(row.request_id).then(() => null))}>삭제</button>
             <button type="button" className="btn-ghost px-2.5 py-1 text-xs" disabled={busy} onClick={close}>취소</button>

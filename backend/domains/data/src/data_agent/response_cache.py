@@ -80,7 +80,7 @@ def rules_version() -> str:
 
 def data_stamp(env: Mapping[str, str], board_stamp: str, now: datetime | None = None) -> str:
     """데이터 시점 도장. 스냅샷 시각은 인덱스(collected_at)로 바로 찾는다."""
-    from ax_agent_template.llm import LLMSettings
+    from data_agent import llm_settings
     from data_agent.skills import shorts_stats, topic_category
     from data_agent.skills import trend_candidates as cand_mod
     from data_agent.youtube_store import DB_ENV as YT_ENV
@@ -116,8 +116,9 @@ def data_stamp(env: Mapping[str, str], board_stamp: str, now: datetime | None = 
             ]
         ),  # fmt: skip
         # 이 프로세스가 LLM·YouTube를 쓸 수 있는지 (값은 안 본다).
-        # 수집기와 서버의 설정이 다르면 다른 키
-        bool((llm := LLMSettings.from_env("data", env)).model and llm.base_url),
+        # 수집기와 서버의 설정이 다르면 다른 키. 요청 회사의 AI 모델·주소를 반영한다
+        # (회사는 캐시 키 자체에도 들어간다, `ResponseCache.key`)
+        bool((llm := llm_settings.settings(env)).model and llm.base_url),
         bool(env.get("YOUTUBE_API_KEY")),
     ]
     return json.dumps(parts, ensure_ascii=False)
