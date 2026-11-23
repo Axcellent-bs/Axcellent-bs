@@ -8,7 +8,8 @@
 
 - 읽기(GET)만 중계해요. 정해 둔 경로만 열고, 아무 경로나 넘기는 중계는 하지 않아요.
 - 토큰은 판매 서버의 읽기 전용 열람 토큰(`SHOP_VIEWER_TOKEN`, 판매 서버와 같은 값)이에요.
-  열람 토큰은 총괄 사건·부서 읽기, 받은 기획안 읽기, 장애 상태 읽기만 통하고 쓰기는 모두 403이에요.
+  열람 토큰은 받은 기획안 읽기, 장애 상태 읽기만 통하고 쓰기는 모두 403이에요.
+  총괄 사건·부서 읽기는 11/23부터 화면이 총괄을 직접 읽어서 이 중계에 없어요(여러 회사 2단계).
   목 모드에서 값이 없으면 `mock:viewer`를 써요.
   실제 모드에서 없으면 503 `SHOP_VIEWER_TOKEN_NOT_SET`이에요.
 - 장애 넣기·빼기(POST·DELETE)는 중계하지 않아요. 운영자 명령(`scripts/shop_fault.sh`)이에요.
@@ -37,8 +38,6 @@ LIST_LIMIT_MAX = 100
 
 # 화면 경로(`/api/dashboard/shop` 아래) → 판매 서버 경로. 이 밖의 경로는 중계하지 않아요
 UPSTREAM = {
-    "orchestrator_incidents": "/api/shop/admin/orchestrator/incidents",
-    "orchestrator_departments": "/api/shop/admin/orchestrator/departments",
     "marketing_briefs": "/api/shop/admin/marketing/briefs",
     "marketing_outage_sns_drafts": "/api/shop/admin/marketing/outage-sns-drafts",
     "banners": "/api/shop/banners",
@@ -140,18 +139,6 @@ async def relay_get(key: str, params: dict[str, Any] | None = None) -> dict[str,
     if isinstance(upstream_meta, dict):
         out["meta"] = {**upstream_meta, **out["meta"]}
     return out
-
-
-@router.get("/orchestrator/incidents")
-async def orchestrator_incidents() -> dict:
-    """총괄 사건 목록 (판매 서버 총괄 읽기 중계)."""
-    return await relay_get("orchestrator_incidents")
-
-
-@router.get("/orchestrator/departments")
-async def orchestrator_departments() -> dict:
-    """부서 카드·사용량 (판매 서버 총괄 읽기 중계)."""
-    return await relay_get("orchestrator_departments")
 
 
 @router.get("/marketing/briefs")
