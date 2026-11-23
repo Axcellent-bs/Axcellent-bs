@@ -7,8 +7,11 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 /** 메뉴·버튼에 쓰는 지우기 이름 */
 export const REMOVE_LABEL = "삭제(목록에서 지움 · 기록은 보관)";
 
-export function ConfirmRemove({ title, name, lines, onConfirm, onClose }: {
-  title: string; name: string; lines: string[]; onConfirm: () => Promise<void>; onClose: () => void;
+const NO_UNDO_NOTE = "화면에서는 되돌릴 수 없습니다(기록은 서버에 보관돼 관리자가 되살릴 수 있어요). 내 화면에서만 잠깐 안 보이게 하려면 숨기기를 쓰세요";
+
+/** `note`: 아래 빨간 안내 (기본: 화면에서 되돌릴 수 없음). 되돌릴 수 있는 삭제(장애 방 숨김)는 null로 뺀다 */
+export function ConfirmRemove({ title, name, lines, onConfirm, onClose, note = NO_UNDO_NOTE }: {
+  title: string; name: string; lines: string[]; onConfirm: () => Promise<void>; onClose: () => void; note?: string | null;
 }) {
   const [running, setRunning] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
@@ -33,13 +36,11 @@ export function ConfirmRemove({ title, name, lines, onConfirm, onClose }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !running) onClose(); }}>
       <div role="dialog" aria-modal="true" aria-labelledby="confirm-remove-title" onKeyDown={onKey} className="card w-full max-w-md p-5">
         <h2 id="confirm-remove-title" className="text-base font-semibold">{title}</h2>
-        <p className="mt-1 truncate text-sm font-medium text-ink-900">{name}</p>
+        {name && <p className="mt-1 truncate text-sm font-medium text-ink-900">{name}</p>}
         <ul className="mt-3 space-y-1 text-xs leading-relaxed text-ink-700">
           {lines.map((l) => <li key={l}>{l}</li>)}
         </ul>
-        <p className="mt-3 text-xs font-semibold text-red-700">
-          화면에서는 되돌릴 수 없습니다(기록은 서버에 보관돼 관리자가 되살릴 수 있어요). 내 화면에서만 잠깐 안 보이게 하려면 숨기기를 쓰세요
-        </p>
+        {note && <p className="mt-3 text-xs font-semibold text-red-700">{note}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <button ref={cancel} type="button" className="btn-ghost" onClick={onClose} disabled={running}>취소</button>
           <button ref={ok} type="button" onClick={() => void run()} disabled={running}

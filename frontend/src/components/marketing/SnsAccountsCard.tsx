@@ -51,7 +51,11 @@ const DOT: Record<Tone, string> = { ok: "bg-emerald-500", bad: "bg-red-500", wai
 function hfView(s: HiggsfieldStatus | null): { tone: Tone; label: string } {
   if (!s) return { tone: "off", label: "확인 중" };
   const mcp = s.source === "mcp";
-  if (s.connection === "ok") return { tone: "ok", label: mcp ? `계정 연결됨${s.plan ? ` · ${s.plan}` : ""}` : "연결됨" };
+  if (s.connection === "ok") {
+    // 회사 계정(구독) 연결이면 요금제와 남은 크레딧을 한 줄에(만들기 탭 요약에도 보인다)
+    const credits = mcp && typeof s.credits === "number" ? ` · 남은 크레딧 ${s.credits.toLocaleString("ko-KR")}` : "";
+    return { tone: "ok", label: mcp ? `계정 연결됨${s.plan ? ` · ${s.plan}` : ""}${credits}` : "연결됨" };
+  }
   if (s.connection === "invalid_key") return { tone: "bad", label: mcp ? "다시 연결 필요" : "키 거절" };
   if (s.connection === "unreachable") return { tone: "wait", label: "닿지 않음" };
   return { tone: "off", label: "연결 전" };
@@ -74,7 +78,9 @@ function igView(s: InstagramStatus | null, hasKeys: boolean | null, login: Insta
 }
 
 /** 연결된 계정의 프로필 주소만 링크로(https만) */
-const safeLink = (url?: string | null): string | null => (url && /^https:\/\/(www\.)?(youtube|instagram)\.com\//.test(url) ? url : null);
+const safeLink = (url?: string | null): string | null => (url && /^https:\/\/(www\.)?(youtube\.com|instagram\.com|higgsfield\.ai)\//.test(url) ? url : null);
+/** Higgsfield에 로그인한 계정의 프로필로 간다(higgsfield.ai가 /profile을 그 계정 주소로 넘긴다) */
+const HIGGSFIELD_PROFILE = "https://higgsfield.ai/profile";
 
 function Status({ name, tone, label, href }: { name: string; tone: Tone; label: string; href?: string | null }) {
   return (
@@ -159,6 +165,7 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
   const admins = admin?.approval.admins ?? 1;
   const blocked = !admin?.secret_store.enabled;
   const hfLook = hfView(hf);
+  const hfLink = hf?.connection === "ok" && hf.source === "mcp" ? safeLink(HIGGSFIELD_PROFILE) : null;
   const ytLook = ytView(yt);
   const igLook = igView(ig, admin ? igOn : null, igAcct);
   const ytLink = yt?.connection === "ok" ? safeLink(yt.channel_url) : null;
@@ -168,7 +175,7 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
     return (
       <section className="card flex flex-wrap items-center gap-x-6 gap-y-2 px-6 py-4" aria-label="SNS 계정 연결 상태" aria-live="polite">
         <h2 className="text-sm font-semibold">SNS 계정 연결</h2>
-        <Status name="Higgsfield" {...hfLook} />
+        <Status name="Higgsfield" {...hfLook} href={hfLink} />
         <Status name="유튜브" {...ytLook} href={ytLink} />
         <Status name="인스타그램" {...igLook} href={igLink} />
         {onManage && <button type="button" className="btn-ghost ml-auto text-xs" onClick={onManage}>계정·연결에서 바꾸기</button>}
@@ -206,11 +213,8 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
       {denied && <p className="text-xs text-ink-700">연결을 바꾸는 건 고객사 관리자만 할 수 있어요. ({denied})</p>}
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-2 rounded-xl border border-ink-100 p-4">
-          <Status name="Higgsfield" {...hfLook} />
+          <Status name="Higgsfield" {...hfLook} href={hfLink} />
           <p className="text-xs text-ink-500">스토리보드로 영상을 만들 때 써요. {hf?.message_ko}{hf?.image_model ? ` · 이미지 모델 ${hf.image_model}` : ""}</p>
-          {hf?.source === "mcp" && typeof hf.credits === "number" && (
-            <p className="text-xs text-ink-700">남은 크레딧 {hf.credits.toLocaleString("ko-KR")}{hf.plan ? ` · 요금제 ${hf.plan}` : ""} (이 회사 계정의 구독 크레딧)</p>
-          )}
           {canEdit && (
             <>
               <p className="text-xs text-ink-500">
