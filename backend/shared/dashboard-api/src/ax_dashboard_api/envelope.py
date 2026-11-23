@@ -15,10 +15,15 @@ from ax_contracts.schemas.common import TENANT_ID_ALIASES, TENANT_ID_CATBOOKS, T
 
 
 class ApiError(Exception):
-    def __init__(self, status_code: int, code: str, message: str) -> None:
+    """`extra`는 `error` 안에 더 싣는 칸이다(예: 사이트 변환기 `site_code`). 없으면 예전 모양."""
+
+    def __init__(
+        self, status_code: int, code: str, message: str, extra: dict[str, Any] | None = None
+    ) -> None:
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.extra = dict(extra or {})
 
 
 class ServiceDisabled(ApiError):
@@ -136,16 +141,19 @@ def require_mock() -> None:
         )
 
 
-def _error(status_code: int, code: str, message: str) -> JSONResponse:
+def _error(
+    status_code: int, code: str, message: str, extra: dict[str, Any] | None = None
+) -> JSONResponse:
     return JSONResponse(
-        status_code=status_code, content={"error": {"code": code, "message": message}}
+        status_code=status_code,
+        content={"error": {**(extra or {}), "code": code, "message": message}},
     )
 
 
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
-        return _error(exc.status_code, exc.code, exc.message)
+        return _error(exc.status_code, exc.code, exc.message, getattr(exc, "extra", None))
 
     @app.exception_handler(HTTPException)
     async def _http_error(_: Request, exc: HTTPException) -> JSONResponse:
