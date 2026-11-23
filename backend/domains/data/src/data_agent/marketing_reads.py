@@ -153,7 +153,8 @@ async def youtube_fact(read: Read, context_id: str, campaign_id: str,
         read, context_id, YOUTUBE_UPLOADS_LIST_SKILL, {"campaign_id": campaign_id[:80]},
         f"{campaign_id}:{YOUTUBE_UPLOADS_LIST_SKILL}", YoutubeUploadsListOutput)  # fmt: skip
     if listed is not None:
-        ids = youtube_ids_of([*ids, *(u.video_id for u in listed.items)])
+        ids = youtube_ids_of([*ids, *(u.video_id for u in listed.items),
+                              *(u.video_id for u in listed.request_items)])  # fmt: skip
     ids = ids[:YOUTUBE_STATS_MAX]
     link: str | None = None
     if not ids:

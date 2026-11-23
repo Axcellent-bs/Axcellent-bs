@@ -226,3 +226,15 @@ def test_facts_stay_within_twelve_and_keep_the_two_new_lines() -> None:
     assert crowded[0].label == "조회 판정"
     assert mr.ad_campaign_of("wr_abc0000001", None) is None  # 제안 번호 없으면 모름
     assert mr.ad_campaign_of("wr_abc0000001", "PROP-7") == "cmp_PROP-7"
+
+
+def test_request_video_uploaded_from_records_tab_counts(tmp_path: Path) -> None:
+    """의뢰 영상을 제작 기록의 유튜브 칸으로 올렸으면(request_items) 그 영상 성과도 담는다."""
+    marketing = FakeMarketing(uploads=[])
+    marketing.out["youtube_uploads_list"]["request_items"] = [
+        {"post_draft_id": "pd_req_1", "request_id": "wr_abc0000001", "video_id": YT}
+    ]
+    planning, _ = _request_week(tmp_path, marketing)
+    yt = _facts(planning)[mr.YOUTUBE_LABEL]
+    assert yt["value"] == "조회 1,500회 · 좋아요 30 · 댓글 모름"
+    assert marketing.asked[-1].input == {"video_ids": [YT]}
