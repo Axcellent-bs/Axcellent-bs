@@ -46,7 +46,8 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/api/dashboard/marketing/youtube/callback"),
         # Higgsfield가 돌려보내는 회사 계정 연결 주소(MCP OAuth). 유튜브와 같이 state로 확인한다
         ("GET", "/api/dashboard/marketing/higgsfield/callback"),
-        # Meta가 돌려보내는 회사 인스타 로그인 연결 주소. 유튜브와 같이 state로 확인하고 교환은 complete에서
+        # Meta가 돌려보내는 회사 인스타 로그인 연결 주소. 유튜브와 같이 state로 확인한다
+        # (토큰 교환은 로그인한 화면이 부르는 complete에서)
         ("GET", "/api/dashboard/marketing/instagram/callback"),
     }
 )

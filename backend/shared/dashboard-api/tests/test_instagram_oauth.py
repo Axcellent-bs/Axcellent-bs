@@ -22,9 +22,8 @@ from fastapi.testclient import TestClient
 
 from ax_agent_template import instagram_link
 from ax_contracts.schemas.company_ai import COMPANY_AI_KEY_NAMES
-from ax_dashboard_api import company_ai
+from ax_dashboard_api import company_ai, oauth_link
 from ax_dashboard_api import instagram_oauth as io
-from ax_dashboard_api import oauth_link
 from ax_secret_store import get_secret, resolver
 
 from .test_company_ai_routes import ROWS, _people, client, env, people  # noqa: F401

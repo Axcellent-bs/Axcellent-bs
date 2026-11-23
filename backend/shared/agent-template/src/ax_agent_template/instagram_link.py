@@ -4,9 +4,9 @@ dashboard-api(`instagram_oauth.py`, 연결·연장·끊기)가 쓰고 마케팅(
 두 쪽이 서로 import하지 않도록 이름·파일 모양을 여기 한 곳에 둔다.
 
 - 토큰: 회사 키 저장소(tenant=회사 ID)의 `MARKETING_IG_OAUTH_REFRESH_TOKEN`. 로그인 연결
-  (Meta 통합 로그인)로 받은 60일 장기 토큰이다. 연장할 때마다 값이 바뀌어 `store_oauth_token(expect=...)`로
-  넣는다(이름이 `_REFRESH_TOKEN`으로 끝나야 그 길을 쓸 수 있다). 사람이 직접 넣는
-  `MARKETING_IG_ACCESS_TOKEN`과 따로다
+  (Meta 통합 로그인)로 받은 60일 장기 토큰이다. 연장할 때마다 값이 바뀌어
+  `store_oauth_token(expect=...)`로 넣는다(이름이 `_REFRESH_TOKEN`으로 끝나야 그 길을 쓴다).
+  사람이 직접 넣던 `MARKETING_IG_ACCESS_TOKEN`과 따로다
 - 토큰 종류(`kind`)는 연결할 때 판정해 회사마다 남긴다(Meta 통합 로그인이 어느 쪽 토큰을 줄지
   미리 알 수 없어서다, 11/23). `ig`면 graph.instagram.com, `fb`(Facebook 사용자 토큰)면
   graph.facebook.com/<버전>만 쓴다. 두 API의 토큰을 섞지 않는다(`api_of`)

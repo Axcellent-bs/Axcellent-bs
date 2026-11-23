@@ -353,9 +353,15 @@ def _with_request_video(env: dict[str, Any]) -> sns.SnsPostDraft:
     labeled = folder / "labeled.mp4"
     labeled.write_bytes(b"labeled-video-with-ai-mark")
     sha = sns_media.sha256_file(labeled)
-    meta = {"media_id": "med_1", "media_kind": "video", "post_draft_id": draft.post_draft_id,
-            "generated_at": "2026-11-23T01:00:00+00:00", "prompt": "Scene 1: office.",
-            "ai_label": {"label_overlay": True, "labeled_sha256": sha, "labeled_file": "labeled.mp4"}}  # fmt: skip
+    label = {"label_overlay": True, "labeled_sha256": sha, "labeled_file": "labeled.mp4"}
+    meta = {
+        "media_id": "med_1",
+        "media_kind": "video",
+        "post_draft_id": draft.post_draft_id,
+        "generated_at": "2026-11-23T01:00:00+00:00",
+        "prompt": "Scene 1: office.",
+        "ai_label": label,
+    }
     (folder / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
     linked = draft.model_copy(
         update={"asset_ref": sns_media.asset_ref_for(labeled), "asset_sha256": sha}
