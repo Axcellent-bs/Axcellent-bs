@@ -14,6 +14,15 @@ export function rawCard(message: unknown): ChatCard | null {
   return c && typeof c === "object" && CARD_KINDS.has(String((c as { kind?: unknown }).kind)) ? (c as ChatCard) : null;
 }
 
+/** 대화방(단톡방) 말풍선에 붙일 데이터분석 카드 (11/23). 1:1(DirectChat)과 같은 ChatCardView를 다시 쓴다.
+ *  messageId는 서버 메시지 id 그대로(1:1과 같은 값이라 [의뢰 넣기] 상태가 두 화면에서 같다), threadId는 그 메시지의 대화 id.
+ *  분석 카드(trend_request·trend_report_progress·trend_report_done)만. 이미지 시트 카드(creative)는 따로 그린다 */
+export interface RoomChatCard { card: ChatCard; messageId: string; threadId: string | null }
+export function roomChatCard(message: { id: string; card?: unknown } | null | undefined, threadId: string | null | undefined): RoomChatCard | null {
+  const card = message ? rawCard(message) : null;
+  return card && message ? { card, messageId: message.id, threadId: threadId || null } : null;
+}
+
 /** camelize한 대화에 서버 원문 메시지의 card를 그대로 다시 붙인다 (competitor_names 키 = 인스타 아이디를 지키려고) */
 export function withRawCards<T extends { messages: ChatMessage[] }>(thread: T, rawMessages: unknown[] | null | undefined): T {
   const raw = Array.isArray(rawMessages) ? rawMessages : [];

@@ -4,6 +4,7 @@
 // 2. 대화 상세에 shared(기본 false)·owner. shared면 남의 대화라도 messages가 오고 restricted=false
 // 3. 8곳 중계 부서(dashboard-api 창구)는 보내기 body를 바꾸지 않는다 (단톡방인지는 office-room 줄로 정한다).
 //    POST /office-room이 403 NOT_THREAD_OWNER면 단톡방 줄을 만들지 않는다
+import { roomChatCard, type RoomChatCard } from "./chatCards.ts";
 
 /** 보내기 body에 room_id를 넣는 부서 (부서 서버가 직접 받는 창구). 그 밖 8곳은 dashboard-api 중계라 body를 바꾸지 않는다 */
 export const ROOM_ID_AGENTS: ReadonlySet<string> = new Set(["safety", "hr", "archive"]);
@@ -55,6 +56,13 @@ export function ownsThread(
 }
 
 /** POST /office-room이 "남의 대화" 거절(403 NOT_THREAD_OWNER)인지 → 단톡방 줄을 만들지 않고 콘솔 경고만 */
+/** 대화방 말풍선 항목에 붙일 데이터분석 카드 칸 (11/23). 분석 카드가 아니면 빈 칸이라 지금 그대로다.
+ *  ChatCardView(1:1과 같은 컴포넌트)가 이 칸으로 [의뢰 넣기]·진행·완료 카드를 그린다 */
+export function roomCardField(m: { id: string; card?: unknown }, threadId: string | null | undefined): { chatCard?: RoomChatCard } {
+  const c = roomChatCard(m, threadId);
+  return c ? { chatCard: c } : {};
+}
+
 export function notThreadOwner(e: unknown): boolean {
   if (!e || typeof e !== "object") return false;
   const x = e as { status?: unknown; code?: unknown };
