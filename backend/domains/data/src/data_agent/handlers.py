@@ -103,6 +103,7 @@ from data_agent import (
     llm_failure,
     llm_halt,
     llm_inflight,
+    llm_settings,
     sales_reads,
 )
 from data_agent.clients import customer_reaction
@@ -270,8 +271,10 @@ _LLM_TASK: ContextVar[tuple[str, str] | None] = ContextVar("data_llm_task", defa
 
 
 def get_llm() -> LLMClient:
-    """설명 문장용 LLM. 테스트는 이 함수를 바꿔 끼운다. 미설정이면 explain이 템플릿으로 대체한다."""
-    return TimedLLMClient("data")
+    """설명 문장용 LLM. 테스트는 이 함수를 바꿔 끼운다. 미설정이면 explain이 템플릿으로 대체한다.
+
+    요청 회사의 AI 키가 있으면 그 키·주소·모델, 없으면 서버 설정(`llm_settings.settings`)."""
+    return TimedLLMClient("data", llm_settings.settings())
 
 
 def get_seller_client() -> SellerClient:

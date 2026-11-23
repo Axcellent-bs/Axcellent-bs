@@ -14,11 +14,10 @@ from fastapi import FastAPI
 
 from ax_agent_template.client import call_agent
 from ax_agent_template.config import agent_token
-from ax_agent_template.llm import LLMSettings
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard, RequestMeta
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
-from data_agent import campaign_update, sales_reads
+from data_agent import campaign_update, llm_settings, sales_reads
 from data_agent import catalog as metric_catalog
 from data_agent.clients.log_client import get_log_source
 from data_agent.connectors.shop_api import close_shared_client
@@ -53,11 +52,11 @@ def load_card() -> AgentCard:
 
 
 def llm_configured(env: Mapping[str, str] | None = None) -> bool:
-    """설명 문장용 LLM 설정이 있는지 (`DATA_LLM_*` 또는 공통 `LLM_*`의 모델과 주소).
+    """설명 문장용 LLM 설정이 있는지 (요청 회사의 AI 모델·주소, 없으면 `DATA_LLM_*`·`LLM_*`).
 
     없으면 설명은 늘 템플릿이다(`fallback_reason=llm_unavailable`). 키 값은 보지 않는다.
     """
-    settings = LLMSettings.from_env("data", env)
+    settings = llm_settings.settings(env)
     return bool(settings.model and settings.base_url)
 
 

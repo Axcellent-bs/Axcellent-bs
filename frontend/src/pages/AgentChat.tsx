@@ -612,7 +612,7 @@ export default function AgentChat() {
       {/* chat-round: 이 안의 말풍선·알약·아바타·배지만 둥글게 (styles.css) */}
       <div className="chat-round flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <div className={`flex min-h-0 shrink-0 flex-col gap-2 ${shownCount >= 3 ? "lg:w-64" : "lg:w-80"}`}>
-          <RequestHandoffCard compact />
+          <RequestHandoffCard compact layout="sidebar" />
           <RoomList all={all} incidents={incidentRooms} unseen={data.unseen} act={act} focusedRoom={focusedRoom} narrow={shownCount >= 3} />
         </div>
         <div className={`grid min-h-0 min-w-0 flex-1 gap-3 ${cols}`}>
