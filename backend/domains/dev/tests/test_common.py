@@ -232,7 +232,10 @@ def test_dev_agent_card_format_and_served() -> None:
         "receive_release_order",
         "receive_request_pause",
         "revert_merged_pr",
+        "handoff_known",  # 다시 켰을 때 맞추기: 기획이 넘긴 것을 받았는지 (read, 11/23)
     }
+    assert skills["handoff_known"].grade == "read"
+    assert skills["handoff_known"].allowed_requesters == ["planning"]
     assert skills["revert_merged_pr"].grade == "B"
     assert skills["revert_merged_pr"].allowed_requesters == ["infra"]
     for name in chat:

@@ -96,6 +96,7 @@ from ax_workflow.dev_handoff import (
     RECEIVE_DEV_RESULT,
     START_DEV,
     DevSender,
+    fingerprint,
     start_dev_key,
 )
 from ax_workflow.handover import (
@@ -377,11 +378,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
             req = self._request_of_spec(s, sp)
             if not sp.handed_to_dev or (sp.id in was and not full) or req is None:
                 continue
-            inp = DevHandoffInput(
-                request=dump(req),
-                spec=dump(sp),
-                tasks=[dump(t) for t in s.tasks if t.spec == sp.id],
-            )
+            inp = self._start_dev_input(s, sp, req)
             out.append((START_DEV, req.context_id, inp, start_dev_key(req.context_id, sp.id)))
         # 사람이 "개발로 다시 보내기"를 고른 기획서: keep_dev를 켜서 다시 보낸다 (새 멱등 키)
         queue = self._redev_queue()
@@ -398,6 +395,31 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
             key = f"{start_dev_key(req.context_id, sp.id)}:keep:{task_id}:{n}"
             out.append((START_DEV, req.context_id, inp, key))
         return out
+
+    @staticmethod
+    def _start_dev_input(s: State, sp: Spec, req: Request) -> DevHandoffInput:
+        return DevHandoffInput(
+            request=dump(req),
+            spec=dump(sp),
+            tasks=[dump(t) for t in s.tasks if t.spec == sp.id],
+        )
+
+    def _reack_from_dev(self, spec_id: str) -> None:
+        """개발이 기획서 결과를 돌려줬으면 개발은 그 기획서를 가진 것이다. 받았다는 기록이 있는
+        start_dev의 지문을 지금 입력으로 바꾼다 (개발이 돌려준 작업·요청 상태로 입력이 바뀌어
+        다시 켰을 때 맞추기가 같은 기획서를 또 보내지 않게)."""
+        s = self.state
+        sp = next((x for x in s.specs if x.id == spec_id), None)
+        req = self._request_of_spec(s, sp) if sp else None
+        if sp is None or req is None:
+            return
+        key = start_dev_key(req.context_id, sp.id)
+        if key not in self._acked:
+            return
+        fp = fingerprint(self._start_dev_input(s, sp, req).model_dump(mode="json"))
+        if self._acked[key] != fp:
+            self._ack(key, fp)
+            self._save_handoff()
 
     async def _inbound(self, s: State, kind: str) -> ActionResult | None:
         """시뮬레이터: 다른 부서 요청·개선 초안이 들어온 것처럼 (목 모드)."""
@@ -1679,6 +1701,8 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         result = await self._apply(run)
         self._idempotent[idempotency_key] = result
         self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
+        if spec_id:
+            self._reack_from_dev(spec_id)
         return result
 
     async def _answer_question(self, s: State, spec: str, text: str) -> None:

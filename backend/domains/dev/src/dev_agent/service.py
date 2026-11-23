@@ -277,6 +277,12 @@ class DevService(PlanningCore):
 
         self._pr_sync = asyncio.get_running_loop().create_task(loop())
 
+    def stop_pr_sync(self) -> None:
+        """맞추기 루프를 끈다 (서버를 끌 때). 다시 켜면 start_pr_sync가 새로 띄운다."""
+        task, self._pr_sync = self._pr_sync, None
+        if task is not None:
+            task.cancel()
+
     def _spawn_hold_poll(self) -> None:
         """보류 건 결정 묻기를 따로 돌린다. 앞 차례가 아직 돌면 건너뛴다 (PR 맞추기·대화 손보기가
         승인 뒤 이어서 하기(머지 등)를 기다리느라 멈추지 않게)."""

@@ -404,6 +404,24 @@ class DevResultOutput(AxModel):
     applied: int  # planning 쪽에 반영한 작업·PR 수
 
 
+# ---- 넘기기 받았는지 묻기 (planning ↔ dev `handoff_known`, 등급 read, 2026-11-23)
+#
+# 다시 켰을 때 맞추기가 받았다고 기록한 넘기기를 다 다시 보내지 않고, 받는 쪽에 한 번 묻는다.
+# 받는 쪽은 준 멱등 키 중 자기가 반영한(중복 거르기 기록에 있는) 키만 돌려준다.
+# 상태를 바꾸지 않는다.
+# 빠진 키(받는 쪽이 상태를 잃음)만 보내는 쪽이 다시 보낸다.
+
+HANDOFF_KNOWN_MAX_KEYS = 2000
+
+
+class HandoffKnownInput(AxModel):
+    keys: list[str] = Field(default_factory=list, max_length=HANDOFF_KNOWN_MAX_KEYS)
+
+
+class HandoffKnownOutput(AxModel):
+    known: list[str] = Field(default_factory=list)  # keys 중 받는 쪽이 반영한 것 (준 순서)
+
+
 # ---- 기획 → 요청 서비스 되묻기 (planning, 2026-11-02)
 #
 # 기획서를 쓰다가 정보가 모자라면 요청을 보낸 **서비스**에 되묻는다 (부서가 아니라 서비스 단위).

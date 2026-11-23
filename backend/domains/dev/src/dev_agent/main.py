@@ -9,13 +9,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from ax_agent_template import config as template_config
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
 from ax_workflow.auth import AuthError
@@ -66,17 +71,61 @@ app.include_router(create_dev_router(get_service))
 hold_resume.setup_subscriber(get_service)
 
 
-async def _resync_on_start() -> None:
-    """켤 때 기획 서비스와 맞추고, 형상관리에서 직접 머지·닫은 PR을 주기적으로 맞춘다.
+async def _resync_peer_on_start() -> None:
+    """켤 때 기획 서비스와 맞춘다. 기획이 뜰 때까지(최대 5분) 기다린 뒤, 받았다고 하지 않았거나
+    기획이 갖고 있지 않은 넘기기만 보낸다. 끝내 안 뜨면 못 보낸 것으로 남겨 다시 보낸다."""
+    try:
+        await get_service().resync_peer(wait_peer=True)
+    except Exception:  # 켤 때 뒷일이라 서버를 멈추지 않는다
+        logging.getLogger("ax.dev").exception("기획 서비스와 맞추기 실패")
 
-    상대가 아직 안 떴으면 못 보낸 것으로 남겨 다시 보낸다."""
-    asyncio.get_running_loop().create_task(get_service().resync_peer())
-    get_service().start_pr_sync()
-    # 연결 대장: 켤 때 한 번, 그 뒤 하루마다 서버 버전·토큰 권한을 다시 읽는다
+
+def _runs_loops() -> bool:
+    """주기 루프(PR 맞추기·연결 대장)를 켤지. 목 모드(시험 전용)에서는 켜지 않는다.
+
+    시험이 `with TestClient(app)`로 앱을 켤 때마다 대화 되돌리기·형상관리 읽기가 돌지 않게 한다."""
+    return not template_config.is_mock("dev")
+
+
+def _start_loops() -> Callable[[], None]:
+    """켤 때 도는 주기 루프를 띄우고 끄는 함수를 돌려준다.
+
+    - PR 맞추기 루프(`start_pr_sync`): 형상관리에서 직접 머지·닫은 PR 맞추기, CI 다시 보기, 멈춘
+      작업 다시 하기, 구독형 작업 되돌리기, 사람이 승인한 보류 건 잇기, 대화 손보기.
+    - 연결 대장(`inventory.start_daily`): 켤 때 한 번, 그 뒤 하루마다 서버 버전·토큰 권한 읽기.
+    둘 다 이미 돌고 있으면 새로 띄우지 않는다 (프로세스에 하나)."""
+    if not _runs_loops():
+        return lambda: None
+    svc = get_service()
+    svc.start_pr_sync()
     inventory.start_daily()
 
+    def stop() -> None:
+        svc.stop_pr_sync()
+        inventory.stop_daily()
 
-app.router.on_startup.append(_resync_on_start)
+    return stop
+
+
+# 템플릿 앱은 `lifespan`을 써서 `on_startup`이 실행되지 않는다 (기획 main과 같다, 11/23 확인).
+# 켤 때 도는 일(기획과 맞추기·PR 맞추기 루프·연결 대장)은 템플릿 lifespan을 감싸 띄우고
+# 끌 때 멈춘다
+_template_lifespan = app.router.lifespan_context
+
+
+@asynccontextmanager
+async def _lifespan(a: Any) -> AsyncIterator[None]:
+    async with _template_lifespan(a):
+        task = asyncio.get_running_loop().create_task(_resync_peer_on_start())
+        stop_loops = _start_loops()
+        try:
+            yield
+        finally:
+            task.cancel()
+            stop_loops()
+
+
+app.router.lifespan_context = _lifespan
 
 
 @app.exception_handler(AuthError)
