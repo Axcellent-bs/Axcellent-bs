@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 로그인 전 회사 공개 정보 읽기·거절 구분·회사 고르기.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pickCompany, readPublicCompany, refusedForThisPerson } from "./publicCompany.ts";
+import { pickCompany, publicFallbackOk, readPublicCompany, readTurns, refusedForThisPerson } from "./publicCompany.ts";
 
 test("공개 회사 정보는 id·이름·사이트 주소만 읽는다", () => {
   const body = { data: { company: { id: "c-k1", name: " 고양이책방 ", site_url: "https://cat.example", key: "AXC-SECRET" } } };
@@ -36,4 +36,19 @@ test("로그인 전에는 공개 정보로, 로그인 뒤에는 서버 목록으
   assert.equal(pickCompany(keyed, site, pub), keyed);
   assert.equal(pickCompany(null, site, pub), site);
   assert.equal(pickCompany(null, null, null), null);
+});
+
+test("로그인한 사람의 응답을 기다리는 동안에는 공개 정보(캣북스)를 쓰지 않는다 (사후 리뷰 11/23)", () => {
+  assert.equal(publicFallbackOk(false, false), true); // 로그인 전·거절(401·403)
+  assert.equal(publicFallbackOk(false, true), false); // 세션이 바뀌어 새 응답 기다리는 중·연결 실패
+  assert.equal(publicFallbackOk(true, false), false); // 이 사람 토큰으로 읽음: 서버가 준 세션 회사 줄이 답
+});
+
+test("세션이 바뀌면 앞 차례에 보낸 요청의 응답은 버린다", () => {
+  const turns = readTurns();
+  const before = turns.current();
+  assert.equal(turns.isCurrent(before), true);
+  const after = turns.next(); // 로그인한 사람이 바뀜
+  assert.equal(turns.isCurrent(before), false); // 앞 사람 응답이 늦게 와도 버린다
+  assert.equal(turns.isCurrent(after), true);
 });

@@ -9,6 +9,8 @@
 - 키 목록은 설치에 하나(운영팀이 발급하는 "연결해도 된다"는 권한이라 회사 정보가 없다)
 - 연결된 회사는 회사마다 한 줄: 캣북스는 예전 칸 `company` 그대로(파일 모양·되돌리기 그대로),
   다른 회사는 `companies.<회사 ID>`. 연결한 키 줄에는 `company_id`를 남긴다
+- 연결 전 키 줄(발급만 함)은 운영자 세션·공용 토큰만 본다. 끊거나 다른 키로 바꾸면 그 키 줄은
+  연결 전으로 돌아간다(`company_id`·회사 정보 지움). 회사별 전 예전 줄의 주인은 `_owner()`
 - 화면은 로그인 세션 회사의 줄만 읽고 쓴다. 공용 토큰(세션 아님)은 캣북스(예전 그대로)
 - 다른 회사가 이미 쓰는 키는 `KEY_IN_USE`. 다른 회사 관리자에게는 그 회사 키 줄·회사 정보를
   보이지 않는다(운영자 세션·공용 토큰은 예전처럼 전부 본다)
@@ -21,6 +23,7 @@ import json
 import os
 import re
 import secrets
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,6 +42,10 @@ KEYS_FILE = "connection_keys.json"
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 router = APIRouter(prefix="/api/dashboard/connection-keys", dependencies=[Depends(require_human)])
+# 키 파일 읽고-고치고-쓰기 잠금. 두 관리자가 동시에 연결·발급해도 한쪽 저장이 덮이지 않게 한다.
+# dashboard-api의 다른 저장 파일(accounts·company_ai·personal_mcp)과 같은 방식:
+# 서버 하나(워커 1개)라 프로세스 안 스레드 잠금으로 막고, 파일은 임시 파일 + `os.replace`로 바꾼다
+_file_lock = threading.Lock()
 
 
 # 로그인 세션 토큰이면 역할을 본다(설계 3절): 키 발급·폐기는 운영자,
@@ -130,9 +137,31 @@ def _set_record(data: dict[str, Any], cid: str, value: dict[str, Any] | None) ->
         data["companies"][cid] = value
 
 
-def _owner(row: dict[str, Any]) -> str:
-    """키 줄의 회사. 회사 칸이 없는 예전 줄(회사별 전)은 캣북스."""
-    return company_scope.scope_id(row.get("company_id"))
+def _owner(row: dict[str, Any], data: dict[str, Any]) -> str | None:
+    """키 줄의 회사. 없으면 None(아직 아무 회사도 쓰지 않은 키: 운영자만 본다).
+
+    - `company_id`가 있으면 그 회사
+    - `company_id`가 없으면 회사별 전의 예전 줄이거나 연결 전 키다. 회사별 전에는 연결이 모두
+      캣북스였으므로 연결 기록이 있는 줄만 캣북스로 본다: 예전 칸 `company`의 `key_id`인 줄
+      (지금 캣북스가 쓰는 키), 또는 키 줄에 회사 정보(`company`)가 남은 줄(예전에 캣북스가 쓴 키).
+      지금은 연결할 때 `company_id`를 남기고 끊거나 바꿀 때 회사 정보를 지워서,
+      이 둘은 예전 줄에만 있다
+    - 그 밖(발급만 한 키)은 어느 회사 것도 아니다. 운영자가 누비용으로 발급해 둔 키가 연결 전에
+      캣북스 관리자 목록에 보이지 않게 한다
+    """
+    if row.get("company_id"):
+        return company_scope.scope_id(row["company_id"])
+    legacy = data.get("company")
+    if (isinstance(legacy, dict) and legacy.get("key_id") == row.get("id")) or row.get("company"):
+        return company_scope.CATBOOKS
+    return None
+
+
+def _release(row: dict[str, Any]) -> None:
+    """회사가 끊거나 다른 키로 바꾼 키 줄: 연결 전 상태로 되돌린다(회사·회사 정보를 지운다)."""
+    row["status"] = "issued"
+    row.pop("company_id", None)
+    row.pop("company", None)
 
 
 def _sees_all(authorization: str | None) -> bool:
@@ -144,6 +173,7 @@ def _sees_all(authorization: str | None) -> bool:
 
 
 def _save(data: dict[str, Any]) -> None:
+    """임시 파일에 쓰고 `os.replace`로 바꾼다. 읽고-고치고-쓰기는 `_file_lock` 안에서 한다."""
     path = _path()
     if path is None:
         raise ApiError(
@@ -165,7 +195,7 @@ def _state(data: dict[str, Any] | None = None, *, everyone: bool = True) -> dict
     cid = _cid()
     company = _record(data, cid)
     by_id = {k["id"]: k for k in data["keys"]}
-    listed = data["keys"] if everyone else [k for k in data["keys"] if _owner(k) == cid]
+    listed = data["keys"] if everyone else [k for k in data["keys"] if _owner(k, data) == cid]
     rows = [
         {
             "id": k["id"],
@@ -243,7 +273,6 @@ def issue(body: IssueIn) -> dict:
         raise ApiError(
             409, "KEYS_NOT_EDITABLE", f"{store.CONNECTION_FILE_ENV}가 없어 저장할 수 없다"
         )
-    data = _load()
     part = lambda: "".join(secrets.choice(ALPHABET) for _ in range(4))  # noqa: E731
     key = f"AXC-{part()}-{part()}-{part()}"
     row = {
@@ -253,8 +282,10 @@ def issue(body: IssueIn) -> dict:
         "issued_at": _now(),
         "status": "issued",
     }
-    data["keys"].insert(0, row)
-    _save(data)
+    with _file_lock:
+        data = _load()
+        data["keys"].insert(0, row)
+        _save(data)
     return ok({"id": row["id"], "key": key, **_state(data)})
 
 
@@ -267,79 +298,83 @@ def check(body: KeyIn) -> dict:
         return ok({"ok": False, "reason": problem[1]})
     assert found is not None
     # 미리 채울 회사 정보는 그 키를 전에 쓴 회사가 이 회사일 때만(다른 회사 이름·업종은 안 보임)
-    prefill = (found.get("company") or None) if _owner(found) == _cid() else None
+    prefill = (found.get("company") or None) if _owner(found, data) == _cid() else None
     return ok({"ok": True, "reason": None, "company": prefill})
 
 
 @router.post("/connect", dependencies=ADMIN_ONLY)
 def connect(body: ConnectIn, authorization: str | None = Header(None)) -> dict:
     """세션 회사의 줄에만 저장한다. 다른 회사 줄(캣북스 포함)은 그대로."""
-    data = _load()
     cid = _cid()
-    found = _find(data, body.key)
-    problem = _why_not(data, found)
-    if problem:
-        raise ApiError(422, problem[0], problem[1])
-    assert found is not None
-    prev = _record(data, cid)
-    for k in data["keys"]:
-        if prev and k["id"] == prev.get("key_id") and k["id"] != found["id"]:
-            k["status"] = "issued"
-    info = _info(body)
-    if not info["name"]:
-        raise ApiError(422, "NAME_REQUIRED", "회사 이름을 넣어 주세요")
-    company = {"id": f"c-{found['id']}", **info, "key_id": found["id"], "connected_at": _now()}
-    found["status"] = "connected"
-    found["company"] = info
-    found["company_id"] = cid
-    _set_record(data, cid, company)
-    _save(data)
+    with _file_lock:
+        data = _load()
+        found = _find(data, body.key)
+        problem = _why_not(data, found)
+        if problem:
+            raise ApiError(422, problem[0], problem[1])
+        assert found is not None
+        info = _info(body)
+        if not info["name"]:
+            raise ApiError(422, "NAME_REQUIRED", "회사 이름을 넣어 주세요")
+        prev = _record(data, cid)
+        for k in data["keys"]:
+            if prev and k["id"] == prev.get("key_id") and k["id"] != found["id"]:
+                _release(k)  # 다른 키로 바꾸면 예전 키 줄은 연결 전으로(회사·회사 정보 지움)
+        company = {"id": f"c-{found['id']}", **info, "key_id": found["id"], "connected_at": _now()}
+        found["status"] = "connected"
+        found["company"] = info
+        found["company_id"] = cid
+        _set_record(data, cid, company)
+        _save(data)
     return ok(_state(data, everyone=_sees_all(authorization)))
 
 
 @router.post("/company", dependencies=ADMIN_ONLY)
 def update_company(body: InfoIn, authorization: str | None = Header(None)) -> dict:
-    data = _load()
-    company = _record(data, _cid())
-    if not company:
-        raise ApiError(409, "NOT_CONNECTED", "연결된 회사가 없어요")
-    info = _info(body)
-    if not info["name"]:
-        raise ApiError(422, "NAME_REQUIRED", "회사 이름을 넣어 주세요")
-    company.update(info)
-    for k in data["keys"]:
-        if k["id"] == company.get("key_id"):
-            k["company"] = info
-    _save(data)
+    with _file_lock:
+        data = _load()
+        company = _record(data, _cid())
+        if not company:
+            raise ApiError(409, "NOT_CONNECTED", "연결된 회사가 없어요")
+        info = _info(body)
+        if not info["name"]:
+            raise ApiError(422, "NAME_REQUIRED", "회사 이름을 넣어 주세요")
+        company.update(info)
+        for k in data["keys"]:
+            if k["id"] == company.get("key_id"):
+                k["company"] = info
+        _save(data)
     return ok(_state(data, everyone=_sees_all(authorization)))
 
 
 @router.post("/revoke", dependencies=OPERATOR_ONLY)
 def revoke(body: RevokeIn) -> dict:
-    data = _load()
-    found = next((k for k in data["keys"] if k["id"] == body.id), None)
-    if found is None:
-        raise ApiError(404, "KEY_NOT_FOUND", "그 키가 없어요")
-    found["status"] = "revoked"
-    # 그 키로 연결한 회사(어느 회사든)의 연결을 끊는다
-    for cid in [company_scope.CATBOOKS, *data["companies"]]:
-        company = _record(data, cid)
-        if company and company.get("key_id") == found["id"]:
-            _set_record(data, cid, None)
-    _save(data)
+    with _file_lock:
+        data = _load()
+        found = next((k for k in data["keys"] if k["id"] == body.id), None)
+        if found is None:
+            raise ApiError(404, "KEY_NOT_FOUND", "그 키가 없어요")
+        found["status"] = "revoked"
+        # 그 키로 연결한 회사(어느 회사든)의 연결을 끊는다
+        for cid in [company_scope.CATBOOKS, *data["companies"]]:
+            company = _record(data, cid)
+            if company and company.get("key_id") == found["id"]:
+                _set_record(data, cid, None)
+        _save(data)
     return ok(_state(data))
 
 
 @router.post("/disconnect", dependencies=ADMIN_ONLY)
 def disconnect(authorization: str | None = Header(None)) -> dict:
     """세션 회사의 연결만 끊는다."""
-    data = _load()
     cid = _cid()
-    company = _record(data, cid)
-    if company:
-        for k in data["keys"]:
-            if k["id"] == company.get("key_id") and k["status"] == "connected":
-                k["status"] = "issued"
-        _set_record(data, cid, None)
-        _save(data)
+    with _file_lock:
+        data = _load()
+        company = _record(data, cid)
+        if company:
+            for k in data["keys"]:
+                if k["id"] == company.get("key_id") and k["status"] == "connected":
+                    _release(k)  # 끊은 키 줄은 연결 전으로(회사·회사 정보 지움)
+            _set_record(data, cid, None)
+            _save(data)
     return ok(_state(data, everyone=_sees_all(authorization)))
