@@ -1379,6 +1379,8 @@ export interface LlmStatus {
   /** request_error: 막힌 응답 형식 이름과 공급자 메시지 앞 200자 (서버가 키·토큰 모양을 가림) */
   request?: string | null;
   error_message?: string | null;
+  /** 쓰는 키 종류 (여러 회사 6+, 11/23). company면 key_source가 "<회사> 회사 키(…끝4자리)". 예전 응답은 없다 */
+  key_kind?: "company" | "server" | "none" | null;
 }
 /** 응답에 나오는 숫자 하나 (출처·기간·표본, #614) */
 export interface DataFact {
