@@ -827,3 +827,104 @@ def test_sns_draft_media_preview_serves_only_the_checked_labeled_file(
     assert client.get("/api/dashboard/marketing/sns-drafts/bad.id/media/preview").status_code == 422
     monkeypatch.delenv(marketing_client.MEDIA_DIR_ENV)
     assert client.get(DRAFT_PREVIEW).status_code == 404
+
+
+# --- 화면 직결 읽기: 받은 기획안·장애 SNS 초안 (판매 서버 중계 없이 마케팅 skill을 바로 부른다) ---
+
+BRIEFS = "/api/dashboard/marketing/briefs"
+OUTAGE_DRAFTS = "/api/dashboard/marketing/outage-sns-drafts"
+
+
+def _read_setup(
+    monkeypatch: pytest.MonkeyPatch,
+    skill: str,
+    result: dict,
+    seen: list,
+    *,
+    status: TaskStatus = TaskStatus.COMPLETED,
+    outcome: str | None = None,
+) -> None:
+    async def send(target: str, request: AgentRequest) -> AgentResult:
+        assert (target, request.skill) == ("marketing", skill)
+        seen.append(request.input)
+        return AgentResult(meta=request.meta, status=status, outcome=outcome, output=result)
+
+    monkeypatch.setattr(marketing_client, "SEND", send)
+
+
+def test_briefs_list_reads_marketing_skill_and_keeps_shape(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = {"items": [{"proposal_id": "p1"}], "total": 1, "unknown_reason": None}
+    seen: list = []
+    _read_setup(monkeypatch, "list_campaign_briefs", out, seen)
+    res = client.get(BRIEFS + "?limit=7")
+    assert res.status_code == 200 and "meta" in res.json()
+    assert res.json()["data"] == out
+    assert seen == [{"limit": 7}]
+    assert client.get(BRIEFS + "?limit=101").status_code == 422
+    assert client.get(BRIEFS + "?limit=0").status_code == 422
+
+
+def test_briefs_list_empty_stays_an_empty_list(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    empty = {"items": [], "total": 0, "unknown_reason": "받은 기획안이 없음"}
+    _read_setup(monkeypatch, "list_campaign_briefs", empty, [])
+    assert client.get(BRIEFS).json()["data"] == empty
+
+
+def test_briefs_list_storage_error_is_503(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _read_setup(
+        monkeypatch,
+        "list_campaign_briefs",
+        {},
+        [],
+        status=TaskStatus.FAILED,
+        outcome="storage_error",
+    )
+    res = client.get(BRIEFS)
+    assert res.status_code == 503 and res.json()["error"]["code"] == "STORAGE_ERROR"
+
+
+def test_brief_detail_found_and_missing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list = []
+    _read_setup(
+        monkeypatch,
+        "get_campaign_brief",
+        {"found": True, "item": {"proposal_id": "p1", "campaign_id": "cmp_p1"}},
+        seen,
+    )
+    res = client.get(BRIEFS + "/p1")
+    assert res.status_code == 200 and res.json()["data"]["proposal_id"] == "p1"
+    assert seen == [{"proposal_id": "p1"}]
+    _read_setup(monkeypatch, "get_campaign_brief", {"found": False, "item": None}, [])
+    assert client.get(BRIEFS + "/p2").status_code == 404
+    assert client.get(BRIEFS + "/bad id!").status_code == 422
+
+
+def test_outage_sns_drafts_list_forwards_query(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = {"items": [], "total": 0, "merged_total": 0, "unknown_reason": "초안이 없음"}
+    seen: list = []
+    _read_setup(monkeypatch, "list_outage_sns_drafts", out, seen)
+    res = client.get(OUTAGE_DRAFTS + "?limit=5&include_merged=true")
+    assert res.status_code == 200 and res.json()["data"] == out
+    assert seen == [{"limit": 5, "include_merged": True}]
+    assert client.get(OUTAGE_DRAFTS + "?limit=101").status_code == 422
+
+
+def test_marketing_reads_reject_a_bad_token(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list = []
+    _read_setup(monkeypatch, "list_campaign_briefs", {"items": [], "total": 0}, seen)
+    bad = {"Authorization": "Bearer wrong"}
+    for url in (BRIEFS, BRIEFS + "/p1", OUTAGE_DRAFTS):
+        assert client.get(url, headers=bad).status_code in (401, 403)
+    assert seen == []

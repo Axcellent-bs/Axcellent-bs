@@ -488,6 +488,50 @@ async def outage_media_preview(draft_id: str) -> tuple[Path, str]:
 REQUEST_VIDEO_PREVIEW = "/dashboard-api/api/dashboard/marketing/sns-drafts/{draft_id}/media/preview"
 
 
+async def briefs_list_call(limit: int) -> dict[str, Any]:
+    """받은 기획안 목록(`list_campaign_briefs`, 읽기). 마케팅 skill 출력을 그대로 돌려준다."""
+    out = await call(
+        "list_campaign_briefs",
+        {"limit": limit},
+        campaign_id="briefs_read",
+        key=f"ui:briefs-list:{limit}",
+    )
+    if out["status"] == TaskStatus.FAILED.value:
+        raise ApiError(503, "STORAGE_ERROR", f"받은 기획안을 읽지 못했다 ({out['outcome']})")
+    return out["output"] or {"items": [], "total": 0, "unknown_reason": "받은 기획안이 없음"}
+
+
+async def brief_get_call(proposal_id: str) -> dict[str, Any]:
+    """받은 기획안 하나(`get_campaign_brief`, 읽기). 없으면 404."""
+    out = await call(
+        "get_campaign_brief",
+        {"proposal_id": proposal_id},
+        campaign_id=f"cmp_{proposal_id}",
+        key=f"ui:brief-get:{proposal_id}",
+    )
+    if out["status"] == TaskStatus.FAILED.value:
+        status, code = BRIEF_MEDIA_FAILURES.get(out["outcome"] or "", (503, "STORAGE_ERROR"))
+        raise ApiError(status, code, f"받은 기획안을 읽지 못했다 ({out['outcome']})")
+    output = out["output"] or {}
+    if not output.get("found") or not isinstance(output.get("item"), dict):
+        raise ApiError(404, "NOT_FOUND", "받은 기획안을 찾을 수 없다")
+    return output["item"]
+
+
+async def outage_sns_drafts_list_call(limit: int, include_merged: bool) -> dict[str, Any]:
+    """장애 사과·보상 SNS 초안 목록(`list_outage_sns_drafts`, 읽기). 게시하지 않는다."""
+    out = await call(
+        "list_outage_sns_drafts",
+        {"limit": limit, "include_merged": include_merged},
+        campaign_id="outage_sns_read",
+        key=f"ui:outage-sns-list:{limit}:{int(include_merged)}",
+    )
+    if out["status"] == TaskStatus.FAILED.value:
+        raise ApiError(400, "INVALID_INPUT", f"장애 SNS 초안을 읽지 못했다 ({out['outcome']})")
+    empty = {"items": [], "total": 0, "unknown_reason": "장애 사과·보상 SNS 초안이 없음"}
+    return out["output"] or empty
+
+
 async def request_videos_call(request_id: str | None, limit: int) -> dict[str, Any]:
     """의뢰 홍보 영상 목록(`list_request_videos`, 읽기). 파일 확인용 `prepared`는 응답에서 뺀다.
 

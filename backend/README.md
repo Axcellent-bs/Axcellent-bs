@@ -80,11 +80,12 @@ bash scripts/run_all.sh stop
 - 에이전트 토큰(`AX_AGENT_TOKENS`)·사람 토큰은 켤 때마다 새로 만들어 프로세스에만 넘긴다. 화면 개발 서버에 넘길 값만
   `backend/.data/web.env`에 쓴다 (커밋 안 함, 이름은 `AX_WEB_*_TOKEN`). `run_web.sh`는 이 값을 개발 서버 프록시에만 넘기고,
   화면 번들(`VITE_*_TOKEN`)에는 자리표시자만 넣는다. 프록시가 자리표시자를 진짜 토큰으로 바꿔 붙인다(`frontend/token-proxy.ts`, 서버 nginx와 같은 구조).
-- 화면은 판매 서버(shop-api) 관리 읽기(총괄 사건·부서, 받은 기획안·장애 SNS 초안, 공지 배너, 장애 상태)를
+- 화면은 판매 서버(shop-api) 관리 읽기(총괄 사건·부서, 공지 배너, 장애 상태)를
   직접 부르지 않고 dashboard-api의 `/api/dashboard/shop/*`(GET만)를 부른다. dashboard-api가 회사 연결 주소
   (`agent_url("shop-api")`)로 **읽기 전용 열람 토큰** `SHOP_VIEWER_TOKEN`(24자 이상)을 붙여 부른다.
   캣북스 shop-api와 dashboard-api에 같은 값을 넣고, 화면 빌드에는 넣지 않는다. 열람 토큰은 위 읽기만 열리고
   쓰기·그 밖의 관리 API는 모두 403이다. 에이전트 토큰 명부와 따로 두어 다른 서버(총괄 등)로는 통하지 않는다.
+  받은 기획안·장애 SNS 초안은 판매 서버를 거치지 않고 `/api/dashboard/marketing/{briefs,briefs/{id},outage-sns-drafts}`가 마케팅 skill을 A2A로 바로 읽는다.
   `.env`에 없으면 run_all.sh가 `.data/tokens.env`에 만들어 두고 다시 켤 때 그대로 쓴다.
 - 판매 서버(shop-api)가 마케팅 등을 A2A로 부를 때 쓰는 에이전트 토큰 `shop-api`도 같은 명부(`AX_AGENT_TOKENS`)에 들어간다.
   이 값은 판매 서버(`shop.env`)가 쓰는 값과 같아야 한다. 운영 서버는 `.data/tokens.env`의 `AX_AGENT_TOKENS=` 줄에

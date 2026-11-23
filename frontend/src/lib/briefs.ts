@@ -6,8 +6,8 @@ import type { ManualCompleteAnswer, ManualPackageAnswer } from "./manualPublish"
 import type { PublishControlAnswer } from "./publishControl";
 import type { BriefMediaAnswer, MediaEstimate, PreparedMedia, PublishAnswer, PublishState } from "./briefMedia";
 
-// 마케팅이 기획에서 받은 기획안 읽기. 화면은 마케팅도 판매 서버도 직접 부르지 않고 dashboard-api 중계
-// (GET만, `/api/dashboard/shop/marketing/*`)를 부른다. 판매 서버 토큰은 dashboard-api 서버 쪽에만 있다.
+// 마케팅이 기획에서 받은 기획안 읽기. 화면은 dashboard-api의 읽기 주소
+// (GET, `/api/dashboard/marketing/briefs`·`/outage-sns-drafts`)만 부른다. dashboard-api가 마케팅 skill을 A2A로 바로 읽는다(판매 서버를 거치지 않는다).
 // 응답 모양은 ax-backend `marketing_agent/briefs.py`(`StoredBrief`)와 계약 `CampaignBriefInput` 기준이다.
 
 export interface BriefFact { label: string; value: string; source: string; link: string | null }
@@ -340,9 +340,10 @@ export const outageMediaPreviewUrl = (draftId: string, version: string | null) =
   `${DASHBOARD_API_URL}${outagePath(draftId)}/media/preview${version ? `?v=${encodeURIComponent(version.slice(0, 12))}` : ""}`;
 
 export const briefs = {
-  list: (limit = 50) => get<BriefList>(`/api/dashboard/shop/marketing/briefs?limit=${briefsListLimit(limit)}`),
+  list: (limit = 50) => get<BriefList>(`/api/dashboard/marketing/briefs?limit=${briefsListLimit(limit)}`),
+  get: (proposalId: string) => get<StoredBrief>(`/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}`),
   outageSnsDrafts: (limit = 20, includeMerged = false) =>
-    get<OutageSnsDraftList>(`/api/dashboard/shop/marketing/outage-sns-drafts?limit=${briefsListLimit(limit)}${includeMerged ? "&include_merged=true" : ""}`),
+    get<OutageSnsDraftList>(`/api/dashboard/marketing/outage-sns-drafts?limit=${briefsListLimit(limit)}${includeMerged ? "&include_merged=true" : ""}`),
   mergeOutageSnsDrafts,
   handoff,
   makeMedia,

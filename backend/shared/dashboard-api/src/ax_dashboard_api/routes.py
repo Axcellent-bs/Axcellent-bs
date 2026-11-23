@@ -1099,6 +1099,29 @@ async def choose_brief_audio(
     )
 
 
+@router.get("/marketing/briefs")
+async def list_marketing_briefs(limit: int = Query(50, ge=1, le=100)) -> dict:
+    """마케팅이 받은 기획안 목록(마케팅 `list_campaign_briefs`, 읽기). 판매 서버를 거치지 않는다."""
+    _no_org_in_mock()
+    return ok(await marketing_client.briefs_list_call(limit))
+
+
+@router.get("/marketing/briefs/{proposal_id}")
+async def get_marketing_brief(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> dict:
+    """받은 기획안 하나(마케팅 `get_campaign_brief`, 읽기). 없으면 404."""
+    _no_org_in_mock()
+    return ok(await marketing_client.brief_get_call(proposal_id))
+
+
+@router.get("/marketing/outage-sns-drafts")
+async def list_marketing_outage_sns_drafts(
+    limit: int = Query(20, ge=1, le=100), include_merged: bool = False
+) -> dict:
+    """장애 사과·보상 SNS 글 초안 목록(마케팅 `list_outage_sns_drafts`, 읽기). 게시하지 않는다."""
+    _no_org_in_mock()
+    return ok(await marketing_client.outage_sns_drafts_list_call(limit, include_merged))
+
+
 @router.get("/marketing/briefs/{proposal_id}/media/preview")
 async def preview_brief_media(proposal_id: str = Path(pattern=_PROPOSAL_ID)) -> FileResponse:
     """준비된 미디어 초안의 미리보기. AI 표시를 입힌 결과 파일(`labeled.jpg|mp4`)만 내준다."""
