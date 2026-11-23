@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from ax_agent_template.config import is_mock
 from ax_workflow.api import (
     ADMIN,
     CALLER,
@@ -21,15 +22,18 @@ from ax_workflow.api import (
     add_common_routes,
 )
 from ax_workflow.auth import (
+    MOCK_NAME,
     AuthError,
     check_human,
     scoped_account,
+    session_account,
     session_admin,
     session_decider,
+    session_mode,
 )
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import dump
-from dev_agent import coder, dev_chat, llm_key, vcs, vcs_bridge
+from dev_agent import coder, dev_chat, llm_key, scope, vcs, vcs_bridge
 from dev_agent.deploy import DeployError
 from dev_agent.deploy_store import get_deploy_store
 from dev_agent.repo_api import add_repo_routes
@@ -335,7 +339,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         """시연 준비(운영자): 장애 직전 배포로 나간 머지 PR을 지금 시각으로 기록한다.
 
         본문 `{deployed_version: "shop-api v2.4.2", title?, changed_paths?}`. infra 시연 배포와
-        같이 `scripts/demo_deploy.sh`가 부른다. 롤백 교차검증이 이 PR을 찾는다."""
+        같이 `scripts/demo_deploy.sh`가 부른다. 롤백 교차검증이 이 PR을 찾는다.
+
+        코딩 작업·형상관리를 거치지 않은 지어낸 머지 기록이라 목 모드(시험 전용)에서만 받는다.
+        실제 모드는 403 `SIMULATOR_DISABLED` (화면에 시연 데이터를 넣지 않는다)."""
+        if not is_mock(MOCK_NAME):
+            return _err(403, "SIMULATOR_DISABLED", "시연용 머지 기록은 목 모드에서만 받는다")
         svc = get_service()
         body = await _body(request)
         if body is None:
@@ -427,6 +436,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
                 paths=paths,
                 connection=connection or None,
                 mode=mode,
+                assignee=_assignee(request) if mode == "subscription" else None,
             )
         except ActionError as exc:
             return _coding_err(exc)
@@ -565,7 +575,9 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return refused
         svc = get_service()
         try:
-            result = await svc.hand_to_subscription(task_id)
+            result = await svc.hand_to_subscription(
+                task_id, assignee=_hand_assignee(svc, request, task_id)
+            )
         except ActionError as exc:
             return _coding_err(exc)
         except GateRefused as exc:
@@ -876,10 +888,54 @@ def _person(request: Request) -> str | None:
         return None
 
 
+def _assignee(request: Request) -> str | None:
+    """세션 모드에서 내 Claude 작업을 맡길 사람: 누른 계정 (`acct:<계정 ID>`, work_auth 이름).
+
+    그 계정의 개인 MCP 연결(내 Claude)만 가져간다 (work_queue). 세션 모드가 아니거나 세션 토큰이
+    아니면 None (예전처럼 맡긴 사람 없음)."""
+    if not session_mode():
+        return None
+    account = session_account(request.headers.get("authorization"))
+    return f"acct:{account}" if account else None
+
+
+def _hand_assignee(svc: Any, request: Request, task_id: str) -> str | None:
+    """내 Claude로 넘길 때 맡길 사람. 작업 주인(대화를 연 계정)이 따로 있고 누른 사람이 그
+    주인이 아니면(관리자가 남의 작업을 넘김) 주인 계정에게 맡긴다. 나머지는 누른 계정
+    (`_assignee`)."""
+    mine = _assignee(request)
+    if mine is None:
+        return None
+    rid = dev_chat.task_request(svc.state, task_id)
+    chats = dev_chat.request_owners(svc.state, rid) if rid else []
+    owners = [c.account for c in chats if c.account]
+    if owners and mine.removeprefix("acct:") not in owners:
+        return f"acct:{owners[0]}"
+    return mine
+
+
 def create_dev_router(get_service: Callable[[], Any]) -> APIRouter:
     """개발 서비스 화면 REST (공용 + 개발)."""
     router = APIRouter(prefix="/api/planning", tags=["dev"])
-    add_common_routes(router, get_service, session_actions=DECISION_ACTIONS)
+    def guard(name: str, body: dict, authorization: str | None) -> JSONResponse | None:
+        """세션 모드: 작업·PR을 건드리는 액션은 그 작업 주인(대화를 연 계정)과 관리자만 (#1556)."""
+        if name not in scope.TASK_ACTIONS or not session_mode():
+            return None
+        scope.check_session(authorization)  # 누구인지부터 (401·403)
+        svc = get_service()
+        try:
+            tasks = scope.tasks_of_action(svc, name, body)
+        except scope.BadAction as exc:
+            return _err(400, "INVALID_ACTION", str(exc))
+        if not tasks:  # 모르는 PR·기획서: 주인을 가를 수 없어 통과시키지 않는다 (fail-closed)
+            return _err(404, "NOT_FOUND", "작업·PR을 찾지 못했다")
+        if scope.may_operate_tasks(svc, tasks, authorization):
+            return None
+        return _err(403, "VIEW_ONLY", dev_chat.TASK_OWNER_ONLY)
+
+    add_common_routes(
+        router, get_service, session_actions=DECISION_ACTIONS, action_guard=guard
+    )
     add_dev_routes(router, get_service)
     add_settings_routes(router, get_service)
     return router

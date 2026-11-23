@@ -6,6 +6,7 @@ import { DEPT_NAME, RELATION_LABEL, byRelation, type CodingRun, type CodingStatu
 import { DEV_API, PlanningApiError, approveReview, chatApi, devTaskApi, needAccount, planningApi, useCodingLimits } from '@/lib/planning'
 import { openDevChat } from '@/components/dev/chatOpen'
 import { useSession } from '@/demo/session'
+import { workerLabel } from '@/lib/devView'
 import { State, Tag } from '@/components/planning-common/parts'
 import { Step } from '@/components/planning-common/flow'
 import './usage.css'
@@ -263,10 +264,10 @@ export function RelatedTags({ s, t }: { s: S; t?: Task }) {
 }
 
 /** 목록 줄·머리에 쓰는 코딩 상태 글자 */
-export const codingState = (c: CodingRun) =>
+export const codingState = (c: CodingRun, me?: string | null) =>
   c.status === 'queued' && c.waitingFor?.length ? `순서 기다림 (${c.waitingFor.join(', ')} 다음)`
     : c.status === 'queued' && c.mode === 'subscription' ? '내 Claude 차례 기다림'
-    : c.status === 'claimed' ? `맡음 · ${c.claimedBy ?? '개발자'}`
+    : c.status === 'claimed' ? `맡음 · ${workerLabel(c.claimedBy, me) ?? '개발자'}`
     : CODING_LABEL[c.status] ?? c.status
 
 /** 작업·PR 흐름 맨 위 "코딩 에이전트" 단계. prs는 상태의 PR 목록 (이 작업의 열린 PR·주소를 본다) */
@@ -390,9 +391,9 @@ export function CodingStep({ task, on, prs }: { task: Task; on?: boolean; prs?: 
   return (
     <Step name="AI 코딩" on={!!on || DONE.includes(c.status)} title={<CodingLabel c={c} />}>
       <span className="tags">
-        {c.mode === 'subscription' && c.assignee && <Tag>맡은 사람 {c.assignee}</Tag>}
+        {c.mode === 'subscription' && c.assignee && <Tag>맡은 사람 {workerLabel(c.assignee, account)}</Tag>}
         {warns.length > 0 && <Tag tone={c.textOkBy ? undefined : 'amber'}>작업 글 주의 · {warns.join(', ')}{c.textOkBy ? ` · ${c.textOkBy} 확인` : ''}</Tag>}
-        {c.mode === 'subscription' ? <Tag>내 Claude{c.claimedBy ? ` · ${c.claimedBy}` : ''}</Tag> : c.model && <Tag><span className="mono">{c.model}</span></Tag>}
+        {c.mode === 'subscription' ? <Tag>내 Claude{c.claimedBy ? ` · ${workerLabel(c.claimedBy, account)}` : ''}</Tag> : c.model && <Tag><span className="mono">{c.model}</span></Tag>}
         {c.attempts > 1 && <Tag>{c.attempts}번째 시도</Tag>}
         {!!c.llmCalls && <Tag><UsageBar used={c.llmTokens ?? 0} limit={lim.runTokens} label={`AI ${c.llmCalls}/${lim.runCalls}회 · 토큰`} title="코딩 실행 한 번의 한도 대비 (다시 시도까지 합친 양)" /></Tag>}
         {!!files.length && <Tag>{files.length}파일 · <span className="mono">+{add} −{del}</span></Tag>}

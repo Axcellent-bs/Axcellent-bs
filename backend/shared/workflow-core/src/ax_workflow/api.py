@@ -23,13 +23,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ax_workflow.auth import (
     acting,
-    check_admin,
     check_caller,
     check_human,
     require_admin,
     require_caller,
     require_human,
     session_decider,
+    session_operator,
 )
 from ax_workflow.base import (
     SIMULATOR_ACTIONS,
@@ -55,15 +55,23 @@ ADMIN_ACTIONS = frozenset({"approve_promotion", "reject_promotion"})
 INTAKE_ACTIONS = frozenset(SIMULATOR_ACTIONS)
 
 
-def _check_action(body: Any, authorization: str | None) -> None:
+def _check_action(body: Any, authorization: str | None) -> str | None:
+    """액션 종류별 토큰 확인. 운영 결정(ADMIN_ACTIONS)을 세션 관리자가 했으면 그 이름."""
     raw = body.get("type") if isinstance(body, dict) else None
     name = action_name(raw) if isinstance(raw, str) else ""
     if name in ADMIN_ACTIONS:
-        check_admin(authorization)
-    elif name in INTAKE_ACTIONS:
+        # 세션 모드면 로그인한 회사 관리자, 아니면 예전처럼 admin 에이전트 토큰
+        # (auth.session_operator)
+        return session_operator(authorization)
+    if name in INTAKE_ACTIONS:
         check_caller(authorization)
     else:
         check_human(authorization)
+    return None
+
+
+# 액션을 보내기 전 서비스별 추가 확인 (개발: 작업 주인만). 거절이면 응답, 아니면 None
+ActionGuard = Callable[[str, dict, str | None], JSONResponse | None]
 
 
 def _ok(data: Any, svc: PlanningCore, **meta: Any) -> dict:
@@ -108,12 +116,16 @@ def add_common_routes(
     router: APIRouter,
     get_service: Callable[[], Any],
     session_actions: frozenset[str] = frozenset(),
+    action_guard: ActionGuard | None = None,
 ) -> None:
     """두 서비스가 같이 쓰는 읽기·액션·SSE·초기화.
 
     `session_actions`: 승인 같은 사람 결정 액션(snake_case). 세션 모드면 로그인 세션 토큰만 받고
     (공용 토큰은 403 `SESSION_REQUIRED`) 그 계정을 결정한 사람으로 남긴다 (`auth.acting`).
-    세션 설정이 꺼진 로컬·시험 모드는 예전처럼 사람 토큰이면 된다."""
+    세션 설정이 꺼진 로컬·시험 모드는 예전처럼 사람 토큰이면 된다.
+
+    `action_guard`: 토큰 확인 뒤 보내기 전 서비스별 추가 확인 `(액션 이름, 본문, Authorization)`.
+    거절 응답을 돌려주면 보내지 않는다 (개발: 세션 모드에서 작업·PR 주인과 관리자만)."""
 
     @router.get("/state")
     def get_state() -> dict:
@@ -251,13 +263,14 @@ def add_common_routes(
         except ValueError:
             check_human(authorization)
             return _err(400, "INVALID_ACTION", "JSON이 아니다")
-        _check_action(body, authorization)
+        operator = _check_action(body, authorization)
         raw = body.get("type") if isinstance(body, dict) else None
-        who = (
-            session_decider(authorization)
-            if isinstance(raw, str) and action_name(raw) in session_actions
-            else None
-        )
+        name = action_name(raw) if isinstance(raw, str) else ""
+        who = session_decider(authorization) if name in session_actions else operator
+        if action_guard is not None and isinstance(body, dict):
+            refused = action_guard(name, body, authorization)
+            if refused is not None:
+                return refused
         try:
             with acting(who):
                 result = await svc.dispatch(body)

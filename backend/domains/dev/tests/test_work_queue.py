@@ -420,3 +420,47 @@ def test_mcp_refuses_browser_origins(svc: PlanningService, adapter, monkeypatch)
     monkeypatch.setenv("DEV_MCP_ALLOWED_ORIGINS", "http://localhost:3090")
     ok = {**me, "Origin": "http://localhost:3090"}
     assert client.post("/api/planning/mcp", json=body, headers=ok).status_code == 200
+
+
+# ---------------------------------------------------------------- 세션 모드: 계정별 대기열
+
+
+def _session(monkeypatch: pytest.MonkeyPatch, account: str) -> dict[str, str]:
+    from ax_agent_template import human_auth
+
+    monkeypatch.setenv(human_auth.SESSION_SECRET_ENV, "s" * 40)
+    tok, _ = human_auth.issue_session(account_id=account, name=account, role="member")
+    return {"Authorization": f"Bearer {tok}"}
+
+
+def test_session_mode_lists_and_claims_only_own_assigned_tasks(
+    svc: PlanningService, adapter, monkeypatch
+) -> None:
+    """세션 모드면 맡긴 사람(`acct:<계정>`)의 Claude만 보고 가져가고 진행·PR·반납한다."""
+    a, b = _session(monkeypatch, "acc-a"), _session(monkeypatch, "acc-b")
+    mine = run(
+        svc.create_dev_task(
+            title="배너", plan="배너 문구", mode="subscription", assignee="acct:acc-a"
+        )
+    ).output["task_id"]
+    client = TestClient(app)
+    listed = client.get("/api/planning/work/tasks", headers=b).json()["data"]
+    assert mine not in [r["task_id"] for r in listed]
+    res = client.post(f"/api/planning/work/tasks/{mine}/claim", headers=b)
+    assert (res.status_code, res.json()["error"]["code"]) == (403, "NOT_YOURS")
+    got = client.post(f"/api/planning/work/tasks/{mine}/claim", headers=a).json()["data"]
+    assert got["claimed_by"] == "acct:acc-a"
+    for path, body in (("progress", {"text": "작업 중"}), ("pr", {"number": 1}), ("release", {})):
+        res = client.post(f"/api/planning/work/tasks/{mine}/{path}", json=body, headers=b)
+        assert (res.status_code, res.json()["error"]["code"]) == (403, "NOT_YOURS"), path
+    url = f"/api/planning/work/tasks/{mine}/progress"
+    res = client.post(url, json={"text": "작업 중"}, headers=a)
+    assert res.json()["data"]["status"] == "writing"
+
+
+def test_account_scope_is_off_outside_session_mode(svc: PlanningService, adapter) -> None:
+    """세션 설정이 꺼진 로컬·시험 모드는 예전처럼 이름으로만 본다 (계정 범위 없음)."""
+    tid = _new(svc)
+    assert tid in [r["task_id"] for r in work_queue.available(svc, "lee")]
+    run(work_queue.claim(svc, tid, "lee"))
+    assert _coding(svc, tid)[1].claimed_by == "lee"

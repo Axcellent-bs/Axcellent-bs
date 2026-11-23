@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Activity, CrossReview, PR, State, Task } from "./planningData.ts";
 import {
-  ADMIN_ACTION_TYPES, activityDir, activityPeers, auditOf, deptLabel, isStoppedTask, paramLines, reviewStage, routeAction, routeWhyOf, tokenFor,
+  ADMIN_ACTION_TYPES, activityDir, activityPeers, auditOf, deptLabel, isStoppedTask, paramLines, reviewStage, routeAction, routeWhyOf, tokenFor, workerLabel,
 } from "./devView.ts";
 
 const review = (over: Partial<CrossReview & { decideWith?: unknown }> = {}): CrossReview & { decideWith?: never } => ({
@@ -27,6 +27,20 @@ test("자동 범위 승급 승인·보류는 운영자(admin) 토큰으로 보�
   assert.equal(tokenFor({ type: "approvePromotion" }), "admin");
   assert.equal(tokenFor({ type: "rejectPromotion" }), "admin");
   assert.equal(tokenFor({ type: "mergePr", pr: "PR #1" }), "human");
+});
+test("로그인 세션이 있으면 자동 범위 승급 승인·보류도 사람(세션) 토큰으로 보낸다 (서버가 관리자인지 본다)", () => {
+  assert.equal(tokenFor({ type: "approvePromotion" }, true), "human");
+  assert.equal(tokenFor({ type: "rejectPromotion" }, true), "human");
+  assert.equal(tokenFor({ type: "approvePromotion" }, false), "admin");
+  assert.equal(tokenFor({ type: "mergePr", pr: "PR #1" }, true), "human");
+});
+
+test("내 Claude 맡은 사람은 계정 id를 보이지 않는다: 나·팀원, 예전 이름은 그대로", () => {
+  assert.equal(workerLabel("acct:u1", "u1"), "나");
+  assert.equal(workerLabel("acct:u2", "u1"), "팀원");
+  assert.equal(workerLabel("acct:u2", null), "팀원");
+  assert.equal(workerLabel("kim", "u1"), "kim");
+  assert.equal(workerLabel(null, "u1"), null);
 });
 
 // ---- 6. 교차검증 화면: 없는 판정을 기다리는 것처럼 그리지 않는다

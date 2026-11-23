@@ -182,6 +182,30 @@ def session_decider(authorization: str | None) -> str | None:
     return human.name or human.account_id
 
 
+def session_operator(authorization: str | None) -> str | None:
+    """운영 결정(자동 처리 범위 승급 승인·보류)을 한 사람.
+
+    - 세션 모드(`session_mode`): 로그인 세션 토큰이고 회사 관리자(`session_admin`)여야 한다.
+      그 계정 이름을 돌려준다. 관리자가 아니면 403, 공용 사람 토큰·에이전트 토큰(admin 포함)이면
+      403 `SESSION_REQUIRED` (누가 승인했는지 모르는 토큰으로 승인하지 않는다), 토큰이 없으면 401
+    - 세션 설정이 꺼진 로컬·시험 모드: 예전처럼 admin 에이전트 토큰(`check_admin`)만, None"""
+    if not session_mode():
+        check_admin(authorization)
+        return None
+    human = session_human(authorization)
+    if human is None:
+        if not human_auth.bearer(authorization):
+            raise AuthError(401, "로그인 세션 토큰이 필요하다")
+        err = AuthError(
+            403, "운영 결정은 로그인한 관리자만 할 수 있다 (공용·에이전트 토큰으로는 안 된다)"
+        )
+        err.code = SESSION_REQUIRED
+        raise err
+    if not (human.role == "admin" or human.company_role == "admin"):
+        raise AuthError(403, "회사 관리자만 할 수 있다")
+    return human.name or human.account_id
+
+
 # 지금 사람 결정을 하는 사람 (세션 모드에서 `session_decider`가 정한 이름). 없으면 None
 _actor: contextvars.ContextVar[str | None] = contextvars.ContextVar("ax_actor", default=None)
 

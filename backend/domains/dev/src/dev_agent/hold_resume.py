@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 
 from ax_agent_template import config as template_config
 from ax_contracts.schemas import ExecuteDecision
+from ax_workflow.auth import acting, session_mode
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.store import ENV_DIR
 
@@ -493,7 +494,11 @@ async def _policy_promote(svc: DevService, row: HeldAction) -> str:
     frm, to = int(row.args["frm"]), int(row.args["to"])
     if pol.proposal is None or pol.proposal.to != to or pol.level != frm:
         raise Stale(f"승급 제안 L{frm} → L{to}가 더는 없다 (지금 L{pol.level})")
-    await svc.approve_promotion()
+    # 누른 사람(세션 모드 관리자, 보류 때 적음). 세션 모드에서 없으면 보류 건을 승인한 사람.
+    # 세션 설정이 꺼진 로컬·시험 모드는 예전처럼 팀장(목)
+    who = row.args.get("actor") or (row.decided_by if session_mode() else None)
+    with acting(str(who) if who else None):
+        await svc.approve_promotion()
     return f"자동 처리 범위 L{frm} → L{to} 승급함"
 
 

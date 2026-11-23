@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
 from ax_agent_template import llm_usage, on_behalf
+from ax_workflow.auth import session_mode
 from ax_workflow.core import ActionError, GateRefused
 from dev_agent import work_queue
 from dev_agent.service import DevService
@@ -38,6 +39,7 @@ STATUS = {
     "NOT_FOUND": 404,
     "PR_NOT_FOUND": 404,
     "NOT_CLAIMANT": 403,
+    "NOT_YOURS": 403,  # 다른 사람에게 맡긴 작업·세션 모드에서 남의 작업
     "NOT_SUBSCRIPTION": 409,
     "ALREADY_CLAIMED": 409,
     "NOT_CLAIMABLE": 409,
@@ -118,20 +120,24 @@ def _str(args: dict, key: str, *, required: bool = True, limit: int = 2000) -> s
     return value.strip()
 
 
-async def _run(svc: DevService, who: str, name: str, args: dict) -> Any:
-    """도구 하나를 부른다. REST와 MCP가 같이 쓴다. 부른 개발자는 '본인 Claude 연결됨'으로 적는다."""
+async def _run(
+    svc: DevService, who: str, name: str, args: dict, account: str | None = None
+) -> Any:
+    """도구 하나를 부른다. REST와 MCP가 같이 쓴다. 부른 개발자는 '본인 Claude 연결됨'으로 적는다.
+
+    `account`: 세션 모드에서 부른 계정. 그 계정 작업만 보고·가져가고·진행한다 (work_queue)."""
     await svc.mark_agent_seen(who)
     if name == "list_tasks":
         await work_queue.expire_leases(svc)
-        return work_queue.available(svc, who)
+        return work_queue.available(svc, who, account)
     task_id = _str(args, "task_id", limit=40)
     assert task_id is not None
     if name == "claim_task":
         await work_queue.expire_leases(svc)
-        return await work_queue.claim(svc, task_id, who)
+        return await work_queue.claim(svc, task_id, who, account)
     if name == "report_progress":
         text = _str(args, "text", limit=work_queue.MAX_PROGRESS_CHARS * 4)
-        return await work_queue.progress(svc, task_id, who, text or "")
+        return await work_queue.progress(svc, task_id, who, text or "", account)
     if name == "report_pr":
         number = args.get("number")
         if isinstance(number, str) and number.strip().lstrip("#").isdigit():
@@ -139,21 +145,24 @@ async def _run(svc: DevService, who: str, name: str, args: dict) -> Any:
         if isinstance(number, bool) or not isinstance(number, int) or number < 1:
             raise _Bad("number는 1 이상 정수여야 한다")
         url = _str(args, "url", required=False, limit=500)
-        return await work_queue.report_pr(svc, task_id, who, number, url)
+        return await work_queue.report_pr(svc, task_id, who, number, url, account)
     if name == "release_task":
         reason = _str(args, "reason", required=False, limit=500)
-        return await work_queue.release(svc, task_id, who, reason)
+        return await work_queue.release(svc, task_id, who, reason, account)
     raise _Bad(f"모르는 도구: {name}")
 
 
 async def _as(svc: DevService, caller: Caller, name: str, args: dict) -> Any:
     """`_run`을 부른 사람으로 돌린다. 개인 MCP 연결이면 그 계정을 문맥에 묶는다."""
+    # 계정별 대기열은 세션 모드에서만 (꺼진 로컬·시험 모드는 예전처럼 이름으로만 본다)
+    # 회사 관리자(세션)는 누구 작업이든 가져간다 (작업 API의 관리자와 같다)
+    scoped = {"account": caller.account_id} if session_mode() and not caller.admin else {}
     if caller.account_id is None:
-        return await _run(svc, caller.name, name, args)
+        return await _run(svc, caller.name, name, args, **scoped)
     token = on_behalf.bind(caller.account_id)
     try:
         with llm_usage.account_scope(caller.account_id):
-            return await _run(svc, caller.name, name, args)
+            return await _run(svc, caller.name, name, args, **scoped)
     finally:
         on_behalf.unbind(token)
 

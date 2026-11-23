@@ -4,9 +4,24 @@ import { DEPT_NAME, RULE_LABEL, type Action, type Activity, type AuditItem, type
 
 // ---------------------------------------------------------------- 사람 버튼 → 서버 액션
 
-/** 운영자(admin) 토큰으로 보내는 액션 (백엔드 api.py ADMIN_ACTIONS: approve_promotion·reject_promotion) */
+/** 운영 결정 액션 (백엔드 api.py ADMIN_ACTIONS: approve_promotion·reject_promotion) */
 export const ADMIN_ACTION_TYPES: ReadonlySet<string> = new Set(['approvePromotion', 'rejectPromotion'])
-export const tokenFor = (a: Action): 'admin' | 'human' => (ADMIN_ACTION_TYPES.has(a.type) ? 'admin' : 'human')
+/**
+ * 액션을 보낼 토큰. 운영 결정은 로그인 세션이 있으면 그 세션 토큰(서버 세션 모드는 로그인한 회사 관리자만 받고
+ * 그 사람을 기록한다, auth.session_operator), 없으면 예전처럼 운영자(admin) 토큰. 나머지는 사람 토큰
+ */
+export const tokenFor = (a: Action, signedIn = false): 'admin' | 'human' =>
+  ADMIN_ACTION_TYPES.has(a.type) && !signedIn ? 'admin' : 'human'
+
+/**
+ * 내 Claude 작업의 맡긴 사람·가져간 사람 표시. 세션 모드 서버는 계정 id(`acct:<계정 id>`)로 적는다.
+ * 계정 id는 그대로 보이지 않는다: 내 계정이면 "나", 남이면 "팀원". 예전 이름(토큰 이름)은 그대로
+ */
+export function workerLabel(name: string | null | undefined, me: string | null | undefined): string | null {
+  if (!name) return null
+  if (!name.startsWith('acct:')) return name
+  return me && name === `acct:${me}` ? '나' : '팀원'
+}
 
 /**
  * 교차검증 대기열 버튼을 서버 액션으로 바꾼다.

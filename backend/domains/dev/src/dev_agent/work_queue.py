@@ -17,6 +17,10 @@
    `expire_leases`가 같은 길로 되돌린다 (PR 맞추기 루프와 목록 읽기 때).
 
 - 사람(개발자) 토큰만 받는다. 가져간 사람만 보고·반납할 수 있다.
+- 세션 모드(`account`가 있음)면 그 계정 작업만 보이고 가져가고 진행한다 (`belongs`): 맡긴 사람
+  (`assignee`)이 있으면 그 계정만, 대화가 낸 요청의 작업이면 그 대화 주인 계정만, 둘 다 없거나
+  주인 대화에 계정이 없으면(기획에서 온 작업·대시보드 대화방 등) 작업 API(`dev_chat.may_operate`)
+  처럼 누구나. 남의 작업이면 `NOT_YOURS`. 회사 관리자(세션)는 범위 없이 본다 (work_api).
 - PR 제목에 작업 id(예: `T-D3`)가 있어야 잇는다 (다른 PR을 잘못 잇지 않게).
 """
 
@@ -76,6 +80,25 @@ def _mine(cr: CodingRun, who: str) -> None:
         raise _error("NOT_CLAIMED", "가져간 작업이 아니다 (임대가 끝났으면 claim부터 다시)")
     if cr.claimed_by != who:
         raise _error("NOT_CLAIMANT", f"{cr.claimed_by}가 가져간 작업이다")
+
+
+def belongs(svc: DevService, s: State, x: Task, account: str) -> bool:
+    """세션 모드에서 이 계정의 내 Claude가 다뤄도 되는 작업인가."""
+    from dev_agent import dev_chat  # dev_chat이 service를 거쳐 이 모듈을 부른다 (순환 피하기)
+
+    cr = x.coding
+    if cr is not None and cr.assignee:
+        return cr.assignee == f"acct:{account}"
+    rid = dev_chat.task_request(s, x.id)
+    owners = dev_chat.request_owners(s, rid) if rid else []
+    # 계정이 남지 않은 주인(대시보드 대화방·계정 전 예전 대화)은 계정으로 가를 수 없어 열어 둔다
+    # (대화가 낸 요청이 아닌 작업과 같이, 작업 API `dev_chat.may_operate`처럼). 멈춰 두지 않는다
+    return not owners or any(c.account is None or c.account == account for c in owners)
+
+
+def _yours(svc: DevService, s: State, x: Task, account: str | None) -> None:
+    if account is not None and not belongs(svc, s, x, account):
+        raise _error("NOT_YOURS", f"{x.id}는 다른 사람의 작업이다")
 
 
 def _expired(cr: CodingRun, now: datetime) -> bool:
@@ -197,13 +220,15 @@ def spec_of(s: State, x: Task) -> dict[str, Any]:
     }
 
 
-def available(svc: DevService, who: str) -> list[dict[str, Any]]:
-    """가져갈 수 있는 작업(대기 중)과 이 사람이 쥐고 있는 작업."""
+def available(svc: DevService, who: str, account: str | None = None) -> list[dict[str, Any]]:
+    """가져갈 수 있는 작업(대기 중)과 이 사람이 쥐고 있는 작업. 세션 모드면 이 계정 작업만."""
     rows = []
     for x in svc.state.tasks:
         cr = x.coding
         if cr is None or cr.mode != SUBSCRIPTION:
             continue
+        if account is not None and not belongs(svc, svc.state, x, account):
+            continue  # 다른 사람의 작업 (세션 모드)
         if cr.assignee and cr.assignee != who and cr.status == "queued":
             continue  # 다른 사람에게 맡긴 작업
         if cr.status == "queued" and svc.task_paused(svc.state, x.id):
@@ -215,12 +240,15 @@ def available(svc: DevService, who: str) -> list[dict[str, Any]]:
     return rows
 
 
-async def claim(svc: DevService, task_id: str, who: str) -> dict[str, Any]:
+async def claim(
+    svc: DevService, task_id: str, who: str, account: str | None = None
+) -> dict[str, Any]:
     """대기 중인 작업을 가져간다 (같은 사람이 다시 부르면 임대만 늘린다). 전체 명세를 준다."""
     box: dict[str, Any] = {}
 
     async def run(s: State) -> None:
         x, cr = _task(s, task_id)
+        _yours(svc, s, x, account)
         now = svc.clock()
         again = cr.status in HELD and cr.claimed_by == who
         if cr.status in HELD and not again and not _expired(cr, now):
@@ -264,7 +292,9 @@ async def claim(svc: DevService, task_id: str, who: str) -> dict[str, Any]:
     return box["spec"]
 
 
-async def progress(svc: DevService, task_id: str, who: str, text: str) -> dict[str, Any]:
+async def progress(
+    svc: DevService, task_id: str, who: str, text: str, account: str | None = None
+) -> dict[str, Any]:
     """진행 글을 적고 임대를 늘린다. 글이 바뀔 때만 활동 한 줄을 남긴다."""
     note = " ".join(str(text or "").split())[:MAX_PROGRESS_CHARS]
     if not note:
@@ -273,6 +303,7 @@ async def progress(svc: DevService, task_id: str, who: str, text: str) -> dict[s
 
     async def run(s: State) -> None:
         x, cr = _task(s, task_id)
+        _yours(svc, s, x, account)
         _mine(cr, who)
         now = svc.clock()
         if note != cr.progress:
@@ -290,13 +321,19 @@ async def progress(svc: DevService, task_id: str, who: str, text: str) -> dict[s
 
 
 async def report_pr(
-    svc: DevService, task_id: str, who: str, number: int, url: str | None = None
+    svc: DevService,
+    task_id: str,
+    who: str,
+    number: int,
+    url: str | None = None,
+    account: str | None = None,
 ) -> dict[str, Any]:
     """개발자가 올린 PR을 기록에 잇는다. 형상관리에서 제목·브랜치·바뀐 파일을 읽어 확인한다.
 
     PR 표시 id·관문(`generate_pr` B)·대상 레포는 서버 에이전트 PR(`coding_open`)과 같은 모양이라
     PR 게시판·사람 머지·`sync_prs`가 그대로 다룬다."""
     x, cr = _task(svc.state, task_id)
+    _yours(svc, svc.state, x, account)
     _mine(cr, who)
     if any(p.vcs_number == number and _same_conn(p, cr.connection) for p in svc.state.prs):
         raise _error("PR_TAKEN", f"형상관리 변경 #{number}는 이미 다른 작업에 이어져 있다")
@@ -323,6 +360,7 @@ async def report_pr(
 
     async def run(s: State) -> None:
         x, cr = _task(s, task_id)
+        _yours(svc, s, x, account)
         _mine(cr, who)
         ctx = _ctx(svc, s, x)
         n = len(s.prs) + 30  # 서버 에이전트 PR과 같은 표시 번호 규칙
@@ -407,7 +445,11 @@ async def _requeue(svc: DevService, s: State, x: Task, cr: CodingRun, why: str) 
 
 
 async def release(
-    svc: DevService, task_id: str, who: str, reason: str | None = None
+    svc: DevService,
+    task_id: str,
+    who: str,
+    reason: str | None = None,
+    account: str | None = None,
 ) -> dict[str, Any]:
     """가져간 작업을 내려놓는다 (다른 개발자가 가져갈 수 있게 대기열로)."""
     why = " ".join(str(reason or "").split())[:200]
@@ -415,6 +457,7 @@ async def release(
 
     async def run(s: State) -> None:
         x, cr = _task(s, task_id)
+        _yours(svc, s, x, account)
         _mine(cr, who)
         await _requeue(svc, s, x, cr, f"{who} 반납" + (f": {why}" if why else ""))
         box["spec"] = spec_of(s, x)

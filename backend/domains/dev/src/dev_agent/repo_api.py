@@ -4,6 +4,13 @@
   것)은 `internal`에 내부 PR id를 붙인다.
 - 연결은 `?connection=<id>`로 고른다. 없으면 첫 연결. 연결이 없으면 409 `NO_VCS`.
 - 읽기(GET)는 열어 두고, 쓰기(POST)는 사람 토큰(auth.py HUMAN)만 받는다.
+  읽기는 회사 공용 연결 레포의 내용(PR·이슈·브랜치·커밋)과 내부 PR id·작업 id만 싣는다. 대화 원문·
+  계정 같은 계정별 값은 없어 계정으로 나누지 않는다 (연결 레포는 회사 전체가 같이
+  쓴다).
+- 세션 모드(`AX_SESSION_SECRET`)면 쓰기는 모두 로그인 세션만 받고(공용 토큰은 403
+  `SESSION_REQUIRED`, auth.session_decider) 누른 계정을 기록에 남긴다. AI 작업 PR(내부 PR과 이어진
+  것)의 머지·닫기·되돌리기는 그 작업 주인과 관리자만 (scope.may_operate_tasks,
+  아니면 403 VIEW_ONLY).
 - 쓰기는 모두 실행 관문 뒤에만 형상관리를 부른다.
   AI PR 머지는 내부 `mergePr` 흐름 그대로(감사 기록), 사람이 올린 PR 머지는 `merge_pr`,
   나머지는 `repo_*` 액션(safety registry.toml).
@@ -26,7 +33,7 @@ from ax_workflow.auth import acting, require_human, session_decider
 from ax_workflow.autocheck import merge_risk_paths
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import PR
-from dev_agent import hold_resume, vcs, vcs_bridge
+from dev_agent import dev_chat, hold_resume, scope, vcs, vcs_bridge
 from dev_agent.service import DevService
 from dev_agent.vcs.base import (
     CHANGE_LIST_LIMIT,
@@ -104,6 +111,17 @@ async def resume_op(spec: dict[str, Any]) -> tuple[Callable[[], Awaitable[Any]],
 
         return revert, f"레포 PR #{number} 되돌리기 PR 엶"
     raise Stale(f"모르는 레포 쓰기: {spec['op']}")
+
+
+async def _reverts_made(adapter: VcsAdapter, number: int) -> int:
+    """지금까지 연 되돌리기 PR 수 (열림·병합·닫힘 모두, 본문 `Reverts #N`). 관문 키 끝에 붙인다."""
+    from dev_agent.incident_repo import _REVERTS
+
+    return sum(
+        1
+        for c in await adapter.list_changes(state="all")
+        if any(int(m) == number for m in _REVERTS.findall(c.body or ""))
+    )
 
 
 async def _open_revert(adapter: VcsAdapter, number: int) -> int | None:
@@ -260,6 +278,22 @@ def _issues(adapter: VcsAdapter) -> None:
         raise RepoError(409, "NO_ISSUES", "이 형상관리 연결에는 이슈가 없다")
 
 
+def _revert_exists(number: int, made: int) -> str:
+    return f"레포 PR #{number}의 되돌리기 PR #{made}가 이미 있다"
+
+
+def _by(text: str, who: str | None) -> str:
+    """기록 글 끝에 누른 사람 (세션 모드). 없으면 그대로."""
+    return f"{text} · {who}" if who else text
+
+
+def _owner_only(svc: DevService, linked: PR | None, authorization: str | None) -> None:
+    """AI 작업 PR이면 세션 모드에서 그 작업 주인·관리자만 (#1556 작업 API와 같은 규칙)."""
+    if linked is None or scope.may_operate_tasks(svc, [linked.task], authorization):
+        return
+    raise RepoError(403, "VIEW_ONLY", dev_chat.TASK_OWNER_ONLY)
+
+
 def _writable(adapter: VcsAdapter) -> None:
     if adapter.capabilities.read_only:
         raise RepoError(409, "READ_ONLY", "읽기 전용 연결이라 쓰지 않는다")
@@ -413,6 +447,8 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
     async def comment_repo_issue(
         number: int, request: Request, connection: str | None = None
     ) -> dict | JSONResponse:
+        who = session_decider(request.headers.get("authorization"))
+
         async def run() -> dict:
             body = await _body(request)
             text = body.get("body")
@@ -425,7 +461,7 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             made = await get_service().repo_write(
                 "repo_comment",
                 f"{cid}#{number}",
-                f"사람이 레포 이슈 #{number}에 코멘트",
+                _by(f"사람이 레포 이슈 #{number}에 코멘트", who),
                 {"chars": len(text)},
                 lambda: adapter.add_comment(number, text),
             )
@@ -531,6 +567,7 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             _writable(adapter)
             svc = get_service()
             linked = _linked(svc, cid).get(number)
+            _owner_only(svc, linked, request.headers.get("authorization"))
             if linked is not None and not linked.merged:
                 # AI가 만든 PR: 내부 사람 머지 흐름 그대로 (관문·감사 기록·작업 완료 처리)
                 with acting(who):
@@ -586,21 +623,28 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
         return await guard(run, write=True)
 
     @router.post("/repo/prs/{number}/close", response_model=None, dependencies=HUMAN)
-    async def close_repo_pr(number: int, connection: str | None = None) -> dict | JSONResponse:
+    async def close_repo_pr(
+        number: int, request: Request, connection: str | None = None
+    ) -> dict | JSONResponse:
+        auth = request.headers.get("authorization")
+        who = session_decider(auth)  # 세션 모드면 로그인 세션만, 그 계정을 남긴다
+
         async def run() -> dict:
             cid, adapter, _ = _resolve(connection)
             _writable(adapter)
             svc = get_service()
             linked = _linked(svc, cid).get(number)
+            _owner_only(svc, linked, auth)
             task = next((t for t in svc.state.tasks if linked and t.id == linked.task), None)
             if linked is not None and task is not None and task.coding is not None:
                 # AI 코딩 작업 PR: 작업 중단 흐름 그대로 (실행을 멈추고 PR을 닫는다)
-                await svc.cancel_dev_task(task.id)
+                with acting(who):
+                    await svc.cancel_dev_task(task.id)
             else:
                 await svc.repo_write(
                     "repo_close_pr",
                     f"{cid}#{number}",
-                    f"사람이 레포 PR #{number} 닫기",
+                    _by(f"사람이 레포 PR #{number} 닫기", who),
                     None,
                     lambda: adapter.close_change(number),
                 )
@@ -611,18 +655,24 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
         return await guard(run, write=True)
 
     @router.post("/repo/prs/{number}/reopen", response_model=None, dependencies=HUMAN)
-    async def reopen_repo_pr(number: int, connection: str | None = None) -> dict | JSONResponse:
+    async def reopen_repo_pr(
+        number: int, request: Request, connection: str | None = None
+    ) -> dict | JSONResponse:
+        auth = request.headers.get("authorization")
+        who = session_decider(auth)
+
         async def run() -> dict:
             cid, adapter, _ = _resolve(connection)
             _writable(adapter)
             svc = get_service()
             linked = _linked(svc, cid).get(number)
+            _owner_only(svc, linked, auth)
             if linked is not None and linked.closed:
                 raise RepoError(409, "INTERNAL_FLOW", f"{linked.id}는 중단한 AI 작업이다")
             head = await svc.repo_write(
                 "repo_reopen_pr",
                 f"{cid}#{number}",
-                f"사람이 레포 PR #{number} 다시 열기",
+                _by(f"사람이 레포 PR #{number} 다시 열기", who),
                 None,
                 lambda: adapter.reopen_change(number),
             )
@@ -634,6 +684,8 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
     async def comment_repo_pr(
         number: int, request: Request, connection: str | None = None
     ) -> dict | JSONResponse:
+        who = session_decider(request.headers.get("authorization"))
+
         async def run() -> dict:
             body = await _body(request)
             text = body.get("body")
@@ -644,7 +696,7 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             made = await get_service().repo_write(
                 "repo_comment",
                 f"{cid}#{number}",
-                f"사람이 레포 PR #{number}에 코멘트",
+                _by(f"사람이 레포 PR #{number}에 코멘트", who),
                 {"chars": len(text)},
                 lambda: adapter.add_comment(number, text),
             )
@@ -656,6 +708,9 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
     async def revert_repo_pr(
         number: int, request: Request, connection: str | None = None
     ) -> dict | JSONResponse:
+        auth = request.headers.get("authorization")
+        who = session_decider(auth)
+
         async def run() -> dict:
             body = await _body(request)
             title = body.get("title")
@@ -666,12 +721,36 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             change = await adapter.get_change(number)
             if not change.merged:
                 raise RepoError(409, "VCS_CONFLICT", f"병합되지 않은 변경: {number}")
-            made = await get_service().repo_write(
+            svc = get_service()
+            _owner_only(svc, _linked(svc, cid).get(number), auth)
+            if (made := await _open_revert(adapter, number)) is not None:
+                raise RepoError(409, "REVERT_EXISTS", _revert_exists(number, made))
+            # 관문 키를 (연결, PR, 지금까지 연 되돌리기 PR 수)마다 하나로: 되돌리기 PR이 생기기 전
+            # 두 번 클릭·다시 보내기는 같은 키라 보류 건이 하나다 (머지와 같다). 되돌리기 PR을 한 번
+            # 열었으면(병합·닫힘이라도) `:v<수>`로 새 키 → 지난 승인을 재생하지 않고 새로 판정.
+            # 거절·만료·건너뜀으로 끝난 뒤 다시 누르면 새 키 (fresh_target)
+            target = f"{cid}#{number}"
+            made_before = await _reverts_made(adapter, number)
+            key = hold_resume.fresh_target(
+                svc.holds,
+                f"repo:{cid}",
                 "repo_revert_pr",
-                f"{cid}#{number}",
-                f"사람이 레포 PR #{number} 되돌리기 PR 열기",
+                f"{target}:v{made_before}" if made_before else target,
+            )
+
+            async def revert() -> Any:
+                # 같은 키로 이전 승인이 재생돼도 되돌리기 PR은 하나만 (이미 열었으면 열지 않는다)
+                if (made := await _open_revert(adapter, number)) is not None:
+                    raise RepoError(409, "REVERT_EXISTS", _revert_exists(number, made))
+                return await adapter.revert_change(number, (title or "").strip() or None)
+
+            made = await svc.repo_write(
+                "repo_revert_pr",
+                target,
+                _by(f"사람이 레포 PR #{number} 되돌리기 PR 열기", who),
                 _size_params(cid, change),
-                lambda: adapter.revert_change(number, (title or "").strip() or None),
+                revert,
+                key_target=key,
                 resume={
                     "op": "revert",
                     "connection": cid,
@@ -688,6 +767,8 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
     async def delete_repo_branch(
         request: Request, connection: str | None = None
     ) -> dict | JSONResponse:
+        who = session_decider(request.headers.get("authorization"))
+
         async def run() -> dict:
             body = await _body(request)
             name = body.get("name")
@@ -710,7 +791,7 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             await get_service().repo_write(
                 "repo_delete_branch",
                 f"{cid}:{name}",
-                f"사람이 브랜치 {name} 지우기",
+                _by(f"사람이 브랜치 {name} 지우기", who),
                 {"branch": name},
                 lambda: adapter.delete_branch(name),
             )
