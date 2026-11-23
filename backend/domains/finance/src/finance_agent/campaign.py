@@ -190,21 +190,43 @@ VIEWS_FINAL_POINT = "7d"  # 조회당 제작비는 게시 7일 조회수로만 �
 
 
 def view_cost(data: dict[str, Any]) -> dict[str, Any]:
-    """조회당 제작비 (CMP-007). 제작비·조회수가 없거나 7일 측정 전이면 계산하지 않고 이유를 둔다."""
+    """조회당 제작비 (CMP-007). 제작비·조회수가 없거나 7일 측정 전이면 계산하지 않고 이유를 둔다.
+
+    조회수는 두 곳에서 온다(11/23). 어디서 온 숫자인지 `views_from`에 따로 남긴다.
+    - `views`: 데이터 `video_performance`가 잰 값. 게시 7일(`7d`) 값만 쓰고 그 전이면 측정 중이다
+    - `youtube_views`: 마케팅이 캠페인에 연결한 회사 유튜브 영상의 조회수(읽은 때 누적)
+    합(`views_total`)으로 나눈다. 둘 다 없으면 계산하지 않는다(0으로 채우지 않는다).
+    """
     production, views, point = (
         data.get("production_cost_krw"),
         data.get("views"),
         data.get("views_point"),
     )
+    youtube = data.get("youtube_views")
+    performance = views if point is not None else None
+    sources = {"video_performance": performance, "youtube": youtube}
+    base = {"views_total": None, "views_from": sources}
     if production is None:
-        return {"cost_per_view": None, "view_cost_status": "no_production_cost"}
-    if views is None or point is None:
-        return {"cost_per_view": None, "view_cost_status": "no_views"}
-    if point != VIEWS_FINAL_POINT:
-        return {"cost_per_view": None, "view_cost_status": "measuring"}
-    if views == 0:
-        return {"cost_per_view": None, "view_cost_status": "zero_views"}
-    return {"cost_per_view": round(production / views, 2), "view_cost_status": "measured"}
+        return base | {"cost_per_view": None, "view_cost_status": "no_production_cost"}
+    if performance is not None and point != VIEWS_FINAL_POINT:
+        return base | {"cost_per_view": None, "view_cost_status": "measuring"}
+    if performance is None and youtube is None:
+        return base | {"cost_per_view": None, "view_cost_status": "no_views"}
+    total = (performance or 0) + (youtube or 0)
+    base["views_total"] = total
+    if total == 0:
+        return base | {"cost_per_view": None, "view_cost_status": "zero_views"}
+    return base | {"cost_per_view": round(production / total, 2), "view_cost_status": "measured"}
+
+
+def views_text(row: dict[str, Any]) -> str:
+    """조회수와 출처. 유튜브 조회수가 섞였을 때만 나눠 적는다(옛 문구는 그대로)."""
+    total = row["views"]
+    youtube = row.get("youtube_views") or 0
+    if not youtube:
+        return f"{total:,}회"
+    performance = row.get("performance_views") or 0
+    return f"{total:,}회(영상 성과 7일 {performance:,} + 회사 유튜브 {youtube:,})"
 
 
 def _pct(value: float | None) -> str:
@@ -678,6 +700,8 @@ def category_view_costs(campaigns: dict[str, dict[str, Any]]) -> list[dict[str, 
                 "campaigns": [],
                 "production_cost_krw": 0,
                 "views": 0,
+                "performance_views": 0,  # 데이터 video_performance 7일 조회수 합
+                "youtube_views": 0,  # 회사 유튜브 조회수 합(읽은 때 누적)
                 "measuring": 0,
                 "latest_production_krw": None,
                 "format": None,
@@ -689,7 +713,10 @@ def category_view_costs(campaigns: dict[str, dict[str, Any]]) -> list[dict[str, 
             continue
         row["campaigns"].append(c["campaign_id"])
         row["production_cost_krw"] += c["production_cost_krw"]
-        row["views"] += c["views"]
+        sources = c.get("views_from") or {"video_performance": c.get("views"), "youtube": None}
+        row["views"] += c.get("views_total", c.get("views")) or 0  # 옛 기록에는 views_total이 없다
+        row["performance_views"] += sources.get("video_performance") or 0
+        row["youtube_views"] += sources.get("youtube") or 0
         row["latest_production_krw"] = c["production_cost_krw"]
         row["format"] = c.get("format") or row["format"]
     out = []
@@ -744,7 +771,7 @@ def budget_shift(campaigns: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
                 _evidence(
                     r["content_category"],
                     f"제작비 {fc.won(r['production_cost_krw'])} ÷ 7일 조회수 "
-                    f"{r['views']:,}회 = 조회당 {r['cost_per_view']:,}원",
+                    f"{views_text(r)} = 조회당 {r['cost_per_view']:,}원",
                 )
                 for r in measured
             ],

@@ -15,6 +15,7 @@ AI가 제목·설명·태그 초안 → 사람이 고친다 → [유튜브 올�
 - 초안 재료는 의뢰 영상 초안의 기획 문구(개념·대본 첫 문장)와 영상 프롬프트(장면). 외부 입력이라 LLM
   데이터 블록(`untrusted`)에만 넣는다. LLM이 없으면 기획 문구로 고정 초안
 - 채널·키는 로그인한 회사의 키 저장소(`youtube._secret`, tenant=`company_ai.company_id()`) 그대로
+- 어느 캠페인 영상인지(상태의 `campaign_id`, 11/23, 선택)는 `set_campaign`으로 남긴다
 """
 
 from __future__ import annotations
@@ -180,6 +181,15 @@ async def write_draft(
         privacy=edits.get("privacy") or cur.get("privacy") or "unlisted",
         part="labeled_video",
     )
+
+
+def set_campaign(sns: SnsStore, post_draft_id: str, campaign_id: str) -> dict[str, Any]:
+    """이 의뢰 영상이 어느 캠페인(cmp_…) 영상인지 남긴다(""면 연결을 푼다).
+
+    상태와 관계없이 바꾼다(올리기와 상관없는 표시).
+    """
+    draft = _draft(sns, post_draft_id)
+    return _put(post_draft_id, _request_id(draft), campaign_id=campaign_id or None)
 
 
 # ---------------------------------------------------------------- 올리기 (사람 승인)
@@ -359,5 +369,6 @@ __all__ = [
     "get",
     "refresh",
     "request_upload",
+    "set_campaign",
     "write_draft",
 ]

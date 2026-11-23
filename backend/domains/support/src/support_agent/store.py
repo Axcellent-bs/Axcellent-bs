@@ -10,7 +10,8 @@ import itertools
 from datetime import UTC, datetime
 from typing import Any
 
-from support_agent import abuse_rules, company_scope, languages
+from ax_agent_template import company_scope
+from support_agent import abuse_rules, languages
 from support_agent.schemas import (
     ActivityEntry,
     Analysis,

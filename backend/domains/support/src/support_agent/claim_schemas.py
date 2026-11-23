@@ -1,6 +1,7 @@
 """클레임(취소·반품·교환) skill의 입력·출력 모델.
 
 금액은 정수 원이고 모두 코드가 주문 사실에서 계산한 값이다. 입력에는 금액이 없다.
+예외: 사이트 변환기 신청은 사이트가 자기 규칙으로 계산한 예상 환불(`SiteRefund`)을 싣는다.
 사유 설명·메모 같은 자유 문장은 `AgentRequest.untrusted`로만 받는다.
 """
 
@@ -69,6 +70,17 @@ class ClaimAudit(AxModel):
     at: str
 
 
+class SiteRefund(AxModel):
+    """고객사 사이트가 자기 규칙으로 계산한 예상 환불 (사이트 변환기 신청 받은함이 옮긴 값).
+
+    있으면 판정·환불 승인 금액이 `refund_amount`다(받은 금액 기준 환불 가능액을 넘으면 그 금액).
+    """
+
+    refund_amount: int = Field(ge=0)  # 사이트 예상 환불액 (원)
+    fee: int | None = Field(default=None, ge=0)  # 사이트 수수료 (원)
+    fee_rate: float | None = Field(default=None, ge=0, le=1)  # 사이트 수수료율 (0.1 = 10%)
+
+
 class ClaimReceiptItem(AxModel):
     id: EntityId
     title: str
@@ -131,6 +143,8 @@ class Claim(AxModel):
     agent_note: str | None = None  # 상담원 결정 메모 (`untrusted.note`)
     inspection_note: str | None = None  # 검수 메모 (`untrusted.note`)
     receipt: ClaimReceipt | None = None
+    # 사이트 규칙 예상 환불 (사이트 변환기 신청). 있으면 `expected_refund`가 이 규칙 금액이다
+    site_refund: SiteRefund | None = None
     audit: list[ClaimAudit] = Field(default_factory=list)
     purged_at: str | None = (
         None  # 보유기간이 지나 사람이 쓴 글·이름을 지운 시각 (`claim_retention.py`)
@@ -216,6 +230,8 @@ class CreateClaimInput(AxModel):
     unsealed: bool = False
     evidence_count: int = Field(default=0, ge=0)
     conversation_id: int | None = None
+    # 고객사 사이트 규칙 예상 환불 (사이트 변환기 신청 받은함만 채운다). 없으면 책 쇼핑몰 규칙
+    site_refund: SiteRefund | None = None
 
 
 class ListClaimsInput(AxModel):

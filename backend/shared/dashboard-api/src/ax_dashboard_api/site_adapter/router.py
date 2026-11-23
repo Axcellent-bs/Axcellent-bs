@@ -1,13 +1,14 @@
 """`/site-adapter` 주소: AI들이 shop-api로 알고 부르는 곳.
 
-- ① 짝 맞춘 읽기: 주문(목록·하나)·상품·분류·고객·판매 합계·내보내기·상태 확인
+- ① 짝 맞춘 읽기: 주문(목록·하나)·상품·분류·고객·판매 합계·내보내기·상태 확인,
+  신청 받은함(`GET /admin/claims`, 짝 `inboxes.claims`가 있을 때, `claims`)
 - ③ 사이트에 없는 자료: 각 주소의 응답 모양 그대로 빈 값 (`meta.source = "site_adapter"`)
 - 고객지원 접수 동기화(POST): 변환기 장부에 기록만 (에이전트 토큰 또는 판매 서버 서비스 키 필요)
 - ③-쓰기(환불·쿠폰·배너·신청 결과·문의 화면 값·롤백·장애 해제): `writes`가 판정한다.
   환불·쿠폰은 safety 실행 기록 확인(판정 2, `gate_check`)을 지나야 받는다. 짝 파일에 쓰기 짝이
   있고 회사 연결에서 그 동작을 켰으면 고객사에 직접 쓰고(`applied: "site"`, W3), 아니면 할 일함
   (`applied: "pending_human"`)
-- 그 밖: 404 `NOT_MAPPED` (문의·신청 읽기는 다음 PR)
+- 그 밖: 404 `NOT_MAPPED` (문의 읽기는 다음 PR)
 
 읽기는 shop-api처럼 토큰 없이 받는다(dashboard-api는 사내망에만 있다).
 """
@@ -26,10 +27,11 @@ from fastapi import APIRouter, Depends, Header, Query, Request
 from ax_agent_template.server import verify_token
 from ax_dashboard_api.auth import bearer
 from ax_dashboard_api.envelope import ApiError
-from ax_dashboard_api.site_adapter import bookkeeping, resources, upstream, writes
+from ax_dashboard_api.site_adapter import bookkeeping, claims, resources, upstream, writes
 from ax_dashboard_api.site_adapter.mapping import (
     MappingError,
     Resource,
+    ResourceMap,
     SiteMapping,
     WriteAction,
     load_mapping,
@@ -175,10 +177,64 @@ def attributed() -> dict[str, Any]:  # ③: 유입 꼬리표는 사이트에 없
 
 @router.get("/api/shop/orders/{order_id}")
 async def order_detail(order_id: str) -> dict[str, Any]:
+    """주문 하나. 고객지원 클레임 판정이 읽는 결제 번호·줄 번호를 더한다(`order_detail`)."""
     for o in await _rows("orders"):
         if o["order_id"] == order_id:
-            return _ok(o)
+            return _ok(resources.order_detail(o))
     raise ApiError(404, "NOT_FOUND", "주문을 찾지 못했어요")
+
+
+@router.get("/api/shop/admin/claims")
+async def claim_inbox(
+    state: str = "new",
+    limit: int | None = None,
+    after: int = 0,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """신청 받은함 (W5, `claims`). 고객 글이 있어 접수 동기화와 같은 인증을 받는다.
+
+    짝(`inboxes.claims`)이 없으면 예전처럼 404 `NOT_MAPPED`.
+    """
+    _writer(authorization)
+    m = _mapping()
+    res = m.inboxes.get("claims")
+    if res is None:
+        return _not_mapped("GET", "/api/shop/admin/claims")
+    size = max(1, min(limit or DEFAULT_LIMIT, MAX_LIMIT))
+    if state == "open":
+        page, next_after = claims.open_rows(after, size)
+        return _ok(page, next_after=next_after)
+    if state != "new":
+        raise ApiError(422, "INVALID_REQUEST", "state는 new 또는 open이에요")
+    page, total = claims.new_rows(await _claim_rows(m, res), size)
+    return _ok(page, total=total, failed=0)
+
+
+async def _claim_rows(m: SiteMapping, res: ResourceMap) -> list[dict[str, Any]]:
+    """고객사 신청 전체를 받은함 재료로 (주문 원본을 `order`로 붙이고 번호를 매긴다)."""
+    orders_map = m.resources.get("orders")
+    try:
+        raw, truncated = await upstream.fetch_all(m, res)
+        order_rows: list[dict[str, Any]] = []
+        if orders_map is not None:
+            order_rows, cut = await upstream.fetch_all(m, orders_map)
+            truncated = truncated or cut
+        if truncated:
+            raise ApiError(
+                503,
+                "UPSTREAM_TRUNCATED",
+                "고객사 신청·주문이 읽을 수 있는 양보다 많아 일부만 받았어요. 상한을 늘려 주세요",
+            )
+        by_id = (
+            {str(resources.to_order(o, orders_map)["order_id"]): o for o in order_rows}
+            if orders_map is not None
+            else {}
+        )
+        return claims.number([claims.to_claim(row, res, by_id) for row in raw])
+    except upstream.UpstreamError as exc:
+        raise ApiError(exc.status, exc.code, str(exc)) from exc
+    except resources.MappingBroken as exc:
+        raise ApiError(502, "MAPPING_BROKEN", str(exc)) from exc
 
 
 @router.get("/api/shop/products")
@@ -587,11 +643,15 @@ async def fault_release(authorization: str | None = Header(default=None)) -> dic
 
 
 async def claim_result(request: Request, seq: str, authorization: str | None) -> dict[str, Any]:
-    """신청 결과 쓰기 (판정 결과를 고객 화면에 옮김, 관문 없음). `sync_write`가 넘긴다."""
+    """신청 결과 쓰기 (판정 결과를 고객 화면에 옮김, 관문 없음). `sync_write`가 넘긴다.
+
+    쓰기 판정을 지나면(직접 썼든 할 일함이든) 신청 받은함 처리 기록에도 적는다(W5): 그 신청은
+    `state=new`에서 빠지고 `state=open`에 나온다. 판정에서 막히면(403·409) 적지 않는다.
+    """
     service = _agent(authorization, "claim_result")
     body = await _json_body(request)
     body_digest = digest(body)
-    return await _write(
+    written = await _write(
         WriteRequest(
             action="claim_result",
             service=service,
@@ -610,6 +670,9 @@ async def claim_result(request: Request, seq: str, authorization: str | None) ->
             path_values={"seq": seq},
         )
     )
+    if seq.isdigit():
+        claims.record_result(seq, body)
+    return written
 
 
 def _agent_name(authorization: str | None) -> str | None:

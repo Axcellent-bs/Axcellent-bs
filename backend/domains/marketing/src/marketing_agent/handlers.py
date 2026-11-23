@@ -40,6 +40,11 @@ from ax_contracts.schemas.ad_metrics import (
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.finance import ContentFormat
+from ax_contracts.schemas.marketing_campaigns import (
+    ListMarketingCampaignsInput,
+    ListMarketingCampaignsOutput,
+    MarketingCampaignItem,
+)
 from ax_contracts.schemas.marketing_creative import (
     CreativeRecordAttachInput,
     CreativeRecordAttachOutput,
@@ -912,6 +917,34 @@ def _youtube_failed(request: AgentRequest, error: Exception) -> AgentResult:
     return _result(request, TaskStatus.FAILED, outcome=str(error), output={"message": str(error)})
 
 
+# 유튜브 칸의 "어느 캠페인 영상인지" 말고 초안을 바꾸는 칸
+_DRAFT_FIELDS = ("title", "description", "tags", "privacy", "part")
+
+
+def _known_campaign(campaign_id: str) -> bool:
+    """마케팅이 아는 캠페인인가: 시작한 캠페인 대장에 있거나 받아 둔 기획안의 캠페인."""
+    return STATE.campaigns.get(campaign_id) is not None or _stored_brief(campaign_id) is not None
+
+
+def _campaign_refused(request: AgentRequest, campaign_id: str) -> AgentResult | None:
+    """고른 캠페인이 마케팅이 모르는 번호면 거절한다(빈 값은 연결 풀기라 통과)."""
+    if not campaign_id or _known_campaign(campaign_id):
+        return None
+    return _result(
+        request,
+        TaskStatus.FAILED,
+        outcome="unknown_campaign",
+        output={"message": f"마케팅이 모르는 캠페인이다: {campaign_id}"},
+    )
+
+
+def _only_campaign(data: Any) -> bool:
+    """캠페인 연결만 바꾸는 요청인가(올린 뒤에도 바꿀 수 있게 초안 쓰기를 건너뛴다)."""
+    if data.campaign_id is None or data.regenerate:
+        return False
+    return all(getattr(data, name, None) is None for name in _DRAFT_FIELDS)
+
+
 async def creative_youtube_draft(request: AgentRequest) -> AgentResult:
     """AI가 유튜브 제목·설명·태그 초안을 쓰거나 사람이 고친 값을 저장한다(올리지는 않는다)."""
     from marketing_agent.chat import default_llm
@@ -919,15 +952,20 @@ async def creative_youtube_draft(request: AgentRequest) -> AgentResult:
     data = _parse(request, CreativeYoutubeDraftInput)
     if isinstance(data, AgentResult):
         return data
+    if data.campaign_id is not None and (refused := _campaign_refused(request, data.campaign_id)):
+        return refused
     edits = data.model_dump(include={"title", "description", "tags", "privacy", "part"})
     try:
-        youtube = await _youtube.write_draft(
-            data.record_id,
-            YOUTUBE_LLM or default_llm,
-            request.meta.context_id,
-            edits=edits,
-            regenerate=data.regenerate,
-        )
+        if data.campaign_id is not None:
+            youtube = _youtube.set_campaign(data.record_id, data.campaign_id)
+        if not _only_campaign(data):
+            youtube = await _youtube.write_draft(
+                data.record_id,
+                YOUTUBE_LLM or default_llm,
+                request.meta.context_id,
+                edits=edits,
+                regenerate=data.regenerate,
+            )
     except _youtube.YoutubeError as error:
         return _youtube_failed(request, error)
     out = CreativeYoutubeOutput(record_id=data.record_id, youtube=youtube)
@@ -1693,16 +1731,21 @@ async def request_video_youtube_draft(request: AgentRequest) -> AgentResult:
     data = _parse(request, RequestVideoYoutubeDraftInput)
     if isinstance(data, AgentResult):
         return data
+    if data.campaign_id is not None and (refused := _campaign_refused(request, data.campaign_id)):
+        return refused
     edits = data.model_dump(include={"title", "description", "tags", "privacy"})
     try:
-        youtube = await _request_youtube.write_draft(
-            STATE.sns,
-            data.post_draft_id,
-            YOUTUBE_LLM or default_llm,
-            request.meta.context_id,
-            edits=edits,
-            regenerate=data.regenerate,
-        )
+        if data.campaign_id is not None:
+            youtube = _request_youtube.set_campaign(STATE.sns, data.post_draft_id, data.campaign_id)
+        if not _only_campaign(data):
+            youtube = await _request_youtube.write_draft(
+                STATE.sns,
+                data.post_draft_id,
+                YOUTUBE_LLM or default_llm,
+                request.meta.context_id,
+                edits=edits,
+                regenerate=data.regenerate,
+            )
     except _request_youtube.YoutubeError as error:
         return _youtube_failed(request, error)
     return _request_youtube_done(request, data.post_draft_id, youtube, "초안")
@@ -2055,6 +2098,28 @@ async def start_campaign_skill(request: AgentRequest) -> AgentResult:
     )
 
 
+async def list_marketing_campaigns(request: AgentRequest) -> AgentResult:
+    """시작한 캠페인 대장(read): 유튜브 영상의 캠페인 고르기·결과 저장 칸 미리 채우기에 쓴다."""
+    data = _parse(request, ListMarketingCampaignsInput)
+    if isinstance(data, AgentResult):
+        return data
+    items = [
+        MarketingCampaignItem(status=status, **started.model_dump())
+        for status, started in STATE.campaigns.list(data.limit)
+    ]
+    out = ListMarketingCampaignsOutput(items=items, total=len(items))
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["list_marketing_campaigns"],
+            f"시작한 캠페인 {out.total}개",
+            [i.campaign_id for i in items],
+        ),
+    )
+
+
 async def record_campaign_result_skill(request: AgentRequest) -> AgentResult:
     """`record_campaign_result`: 요청이 안 준 카테고리·형식은 기획안 값으로 채운다."""
     return await record_campaign_result(
@@ -2117,6 +2182,7 @@ HANDLERS = {
     "issue_coupon": issue_coupon,
     "start_campaign": start_campaign_skill,
     "record_campaign_result": record_campaign_result_skill,
+    "list_marketing_campaigns": list_marketing_campaigns,
     "draft_sns_post": draft_sns_post_skill,
     "prepare_video_draft_from_plan": prepare_video_draft_from_plan_skill,
     "draft_outage_sns_post": draft_outage_sns_post_skill,

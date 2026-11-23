@@ -793,7 +793,7 @@ def planning_insight(item: dict[str, Any]) -> dict[str, Any]:
     facts += [
         InsightFact(
             label=f"{row['content_category']} 제작비 · 7일 조회수"[:120],
-            value=f"{fc.won(row['production_cost_krw'])} · {row['views']:,}회"[:80],
+            value=f"{fc.won(row['production_cost_krw'])} · {cp.views_text(row)}"[:80],
             source=PLANNING_INSIGHT_SKILL,
         )
         for row in item.get("categories", [])
@@ -1077,7 +1077,17 @@ async def verify_campaign_budget(request: AgentRequest) -> AgentResult:
 
 
 # 같은 캠페인 결과를 다시 받을 때 비어 오면 앞 값을 지키는 칸 (콘텐츠 카테고리별 예산)
-KEEP_ON_RESEND = ("content_category", "format", "production_cost_krw", "views", "views_point")
+KEEP_ON_RESEND = (
+    "content_category",
+    "format",
+    "production_cost_krw",
+    "views",
+    "views_point",
+    # 회사 유튜브 조회수(11/23): 마케팅이 이번에 못 읽어 비워 보내도 앞서 받은 값을 지우지 않는다
+    "youtube_views",
+    "youtube_views_at",
+    "youtube_video_ids",
+)
 
 
 async def record_result(data: CampaignResultInput, context_id: str) -> dict[str, Any]:

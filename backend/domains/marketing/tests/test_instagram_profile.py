@@ -16,6 +16,7 @@ from marketing_agent.sns_publish.instagram import IgApiError, IgResponseLost
 class FakeAdapter:
     def __init__(self, answer: Any) -> None:
         self.answer = answer
+        self._user_id = "17841400000000528"
         self.asked: list[tuple[str, str, dict[str, Any] | None]] = []
 
     async def _request(self, method: str, path: str, *, params: dict[str, Any] | None = None):  # noqa: ANN202
@@ -46,7 +47,7 @@ def test_ok_gives_username_and_profile_url(monkeypatch: pytest.MonkeyPatch) -> N
         "catbooks_official",
         "https://www.instagram.com/catbooks_official/",
     )
-    assert fake.asked == [("GET", "me", {"fields": "username"})]
+    assert fake.asked == [("GET", "17841400000000528", {"fields": "username"})]
     asyncio.run(ip.status())
     assert len(fake.asked) == 1  # 60초 기억
 

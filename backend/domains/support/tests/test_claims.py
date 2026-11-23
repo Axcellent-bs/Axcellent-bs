@@ -363,6 +363,129 @@ def test_refund_request_summary_has_only_code_computed_facts(
         assert leaked not in summary
 
 
+# ---------------------------------------------------------------- 사이트 규칙 환불 (변환기 신청)
+TOUR = orders.Order(
+    id="NB-20261110-0001",
+    order_no="NB-20261110-0001",
+    buyer_id="usr_01",
+    status="paid",
+    paid_at=NOW,
+    items=[orders.OrderItem(id="NB-20261110-0001-1", title="JP-OSA-4D", qty=1, paid_amount=900000)],
+)
+SITE_RULE = claim_rules.SiteRefund(refund=650000, fee=250000, fee_rate=0.1)
+
+
+def decide_tour(site: claim_rules.SiteRefund | None) -> claim_rules.Decision:
+    return claim_rules.decide(
+        TOUR,
+        "cancel",
+        "other",
+        items=None,
+        evidence_count=0,
+        unsealed=False,
+        prior_claims=0,
+        now=NOW,
+        site_refund=site,
+    )
+
+
+def test_site_rule_refund_is_the_decided_amount_with_facts() -> None:
+    """받은 900000원, 사이트 규칙 환불 650000원 → 판정 금액 650000원, 근거는 사이트 값 그대로."""
+    d = decide_tour(SITE_RULE)
+    assert d.expected_refund == 650000
+    hits = {r.code: r for r in d.reasons}
+    assert hits["SITE_REFUND_RULE"].level == "info"
+    assert hits["SITE_REFUND_RULE"].message == (
+        "사이트 규칙: 수수료율 10%, 수수료 250,000원, 환불 650,000원"
+    )
+    assert d.deductions == [
+        (
+            "SITE_CANCEL_FEE",
+            250000,
+            "사이트 규칙 수수료 (사이트 규칙: 수수료율 10%, 수수료 250,000원, 환불 650,000원)",
+        )
+    ]
+    # 등급 흐름은 그대로: 기준 이상 금액은 사람이 본다
+    assert "HIGH_AMOUNT" in hits and d.outcome == "needs_review"
+    assert "SITE_REFUND_OVER_PAID" not in hits
+
+
+def test_without_site_rule_the_book_rule_refunds_everything_paid() -> None:
+    d = decide_tour(None)
+    assert d.expected_refund == 900000
+    assert d.deductions == []
+    assert not any(r.code.startswith("SITE_") for r in d.reasons)
+
+
+def test_site_refund_over_what_was_paid_is_capped_and_sent_to_a_person() -> None:
+    d = decide_tour(claim_rules.SiteRefund(refund=1000000, fee=0, fee_rate=0.0))
+    assert d.expected_refund == 900000  # 받은 것보다 많이 내보내지 않는다
+    over = next(r for r in d.reasons if r.code == "SITE_REFUND_OVER_PAID")
+    assert over.level == "review"
+    assert "1,000,000원" in over.message and "900,000원" in over.message
+    assert d.outcome == "needs_review"
+    assert d.deductions == []
+
+
+def test_site_rule_without_fee_facts_shows_only_the_refund() -> None:
+    assert claim_rules.site_rule_text(claim_rules.SiteRefund(refund=650000)) == (
+        "사이트 규칙: 환불 650,000원"
+    )
+
+
+def test_site_rule_refund_is_the_refund_request_amount_and_shown_in_the_summary(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """사이트 규칙 금액이 클레임 → `execute("refund_request")` params·보류 요약까지 같은 값이다."""
+    site = {"refund_amount": 9000, "fee": 3000, "fee_rate": 0.25}
+    made = create(
+        client,
+        order_id="102",
+        buyer_id="buy_0002",
+        type="cancel",
+        reason="change_of_mind",
+        site_refund=site,
+    )["output"]
+    assert made["expected_refund"] == 9000  # 책 쇼핑몰 규칙이면 12000
+    assert made["site_refund"] == site
+    seen: dict[str, Any] = {}
+
+    async def spy(action: str, params: dict, meta: Any, evidence: Any) -> ExecuteDecision:
+        seen.update(action=action, params=params)
+        return ExecuteDecision(execution_id="exe_1", grade="B", status="executed")
+
+    monkeypatch.setattr(claim_handlers, "execute", spy)
+    run = call(client, "process_claim_queue", {}, key="k-p")["output"]
+    assert seen["action"] == "refund_request"
+    assert seen["params"]["refund_amount"] == 9000
+    summary = seen["params"]["summary"]
+    assert summary == (
+        "환불 9,000원 · 클레임 1 · 주문 102 · cancel/change_of_mind"
+        " · 사이트 규칙: 수수료율 25%, 수수료 3,000원, 환불 9,000원"
+    )
+    assert len(summary) <= 200
+    assert run["paid"] == 1 and run["results"][0]["refund"] == 9000
+
+
+@pytest.mark.parametrize(
+    "site",
+    [{"refund_amount": -1}, {"refund_amount": "많이"}, {"refund_amount": 9000, "fee_rate": 1.5}],
+)
+def test_a_bad_site_rule_refund_is_refused_not_refunded_in_full(
+    client: TestClient, site: dict[str, Any]
+) -> None:
+    result = create(
+        client,
+        order_id="102",
+        buyer_id="buy_0002",
+        type="cancel",
+        reason="change_of_mind",
+        site_refund=site,
+    )
+    assert result["status"] == "failed"
+    assert call(client, "list_claims", {})["output"] == {"items": []}  # 클레임을 만들지 않는다
+
+
 def test_refund_rejected_by_safety_leaves_the_payable_queue_and_is_not_counted_as_held(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -26,6 +26,13 @@
   `video_performance`(campaign_id)를 읽어 가장 늦게 잰 시점의 값을 싣는다(7일 전에 끝났으면 3d 등).
   측정 중·놓침·등록 없음·시험 영상·데이터 실패면 비워 보내고 값을 지어내지 않는다(결과 전달은
   막지 않는다). 7일이 지나 다시 부르면 같은 campaign_id로 새 값이 간다(덮어쓰기는 재무가 한다).
+- 결과의 유튜브 조회수(11/23): 사람이 유튜브 칸(제작 기록·의뢰 영상)에서 "어느 캠페인 영상인지"
+  고른 회사 유튜브 영상(`youtube_stats.uploads`·`request_uploads`의 campaign_id)을
+  `youtube_stats.video_stats`로 읽어 조회수 합을 `youtube_views`(읽은 시각 `youtube_views_at`, 더한
+  영상 `youtube_video_ids`)로 따로 싣는다. `views`(데이터 video_performance)와 섞지 않고, 데이터에
+  등록된 같은 유튜브 영상은 빼서 두 번 세지 않는다. 연결된 영상이 없거나, 유튜브를 못 읽거나, 한
+  영상이라도 조회수를 모르면 비워 보낸다(일부만 더해 적게 보이지 않게, 지어내지 않는다).
+  호출자가 `youtube_views`를 주면 그대로 둔다. 사람 저장·자동 전송 둘 다 같은 길을 지난다.
 - 영상 캠페인 필수 입력(11/18): 영상 캠페인(`campaign_kind="video"`)은 시작할 때
   콘텐츠 카테고리·형식·제작비(`production_cost_krw`, 0원 가능)를 모두 알아야 한다.
   호출자가 안 준 칸은
@@ -172,6 +179,11 @@ class RecordCampaignResultInput(AxModel):
     production_cost_krw: int | None = Field(default=None, ge=0)  # 광고비(spend_krw)와 따로
     views: int | None = Field(default=None, ge=0)
     views_point: ViewsPoint | None = None
+    # 회사 유튜브 조회수(재무 계약과 같은 칸). 안 주면 연결된 유튜브 영상을 읽어 채운다
+    # (못 읽으면 비움)
+    youtube_views: int | None = Field(default=None, ge=0)
+    youtube_views_at: str | None = Field(default=None, max_length=40)
+    youtube_video_ids: list[str] | None = Field(default=None, max_length=50)
 
     @model_validator(mode="after")
     def _period_in_order(self) -> RecordCampaignResultInput:
@@ -553,8 +565,12 @@ async def _fill_views(
     request: AgentRequest,
     data: RecordCampaignResultInput,
     on_seven_day: Callable[[bool], None] | None = None,
+    seen: list[VideoPerformanceOutput] | None = None,
 ) -> RecordCampaignResultInput:
-    """호출자가 조회수를 안 줬으면 데이터가 잰 값을 싣는다. 못 얻으면 비워 두고 막지 않는다."""
+    """호출자가 조회수를 안 줬으면 데이터가 잰 값을 싣는다. 못 얻으면 비워 두고 막지 않는다.
+
+    `seen`에는 읽은 데이터 답을 남긴다(유튜브 조회수에서 같은 영상을 두 번 세지 않으려고).
+    """
     if data.views is not None or data.views_point is not None:
         return data
     sent = AgentRequest(
@@ -572,6 +588,8 @@ async def _fill_views(
         return data
     if out.campaign_id not in (None, data.campaign_id) or out.test:
         return data  # 다른 캠페인 답이거나 시험 영상이면 재무 결과에 싣지 않는다
+    if seen is not None:
+        seen.append(out)
     if on_seven_day is not None:
         on_seven_day(seven_day_known(out))  # 이 호출에서 이미 읽은 값. 새 호출은 없다
     latest = _latest_views(out)
@@ -579,6 +597,65 @@ async def _fill_views(
         return data
     views, point = latest
     return data.model_copy(update={"views": views, "views_point": point})
+
+
+# 유튜브 조회수를 더할 영상 수 상한(재무 계약 youtube_video_ids와 같다)
+YOUTUBE_LINKED_MAX = 50
+
+
+def _linked_youtube_ids(campaign_id: str) -> list[str]:
+    """그 캠페인에 연결된 회사 유튜브 영상(제작 기록·의뢰 영상, 올리기가 끝난 것)."""
+    from marketing_agent import youtube_stats as _ys
+
+    ids = [u.video_id for u in _ys.uploads(YOUTUBE_LINKED_MAX, campaign_id)]
+    ids += [u.video_id for u in _ys.request_uploads(YOUTUBE_LINKED_MAX, campaign_id)]
+    return list(dict.fromkeys(ids))[:YOUTUBE_LINKED_MAX]
+
+
+async def youtube_views_of(
+    campaign_id: str, skip: set[str] | None = None
+) -> tuple[int, str, list[str]] | None:
+    """(조회수 합, 읽은 시각, 더한 영상). 연결 없음·못 읽음·한 영상이라도 모르면 None."""
+    from marketing_agent import youtube_stats as _ys
+
+    ids = [v for v in _linked_youtube_ids(campaign_id) if v not in (skip or set())]
+    if not ids:
+        return None
+    out = await _ys.video_stats(ids, [])
+    items = out.get("items") or []
+    if out.get("status") != "ok" or {i.get("video_id") for i in items} != set(ids):
+        return None
+    if any(i.get("status") != "ok" or i.get("views") is None for i in items):
+        return None  # 지웠거나 읽지 못한 영상이 있으면 일부만 더하지 않는다
+    at = min(str(i.get("measured_at") or out.get("checked_at") or "") for i in items)
+    return sum(int(i["views"]) for i in items), at[:40], ids
+
+
+def _registered_youtube(seen: list[VideoPerformanceOutput]) -> set[str]:
+    """데이터 video_performance에 등록된 유튜브 영상(이미 `views`에 있는 영상)."""
+    return {o.video_id for o in seen if o.platform == "youtube" and o.video_id}
+
+
+async def _fill_youtube(
+    data: RecordCampaignResultInput, seen: list[VideoPerformanceOutput]
+) -> RecordCampaignResultInput:
+    """호출자가 유튜브 조회수를 안 줬으면 연결된 영상의 조회수 합을 싣는다. 못 읽으면 비운다."""
+    if data.youtube_views is not None:
+        return data
+    skip = _registered_youtube(seen) if data.views is not None else set()
+    try:
+        found = await youtube_views_of(data.campaign_id, skip)
+    except Exception as exc:  # noqa: BLE001 - 유튜브 조회수는 선택 칸이라 실패해도 결과 전달은 간다
+        _log.warning(
+            "캠페인 %s 유튜브 조회수를 읽지 못함: %s", data.campaign_id, type(exc).__name__
+        )
+        return data
+    if found is None:
+        return data
+    views, at, ids = found
+    return data.model_copy(
+        update={"youtube_views": views, "youtube_views_at": at, "youtube_video_ids": ids}
+    )
 
 
 async def record_campaign_result(
@@ -627,7 +704,9 @@ async def record_campaign_result(
                 output={"campaign_id": data.campaign_id},
             )
 
-    data = await _fill_views(request, data, on_seven_day)
+    seen: list[VideoPerformanceOutput] = []
+    data = await _fill_views(request, data, on_seven_day, seen)
+    data = await _fill_youtube(data, seen)
     # 계약 모델 그대로 보낸다. 값이 없는 선택 필드는 보내지 않아 재무가 0으로 채우지 못한다
     try:
         contract = CampaignResultInput.model_validate(data.model_dump())

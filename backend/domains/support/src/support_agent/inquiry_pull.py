@@ -208,7 +208,11 @@ NOT_ACCEPTED = ("not_found", "duplicate_claim")  # 클레임으로 받지 않은
 
 
 def _claim_request(item: dict[str, Any]) -> AgentRequest:
-    """클레임함 한 건을 `create_claim` 요청으로 바꾼다. 설명(고객이 쓴 문장)은 untrusted다."""
+    """클레임함 한 건을 `create_claim` 요청으로 바꾼다. 설명(고객이 쓴 문장)은 untrusted다.
+
+    사이트 변환기 신청에 사이트 규칙 예상 환불이 있으면 `site_refund`로 싣는다(없으면 칸 없음).
+    """
+    site_refund = _site_refund(item)
     return AgentRequest(
         meta=RequestMeta(
             context_id=item["context_id"],
@@ -227,9 +231,28 @@ def _claim_request(item: dict[str, Any]) -> AgentRequest:
             "items": item.get("items"),
             "unsealed": bool(item.get("unsealed")),
             "evidence_count": int(item.get("evidence_count") or 0),
+            **({"site_refund": site_refund} if site_refund is not None else {}),
         },
         untrusted={"description": item.get("description") or ""},
     )
+
+
+def _site_refund(item: dict[str, Any]) -> dict[str, Any] | None:
+    """사이트 변환기 신청의 사이트 규칙 예상 환불 칸.
+
+    받은함 줄의 `site_refund_amount`·`site_fee`·`site_fee_rate`를 `SiteRefund` 모양으로 옮긴다.
+
+    환불액이 비면 None(책 쇼핑몰 규칙). 값 모양은 `CreateClaimInput`이 검사한다: 잘못된 값이면
+    판정하지 않고 실패로 알린다(전액 환불로 넘어가지 않는다).
+    """
+    amount = item.get("site_refund_amount")
+    if amount is None:
+        return None
+    return {
+        "refund_amount": amount,
+        "fee": item.get("site_fee"),
+        "fee_rate": item.get("site_fee_rate"),
+    }
 
 
 async def _ingest_claim(item: dict[str, Any]) -> bool:

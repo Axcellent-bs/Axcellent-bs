@@ -160,7 +160,7 @@
     },
     {
       "id": "creative_youtube_draft",
-      "description": "제작 기록(input.record_id: CR-…)의 영상으로 AXcellent 유튜브에 올릴 제목·설명·태그 초안을 AI가 쓴다(LLM이 없으면 고정 문구). regenerate=true면 다시 쓰고, title·description·tags·privacy(private·unlisted·public, 기본 unlisted)·part(video·final_video)를 주면 사람이 고친 값으로 저장한다. 설명 끝 AI 생성 표시는 지우지 않는다. 기록 render.youtube(status=draft)에 남기고 올리지는 않는다. 거절 outcome: not_found·already_requested.",
+      "description": "제작 기록(input.record_id: CR-…)의 영상으로 AXcellent 유튜브에 올릴 제목·설명·태그 초안을 AI가 쓴다(LLM이 없으면 고정 문구). regenerate=true면 다시 쓰고, title·description·tags·privacy(private·unlisted·public, 기본 unlisted)·part(video·final_video)를 주면 사람이 고친 값으로 저장한다. 설명 끝 AI 생성 표시는 지우지 않는다. 기록 render.youtube(status=draft)에 남기고 올리지는 않는다. campaign_id(cmp_…, 시작한 캠페인 대장이나 받은 기획안의 캠페인, \"\"면 연결 풀기)를 주면 render.youtube.campaign_id에 남겨 재무 결과의 유튜브 조회수가 그 영상을 찾는다(올린 뒤에도 바꿀 수 있다). 거절 outcome: not_found·already_requested·unknown_campaign.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeYoutubeDraftInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeYoutubeOutput",
       "grade": "read",
@@ -227,6 +227,18 @@
       "grade": "read",
       "allowed_requesters": [
         "data",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "list_marketing_campaigns",
+      "description": "마케팅이 시작한 캠페인 대장(read, 11/23): 안전 관문이 executed로 끝난 캠페인의 campaign_id·campaign_name·channel·budget_krw·started_on·ends_on·status(active·recorded_auto·recorded_human·canceled·gave_up)·content_category·format·production_cost_krw. 시작 때 값 그대로이고 숫자를 만들지 않는다. 유튜브 칸의 캠페인 고르기와 결과 저장 칸 미리 채우기에 쓴다. 최근 시작한 것부터 limit개.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_campaigns.py#ListMarketingCampaignsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_campaigns.py#ListMarketingCampaignsOutput",
+      "grade": "read",
+      "allowed_requesters": [
         "dashboard-api"
       ],
       "verifier": null,
@@ -442,7 +454,7 @@
     },
     {
       "id": "request_video_youtube_draft",
-      "description": "의뢰로 만든 영상(input.post_draft_id: 의뢰 wr_*의 릴스 초안)으로 회사 유튜브에 올릴 제목·설명·태그 초안을 AI가 쓴다(재료: 기획 문구·영상 프롬프트, LLM이 없으면 기획 문구로 고정 초안). AI 라벨 입힌 영상(labeled.mp4, 해시·라벨 기록 확인)이 있어야 한다. regenerate=true면 다시 쓰고, title·description·tags·privacy(private·unlisted·public, 기본 unlisted)를 주면 사람이 고친 값으로 저장한다. 설명 끝 AI 생성 표시는 지우지 않는다. 올리지는 않는다. 거절 outcome: not_found·video_not_ready·already_requested.",
+      "description": "의뢰로 만든 영상(input.post_draft_id: 의뢰 wr_*의 릴스 초안)으로 회사 유튜브에 올릴 제목·설명·태그 초안을 AI가 쓴다(재료: 기획 문구·영상 프롬프트, LLM이 없으면 기획 문구로 고정 초안). AI 라벨 입힌 영상(labeled.mp4, 해시·라벨 기록 확인)이 있어야 한다. regenerate=true면 다시 쓰고, title·description·tags·privacy(private·unlisted·public, 기본 unlisted)를 주면 사람이 고친 값으로 저장한다. 설명 끝 AI 생성 표시는 지우지 않는다. 올리지는 않는다. campaign_id(cmp_…, \"\"면 연결 풀기)를 주면 이 영상이 어느 캠페인 영상인지 상태에 남긴다(올린 뒤에도 바꿀 수 있다). 거절 outcome: not_found·video_not_ready·already_requested·unknown_campaign.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoYoutubeDraftInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoYoutubeOutput",
       "grade": "read",

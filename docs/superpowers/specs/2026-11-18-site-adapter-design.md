@@ -54,7 +54,7 @@ AI가 부르는 주소 약 45개를 셋으로 나눈다. 목록에 없는 주소
 | `GET /api/shop/sales-summary`, `/sales-export` | 주문에서 계산 | 상품별 수량·금액 합 |
 | `GET /api/shop/customers-export` | 고객 | |
 | `GET /api/shop/admin/inquiries` (`state=new`), `/admin/inquiries/open` | 문의 | 고객지원 접수함. 상태 값 짝(`open`→`new` 등) |
-| `GET /api/shop/admin/claims` | 취소·환불 신청 | 사이트에 있으면 짝, 없으면 ③ |
+| `GET /api/shop/admin/claims` | 취소·환불 신청 | 사이트에 있으면 짝(`inboxes.claims`), 없으면 404 `NOT_MAPPED`. (11/23 W5) 누비투어 `GET /api/v1/cancellations` 짝 구현 |
 | `GET /health` | 고객사 API 상태 | 짝 확인용 |
 
 상태 값은 짝에 **값 표**로 적는다(예: 누비투어 `deposit_paid`·`fully_paid` → 결제 완료, `cancelled`·`expired` → 취소). 금액·시각 형식(원 단위 정수, ISO 시각)은 변환기가 맞춘다.
@@ -147,6 +147,7 @@ AI가 shop-api(→ 변환기)에 보내는 쓰기는 아래가 전부다(`backen
 | 2xx | 기록 `done` | shop-api 성공 모양 + `applied: "site"` |
 | 400·404·409·422 (입력·상태 거절) | 기록 `rejected`, 재시도 안 함 | 409 `SITE_REJECTED` + 고객사 오류 코드(`error.site_code`). AI는 지금의 쓰기 실패 처리(보류·실패)로 간다 |
 | 401·403 | 기록 `rejected`, 그 동작을 "키에 쓰기 권한 없음"으로 표시 | 할 일함에 넣고 ② 모양(`applied: "pending_human"`) |
+| 짝 `partial_codes`에 든 오류 코드 (W5, 예: 누비투어 502 `REFUND_FAILED`) | 기록 `partial`, 재시도 안 함 (반영은 됐다) | 할 일함 "결제사 환불 확인"(환불) / "뒤따르는 처리 확인"(그 밖), ② 모양 |
 | 429·5xx·시간 초과·연결 끊김 | 기록 `unknown`, **재시도 안 함** | 할 일함 "사이트에 반영됐는지 확인 후 처리"(멱등 키·보낸 본문 요약을 담음), ② 모양 |
 
 - 시간 초과에 다시 보내지 않는 이유: 고객사 API는 멱등 키를 받지 않아(누비투어·스터디온에듀 모두) 이미 반영됐는지 알 수 없다. 사람이 사이트에서 보고 처리한다.
@@ -188,12 +189,28 @@ AI가 shop-api(→ 변환기)에 보내는 쓰기는 아래가 전부다(`backen
 - 본문 식은 지금 식(점 경로·`const:`·`sum:`·`first:`)에 셋을 더한다: `path:<이름>`(shop-api 경로 값), `key_code:<접두>`(멱등 키로 만든 고정 코드, `[A-Z0-9_-]` 30자 이하), `now_plus:<일>`(ISO 시각). 계산은 코드로만, LLM이 본문을 만들지 않는다.
 - `link:<자원>.<칸>`: shop-api 번호(문의 `seq`·배너 `notice_id`)와 고객사 id의 짝. 읽기 변환(① 문의·신청)이 번호를 줄 때 변환기 장부에 같이 적어 둔 것을 찾는다. 없으면 할 일함.
 - `const:` 식이 `true`·숫자로 보내야 하는 칸은 `json:` 접두로 쓴다(예: `json:true`, `json:["web"]`).
+- (W5 추가) `partial_codes`: "쓰기는 반영됐고 뒤따르는 일만 실패"를 뜻하는 고객사 오류 코드 목록. 이 코드면 `unknown`이 아니라 `partial`로 적는다(위 결과 표).
 
 #### 누비투어 쓰기 짝 (실제 경로 근거)
 
-근거: `Catbooks-demo/nubi-tour` `src/app/api/v1/**/route.ts`, 키 범위 `src/server/apikeys.ts`(`read`·`read_pii`·`write`, write 설명 "문의 답변·예약 메모·출발일 상태"). 쓰기 경로는 셋뿐이다: `POST /api/v1/inquiries/{id}/answer`(`{answer}` 1~5000자, 다시 보내면 고침), `POST /api/v1/bookings/{code}/memo`, `POST /api/v1/departures/{id}/status`(`open`·`confirmed`·`closed`; 출발 취소는 환불이 따라와 직원 화면에서만).
+근거: `Catbooks-demo/nubi-tour` `src/app/api/v1/**/route.ts`, 키 범위 `src/server/apikeys.ts`(`read`·`read_pii`·`write`, write 설명 "문의 답변·예약 메모·출발일 상태"). 쓰기 경로: `POST /api/v1/inquiries/{id}/answer`(`{answer}` 1~5000자, 다시 보내면 고침), `POST /api/v1/bookings/{code}/memo`, `POST /api/v1/departures/{id}/status`(`open`·`confirmed`·`closed`; 출발 취소는 환불이 따라와 직원 화면에서만), (11/23, nubi-tour #16 `c38542c`) `POST /api/v1/cancellations/{id}/decision`, `GET /api/v1/me`.
+
+취소 결정 (`decision`): 본문 `{decision: "approve"|"reject", refund_amount?: 원 정수 0 이상, reason?: 500자까지}`. approve에 `refund_amount`를 빼면 사이트 규칙 수수료대로, 넣으면 수수료 = 받은 금액 − 환불 금액이고 그것이 규칙 수수료와 다르면 `reason` 필수(400 `REASON_REQUIRED`), 받은 금액보다 많으면 400 `BAD_REFUND`. reject는 `reason` 필수. 200 `{id, booking_code, status: done|rejected, fee, refund_amount, decided_at, replayed}`. 같은 결정 재전송은 200 `replayed: true`, 다른 결정·금액은 409 `ALREADY_DECIDED`, 취소 요청 상태가 아니면 409 `BAD_STATE`, 없는 id 404, 결정은 반영됐는데 결제사 환불만 실패하면 502 `REFUND_FAILED`. `Idempotency-Key` 헤더는 없다(결정 자체가 멱등).
 
 ```json
+"inboxes": {
+  "claims": {
+    "path": "/api/v1/cancellations",
+    "fields": {
+      "claim_id": "id", "order_id": "booking_code", "status": "status",
+      "type": "const:cancel", "reason": "const:other", "description": "reason",
+      "buyer_id": "order.member_id", "customer_name": "order.contact.name",
+      "created_at": "created_at",
+      "site_refund_amount": "refund", "site_fee": "fee", "site_fee_rate": "fee_rate"
+    },
+    "values": { "status": { "requested": "requested", "done": "closed", "rejected": "closed" } }
+  }
+},
 "writes": {
   "inquiry_answer": {
     "method": "POST",
@@ -201,15 +218,31 @@ AI가 shop-api(→ 변환기)에 보내는 쓰기는 아래가 전부다(`backen
     "path_params": { "site_id": "link:inquiries.seq" },
     "body": { "answer": "view.answer" },
     "ok": [200]
+  },
+  "refund": {
+    "method": "POST",
+    "path": "/api/v1/cancellations/{site_id}/decision",
+    "path_params": { "site_id": "link:payments.payment_id" },
+    "body": {
+      "decision": "const:approve",
+      "refund_amount": "refund_amount",
+      "reason": "const:AXcellent 안전 관문에서 담당자가 승인한 환불 금액이에요"
+    },
+    "ok": [200],
+    "partial_codes": ["REFUND_FAILED"]
   }
 }
 ```
 
+사이트 규칙 환불 (11/23 결정): 신청 짝의 선택 칸 `site_refund_amount`·`site_fee`·`site_fee_rate`(누비투어 `refund`·`fee`·`fee_rate`)를 받은함 줄에 옮긴다. 고객지원은 사이트 예상 환불액을 판정·환불 승인 금액으로 쓴다(책 쇼핑몰 규칙 = 받은 금액 전액이 아니라). 그래서 safety 실행 기록 `params.refund_amount` = 관문 대조 금액 = 결정 본문 `refund_amount` = 사이트 규칙 환불액이고, 누비투어 수수료(받은 금액 − 환불 금액)도 규칙 수수료 그대로다. 사이트 환불액이 받은 금액 기준 환불 가능액보다 크면 그 금액으로 막고 사람 검토(`SITE_REFUND_OVER_PAID`)로 넘긴다. 보류 카드 요약에 "사이트 규칙: 수수료율·수수료·환불"이 붙는다.
+
+시험 고정 파일: `backend/shared/dashboard-api/tests/site_adapter/fixtures/nubi_inboxes.json`·`nubi_writes.json`·`nubi_cancellations_p1.json`·`_p2.json`.
+
 | 동작 | 누비투어 | 판정 |
 |---|---|---|
 | `inquiry_answer` | 있음 | 직접 쓰기 (① 문의 읽기 짝이 먼저 있어야 함) |
-| `refund` | 없음 (취소 목록 `GET /api/v1/cancellations`만, 손님 취소 `POST /api/bookings/{code}/cancel`은 손님 로그인 전용) | 할 일함 |
-| `claim_result` | 없음 | 할 일함 |
+| `refund` | 있음 (11/23 `POST /api/v1/cancellations/{id}/decision` approve) | **직접 쓰기** (관문 확인 뒤, 동작별 켜기. ① 신청 읽기가 결제 번호 → 신청 id 짝을 먼저 적어야 함, 없으면 할 일함) |
+| `claim_result` | 거절(`reject`)은 같은 경로로 가능 | 할 일함 (W5 남은 일: 결과 쓰기는 상태가 바뀔 때마다 오므로 `rejected`일 때만 쓰는 조건이 짝에 필요) |
 | `coupon_issue` | 없음 (쿠폰 기능 없음) | 할 일함 |
 | `banner_post`·`banner_end` | 없음 (공지 관리는 직원 화면만) | 할 일함 |
 | `payment_rollback`·`fault_release` | 없음 | 할 일함 |
@@ -294,7 +327,7 @@ AXcellent는 사이트 코드를 고치지 않는다. 아래는 사이트를 만
 |---|---|---|---|
 | 둘 다 | `GET /api/v1/me` → `{name, scopes}` | 연결 확인 | 키에 쓰기 권한이 있는지 쓰기 전에 알기 위함. 없으면 첫 403으로 안다 |
 | 둘 다 | 쓰기 요청의 `Idempotency-Key` 헤더 받기 (같은 키는 앞 결과) | 모든 쓰기 | 있으면 시간 초과 때 다시 보낼 수 있다 (판정 표의 `unknown`을 줄임) |
-| 누비투어 | `POST /api/v1/cancellations/{id}/decision` (`approve`·`reject`, 환불 금액·사유) | `refund`·`claim_result` | 취소 수수료 계산은 사이트 규칙. 돈이 걸리므로 AXcellent 관문 뒤에만 부름 |
+| 누비투어 | `POST /api/v1/cancellations/{id}/decision` (`approve`·`reject`, 환불 금액·사유) | `refund`·`claim_result` | **생김** (11/23, nubi-tour #16). 취소 수수료 계산은 사이트 규칙. 돈이 걸리므로 AXcellent 관문 뒤에만 부름. `GET /api/v1/me`도 같이 생김 |
 | 누비투어 | `POST /api/v1/notices`, `DELETE /api/v1/notices/{id}` (문구·기간) | `banner_post`·`banner_end` | |
 | 누비투어 | (선택) 쿠폰 기능과 `POST /api/v1/coupons` | `coupon_issue` | 여행사에 쿠폰이 필요할 때만 |
 | 스터디온에듀 | `POST /api/v1/refunds/{id}/decision` (`approve`·`reject`, `amount`·`adjust_reason`) | `refund`·`claim_result` | 지금은 직원 화면에서만 승인 |
@@ -310,6 +343,14 @@ AXcellent는 사이트 코드를 고치지 않는다. 아래는 사이트를 만
    - 정한 것: `view.answer`는 고객지원 화면 값에 없는 칸이라 변환기가 상담원(`agent`) 메시지 글을 순서대로 빈 줄로 이어 만든다(사이트 답변 칸은 하나, 다시 보내면 고침). 답변이 아직 없으면 계산 실패로 할 일함. 짝 `ok`에 없는 2xx·3xx(리다이렉트는 따라가지 않음)는 `unknown`. 직접 쓰기는 시간당 60번(`AX_SITE_ADAPTER_WRITES_PER_HOUR`), 응답 본문은 64KB까지만 읽는다. 오류 응답에 `error.site_code`·`site_status`·`site_message`(120자까지, 장부에는 안 남김)를 더 싣는다
 4. **W4 화면**: 회사 연결 "동작별 직접 쓰기" 켜기(기본 꺼짐)·"최근 사이트 쓰기"·"키에 쓰기 권한 없음", 결과 칩 "사이트에 반영됨"/"사이트 반영 대기".
 5. **W5 사이트가 경로를 더한 뒤**: 고객별 쿠폰(스터디온에듀 `private` 쿠폰 + `grants`, 11/20 생김. 공용 쿠폰은 W3 뒤 바로 가능)·메시지함 안내(`/inbox`), 환불·신청 결과(사이트 `decision` 경로), 공지. 사이트 경로마다 PR 하나.
+   - (11/23 W5 누비투어 환불 구현 메모) **① 신청 받은함**: 짝 `inboxes.claims`(추가 필드, 회사 연결 화면이 저장하는 `resources`와 따로)로 `GET /admin/claims`를 준다. `state=new`는 결정 전(`requested`)이고 고객지원 결과가 아직 없는 신청(`seq` 순, `limit`, `meta.total`·`failed`), `state=open`은 결과가 적혔고 끝나지 않은(`completed`·`rejected`·`not_accepted` 아님) 신청(`after`·`meta.next_after`, `seq`·`support_claim_id`·`status`·`result_digest`). 신청 받은함은 고객 글이 있어 접수 동기화와 같은 인증(에이전트 토큰·판매 서버 서비스 키)을 받는다
+   - `seq`: 누비투어 취소 id(cuid)는 정수가 아니라 처음 본 순서대로 1부터 번호를 매긴다(`links.numbers`, `links["claims"][seq]` = 취소 id, 같은 id는 늘 같은 번호). `context_id` = `ctx_site_claim_<seq>`, `key` = 취소 id
+   - 구매자·이름: 취소 줄에 회원·이름이 없어 같은 예약 원본을 `order`로 붙여 짝 식이 `order.member_id`·`order.contact.name`(read 범위라 가린 이름)을 읽는다. 비회원 예약은 `guest-<예약 번호>`(판매 기록 내보내기와 같은 이름표). `type` = `cancel`, `reason` = `other`(사이트 사유는 고객이 쓴 글이라 `description`, untrusted)
+   - 처리 기록: `POST /admin/claims/{seq}/result`가 쓰기 판정을 지나면 `<변환기 폴더>/claims.json`에 `support_claim_id`·`status`·결과 지문(고객지원 `claim_digest`와 같은 방식)만 남긴다. `failed`·`retry`는 예전처럼 접수 동기화 기록에만
+   - 주문 하나 읽기(`GET /orders/{id}`)에 고객지원 `to_order`가 읽는 `payments[].payment_id`(= 예약 번호: 사이트 환불이 예약 단위)·`items[].order_item_id`(`<예약 번호>-<순번>`)·`title`(상품 번호)을 더하고, 비회원은 `guest-<예약 번호>`. 없으면 고객지원이 누비투어 주문을 읽지 못한다
+   - **환불**: 결정 전 신청을 읽을 때 `links["payments"][<예약 번호>]` = 취소 id를 적고, 환불 쓰기 짝 `link:payments.payment_id`가 그것을 찾는다(없으면 할 일함 `link_missing`). 본문 approve + `refund_amount` = 관문 기록 금액(W2가 맞춰 봄) + 고정 사유 `const:`(금액이 사이트 규칙과 달라도 400 `REASON_REQUIRED`가 나지 않게 늘 싣는다; 같으면 사이트 처리 메모로만 남음)
+   - 응답: 200(`replayed` 포함) `done`, 400 `REASON_REQUIRED`·`BAD_REFUND`·404·409 `ALREADY_DECIDED`·`BAD_STATE` → `rejected` 409 `SITE_REJECTED`, 502 `REFUND_FAILED` → `partial` 할 일함 "결제사 환불 확인"(짝 `partial_codes`), 401·403·429·5xx·시간 초과 → W3 그대로
+   - 남은 일: ⓐ 시간 초과 재전송: 결정이 멱등(같은 결정은 `replayed`, 다른 결정은 409)이라 같은 본문 재전송은 안전해 보인다. 이번엔 W3 규칙(재시도 안 함 → 할 일함)을 그대로 두고, 동작별 "재전송 안전" 표시를 짝에 더하는 것은 다음에 정한다 ⓑ 거절(`reject`): 고객지원은 거절을 `write_claim_result`(상태가 바뀔 때마다 부름)로만 알려, 짝에 "상태가 `rejected`일 때만" 조건이 있어야 한다. 지금 `claim_result`는 할 일함 ⓒ 고객지원 판정 금액은 책 쇼핑몰 규칙(취소 = 받은 금액 전액)이라 여행사 취소 수수료(`cancellation.fee`)를 모른다. 사람이 관문에서 금액을 승인하지만, 그대로 보내면 사이트 수수료가 0으로 바뀐다(사유는 남음). 사이트 예상 환불액을 고객지원 판정에 넘기는 길이 필요하다 ⓓ 신청 `failed` 횟수로 받은함에서 빼기(판매 서버처럼)는 아직 없다 ⓔ 회사 연결 화면 저장이 `inboxes`·`writes`를 덮어쓰지 않게(W4)
 6. 롤백·장애 해제: 도메인 클라이언트가 `context_id`를 보내게 바꾼 뒤 따로 정한다(그때까지 할 일함).
 
 #### 시험

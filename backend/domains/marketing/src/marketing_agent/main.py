@@ -104,6 +104,8 @@ async def _lifespan(application: object) -> AsyncIterator[None]:
                 campaign_auto.auto_record_loop(
                     handlers.STATE.campaigns,
                     handlers._brief_content,  # noqa: SLF001
+                    # 기간 광고 숫자 합계가 있으면 그 값을 광고비로(없으면 승인 예산)
+                    lambda item: campaign_auto.ad_metrics_spend(handlers.STATE.ad_metrics, item),
                 ),
                 name="campaign-auto-record",
             )

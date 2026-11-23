@@ -5,5 +5,17 @@
     "path_params": { "site_id": "link:inquiries.seq" },
     "body": { "answer": "view.answer" },
     "ok": [200]
+  },
+  "refund": {
+    "method": "POST",
+    "path": "/api/v1/cancellations/{site_id}/decision",
+    "path_params": { "site_id": "link:payments.payment_id" },
+    "body": {
+      "decision": "const:approve",
+      "refund_amount": "refund_amount",
+      "reason": "const:AXcellent 안전 관문에서 담당자가 승인한 환불 금액이에요"
+    },
+    "ok": [200],
+    "partial_codes": ["REFUND_FAILED"]
   }
 }

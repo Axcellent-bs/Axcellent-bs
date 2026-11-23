@@ -133,6 +133,33 @@ def _to_order_lines(row: dict[str, Any], m: ResourceMap) -> dict[str, Any]:
     }
 
 
+def order_detail(order: dict[str, Any]) -> dict[str, Any]:
+    """주문 하나 읽기(`GET /orders/{id}`)에 고객지원 클레임 판정이 읽는 칸을 더한다 (W5).
+
+    고객지원 `shop_client.to_order`는 결제의 `payment_id`, 줄의 `order_item_id`·`title`, 구매자를
+    읽는다. 사이트에 없는 값은 지어내지 않고 주문의 값으로 만든 번호만 붙인다.
+
+    - `payment_id` = 주문 번호: 사이트 환불은 주문(예약) 단위라 결제 하나를 가리킬 필요가 없다.
+      환불 쓰기 짝은 이 번호로 신청을 찾는다(`link:payments.payment_id`, `claims.number`)
+    - `order_item_id` = `<주문 번호>-<줄 순번>`, `title` = 상품 번호(사이트 예약에 상품 이름이 없다)
+    - 구매자가 비면(회원 아님) `guest-<주문 번호>` (판매 기록 내보내기·신청 받은함과 같은 이름표)
+    """
+    order_id = order["order_id"]
+    return {
+        **order,
+        "buyer_id": _buyer(order),
+        "items": [
+            {
+                **item,
+                "order_item_id": f"{order_id}-{n}",
+                "title": str(item.get("product_id") or order_id),
+            }
+            for n, item in enumerate(order["items"], start=1)
+        ],
+        "payments": [{**p, "payment_id": order_id} for p in order["payments"]],
+    }
+
+
 def to_product(row: dict[str, Any], m: ResourceMap) -> dict[str, Any]:
     get = lambda name: _get(row, m, name, "products")  # noqa: E731
     price = get("price")
