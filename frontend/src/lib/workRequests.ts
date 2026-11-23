@@ -57,6 +57,40 @@ export interface WorkRequestRow {
   context_id?: string | null;
   handoff_task_id?: string | null;
   corrections?: { at: string; by: string | null; from_task: string | null; to_task: string }[];
+  /** 11/23 사람이 삭제(멈추고 숨김)한 때·사람. 기본 목록에는 오지 않는다 (?hidden=1로만) */
+  hidden_at?: string | null;
+  hidden_by?: string | null;
+  /** 의뢰문을 고쳐 다시 접수한 두 의뢰의 연결 */
+  replaces?: string | null;
+  replaced_by?: string | null;
+}
+
+// ---- 의뢰 삭제·의뢰문 수정 (11/23, 화면 시안 문구 그대로)
+
+export const EDIT_NOTE = "고친 글로 새 의뢰를 접수하고, 지금 의뢰는 멈추고 목록에서 숨겨요. 이미 만든 보고서·기획서는 새 의뢰가 다시 써요(같은 글이 아니면 새로 만듦).";
+export const EDIT_MAX = 2000;
+const DONE_STEP: ReadonlySet<StepStatus> = new Set(["completed", "failed", "skipped", "rejected_by_human"]);
+
+/** 삭제하면 멈추는 남은 단계 이름 (계획 순서). 끝난 의뢰면 빈 목록 */
+export function remainingSteps(r: Pick<WorkRequestRow, "plan" | "steps" | "status">): string[] {
+  if (!isOpenRequest(r) && r.status !== "needs_human") return [];
+  return r.plan.filter((p) => !DONE_STEP.has(r.steps[p.step_id]?.status ?? "pending")).map((p) => p.label);
+}
+
+/** 삭제 확인 상자: 제목 · 본문 (남은 단계 이름을 넣는다) */
+export function deleteConfirm(title: string, r: Pick<WorkRequestRow, "plan" | "steps" | "status">): { head: string; body: string } {
+  const left = remainingSteps(r);
+  const stop = left.length ? `남은 단계(${left.join("·")})를 멈추고 목록에서 숨겨요.` : "목록에서 숨겨요.";
+  return { head: `"${title}" 의뢰를 삭제할까요?`, body: `${stop} 이미 만든 보고서·기획서·영상은 각 부서에 남아요.` };
+}
+
+/** 고친 글을 보낼 수 있나: 비었거나 길거나 원문과 같으면 이유 (서버도 같은 규칙: 422 "바뀐 내용이 없어요") */
+export function editProblem(text: string, original: string): string | null {
+  const norm = (s: string) => s.split(/\s+/).filter(Boolean).join(" ");
+  if (!norm(text)) return "의뢰문을 적어 주세요";
+  if (text.length > EDIT_MAX) return `의뢰문은 ${EDIT_MAX.toLocaleString("ko-KR")}자까지예요`;
+  if (norm(text) === norm(original)) return "바뀐 내용이 없어요";
+  return null;
 }
 
 export interface WorkRequestTask { name: string; label: string }

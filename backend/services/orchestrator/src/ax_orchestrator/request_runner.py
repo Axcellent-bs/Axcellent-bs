@@ -44,7 +44,7 @@ from ax_contracts.schemas import (
 from ax_orchestrator import request_inputs, request_tasks
 from ax_orchestrator.engine import TRANSFER_CODES, Engine
 from ax_orchestrator.models import now
-from ax_orchestrator.work_requests import OPEN_STATES, WorkRequests, ready_steps
+from ax_orchestrator.work_requests import OPEN_STATES, STEP_WAITING, WorkRequests, ready_steps
 
 HUMAN_GRADE = request_tasks.HUMAN_GRADE
 
@@ -56,6 +56,7 @@ STEP_TIMEOUT = 30.0
 RETRY_DELAY = 0.2
 WAITING = ("held", "waiting_human", "waiting_async")
 NOT_OK = ("failed", "skipped", "rejected_by_human")
+HIDE_NOTE = "사람이 의뢰를 삭제함"  # 의뢰 삭제(멈추고 숨김)로 닫은 단계·의뢰의 이유
 NEEDS_APPROVAL = "needs_approval"
 HUMAN_CHECK = "human_check"
 NO_AGENT = "no_agent"
@@ -185,7 +186,7 @@ class RequestRunner:
         self._requests.set_status(request_id, "running", "부서에 시키기 시작했다")
         while True:
             row = self._requests.get(request_id)
-            if row is None:
+            if row is None or row.get("stopped_at"):  # 사람이 멈췄으면 다음 단계로 넘기지 않는다
                 return
             ready = ready_steps(row)
             if not ready:
@@ -605,6 +606,8 @@ class RequestRunner:
         if source != spec.get("dept") or data.get("skill") != spec.get("skill"):
             log.warning("긴 작업 알림의 보낸 곳·skill이 맡긴 부서와 달라 무시: %s/%s", rid, step_id)
             return "ignored"
+        if (self._requests.get(rid) or {}).get("stopped_at"):  # 사람이 멈춘 뒤 온 결과
+            return "unmatched"
         stamp = now().isoformat()
         if kind == "progress":  # 부서가 쓴 문장은 옮기지 않고 진행률만 둔다
             percent = data.get("percent")
@@ -667,7 +670,7 @@ class RequestRunner:
     def _finish(self, rid: str) -> None:
         """남은 단계를 정리하고 의뢰 상태를 정한다 (끝남·실패·기다림)."""
         row = self._requests.get(rid)
-        if row is None:
+        if row is None or row.get("stopped_at"):  # 사람이 삭제한 의뢰: 상태(rejected)를 그대로 둔다
             return
         self._skip_blocked(row)
         row = self._requests.get(rid)
@@ -782,6 +785,63 @@ class RequestRunner:
         self._requests.replan(request_id, task=task.name, plan=request_tasks.plan_of(task), by=by)
         self.start(request_id)
         return "ok"
+
+    # ---- 의뢰 삭제(멈추고 숨김)·의뢰문 수정 (11/23) -------------------------------------
+    def hide(self, request_id: str, by: str | None = None) -> str:
+        """사람이 의뢰를 삭제한다 = 멈추고 숨김. 돌려주는 값: ok · missing.
+
+        끝나지 않은 의뢰(받음·일 고름·진행·기다림·사람 확인 필요)면 남은 단계
+        (시작 전·승인·사람 확인·긴 작업 대기)를 `skipped`("사람이 의뢰를 삭제함")로 닫고
+        의뢰는 `rejected`. 사람 확인 거절과 같은 길이고 이유만 다르다.
+        이미 부서에 맡긴 긴 작업은 취소하지 않는다(취소 계약 없음).
+        결과가 와도 다음 단계로 넘기지 않는다(`stopped_at`). 끝난 의뢰는 숨기기만 한다.
+        """
+        row = self._requests.get(request_id)
+        if row is None:
+            return "missing"
+        if row["status"] in (*OPEN_STATES, "needs_human") and not row.get("stopped_at"):
+            self._requests.mark_stopped(request_id)
+            who = f" ({by})" if by else ""
+            done = now().isoformat()
+            for sid, step in row["steps"].items():
+                if step["status"] in ("pending", *STEP_WAITING):
+                    self._update(request_id, sid, status="skipped",
+                                 note=f"{HIDE_NOTE}{who}", finished_at=done)  # fmt: skip
+            self._requests.set_status(request_id, "rejected", f"{HIDE_NOTE}{who}")
+        self._requests.hide(request_id, by)
+        return "ok"
+
+    def unhide(self, request_id: str, by: str | None = None) -> str:
+        """숨김만 되돌린다 (멈춘 단계·상태는 그대로). 돌려주는 값: ok · missing."""
+        if self._requests.get(request_id) is None:
+            return "missing"
+        self._requests.unhide(request_id, by)
+        return "ok"
+
+    async def edit(
+        self, request_id: str, text: str, intake: Any, llm: Any, by: str | None = None
+    ) -> tuple[str, str | None]:
+        """의뢰문 수정 = 고쳐서 다시 접수. (결과, 새 의뢰 번호).
+
+        결과: ok · missing · same(바뀐 내용 없음) · not_request(새 글이 의뢰로 접수되지 않음).
+        순서: 대화 접수와 같은 함수(`RequestIntake.receive`, 분류·되묻기 그대로)로 새 의뢰를 먼저
+        만들고, 성공하면 옛 의뢰를 삭제(멈추고 숨김)하고 둘을 잇는다. 새 접수에 실패하면(예외 포함)
+        옛 의뢰는 건드리지 않는다.
+        """
+        row = self._requests.get(request_id)
+        if row is None:
+            return "missing", None
+        if " ".join(text.split()) == " ".join((row.get("text") or "").split()):
+            return "same", None
+        result = await intake.receive(row.get("account"), text, llm,
+                                      thread_id=row.get("thread_id"),
+                                      buyer_id=row.get("buyer_id"))  # fmt: skip
+        new_id = result.request_id
+        if not result.handled or not new_id or new_id == request_id:
+            return "not_request", None
+        self.hide(request_id, by)
+        self._requests.link_replacement(request_id, new_id)
+        return "ok", new_id
 
     def _skip_blocked(self, row: dict[str, Any]) -> None:
         """앞 단계가 성공하지 못해 시킬 수 없게 된 뒤 단계를 건너뜀으로 닫는다 (연달아 반복)."""

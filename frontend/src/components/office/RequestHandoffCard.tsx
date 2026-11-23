@@ -4,12 +4,14 @@ import { ago } from "@/lib/format";
 import { handoffRequests, requestTitle, shortNo } from "@/lib/requestHandoffs";
 import { REQUEST_STATUS } from "@/lib/workRequests";
 import { useWorkRequests } from "@/components/office/useWorkRequests";
+import { HiddenRequests, RequestActions } from "@/components/office/RequestActions";
 import { STALE_HOURS, staleHours } from "@/lib/officeRequests";
 
 // 고객 의뢰가 부서 사이로 넘어가는 모습: AI 대화방·AI 오피스 공용 카드. 장애 이슈와 따로, 의뢰 전용으로 그린다.
 // 평소에는 접어 두고(의뢰가 늘어도 아래 대화 칸이 밀리지 않게) 펼치면 한 줄에 카드 3개씩 보인다.
 // 의뢰 목록(GET /api/requests)은 사람 토큰이 있어야 읽힌다. 토큰이 없으면(직원 로그인 전) 아무것도 그리지 않고 조회도 하지 않는다.
 // 고객 글·부서가 돌려준 문장은 옮기지 않는다. 일 이름·단계 이름·부서·상태만 보인다.
+// 11/23: 의뢰마다 ⋯ 메뉴 [의뢰문 수정] [의뢰 삭제] (RequestActions, 원문은 수정 칸에만), 목록 아래 "숨긴 의뢰 N건 보기"
 
 const SHOWN = 12;
 
@@ -46,6 +48,7 @@ export function RequestHandoffCard({ compact = false }: { compact?: boolean } = 
                 <p className="mt-0.5 text-[12px] tabular-nums text-ink-500" title={row.request_id}>
                   의뢰 {shortNo(row.request_id)} · {ago(row.created_at)}
                 </p>
+                <RequestActions row={row} title={requestTitle(row, tasks)} />
                 <ol className="mt-2 space-y-2">
                   {handoffs.map((h, i) => (
                     <li key={h.id} className={h.planned ? "text-ink-500" : "text-ink-900"}>
@@ -66,6 +69,7 @@ export function RequestHandoffCard({ compact = false }: { compact?: boolean } = 
           {all.length > SHOWN && <p className="mt-2 text-[13px] text-ink-500">최근 {SHOWN}건만 보여요</p>}
         </>
       )}
+      {rows !== null && <HiddenRequests titleOf={(r) => requestTitle(r, tasks)} />}
     </details>
   );
 }

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -21,7 +22,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ax_agent_template import events
 from ax_agent_template.config import set_agent_name
@@ -43,6 +44,9 @@ from ax_orchestrator.real import http_review_checker
 from ax_orchestrator.registry import Registry
 from ax_orchestrator.store import DB_ENV, IncidentStore
 from ax_orchestrator.usage import BUCKET_SECONDS, WINDOW_SECONDS, RecordingCaller, UsageRecorder
+from ax_orchestrator.work_requests import MAX_TEXT
+
+log = logging.getLogger("orchestrator.main")
 
 STATIC = Path(__file__).parent / "static"
 DEPTS = ["infra", "data", "planning", "dev", "marketing", "support", "finance", "archive"]
@@ -411,9 +415,14 @@ def _public(row: dict) -> dict:
 
 
 @app.get("/api/requests")
-async def list_requests(status: str | None = None, _: str = Depends(require_human)) -> dict:
-    """접수된 고객 의뢰 (최근 것부터, 최대 100건). 고객 글이 들어 있어 사람 토큰만 본다."""
-    rows = state.manager.work_requests.list(status=status) if state.manager else []
+async def list_requests(
+    status: str | None = None, hidden: int = 0, _: str = Depends(require_human)
+) -> dict:
+    """접수된 고객 의뢰 (최근 것부터, 최대 100건). 고객 글이 들어 있어 사람 토큰만 본다.
+
+    기본은 숨긴(삭제한) 의뢰를 뺀다. `?hidden=1`이면 숨긴 것만 준다 (11/23)."""
+    wr = state.manager.work_requests if state.manager else None
+    rows = wr.list(status=status, hidden=bool(hidden)) if wr else []
     rows = [_public(r) for r in rows]
     tasks = [{"name": t.name, "label": t.label} for t in request_tasks.TASKS]
     return {"data": list(reversed(rows))[:100], "meta": {"tasks": tasks}}
@@ -425,6 +434,64 @@ async def get_request(request_id: str, _: str = Depends(require_human)) -> dict:
     if row is None:
         raise HTTPException(404, "없는 의뢰")
     return {"data": _public(row), "meta": {}}
+
+
+@app.post("/api/requests/{request_id}/hide")
+async def hide_request(request_id: str, who: str = Depends(require_human)) -> dict:
+    """의뢰 삭제 = 멈추고 숨김 (기록은 남고 되돌릴 수 있다). 사람 토큰만.
+
+    끝나지 않은 의뢰면 남은 단계를 "사람이 의뢰를 삭제함"으로 건너뛰고 의뢰는 rejected. 이미 부서에
+    맡긴 긴 작업은 취소하지 않고, 결과가 와도 다음 단계로 넘기지 않는다."""
+    runner = state.manager.request_runner if state.manager else None
+    if (runner.hide(request_id, by=who) if runner else "missing") == "missing":
+        raise HTTPException(404, "없는 의뢰")
+    return {"data": {"ok": True}, "meta": {}}
+
+
+@app.post("/api/requests/{request_id}/unhide")
+async def unhide_request(request_id: str, who: str = Depends(require_human)) -> dict:
+    """숨긴 의뢰를 되돌린다 (멈춘 단계는 그대로). 사람 토큰만."""
+    runner = state.manager.request_runner if state.manager else None
+    if (runner.unhide(request_id, by=who) if runner else "missing") == "missing":
+        raise HTTPException(404, "없는 의뢰")
+    return {"data": {"ok": True}, "meta": {}}
+
+
+class EditBody(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_TEXT)
+
+
+def edit_llm() -> Any:
+    """의뢰문을 다시 분류할 LLM (대화 접수와 같은 것). 테스트는 이 함수를 바꿔 끼운다."""
+    from ax_orchestrator.chat.turn import default_llm
+
+    return default_llm()
+
+
+@app.post("/api/requests/{request_id}/edit")
+async def edit_request(request_id: str, body: EditBody, who: str = Depends(require_human)) -> dict:
+    """의뢰문 수정 = 고쳐서 다시 접수. 새 의뢰를 먼저 만들고(대화 접수와 같은 함수), 성공하면 옛
+    의뢰를 멈추고 숨긴다. 새 접수에 실패하면 옛 의뢰는 그대로. 새 의뢰 번호를 돌려준다."""
+    manager = state.manager
+    if manager is None or manager.work_requests.get(request_id) is None:
+        raise HTTPException(404, "없는 의뢰")
+    llm = edit_llm()
+    if llm is None:
+        raise HTTPException(503, "LLM 설정이 없어 다시 접수하지 못했어요")
+    try:
+        outcome, new_id = await manager.request_runner.edit(
+            request_id, body.text, manager.request_intake, llm, by=who
+        )
+    except Exception as exc:  # noqa: BLE001 - 새 접수 실패: 옛 의뢰는 건드리지 않았다
+        log.warning("의뢰문 수정 실패 %s: %s", request_id, type(exc).__name__)
+        raise HTTPException(502, "새 의뢰를 접수하지 못했어요. 지금 의뢰는 그대로예요") from None
+    if outcome == "missing":
+        raise HTTPException(404, "없는 의뢰")
+    if outcome == "same":
+        raise HTTPException(422, "바뀐 내용이 없어요")
+    if outcome == "not_request":
+        raise HTTPException(422, "고친 글이 의뢰로 접수되지 않았어요. 지금 의뢰는 그대로예요")
+    return {"data": {"ok": True, "request_id": new_id, "replaces": request_id}, "meta": {}}
 
 
 class RerunBody(BaseModel):
