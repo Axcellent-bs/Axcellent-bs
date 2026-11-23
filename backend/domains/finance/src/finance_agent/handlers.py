@@ -23,18 +23,23 @@
   재무는 그 결과를 받아(`settlement_feed.py`) 보여 주고 회계에만 쓴다.
 - 기록은 메모리에 두고 `FINANCE_STATE_FILE`이 있으면 파일에도 남긴다
   (`persist.py`, 다시 켜도 이어짐).
+- 회사마다 기록이 따로다(여러 회사 5단계, 11/23). skill 요청 안에서 `state()`는 그 요청의 회사
+  (`ax_agent_template.company_scope.active()`) 기록을 준다. 다른 회사 기록은 없는 것처럼 보인다.
+  요청 밖(화면 HTTP 경로·스스로 도는 루틴)은 지금처럼 기본 회사(catbooks) 기록(`STATE`)을 본다.
+  장부 원천(판매 서버)은 아직 연결된 회사 하나다(설계 6.2 `shop_api_url(company_id)`에서 나눈다)
 """
 
 from __future__ import annotations
 
 import dataclasses
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from ax_agent_template import call_agent
+from ax_agent_template import call_agent, company_scope
 from ax_agent_template.config import is_mock
 from ax_contracts.schemas import (
     AgentRequest,
@@ -229,14 +234,48 @@ class FinanceRecords:
         self.team_budgets: dict[str, dict[str, Any]] = {}  # YYYY-MM → 재무 담당이 확정한 팀 예산
 
 
-STATE: State | None = None
+logger = logging.getLogger(__name__)
+STATE: State | None = None  # 기본 회사(catbooks) 기록. 요청 밖은 늘 이것
+_COMPANY_STATES: dict[str, State] = {}  # 기본 회사 밖 회사 ID → 그 회사 기록
 
 
-def state() -> State:
+def _default_state() -> State:
     global STATE
     if STATE is None:
         STATE = State()
     return STATE
+
+
+def state() -> State:
+    """지금 쓸 재무 기록: skill 요청 안이면 그 요청 회사의 것, 밖이면 기본 회사(catbooks) 것."""
+    cid = company_scope.active()
+    if cid is None or cid == company_scope.CATBOOKS:
+        return _default_state()
+    found = _COMPANY_STATES.get(cid)
+    if found is None:
+        found = _COMPANY_STATES[cid] = _new_company_state(cid)
+    return found
+
+
+def _new_company_state(cid: str) -> State:
+    """처음 부른 회사의 기록. 테스트가 바꾼 바깥 호출(장부·의견 보내기)은 기본 기록에서 잇는다."""
+    from finance_agent import persist  # persist가 이 모듈을 import한다
+
+    base = _default_state()
+    fresh = State()
+    fresh.books_loader = base.books_loader
+    fresh.opinion_sender = base.opinion_sender
+    fresh.planning_insight_sender = base.planning_insight_sender
+    fresh.executions_loader = base.executions_loader
+    path = persist.company_state_file(cid)
+    if path is not None and persist.load(fresh, path):
+        logger.info("%s 재무 기록을 %s에서 이어 받았다", cid, path)
+    return fresh
+
+
+def company_states() -> dict[str, State]:
+    """기본 회사 밖 회사의 기록(저장용). 고치지 말고 읽기만 한다."""
+    return dict(_COMPANY_STATES)
 
 
 def _pg_upload() -> tuple[object, dict[str, dict[str, Any]], list[dict[str, str]]]:
@@ -251,6 +290,7 @@ def reset_state(sources: Sources | None = None) -> None:
     """테스트 사이에 저장소를 비운다."""
     global STATE
     STATE = State(sources)
+    _COMPANY_STATES.clear()
 
 
 # ---------------------------------------------------------------- 공통
@@ -285,7 +325,14 @@ def _positive_int(value: Any) -> int | None:
 
 # ---------------------------------------------------------------- 이벤트 (지급·환불 기록)
 async def on_event(envelope: EventEnvelope) -> None:
-    """`coupon.issued`(보상 쿠폰)와 `payment.refunded`를 누적한다. 같은 event_id는 한 번만."""
+    """`coupon.issued`(보상 쿠폰)와 `payment.refunded`를 누적한다. 같은 event_id는 한 번만.
+
+    이벤트는 요청 밖에서 오므로 봉투의 `tenant_id` 회사 장부에 쌓는다(별칭·없는 값은 catbooks)."""
+    with company_scope.using(envelope.tenant_id):
+        _record_event(envelope)
+
+
+def _record_event(envelope: EventEnvelope) -> None:
     ledger = state().ledger
     if envelope.event_id in ledger.seen_events:
         return
