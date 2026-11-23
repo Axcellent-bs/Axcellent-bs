@@ -114,6 +114,11 @@ def _client() -> httpx.AsyncClient:
     )
 
 
+def client() -> httpx.AsyncClient:
+    """고객사 호출 클라이언트 (직접 쓰기 `direct`가 읽기와 같은 방식으로 쓴다)."""
+    return _client()
+
+
 async def _get(
     client: httpx.AsyncClient, url: str, params: dict[str, Any], headers: dict[str, str]
 ) -> Any:

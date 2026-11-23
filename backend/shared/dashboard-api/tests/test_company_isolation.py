@@ -255,7 +255,6 @@ def test_1_control_b_reads_its_own_inquiry(client: TestClient, people: Any) -> N
     assert res.status_code == 200 and res.json()["data"]["subject"] == "B 회사 문의"
 
 
-@pytest.mark.xfail(strict=True, reason=LEAK_SUPPORT)
 def test_1_a_cannot_read_or_answer_b_inquiry(
     client: TestClient, people: Any, support: FakeSupport
 ) -> None:
@@ -520,7 +519,6 @@ def test_7_tenant_id_in_query_or_body_does_not_pick_the_company(
     assert plain_rows == forced_rows
 
 
-@pytest.mark.xfail(strict=True, reason=LEAK_SUPPORT)
 def test_7_a_request_is_processed_as_company_a(
     client: TestClient, people: Any, support: FakeSupport
 ) -> None:

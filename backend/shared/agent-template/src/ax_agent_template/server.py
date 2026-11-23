@@ -16,7 +16,7 @@
 4. `path` 길이가 3을 넘으면 이관 큐에 넣고 `HOP_LIMIT`
 5. `allowed_requesters` 확인 → 없으면 `FORBIDDEN_SKILL`
 6. 마감(`deadline`)이 지났으면 실행하지 않고 `canceled`(`TIMEOUT`)
-7. 핸들러 호출
+7. 핸들러 호출 (`meta.tenant_id`를 그 요청의 회사로 `company_scope`에 걸어 둔다)
 8. `AgentResult` 스키마 검증 → 깨지면 `failed`(`INVALID_OUTPUT`)
 
 루프 검사는 새 요청에만 적용한다. 동기 질의의 응답은 같은 Task의 결과라서 검사하지 않는다
@@ -38,7 +38,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from ax_agent_template import events, llm_usage
+from ax_agent_template import company_scope, events, llm_usage
 from ax_agent_template.companies import default_company_id
 from ax_agent_template.config import (
     MAX_PATH_LENGTH,
@@ -243,7 +243,7 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
         if not isinstance(meta_raw, dict) or not meta_raw.get("context_id"):
             return _bad_request(ErrorCode.MISSING_CONTEXT.value, "context_id가 없다")
         # 키가 없으면 기본 회사로 본다(통과). 키가 있는데 비었으면 거절한다.
-        # 기본값 채우기는 5단계에서 거절로 바꾼다. 그때까지 동작은 그대로다
+        # 기본값 채우기를 거절로 바꾸는 건 강제 단계(설계 4장)다. 그때까지 동작은 그대로다
         tenant_raw = meta_raw["tenant_id"] if "tenant_id" in meta_raw else default_company_id()
         if not tenant_raw:
             return _bad_request(ErrorCode.MISSING_CONTEXT.value, "tenant_id가 비었다")
@@ -262,7 +262,10 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
         logger.log(level, "a2a 토큰 검증 via=%s requester=%s skill=%s", via, name or "(거부)",
                    request.skill)  # fmt: skip
 
-        with agent_name_scope(card.name):
+        # 요청마다 회사 고르기(5단계): 핸들러가 `company_scope.active()`로 이 요청의 회사를 읽는다.
+        # 모르는 회사·틀린 값은 경고만 남기고 거절하지 않는다(`checked`)
+        company = company_scope.checked(tenant_raw)
+        with agent_name_scope(card.name), company_scope.using(company):
             result = await _handle(card, handlers, request)
         return JSONResponse(content=result.model_dump(mode="json"))
 
