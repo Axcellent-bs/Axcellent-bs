@@ -33,6 +33,8 @@ ADMIN_ONLY_GETS = {
     "/api/dashboard/secrets",
     # 회사 AI 설정(공통 AI 도구 연결): 고객사 관리자만. 회원은 /ai-connection/* 로 본다
     "/api/dashboard/company-ai",
+    # 회사 Higgsfield 계정 연결 상태(동의한 계정 이메일): 고객사 관리자만(연결·끊기와 같다)
+    "/api/dashboard/marketing/higgsfield/connection",
 }
 
 
