@@ -97,6 +97,7 @@ HELD_MESSAGE = {
     "failed": "실행에 실패함",
     "shop_refund_failed": "shop-api 환불 실패 (다시 처리하면 같은 키로 재시도)",
     "shop_refund_read_only": "관찰 모드(읽기 전용)라 환불을 내지 않음 (쓰기 권한 설치에서 처리)",
+    "shop_refund_pending_human": "사이트 반영 대기 (사람이 사이트에서 환불 처리, 할 일함)",
 }
 
 
@@ -671,6 +672,25 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
                                 code="ON_HOLD",
                                 level="block",
                                 message=f"{HELD_MESSAGE[kind]} ({exc.code})",
+                            )
+                        ],
+                    )
+                )
+                continue
+            if shop_refund.get("applied") == "pending_human":
+                # 사이트 변환기가 환불을 할 일함에 넣었다: 아직 돈이 나가지 않았다.
+                # 지급 완료로 적지 않고 보류로 둔다(다시 처리해도 같은 키라 같은 할 일이다)
+                held += 1
+                results.append(
+                    QueueRunResult(
+                        claim_id=claim.id,
+                        result="held",
+                        detail=f"shop_refund_pending_human:{shop_refund.get('handoff_task_id')}",
+                        blockers=[
+                            ClaimReasonHit(
+                                code="ON_HOLD",
+                                level="block",
+                                message=HELD_MESSAGE["shop_refund_pending_human"],
                             )
                         ],
                     )

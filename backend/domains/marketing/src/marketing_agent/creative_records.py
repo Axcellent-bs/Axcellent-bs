@@ -48,6 +48,19 @@ CREATE TABLE IF NOT EXISTS marketing_creative_records (
     tenant_id TEXT NOT NULL DEFAULT 'catbooks'
 )
 """
+# 의뢰로 만든 영상(wr_…)의 유튜브 올리기 상태(2026-11-23). 제작 기록의 render.youtube와 같은 모양을
+# 의뢰 영상 초안(post_draft_id)마다 회사 칸별로 둔다.
+# 영상 파일은 SNS 초안의 AI 라벨 입힌 파일 그대로다
+_REQUEST_YOUTUBE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS marketing_request_video_youtube (
+    post_draft_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    youtube TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (post_draft_id, tenant_id)
+)
+"""
 
 
 def clean_thumbnail(raw: Any) -> str | None:
@@ -72,6 +85,7 @@ class CreativeRecords:
         self._conn.row_factory = sqlite3.Row
         with self._lock, self._conn:
             self._conn.execute(_SCHEMA)
+            self._conn.execute(_REQUEST_YOUTUBE_SCHEMA)
             info = self._conn.execute("PRAGMA table_info(marketing_creative_records)")
             if "render" not in {r["name"] for r in info}:  # 2026-11-20 Higgsfield 그림·영상 칸
                 self._conn.execute("ALTER TABLE marketing_creative_records ADD COLUMN render TEXT")
@@ -183,6 +197,46 @@ class CreativeRecords:
                 " WHERE record_id = ? AND tenant_id = ?",
                 (json.dumps(render, ensure_ascii=False), record_id, self.company_id),
             )
+
+    # ------------------------------------------------ 의뢰로 만든 영상의 유튜브 상태
+    def get_request_youtube(self, post_draft_id: str) -> dict[str, Any]:
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT youtube FROM marketing_request_video_youtube"
+                " WHERE post_draft_id = ? AND tenant_id = ?",
+                (post_draft_id, self.company_id),
+            ).fetchone()
+        return json.loads(r["youtube"]) if r is not None else {}
+
+    def set_request_youtube(
+        self, post_draft_id: str, request_id: str, youtube: dict[str, Any]
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO marketing_request_video_youtube"
+                " (post_draft_id, tenant_id, request_id, youtube, updated_at)"
+                " VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT(post_draft_id, tenant_id)"
+                " DO UPDATE SET youtube = excluded.youtube, updated_at = excluded.updated_at",
+                (
+                    post_draft_id,
+                    self.company_id,
+                    request_id,
+                    json.dumps(youtube, ensure_ascii=False),
+                    now,
+                ),
+            )
+
+    def request_youtube_all(self, limit: int = KEEP) -> dict[str, dict[str, Any]]:
+        """이 회사의 의뢰 영상 유튜브 상태 전부(post_draft_id → 상태), 최근 것부터."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT post_draft_id, youtube FROM marketing_request_video_youtube"
+                " WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT ?",
+                (self.company_id, max(1, limit)),
+            ).fetchall()
+        return {r["post_draft_id"]: json.loads(r["youtube"]) for r in rows}
 
 
 def _statuses(raw: str | None) -> dict[str, str]:

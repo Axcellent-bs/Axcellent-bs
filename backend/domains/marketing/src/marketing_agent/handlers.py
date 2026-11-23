@@ -52,7 +52,16 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeYoutubeDraftInput,
     CreativeYoutubeOutput,
     CreativeYoutubeRequestInput,
+    RequestVideoYoutubeDraftInput,
+    RequestVideoYoutubeOutput,
+    RequestVideoYoutubeRequestInput,
     YoutubeStatusOutput,
+)
+from ax_contracts.schemas.marketing_youtube_stats import (
+    YoutubeUploadsListInput,
+    YoutubeUploadsListOutput,
+    YoutubeVideoStatsInput,
+    YoutubeVideoStatsOutput,
 )
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import ad_metrics as _ad_metrics
@@ -74,8 +83,10 @@ from marketing_agent import character_sheet as _character_sheet
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import higgsfield_status as _higgsfield_status
+from marketing_agent import request_video_youtube as _request_youtube
 from marketing_agent import storyboard as _storyboard
 from marketing_agent import youtube as _youtube
+from marketing_agent import youtube_stats as _youtube_stats
 from marketing_agent.brief_handoff import (
     AUTO,
     DRAFT_MEDIA_KIND,
@@ -964,6 +975,46 @@ async def youtube_status(request: AgentRequest) -> AgentResult:
     )
 
 
+async def youtube_video_stats(request: AgentRequest) -> AgentResult:
+    """회사 유튜브 영상의 조회수·좋아요·댓글(read, 5분 캐시). 키·토큰 값은 돌려주지 않는다."""
+    data = _parse(request, YoutubeVideoStatsInput)
+    if isinstance(data, AgentResult):
+        return data
+    out = YoutubeVideoStatsOutput(
+        **await _youtube_stats.video_stats(data.video_ids, data.record_ids)
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        outcome=out.status,
+        evidence=_evidence(
+            ["youtube_video_stats"],
+            f"유튜브 영상 성과 {len(out.items)}개 ({out.reason or out.status})",
+            [i.video_id for i in out.items],
+        ),
+    )
+
+
+async def youtube_uploads_list(request: AgentRequest) -> AgentResult:
+    """회사 유튜브에 올린 영상 목록(read): 기록 id·video_id·주소·올린 시각·제목·연결 번호."""
+    data = _parse(request, YoutubeUploadsListInput)
+    if isinstance(data, AgentResult):
+        return data
+    items = _youtube_stats.uploads(data.limit, data.campaign_id)
+    out = YoutubeUploadsListOutput(items=items, total=len(items))
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["youtube_uploads_list"],
+            f"올린 유튜브 영상 {out.total}개",
+            [i.record_id for i in items],
+        ),
+    )
+
+
 # 캐릭터 시트 프롬프트(read). 테스트는 이 값을 가짜 LLM을 돌려주는 함수로 바꾼다
 CHARACTER_SHEET_LLM: Any = None
 
@@ -1549,6 +1600,23 @@ async def issue_coupon(request: AgentRequest) -> AgentResult:
                 )
                 STATE.coupons.record(context_id, key, request.sequence, failed, cache=False)
                 return failed
+            if coupon.get("applied") == "pending_human":
+                # 사이트 변환기가 쿠폰 발급을 할 일함에 넣었다: 아직 발급되지 않았다.
+                # 발급 완료로 적지 않고 이벤트도 보내지 않는다(다시 불러도 같은 할 일이다)
+                pending = _result(
+                    request,
+                    TaskStatus.INPUT_REQUIRED,
+                    reason_code=InputReason.HUMAN_INPUT,
+                    outcome="site_pending_human",
+                    output={
+                        "applied": "pending_human",
+                        "handoff_task_id": coupon.get("handoff_task_id"),
+                        "execution_id": decision.execution_id,
+                    },
+                    evidence=evidence,
+                )
+                STATE.coupons.record(context_id, key, request.sequence, pending, cache=False)
+                return pending
             coupon_id = str(coupon["coupon_id"])
         else:
             coupon_id = STATE.coupons.new_coupon_id()
@@ -1594,7 +1662,68 @@ async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentRes
 
 
 async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
-    return await request_video.list_request_videos(request, STATE.sns)
+    """의뢰 영상 목록. 유튜브 승인 대기는 관문을 다시 묻고, 항목마다 유튜브 상태를 붙인다."""
+    await _request_youtube.refresh(request.meta, STATE.sns)
+    result = await request_video.list_request_videos(request, STATE.sns)
+    if result.status != TaskStatus.COMPLETED or not result.output:
+        return result
+    items = _request_youtube.attach_states(list(result.output.get("items") or []))
+    return result.model_copy(update={"output": result.output | {"items": items}})
+
+
+async def request_video_youtube_draft(request: AgentRequest) -> AgentResult:
+    """의뢰로 만든 영상의 유튜브 제목·설명·태그 초안(AI) 또는 사람이 고친 값 저장. 올리지 않는다."""
+    from marketing_agent.chat import default_llm
+
+    data = _parse(request, RequestVideoYoutubeDraftInput)
+    if isinstance(data, AgentResult):
+        return data
+    edits = data.model_dump(include={"title", "description", "tags", "privacy"})
+    try:
+        youtube = await _request_youtube.write_draft(
+            STATE.sns,
+            data.post_draft_id,
+            YOUTUBE_LLM or default_llm,
+            request.meta.context_id,
+            edits=edits,
+            regenerate=data.regenerate,
+        )
+    except _request_youtube.YoutubeError as error:
+        return _youtube_failed(request, error)
+    return _request_youtube_done(request, data.post_draft_id, youtube, "초안")
+
+
+async def request_video_youtube_request(request: AgentRequest) -> AgentResult:
+    """의뢰 영상(AI 라벨 입힌 파일)의 유튜브 올리기를 사람 승인(C publish_youtube)에 올린다."""
+    data = _parse(request, RequestVideoYoutubeRequestInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        youtube = await _request_youtube.request_upload(
+            request.meta, STATE.sns, data.post_draft_id, data.who
+        )
+    except _request_youtube.YoutubeError as error:
+        return _youtube_failed(request, error)
+    return _request_youtube_done(request, data.post_draft_id, youtube, "올리기 요청")
+
+
+def _request_youtube_done(
+    request: AgentRequest, post_draft_id: str, youtube: dict[str, Any], what: str
+) -> AgentResult:
+    request_id = youtube.get("request_id")
+    out = RequestVideoYoutubeOutput(
+        post_draft_id=post_draft_id, request_id=request_id, youtube=youtube
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill],
+            f"의뢰 영상 유튜브 {what} {post_draft_id}: {youtube.get('status')}",
+            [],
+        ),
+    )
 
 
 async def draft_outage_sns_post_skill(request: AgentRequest) -> AgentResult:
@@ -1959,6 +2088,8 @@ HANDLERS = {
     "creative_youtube_draft": creative_youtube_draft,
     "creative_youtube_request": creative_youtube_request,
     "youtube_status": youtube_status,
+    "youtube_video_stats": youtube_video_stats,
+    "youtube_uploads_list": youtube_uploads_list,
     "creative_record_attach": creative_record_attach,
     "receive_campaign_brief": receive_campaign_brief,
     "record_campaign_ad_metrics": record_campaign_ad_metrics,
@@ -1975,6 +2106,8 @@ HANDLERS = {
     "draft_outage_sns_post": draft_outage_sns_post_skill,
     "list_outage_sns_drafts": list_outage_sns_drafts_skill,
     "list_request_videos": list_request_videos_skill,
+    "request_video_youtube_draft": request_video_youtube_draft,
+    "request_video_youtube_request": request_video_youtube_request,
     "merge_outage_sns_drafts": merge_outage_sns_drafts_skill,
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,

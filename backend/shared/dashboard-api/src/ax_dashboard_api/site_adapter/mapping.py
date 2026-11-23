@@ -8,16 +8,21 @@
 - `sum:a,b`: 정수 칸들의 합 (null은 0)
 - `const:<값>`: 그 글자 그대로
 - `first:a,b`: 비어 있지 않은 첫 값 (모두 비면 None, 경로가 하나도 없으면 `MissingField`)
+
+쓰기 짝(`writes`, 동작 → `WriteMap`)은 추가 필드다. 없으면 모든 쓰기가 할 일함으로 간다(예전
+짝 파일 그대로 읽힘). 쓰기 본문 식은 위 셋에 `path:`·`key_code:`·`now_plus:`·`json:`·`link:`를
+더한다. 지금(W1)은 모양만 검사하고, 계산은 직접 쓰기(W3)에서 한다.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
 from ax_agent_template import company_files
 
@@ -26,6 +31,17 @@ DEFAULT_DIR = Path(__file__).resolve().parents[5] / ".data" / "site_adapter"
 MAPPING_FILE = "mapping.json"
 
 Resource = Literal["orders", "products"]
+# 쓰기 동작. shop-api 경로 → 동작은 변환기 코드(`writes.py`)에 고정한다(짝 파일이 정하지 않는다)
+WriteAction = Literal[
+    "refund",
+    "coupon_issue",
+    "banner_post",
+    "banner_end",
+    "claim_result",
+    "inquiry_answer",
+    "payment_rollback",
+    "fault_release",
+]
 
 
 class MappingError(Exception):
@@ -59,6 +75,19 @@ class ItemsMap(BaseModel):
     fields: dict[str, str]
 
 
+def local_path(value: str) -> str:
+    """고객사 주소 뒤에 붙는 경로만 받는다. 다른 호스트로 키가 새지 않게 한다."""
+    bad = (
+        not value.startswith("/")
+        or value.startswith("//")
+        or any(c in value for c in "@?#\\")
+        or "://" in value
+    )
+    if bad:
+        raise ValueError("path는 /로 시작하는 경로만 쓸 수 있어요(@ ? # // 금지)")
+    return value
+
+
 class ResourceMap(BaseModel):
     model_config = ConfigDict(extra="forbid")
     path: str
@@ -66,16 +95,7 @@ class ResourceMap(BaseModel):
     @field_validator("path")
     @classmethod
     def _local_path(cls, value: str) -> str:
-        """고객사 주소 뒤에 붙는 경로만 받는다. 다른 호스트로 키가 새지 않게 한다."""
-        bad = (
-            not value.startswith("/")
-            or value.startswith("//")
-            or any(c in value for c in "@?#\\")
-            or "://" in value
-        )
-        if bad:
-            raise ValueError("path는 /로 시작하는 경로만 쓸 수 있어요(@ ? # // 금지)")
-        return value
+        return local_path(value)
 
     paging: Paging = Paging()
     fields: dict[str, str]
@@ -85,12 +105,87 @@ class ResourceMap(BaseModel):
     items: ItemsMap | None = None
 
 
+_KEY_CODE = re.compile(r"[A-Z0-9_-]{1,30}")
+_LINK = re.compile(r"[a-z_]+\.[a-z_]+")
+_PATH_PARAM = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def check_write_expr(expr: str) -> str:
+    """쓰기 본문 식 하나의 모양만 본다(계산은 W3). 틀리면 ValueError."""
+    if expr.startswith("key_code:"):
+        if not _KEY_CODE.fullmatch(expr[len("key_code:") :]):
+            raise ValueError(f"key_code: 접두는 A-Z 0-9 _ - 30자 이하여야 해요: {expr}")
+    elif expr.startswith("now_plus:"):
+        if not expr[len("now_plus:") :].isdigit():
+            raise ValueError(f"now_plus:는 날 수(정수)여야 해요: {expr}")
+    elif expr.startswith("json:"):
+        try:
+            json.loads(expr[len("json:") :])
+        except ValueError as exc:
+            raise ValueError(f"json: 값이 JSON이 아니에요: {expr}") from exc
+    elif expr.startswith("link:"):
+        if not _LINK.fullmatch(expr[len("link:") :]):
+            raise ValueError(f"link:는 <자원>.<칸> 모양이어야 해요: {expr}")
+    elif expr.startswith("first:"):
+        for part in expr[len("first:") :].split(","):
+            check_write_expr(part.strip())
+    elif expr.startswith(("path:", "const:", "sum:")):
+        pass
+    elif not expr or any(not part for part in expr.split(".")):
+        raise ValueError(f"짝 식이 비었거나 점 경로가 깨졌어요: {expr!r}")
+    return expr
+
+
+class WriteMap(BaseModel):
+    """쓰기 짝 하나: shop-api 쓰기 동작 → 고객사 쓰기 경로·본문."""
+
+    model_config = ConfigDict(extra="forbid")
+    method: Literal["POST", "PUT", "PATCH", "DELETE"]
+    path: str
+    path_params: dict[str, str] = {}
+    body: dict[str, str] = {}
+    ok: list[int] = [200, 201]
+    # 고객사 응답 → shop-api 응답 칸 (필요한 동작만, 예: 쿠폰 `coupon_id`)
+    result: dict[str, str] = {}
+
+    @field_validator("path")
+    @classmethod
+    def _local_path(cls, value: str) -> str:
+        return local_path(value)
+
+    @field_validator("ok")
+    @classmethod
+    def _ok_codes(cls, value: list[int]) -> list[int]:
+        if not value or any(not 200 <= code < 300 for code in value):
+            raise ValueError("ok는 2xx 응답 코드만 쓸 수 있어요")
+        return value
+
+    @field_validator("path_params", "body")
+    @classmethod
+    def _exprs(cls, value: dict[str, str]) -> dict[str, str]:
+        for expr in value.values():
+            check_write_expr(expr)
+        return value
+
+    @model_validator(mode="after")
+    def _params_match_path(self) -> WriteMap:
+        names = set(_PATH_PARAM.findall(self.path))
+        if names != set(self.path_params):
+            raise ValueError(
+                f"path의 {{이름}}과 path_params가 맞지 않아요: {sorted(names)} / "
+                f"{sorted(self.path_params)}"
+            )
+        return self
+
+
 class SiteMapping(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: Literal[1]
     auth_header: str = "Authorization"
     auth_scheme: str = "Bearer"
     resources: dict[Resource, ResourceMap]
+    # 추가 필드: 동작별 쓰기 짝. 없으면 모든 쓰기가 할 일함 (예전 짝 파일 그대로 읽힘)
+    writes: dict[WriteAction, WriteMap] = {}
 
 
 ADAPTER_DIR_NAME = "site_adapter"

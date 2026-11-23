@@ -195,6 +195,32 @@
       "priority": "recommended"
     },
     {
+      "id": "youtube_video_stats",
+      "description": "회사 유튜브 채널(로그인한 회사의 연결)에 올린 영상의 조회수·좋아요·댓글 수를 YouTube Data API videos.list(part=statistics)로 읽는다(read). input은 video_ids(11자) 또는 record_ids(CR-…, render.youtube.video_id로 찾음). 영상마다 5분 캐시. 숨긴 좋아요·댓글은 None(모름), 못 찾은 영상은 not_found. 읽지 못하면 status=unknown과 reason(no_videos·missing_keys·invalid_credentials·stats_http_<코드>·error). 키·토큰 값은 돌려주지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_youtube_stats.py#YoutubeVideoStatsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_youtube_stats.py#YoutubeVideoStatsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "data",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "youtube_uploads_list",
+      "description": "회사 유튜브에 올리기가 끝난 제작 기록 목록(read): record_id·video_id·url·uploaded_at·title·privacy·campaign_id(기록에 연결된 캠페인 cmp_… 또는 의뢰 wr_…, 없으면 null). input.campaign_id를 주면 그 번호에 연결된 것만. 최근 기록부터 limit개.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_youtube_stats.py#YoutubeUploadsListInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_youtube_stats.py#YoutubeUploadsListOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "data",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "creative_video_request",
       "description": "제작 기록(input.record_id: CR-…)의 스토리보드 그림을 시작 이미지로 Higgsfield 영상 만들기를 사람 승인(C generate_creative_video)에 올린다. 영상 월 사용량 예산을 먼저 예약하고, 보류되면 render.video.status=awaiting_approval·review_id를 남긴다. 승인 뒤 기록을 읽을 때(creative_record_get) 같은 키로 관문을 다시 물어 executed면 만들고 파일을 저장한다. 거절 outcome: not_found·board_image_not_ready·model_not_configured·higgsfield_key_missing·quota_exceeded·quota_not_configured·storage_error·in_progress.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeVideoRequestInput",
@@ -392,10 +418,34 @@
     },
     {
       "id": "list_request_videos",
-      "description": "의뢰(wr_*) 홍보 영상 목록(읽기). 총괄 PROMO_VIDEO 흐름의 릴스 초안(context ctx_wr_*) 중 영상이 만들어진 것을 최신 순으로 돌려준다(post_draft_id·request_id·media_id·duration_s·caption_ko·created_at·labeled·status). labeled는 초안이 연결한 파일이 AI 라벨을 입힌 labeled.mp4이고 기록된 해시와 같을 때만 true이며, 이때만 prepared(asset_ref·asset_sha256)를 담는다. 입력 request_id로 한 의뢰만, post_draft_id로 한 건만 조회한다. 초안 저장소와 meta.json을 읽기만 한다.",
+      "description": "의뢰(wr_*) 홍보 영상 목록(읽기). 총괄 PROMO_VIDEO 흐름의 릴스 초안(context ctx_wr_*) 중 영상이 만들어진 것을 최신 순으로 돌려준다(post_draft_id·request_id·media_id·duration_s·caption_ko·created_at·labeled·status). labeled는 초안이 연결한 파일이 AI 라벨을 입힌 labeled.mp4이고 기록된 해시와 같을 때만 true이며, 이때만 prepared(asset_ref·asset_sha256)를 담는다. 입력 request_id로 한 의뢰만, post_draft_id로 한 건만 조회한다. 초안 저장소와 meta.json을 읽기만 한다. 항목마다 youtube(의뢰 영상 유튜브 올리기 상태, 없으면 null)를 붙이고, 유튜브 승인 대기 건은 같은 키로 관문을 다시 물어 승인됐으면 올린다.",
       "input_schema": "agents/marketing/src/marketing_agent/request_video.py#ListRequestVideosInput",
       "output_schema": "agents/marketing/src/marketing_agent/request_video.py#RequestVideoList",
       "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "request_video_youtube_draft",
+      "description": "의뢰로 만든 영상(input.post_draft_id: 의뢰 wr_*의 릴스 초안)으로 회사 유튜브에 올릴 제목·설명·태그 초안을 AI가 쓴다(재료: 기획 문구·영상 프롬프트, LLM이 없으면 기획 문구로 고정 초안). AI 라벨 입힌 영상(labeled.mp4, 해시·라벨 기록 확인)이 있어야 한다. regenerate=true면 다시 쓰고, title·description·tags·privacy(private·unlisted·public, 기본 unlisted)를 주면 사람이 고친 값으로 저장한다. 설명 끝 AI 생성 표시는 지우지 않는다. 올리지는 않는다. 거절 outcome: not_found·video_not_ready·already_requested.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoYoutubeDraftInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoYoutubeOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "request_video_youtube_request",
+      "description": "초안대로 의뢰로 만든 영상(AI 라벨 입힌 파일)의 유튜브 올리기를 사람 승인(C publish_youtube)에 올린다. 보류되면 youtube.status=awaiting_approval·review_id, 승인 뒤 목록을 읽을 때(list_request_videos) 같은 키로 다시 물어 executed면 승인받은 해시와 같은 라벨 영상만 YouTube Data API로 올리고 video_id·url을 남긴다(합성 미디어 표시). 거절 outcome: not_found·draft_missing·video_not_ready·youtube_not_connected.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoYoutubeRequestInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoYoutubeOutput",
+      "grade": "C",
       "allowed_requesters": [
         "dashboard-api"
       ],

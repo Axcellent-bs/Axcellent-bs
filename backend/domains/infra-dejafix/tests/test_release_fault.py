@@ -107,3 +107,10 @@ def test_only_the_orchestrator_may_ask(a2a_body, runtime) -> None:
     result = _call(a2a_body, PAST, token="mock:marketing")
     assert result["status"] != "completed"
     assert runtime.shop.released == 0
+
+
+def test_site_adapter_pending_human_is_not_a_release() -> None:
+    """사이트 변환기가 장애 해제를 할 일함에 넣은 응답(`released: false`)은 해제 성공이 아니다."""
+    pending = {"released": False, "applied": "pending_human", "handoff_task_id": "hof_1"}
+    assert switched_off({"active": True}, pending) is False
+    assert switched_off(None, pending) is False  # 되돌리기 길도 성공으로 보지 않는다

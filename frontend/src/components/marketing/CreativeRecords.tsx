@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
+import { Tabs } from "@/components/connect/parts";
 import { shortDateTime } from "@/lib/format";
 import { RECORD_ID, getCreativeRecord, listCreativeRecords, thumbSrc, type CreativeRecord, type CreativeRecordSummary } from "@/lib/creativeRecords";
 import { SheetBoard } from "./SheetBoard";
 import { StoryboardView } from "./StoryboardMaker";
 import { PromptBox } from "./PromptParts";
 import { RenderPanel } from "./RenderPanel";
+import { RequestVideos } from "./RequestVideos";
 
-// 마케팅 › 제작 기록 (/marketing/records). SNS·미디어 탭에서 만든 이미지 시트와 이어 만든 스토리보드를
-// 기록마다 다시 본다. 목록을 누르면 ?id=CR-… 로 상세가 열린다. 읽기만 하고 아무것도 바꾸지 않는다.
+// 마케팅 › 제작 기록 (/marketing/records). 탭 두 개:
+// - 이미지 시트 · 스토리보드: SNS·미디어 탭에서 만든 이미지 시트와 이어 만든 스토리보드를 기록마다 다시 본다.
+//   목록을 누르면 ?id=CR-… 로 상세가 열린다(상세의 RenderPanel에서 영상·유튜브 올리기)
+// - 의뢰로 만든 영상(?view=videos): 총괄 홍보 영상 의뢰(wr_…)가 만든 AI 표시 영상. 영상마다 유튜브 올리기(사람 승인).
+//   ?request=wr_… 로 들어오면 이 탭을 열고 그 의뢰 영상을 맨 앞에 둔다(11/23, SNS·미디어에서 옮겨 옴)
 
 function Detail({ id }: { id: string }) {
   const [rec, setRec] = useState<CreativeRecord | null>(null);
@@ -76,9 +81,17 @@ function Row({ r }: { r: CreativeRecordSummary }) {
   );
 }
 
+type View = "records" | "videos";
+const VIEW_TABS: readonly { id: View; label: string }[] = [
+  { id: "records", label: "이미지 시트 · 스토리보드" },
+  { id: "videos", label: "의뢰로 만든 영상" },
+];
+
 export function CreativeRecords() {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const id = params.get("id");
+  const view: View = params.get("view") === "videos" || (params.get("request") && !id) ? "videos" : "records";
+  const pick = (next: View) => setParams(next === "videos" ? { view: "videos" } : {}, { replace: true });
   const [items, setItems] = useState<CreativeRecordSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -96,12 +109,14 @@ export function CreativeRecords() {
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">제작 기록</h1>
-          <p className="mt-1 text-sm text-ink-500">SNS·미디어에서 만든 이미지 시트와 이어 만든 스토리보드를 다시 봐요. 최근 200건까지 남고, 올린 원본 이미지는 저장하지 않아 작은 미리보기만 보여요. 총괄 홍보 영상 의뢰로 만든 영상은 <Link to="/marketing/sns#request-videos" className="underline">SNS·미디어의 '의뢰로 만든 영상'</Link>에서 봐요.</p>
+          <p className="mt-1 text-sm text-ink-500">SNS·미디어에서 만든 이미지 시트·스토리보드와 총괄 홍보 영상 의뢰로 만든 영상을 다시 보고, 회사 유튜브에 올려요(올리기는 늘 사람 승인). 기록은 최근 200건까지 남고, 올린 원본 이미지는 저장하지 않아 작은 미리보기만 보여요.</p>
         </div>
         <Link to="/marketing/sns" className="btn-ghost ml-auto text-xs">새로 만들기 ›</Link>
       </header>
-      <section className="card p-6">
-        {id && RECORD_ID.test(id) ? <Detail id={id} />
+      <Tabs label="제작 기록 보기" items={VIEW_TABS} value={view} onPick={pick} />
+      <section className="card p-6" role="tabpanel" aria-label={view === "videos" ? "의뢰로 만든 영상" : "이미지 시트 · 스토리보드"}>
+        {view === "videos" ? <RequestVideos />
+          : id && RECORD_ID.test(id) ? <Detail id={id} />
           : error ? <p className="text-sm text-accent" role="alert">{error}</p>
           : items === null ? <p className="text-sm text-ink-500">불러오는 중…</p>
           : items.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">아직 기록이 없어요. SNS·미디어에서 이미지 시트를 만들면 여기에 쌓여요.</p>

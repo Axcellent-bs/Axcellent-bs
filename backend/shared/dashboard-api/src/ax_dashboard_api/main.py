@@ -29,7 +29,7 @@ from ax_dashboard_api import (
 from ax_dashboard_api.accounts import router as accounts_router
 from ax_dashboard_api.connection_keys import router as connection_keys_router
 from ax_dashboard_api.cost_limit_routes import router as cost_limit_router
-from ax_dashboard_api.envelope import install_error_handlers, is_mock
+from ax_dashboard_api.envelope import SessionCompanyMiddleware, install_error_handlers, is_mock
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
 from ax_dashboard_api.routes import router
 from ax_dashboard_api.secret_routes import router as secret_router
@@ -122,6 +122,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 install_error_handlers(app)
+app.add_middleware(SessionCompanyMiddleware)  # 응답 meta.tenant_id가 세션 회사를 따른다
 app.include_router(router)
 # 영상 비용 상한·안전 정책 화면 (로그인 세션의 운영자·관리자, 변경은 limit_editor·policy_editor)
 app.include_router(cost_limit_router)

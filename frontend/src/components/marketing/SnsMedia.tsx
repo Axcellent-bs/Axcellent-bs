@@ -1,15 +1,15 @@
 import { useCallback, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router";
+import { Navigate, useSearchParams } from "react-router";
 import { Tabs } from "@/components/connect/parts";
 import { Skeleton } from "@/components/finance/bits";
 import { useVisibleInterval } from "@/lib/visibleInterval";
 import { shortDateTime, won } from "@/lib/format";
 import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
+import { REQUEST_VIDEOS_PATH } from "@/lib/requestVideoView";
 import { BriefMediaMaker } from "./BriefMediaMaker";
 import { SnsAccountsCard } from "./SnsAccountsCard";
 import { CharacterSheetMaker } from "./CharacterSheetMaker";
-import { RequestVideos } from "./RequestVideos";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, type StoredBrief } from "@/lib/briefs";
 
 // SNS·미디어 탭. 이미지·영상 생성을 안내하고(SNS 게시 흐름·캐러셀·AI 표시 안내는 Instagram 자동 게시 카드의 물음표),
@@ -17,7 +17,8 @@ import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, dr
 // 안전 장치 보류 큐(finance.reviews)에서 읽을 수 있는 마케팅 항목(publish_sns, generate_media)만 읽기 전용으로 보여 준다.
 // 보류 결정은 장애·공지·캠페인 탭의 보류 큐에서 한다. 이 탭은 결정하지 않는다.
 // 이미지 시트 · 스토리보드 카드(Higgsfield 결과는 카드 안 RenderPanel이 보여 준다).
-// 11/23 화면 정리: 카드를 한 줄로 늘어놓지 않고 탭(만들기·의뢰 영상·넘어온 기획안·승인 대기·계정·연결)으로 나눈다.
+// 11/23 화면 정리: 카드를 한 줄로 늘어놓지 않고 탭(만들기·넘어온 기획안·승인 대기·계정·연결)으로 나눈다.
+// '의뢰로 만든 영상'은 제작 기록(/marketing/records?view=videos)으로 옮겼다. 옛 주소(?view=videos·?request=)는 그리로 보낸다.
 // 고른 탭은 주소 ?view=에 남는다. 유튜브 연결에서 돌아오면(?youtube=) 계정·연결 탭을 연다.
 
 const REFRESH_MS = 15_000;
@@ -30,8 +31,8 @@ const carouselCount = (summary?: string): number | null => {
 };
 const fromMarketing = (requester: string) => requester === "coupon" || requester === "marketing";
 
-type View = "make" | "videos" | "briefs" | "holds" | "accounts";
-const VIEWS: readonly View[] = ["make", "videos", "briefs", "holds", "accounts"];
+type View = "make" | "briefs" | "holds" | "accounts";
+const VIEWS: readonly View[] = ["make", "briefs", "holds", "accounts"];
 const isView = (v: string | null): v is View => v !== null && (VIEWS as readonly string[]).includes(v);
 
 function Section({ title, desc, children }: { title: string; desc?: ReactNode; children: ReactNode }) {
@@ -91,11 +92,16 @@ export function SnsMedia() {
   }, { replace: true });
   const tabs: { id: View; label: string; count?: number }[] = [
     { id: "make", label: "이미지 시트 · 스토리보드" },
-    { id: "videos", label: "의뢰로 만든 영상" },
     { id: "briefs", label: "넘어온 기획안", count: handed?.length },
     { id: "holds", label: "사람 결정 대기", count: holds?.length },
     { id: "accounts", label: "계정·연결" },
   ];
+
+  const movedRequest = asked === "videos" || params.get("request") !== null;
+  if (movedRequest) {
+    const request = params.get("request");
+    return <Navigate replace to={`${REQUEST_VIDEOS_PATH}${request ? `&request=${encodeURIComponent(request)}` : ""}`} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -116,8 +122,6 @@ export function SnsMedia() {
           <CharacterSheetMaker />
         </div>
       )}
-
-      {view === "videos" && <div role="tabpanel" aria-label="의뢰로 만든 영상"><RequestVideos /></div>}
 
       {view === "accounts" && (
         <div className="space-y-6" role="tabpanel" aria-label="계정·연결">
