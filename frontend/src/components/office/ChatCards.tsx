@@ -75,7 +75,7 @@ function RequestCard({ card, messageId, threadId }: { card: TrendRequestCard; me
       {card.cost_note && <p className="text-[11px] text-ink-400">예상 호출 · {card.cost_note}</p>}
       <div className="flex flex-wrap items-center gap-2 pt-1">
         {view.button && (
-          <button type="button" className="btn-primary" disabled={view.disabled} onClick={submit}>{view.button}</button>
+          <button type="button" className="btn-primary btn-card" disabled={view.disabled} onClick={submit}>{view.button}</button>
         )}
         {view.note && (
           <span role="status" className={`text-xs ${done ? "font-semibold text-emerald-700" : state.kind === "error" ? "text-red-700" : "text-ink-500"}`}>
@@ -87,8 +87,8 @@ function RequestCard({ card, messageId, threadId }: { card: TrendRequestCard; me
         )}
         {!done && (
           <>
-            <button type="button" className="btn-ghost" onClick={edit}>분석 의뢰 탭에서 고치기</button>
-            <button type="button" className="btn-ghost" onClick={() => setFolded(true)}>아니에요</button>
+            <button type="button" className="btn-ghost btn-card" onClick={edit}>분석 의뢰 탭에서 고치기</button>
+            <button type="button" className="btn-ghost btn-card" onClick={() => setFolded(true)}>아니에요</button>
           </>
         )}
       </div>
@@ -161,8 +161,8 @@ export function DoneCard({ card }: { card: TrendReportDoneCard }) {
         <ul className="space-y-0.5">{v.evidence.map((e, i) => <li key={i} className="text-xs text-ink-700">· {e}</li>)}</ul>
       )}
       <div className="flex flex-wrap gap-2 pt-1">
-        <button type="button" className="btn-primary" onClick={() => navigate(path)}>보고서 열기</button>
-        <button type="button" className="btn-ghost" onClick={() => navigate(path, { state: { trendReportPrint: true } satisfies TrendNavState })}>PDF로 저장</button>
+        <button type="button" className="btn-primary btn-card" onClick={() => navigate(path)}>보고서 열기</button>
+        <button type="button" className="btn-ghost btn-card" onClick={() => navigate(path, { state: { trendReportPrint: true } satisfies TrendNavState })}>PDF로 저장</button>
       </div>
     </section>
   );
