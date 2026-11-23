@@ -8,7 +8,7 @@ import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestTitle } from "@/lib/requestHandoffs";
 import { REQUEST_STATUS, type WorkRequestRow } from "@/lib/workRequests";
-import { hiddenRequestLine, madeVideo, perfStep, PLAN_LOOKUP_MIN_MS, planCard, planLookupDue, proposalOfRequest, requestActionError, requestEditError, reportIdOfRequest, resultStep, showRequestCard, stepRows, type PerfStepView, type PlanCardView, type PlanLookup, type StepDot } from "@/lib/requestCards";
+import { hiddenRequestLine, madeVideo, needPlanRefetch, perfStep, PLAN_LOOKUP_MIN_MS, PLAN_RETRY_MAX, PLAN_RETRY_MS, planCard, planFound, planLookupDue, proposalOfRequest, requestActionError, requestEditError, reportIdOfRequest, resultStep, showRequestCard, stepRows, type PerfStepView, type PlanCardView, type PlanLookup, type StepDot } from "@/lib/requestCards";
 import { dataAi, type RequestVideoPerformance } from "@/lib/data";
 import { planDocPath } from "@/lib/planDoc";
 import { planId } from "@/lib/format";
@@ -63,10 +63,11 @@ function ReportCell({ reportId }: { reportId: string }) {
 }
 
 // 기획 기록 읽기 (카드 여러 개가 같이 쓴다). 1분에 한 번 넘게 다시 읽지 않는다 (lib/requestCards.ts planLookupDue)
+// force: 1분 제한 없이 읽는다 (결과 번호가 목록에 없을 때·못 찾아 다시 읽을 때. 부르는 쪽이 10초·15초 간격을 지킨다)
 let planCache: { at: number | null; list: PlanLookup[] | null; inflight: Promise<PlanLookup[]> | null } = { at: null, list: null, inflight: null };
-function loadPlanLookup(): Promise<PlanLookup[]> {
+function loadPlanLookup(force = false): Promise<PlanLookup[]> {
   if (planCache.inflight) return planCache.inflight;
-  if (planCache.list && !planLookupDue(planCache.at, Date.now())) return Promise.resolve(planCache.list);
+  if (!force && planCache.list && !planLookupDue(planCache.at, Date.now())) return Promise.resolve(planCache.list);
   const inflight = planningApi(apiBase("planning")).state()
     .then((raw) => (fromBackend(raw, []).proposals ?? []).map((p): PlanLookup => ({
       id: p.id, insightId: p.insightId, spec: p.spec, title: p.title, idea: p.idea, videoPlan: p.videoPlan,
@@ -79,9 +80,13 @@ function loadPlanLookup(): Promise<PlanLookup[]> {
   return inflight;
 }
 
+// 결과 번호(PROP-)마다 마지막으로 다시 읽은 때 (카드 여러 개가 같이 쓴다. 같은 번호는 10초에 한 번까지)
+const refetchAt = new Map<string, number>();
+
 /** 기획 receive_insight 단계가 끝나면 기획 기록을 읽는다 (result_ref가 PROP-여도: 기획서·영상 제작안을 보려고).
- *  의뢰가 바뀌면(updated_at) 다시 읽되 1분에 한 번까지 */
-function usePlanLookup(need: boolean, version: string | undefined): PlanLookup[] | null {
+ *  의뢰가 바뀌면(updated_at) 다시 읽되 1분에 한 번까지. 11/23: 결과 번호가 목록에 없으면 바로(번호마다 10초에 한 번까지),
+ *  그래도 못 찾으면 15초 간격으로 최대 8번 더 읽는다(카드가 사라지면 멈춤) */
+function usePlanLookup(row: WorkRequestRow | null, need: boolean, version: string | undefined): PlanLookup[] | null {
   const [list, setList] = useState<PlanLookup[] | null>(planCache.list);
   useEffect(() => {
     if (!need) return;
@@ -89,7 +94,40 @@ function usePlanLookup(need: boolean, version: string | undefined): PlanLookup[]
     void loadPlanLookup().then((x) => { if (alive) setList(x); });
     return () => { alive = false; };
   }, [need, version]);
+  // 결과 번호가 기억해 둔 목록에 없다: 1분 제한 없이 바로 다시
+  const ref = row ? planRefOf(row) : null;
+  useEffect(() => {
+    if (!need || !row || !ref) return;
+    const now = Date.now();
+    if (!needPlanRefetch(row, list, refetchAt.get(ref) ?? null, now)) return;
+    refetchAt.set(ref, now);
+    let alive = true;
+    void loadPlanLookup(true).then((x) => { if (alive) setList(x); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [need, ref, list]);
+  // 끝났는데 제안을 못 찾았다: 찾을 때까지 15초 간격으로 최대 8번
+  const found = !!row && planFound(row, list);
+  useEffect(() => {
+    if (!need || !row || found) return;
+    let tries = 0;
+    let alive = true;
+    const timer = setInterval(() => {
+      tries += 1;
+      if (tries > PLAN_RETRY_MAX) { clearInterval(timer); return; }
+      void loadPlanLookup(true).then((x) => { if (alive) setList(x); });
+    }, PLAN_RETRY_MS);
+    return () => { alive = false; clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [need, found, row?.request_id]);
   return list;
+}
+
+/** 기획 단계 결과 번호(PROP-)만 (다시 읽기 판정의 열쇠) */
+function planRefOf(row: WorkRequestRow): string | null {
+  const p = row.plan.find((x) => x.skill === "receive_insight");
+  const ref = p ? row.steps[p.step_id]?.result_ref : null;
+  return ref && /^PROP-/.test(ref) ? ref : null;
 }
 
 // 의뢰 영상 성과 읽기 (데이터 video_performance campaign_id = 의뢰 번호). 의뢰마다 1분에 한 번까지 (planLookupDue)
@@ -187,7 +225,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   const insightDone = !!(insightStep && row?.steps[insightStep.step_id]?.status === "completed");
   const made = !!row && madeVideo(row);
   const perf = usePerf(requestId, hasToken && made);
-  const proposals = usePlanLookup(insightDone, `${row?.updated_at ?? ""}|${perf.tick}`);
+  const proposals = usePlanLookup(row, insightDone, `${row?.updated_at ?? ""}|${perf.tick}`);
   if (!showRequestCard(hasToken, requestId) || !row) return null;
   // 삭제한 의뢰: 카드 대신 회색 한 줄 (되돌리면 카드 전체가 다시 보인다)
   const hiddenLine = hiddenRequestLine(row, requestTitle(row, tasks), hasToken);
