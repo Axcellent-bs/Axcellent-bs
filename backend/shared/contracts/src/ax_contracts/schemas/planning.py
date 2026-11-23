@@ -692,6 +692,9 @@ class ReceiveInsightInput(AxModel):
     # 재무 의견 → 기획 제안 → 마케팅 실행까지 같은 카테고리로 잇는다 (11/17 태윤 요청)
     content_category: str | None = Field(default=None, min_length=1, max_length=40)
     content_format: ContentFormat | None = None
+    # 아래는 예전 요청은 없다. 총괄 의뢰(홍보 영상)의 고객 문장 그대로 (11/23 재현 님: "30초 이내"가
+    # 제작안에 안 갔다). untrusted라 기획은 LLM에 넘기지 않고 길이 같은 숫자만 코드로 읽는다
+    request_text: str | None = Field(default=None, max_length=4000)
 
 
 class ReceiveInsightOutput(AxModel):

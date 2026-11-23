@@ -316,3 +316,53 @@ def test_old_video_plan_without_media_hints_still_valid() -> None:
     dumped = vp.rule_plan(_prop()).model_dump(mode="json")
     assert dumped["media_hints"] == {"season": "autumn", "color_theme": "warm cream",
                                      "category": None}  # fmt: skip
+
+
+# ---------------------------------------------------------------- 의뢰 문장의 길이 (11/23 재현 님)
+
+
+def test_requested_format_reads_seconds_from_request_text() -> None:
+    assert vp.requested_format("20~30대 청년 대상 30초 이내 쇼츠 만들어 주세요") == "숏폼 30초"
+    assert vp.requested_format("15초 정도 릴스") == "숏폼 15초"
+    assert vp.requested_format("1분짜리 홍보 영상") == "숏폼 60초"
+    assert vp.requested_format("20대 대상 10 shorts 아이디어") is None  # 나이·개수는 길이가 아니다
+    assert vp.requested_format("5초 영상") is None  # 10~60초 밖이면 기획이 고른 형식 그대로
+    assert vp.requested_format("") is None and vp.requested_format(None) is None
+
+
+def test_orchestrator_request_length_sets_video_plan_duration() -> None:
+    """기획 LLM이 숏폼 15초를 골라도 의뢰가 "30초 이내"면 제작안은 30초 (PROP-20 사례)."""
+    from planning_agent.proposals import ProposalDraft
+
+    class Picks15(Writer):
+        async def draft(self, inp, ctx):
+            return ProposalDraft("숏츠를 만든다", "검색이 오른다", None, "숏폼 15초", "llm")
+
+    writer = Picks15(_mock(_llm_out()))
+    svc = PlanningService(gate=_gate, relater=None, marketing=Brief(), proposal_writer=writer)
+    inp = _insight().model_copy(update={"request_text": "브랜드 인지도 광고 영상, 30초 이내 쇼츠"})
+    res = asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp))
+    out = ReceiveInsightOutput.model_validate(res.output)
+    assert out.video_plan is not None and out.video_plan.duration_s == 30
+    assert out.video_plan.scenes[-1].end_s == 30
+    p = next(x for x in svc.state.proposals if x.id == out.proposal_id)
+    assert p.format == "숏폼 30초"
+    sent = writer.llm.calls[-1]
+    assert "30초 이내" not in str(sent)  # 고객 문장은 LLM에 넘기지 않는다 (숫자만 코드로)
+
+
+def test_no_length_in_request_keeps_planning_format() -> None:
+    from planning_agent.proposals import ProposalDraft
+
+    class Picks15(Writer):
+        async def draft(self, inp, ctx):
+            return ProposalDraft("숏츠를 만든다", "검색이 오른다", None, "숏폼 15초", "llm")
+
+    svc = PlanningService(
+        gate=_gate, relater=None, marketing=Brief(), proposal_writer=Picks15(_mock(_llm_out()))
+    )
+    inp = _insight().model_copy(update={"request_text": "브랜드 광고 영상 만들어 주세요"})
+    out = ReceiveInsightOutput.model_validate(
+        asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp)).output
+    )
+    assert out.video_plan is not None and out.video_plan.duration_s == 15

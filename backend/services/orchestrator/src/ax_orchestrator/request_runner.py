@@ -329,6 +329,8 @@ class RequestRunner:
             )
             return
         payload = carried if carried is not None else self._input_of(row, spec, filled)
+        if carried is not None and spec.get("text_key"):  # 넘겨받은 값 + 고객 문장 칸 (11/23)
+            payload = {**carried, spec["text_key"]: row["text"]}
         if payload is None:
             self._update(
                 rid,

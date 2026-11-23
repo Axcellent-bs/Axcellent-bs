@@ -405,6 +405,8 @@ class ProposalMixin:
             given() if sources is not None else self._option_sources(ctx_in),
         )
         scale = idea_options.scale_facts(inp.past, followers)
+        # 의뢰 문장에 길이가 있으면 그 길이가 형식이다 (제작안 길이 duration_of가 형식을 읽는다)
+        asked = video_plan.requested_format(inp.request_text)
         options = idea_options.build_options(inp, trends, scale)
 
         async def run(s: State) -> ActionResult:
@@ -425,7 +427,7 @@ class ProposalMixin:
                 content_category=inp.content_category, content_format=inp.content_format,
                 audience=inp.audience, shorts_format=inp.shorts_format,
                 body_md=inp.body_md, idea=draft.idea, why=draft.why, target=target,
-                format=draft.format, written_by=draft.written_by, warnings=draft.warnings,
+                format=asked or draft.format, written_by=draft.written_by, warnings=draft.warnings,
                 created_at=self.clock(), follow_of=follow.id if follow else None,
                 past=[ProposalPast(**x.model_dump()) for x in inp.past],
                 options=options, scale=scale,
