@@ -10,7 +10,8 @@
 - `DELETE /api/dashboard/company-connection`: 연결을 지우고 원래 주소(`AX_SHOP_API_URL`·기본값)로
 - `POST /save`·`POST /clear`: PUT·DELETE와 같다(운영 서버 nginx 게이트가 POST만 열 수 있어서)
 
-읽기·쓰기 모두 사람 토큰만 된다(`require_human`). 주소 정책은
+읽기·쓰기 모두 사람 토큰만 된다(`require_human`). 쓰기(확인 포함)는 로그인 세션이면 운영자·관리자만
+(`EDITORS`). 주소 정책은
 `ax_agent_template.company_connection.check_host`(사내 주소 또는 허용 목록 + https, 링크 로컬 차단).
 확인은 서버가 그 주소로 직접 GET을 보내므로 아무 주소나 부를 수 있다.
 사내 설치·사람 토큰 전제이고, 계정이 든 주소·http(s) 밖의 주소는 받지 않는다.
@@ -33,6 +34,7 @@ from ax_agent_template import company_connection as store
 from ax_agent_template import pinned_http
 from ax_agent_template import tenant as tenants
 from ax_agent_template.config import agent_url
+from ax_dashboard_api.accounts import require_session_role
 from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
 from ax_dashboard_api.site_adapter import setup as adapter_setup
@@ -49,6 +51,9 @@ router = APIRouter(
     prefix="/api/dashboard/company-connection",
     dependencies=[Depends(require_human)],
 )
+# 저장·확인·모드·해제는 운영자·고객사 관리자 세션만. 일반회원 세션은 403 ROLE_REQUIRED
+# (일반회원이 연결을 끊거나 회사를 바꾸지 못하게, 회사 간 격리 시험 6). 공용 토큰은 그대로 둔다
+EDITORS = [Depends(require_session_role("operator", "admin"))]
 
 
 class ConnectionIn(BaseModel):
@@ -254,7 +259,7 @@ def get_connection() -> dict:
     return ok(_state())
 
 
-@router.post("/test")
+@router.post("/test", dependencies=EDITORS)
 async def test_connection(body: ConnectionIn) -> dict:
     url = _valid(body.url)
     checks = await run_checks(url)
@@ -269,8 +274,8 @@ async def test_connection(body: ConnectionIn) -> dict:
 
 
 # POST /save·/clear: 운영 서버 nginx 게이트가 POST만 열 수 있어 같은 동작을 POST로도 받는다
-@router.post("/save")
-@router.put("")
+@router.post("/save", dependencies=EDITORS)
+@router.put("", dependencies=EDITORS)
 async def save_connection(body: ConnectionIn, request: Request) -> dict:
     """주소를 확인하고 저장한다. 저장하면 실제 연결 모드가 된다."""
     _require_editable()
@@ -282,7 +287,7 @@ async def save_connection(body: ConnectionIn, request: Request) -> dict:
     return ok({**_state(), "checks": [c.as_dict() for c in checks]})
 
 
-@router.post("/mode")
+@router.post("/mode", dependencies=EDITORS)
 async def switch_mode(body: ModeIn, request: Request) -> dict:
     """내부 데이터 ↔ 실제 연결. 저장한 주소는 남긴다. 실제 연결로 켤 때는 다시 확인한다."""
     _require_editable()
@@ -311,8 +316,8 @@ async def switch_mode(body: ModeIn, request: Request) -> dict:
     return ok(_state())
 
 
-@router.post("/clear")
-@router.delete("")
+@router.post("/clear", dependencies=EDITORS)
+@router.delete("", dependencies=EDITORS)
 def delete_connection(request: Request) -> dict:
     if store.clear_connection(_human(request)):
         logger.info("회사 연결 해제 (by %s)", _human(request))
