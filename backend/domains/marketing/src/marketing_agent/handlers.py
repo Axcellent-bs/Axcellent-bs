@@ -52,6 +52,8 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeYoutubeDraftInput,
     CreativeYoutubeOutput,
     CreativeYoutubeRequestInput,
+    RequestVideoCoverOutput,
+    RequestVideoCoverSelectInput,
     RequestVideoYoutubeDraftInput,
     RequestVideoYoutubeOutput,
     RequestVideoYoutubeRequestInput,
@@ -83,6 +85,7 @@ from marketing_agent import character_sheet as _character_sheet
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import higgsfield_status as _higgsfield_status
+from marketing_agent import request_video_cover as _request_cover
 from marketing_agent import request_video_youtube as _request_youtube
 from marketing_agent import storyboard as _storyboard
 from marketing_agent import youtube as _youtube
@@ -1668,6 +1671,10 @@ async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
     if result.status != TaskStatus.COMPLETED or not result.output:
         return result
     items = _request_youtube.attach_states(list(result.output.get("items") or []))
+    for item in items:  # 썸네일을 바꾸면 다시 승인받아야 하는 요청이 있나(화면 확인 상자)
+        item["approval_waiting"] = _request_cover.approval_waiting(
+            str(item.get("post_draft_id")), item.get("youtube")
+        )
     return result.model_copy(update={"output": result.output | {"items": items}})
 
 
@@ -1705,6 +1712,31 @@ async def request_video_youtube_request(request: AgentRequest) -> AgentResult:
     except _request_youtube.YoutubeError as error:
         return _youtube_failed(request, error)
     return _request_youtube_done(request, data.post_draft_id, youtube, "올리기 요청")
+
+
+async def request_video_cover_select(request: AgentRequest) -> AgentResult:
+    """의뢰 영상 썸네일 후보 중 하나를 고른다. 승인 대기·승인 뒤면 그 승인을 무효로 한다."""
+    data = _parse(request, RequestVideoCoverSelectInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        picked = _request_cover.select_cover(STATE.sns, data.post_draft_id, data.media_id)
+    except _request_cover.CoverError as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome=error.code, output={"message": error.code}
+        )
+    out = RequestVideoCoverOutput.model_validate(picked)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill],
+            f"의뢰 영상 썸네일 {data.post_draft_id}: {data.media_id}"
+            + (f" (승인 무효: {', '.join(out.approvals_reset)})" if out.approvals_reset else ""),
+            [data.post_draft_id],
+        ),
+    )
 
 
 def _request_youtube_done(
@@ -2108,6 +2140,7 @@ HANDLERS = {
     "list_request_videos": list_request_videos_skill,
     "request_video_youtube_draft": request_video_youtube_draft,
     "request_video_youtube_request": request_video_youtube_request,
+    "request_video_cover_select": request_video_cover_select,
     "merge_outage_sns_drafts": merge_outage_sns_drafts_skill,
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,

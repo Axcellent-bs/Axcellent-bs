@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Skeleton } from "@/components/finance/bits";
 import { useAuthedMedia } from "@/lib/authedMedia";
 import { shortDateTime } from "@/lib/format";
 import { listRequestVideos, requestVideoPreviewUrl } from "@/lib/requestVideos";
-import { AI_LABEL_NOTE_KO, REQUEST_VIDEOS_PATH, VIDEOS_EMPTY_KO, canUploadToYoutube, durationKo, requestFilterOf, sortForRequest, statusKo, videoPane, type RequestVideo } from "@/lib/requestVideoView";
+import { AI_LABEL_NOTE_KO, REQUEST_VIDEOS_PATH, VIDEOS_EMPTY_KO, VIDEO_NOT_FOUND_KO, canUploadToYoutube, durationKo, focusDraftId, requestFilterOf, sortForRequest, statusKo, videoPane, type RequestVideo } from "@/lib/requestVideoView";
+import { CoverPicker } from "./CoverPicker";
 import { YoutubePanel } from "./YoutubePanel";
 
 // 제작 기록 › 의뢰로 만든 영상 (/marketing/records?view=videos). 총괄 홍보 영상 의뢰(wr_…)가 만든 reel 초안 중
-// AI 라벨을 입힌 영상을 본다. 영상마다 회사 유튜브에 올릴 수 있다(AI 제목·설명 초안 → 사람 승인 C → 올리기).
-// Instagram 게시·승인은 기획안 카드의 승인 패널에서 한다. ?request=wr_… 이면 그 의뢰 영상을 맨 앞에 두고 강조한다.
+// AI 라벨을 입힌 영상을 본다. 영상마다 썸네일 후보 3장에서 하나를 고르고(시안 ③), 회사 유튜브에 올릴 수 있다
+// (AI 제목·설명 초안 → 사람 승인 C → 올리기). Instagram 게시·승인은 기획안 카드의 승인 패널에서 한다.
+// ?request=wr_… 이면 그 의뢰 영상을 맨 앞에 두고, 그 카드로 한 번 스크롤해 테두리(accent)로 표시한다.
 
 function Player({ v }: { v: RequestVideo }) {
   const url = requestVideoPreviewUrl(v.post_draft_id);
@@ -21,8 +23,20 @@ function Player({ v }: { v: RequestVideo }) {
 
 function Item({ v, focus, onChanged }: { v: RequestVideo; focus: boolean; onChanged: () => void }) {
   const pane = videoPane(v);
+  const ref = useRef<HTMLLIElement>(null);
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (!focus || scrolled.current) return; // 들어왔을 때 한 번만
+    scrolled.current = true;
+    ref.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  }, [focus]);
   return (
-    <li className={`space-y-2 px-4 py-3 text-xs ${focus ? "bg-brand-50" : ""}`} aria-current={focus ? "true" : undefined}>
+    <li
+      ref={ref}
+      className={`space-y-2 px-4 py-3 text-xs ${focus ? "rounded-2xl border-2 border-accent bg-accent-50" : ""}`}
+      aria-current={focus ? "true" : undefined}
+      data-focus={focus ? "request" : undefined}
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-mono text-ink-700">{v.request_id}</span>
         <span className="chip bg-ink-50 text-ink-700">{statusKo(v.status)}</span>
@@ -31,6 +45,7 @@ function Item({ v, focus, onChanged }: { v: RequestVideo; focus: boolean; onChan
       </div>
       {v.caption_ko && <p className="whitespace-pre-line break-words text-sm text-ink-900">{v.caption_ko}</p>}
       {pane.kind === "play" ? <Player v={v} /> : <p className="rounded-xl bg-ink-50 px-3 py-2 text-ink-700">{pane.text}</p>}
+      {pane.kind === "play" && <CoverPicker video={v} onChanged={onChanged} />}
       {canUploadToYoutube(v)
         ? <YoutubePanel requestVideoId={v.post_draft_id} youtube={v.youtube} onChanged={onChanged} />
         : <p className="text-ink-500">AI 표시가 입혀진 뒤에 회사 유튜브에 올릴 수 있어요.</p>}
@@ -55,6 +70,7 @@ export function RequestVideos() {
     setItems(null);
     void load();
   }, [load]);
+  const focusId = items ? focusDraftId(items, requestId) : null;
 
   return (
     <section id="request-videos" className="space-y-4" aria-labelledby="request-videos-h">
@@ -67,10 +83,13 @@ export function RequestVideos() {
       </div>
       {error ? <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">{error}</p>
         : items === null ? <Skeleton stats={0} lines={2} />
-          : items.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">{requestId ? "이 의뢰로 만든 영상이 아직 없어요." : VIDEOS_EMPTY_KO}</p> : (
-            <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100" aria-label="의뢰로 만든 영상 목록">
-              {sortForRequest(items, requestId).map((v) => <Item key={v.post_draft_id} v={v} focus={!!requestId && v.request_id === requestId} onChanged={() => void load()} />)}
-            </ul>
+          : items.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">{requestId ? VIDEO_NOT_FOUND_KO : VIDEOS_EMPTY_KO}</p> : (
+            <>
+              {requestId && !focusId && <p role="status" className="rounded-xl bg-ink-50 px-4 py-2 text-xs text-ink-700">{VIDEO_NOT_FOUND_KO}</p>}
+              <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100" aria-label="의뢰로 만든 영상 목록">
+                {sortForRequest(items, requestId).map((v) => <Item key={v.post_draft_id} v={v} focus={v.post_draft_id === focusId} onChanged={() => void load()} />)}
+              </ul>
+            </>
           )}
     </section>
   );

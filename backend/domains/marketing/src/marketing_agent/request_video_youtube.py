@@ -30,6 +30,7 @@ from ax_agent_template.execute import execute
 from ax_contracts.schemas import Evidence, ExecuteDecision, RequestMeta
 from marketing_agent import creative_records as _creative
 from marketing_agent import request_video as _rv
+from marketing_agent import request_video_cover as _cover
 from marketing_agent import sns_media
 from marketing_agent import youtube as _yt
 from marketing_agent.sns import DEMO_TEXT, TERMS_TEXT, SnsPostDraft, SnsStore, ai_label_text
@@ -207,9 +208,16 @@ async def request_upload(
         raise YoutubeError("youtube_not_connected")
     request_id = _request_id(draft)
     privacy = cur.get("privacy") or "unlisted"
-    digest = hashlib.sha256(
-        f"{cur['title']}|{cur['description']}|{privacy}|{sha}".encode()
-    ).hexdigest()[:16]
+    # 썸네일: 고르지 않았으면 첫 후보를 초안에 적고, 승인 해시에 넣는다
+    # (후보 없는 영상은 옛 해시 그대로)
+    draft = _cover.ensure_cover(sns, draft)
+    cover = _cover.current_cover(draft)
+    if cover is not None and not cover["ok"]:
+        raise YoutubeError("cover_missing")
+    seed = f"{cur['title']}|{cur['description']}|{privacy}|{sha}"
+    if cover is not None:
+        seed += f"|{cover['token']}"
+    digest = hashlib.sha256(seed.encode()).hexdigest()[:16]
     key = f"{meta.context_id}:{_yt.PUBLISH_ACTION}:{post_draft_id}:{digest}"
     params = {
         "post_draft_id": post_draft_id,
@@ -224,6 +232,8 @@ async def request_upload(
         "requested_by": (who or "")[:80],
         "summary": f"유튜브 올리기({privacy}): {cur['title']} (의뢰 {request_id} AI 생성 영상)",
     }
+    if cover is not None:  # 승인자가 볼 썸네일(AI 표시가 들어간 프레임)
+        params |= {"cover_media_id": cover["media_id"], "cover_token": cover["token"]}
     decision = await execute(
         _yt.PUBLISH_ACTION,
         params,
@@ -293,12 +303,19 @@ async def _upload(sns: SnsStore, post_draft_id: str) -> None:
     cur = get(post_draft_id)
     request_id = str((cur.get("params") or {}).get("request_id") or "")
     approved = str((cur.get("params") or {}).get("video_sha256") or "")
+    approved_cover = (cur.get("params") or {}).get("cover_token")
+    cover: dict[str, Any] | None = None
     try:
-        path, sha = _labeled(_draft(sns, post_draft_id))
+        draft = _draft(sns, post_draft_id)
+        path, sha = _labeled(draft)
         data = path.read_bytes()
         # 승인받은 그 AI 라벨 영상만 올린다(승인 뒤 파일이 바뀌었으면 올리지 않는다)
         if not approved or sha != approved or hashlib.sha256(data).hexdigest() != approved:
             raise YoutubeError("video_changed")
+        # 썸네일도 승인받은 그 값이어야 한다(승인 뒤 바꿨으면 올리지 않는다)
+        cover = _cover.current_cover(draft)
+        if (cover["token"] if cover is not None else None) != approved_cover:
+            raise YoutubeError("cover_changed")
         video_id = await _yt.send_video(cur, data)
     except Exception as error:  # noqa: BLE001 - 어떤 실패든 상태에 남긴다(올리는 중으로 멈추지 않게)
         code = str(error) if isinstance(error, YoutubeError) else type(error).__name__
@@ -313,7 +330,34 @@ async def _upload(sns: SnsStore, post_draft_id: str) -> None:
         video_id=video_id,
         url=f"https://youtu.be/{video_id}",
         uploaded_at=_yt._now().isoformat(),  # noqa: SLF001
+        thumbnail=await _thumbnail(video_id, cover),
     )
+
+
+async def _thumbnail(video_id: str, cover: dict[str, Any] | None) -> dict[str, Any] | None:
+    """승인받은 썸네일을 붙인다.
+
+    채널이 맞춤 썸네일을 못 받으면(예: 미인증) 쓰지 않고 그렇게 적는다."""
+    if cover is None:
+        return None
+    try:
+        await _yt.send_thumbnail(video_id, Path(cover["path"]).read_bytes())
+    except Exception as error:  # noqa: BLE001 - 영상은 올라갔다. 썸네일만 못 붙였다고 남긴다
+        code = str(error) if isinstance(error, YoutubeError) else type(error).__name__
+        logger.warning("의뢰 영상 youtube 썸네일 못 붙임: %s (%s)", code, video_id)
+        return {"media_id": cover["media_id"], "applied": False, "reason": code}
+    return {"media_id": cover["media_id"], "applied": True, "reason": None}
+
+
+def reset_for_cover(post_draft_id: str) -> bool:
+    """썸네일을 바꾸면: 승인 대기 중인 유튜브 올리기를 초안으로 되돌린다(다시 승인받아야 한다)."""
+    cur = get(post_draft_id)
+    if cur.get("status") != "awaiting_approval":
+        return False
+    request_id = str((cur.get("params") or {}).get("request_id") or cur.get("request_id") or "")
+    _put(post_draft_id, request_id, status="draft", error="cover_changed", key=None,
+         review_id=None, params=None)  # fmt: skip
+    return True
 
 
 def expire_stale(post_draft_id: str, max_age_s: float = 3600) -> None:

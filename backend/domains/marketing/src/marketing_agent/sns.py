@@ -263,6 +263,16 @@ class SnsPostDraft(AxModel):
     # 의뢰 영상 초안(`request_video`): 생성 직후 라벨을 입혀 연결한 결과 `{"prepared": {...}}`.
     # 옛 레코드는 기본값(None)으로 읽는다
     media_flow: dict[str, Any] | None = None
+    # 의뢰 영상 초안의 기획 장면 시작 시각(초)과 기획 길이
+    # (`prepare_video_draft_from_plan`이 적는다). 썸네일 후보 시점 계산용.
+    # 옛 레코드·장면 없는 초안은 비어 있다
+    scene_starts_s: list[float] = Field(default_factory=list)
+    plan_duration_s: float | None = None
+    # 의뢰 영상 썸네일 후보(`request_video_cover`): [{media_id, at_s, asset_ref, sha256, ...}]
+    # 라벨 입힌 영상에서 뽑은 그림이고 AI 표시(XMP)가 들어 있다. 옛 레코드는 빈 목록
+    cover_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    cover_media_id: str | None = None  # 사람이 고른 후보. 없으면 첫 후보가 기본값
+    cover_rev: int = 0  # 사람이 고를 때마다 1씩. 승인 해시에 들어가 바꾼 뒤 옛 승인이 안 맞는다
 
 
 class CheckSnsPostInput(AxModel):

@@ -15,6 +15,7 @@ import { keyEvidence, recommendationItems, reportHash } from "@/lib/trendReportV
 import type { TrendReportDoneCard } from "@/lib/planningData";
 import type { TrendReport as Report } from "@/lib/data";
 import { DoneCard, ProgressCard } from "@/components/office/ChatCards";
+import { RequestCoverCell } from "@/components/marketing/CoverPicker";
 import { refreshWorkRequests, useWorkRequests } from "@/components/office/useWorkRequests";
 
 // 대화방 "의뢰 진행" 카드 (총괄에게 맡긴 고객 의뢰 하나, 11/20). 전체 대화방·이슈 방·총괄 1:1에서 의뢰 번호가 처음 나온 총괄 말풍선 아래에 붙는다.
@@ -204,7 +205,10 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                 </p>
                 {s.muted && <p className="text-xs text-ink-500">{s.muted}</p>}
                 {videoLink && s.skill === "generate_media" && (
-                  <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(videoLink)}>영상 열기</button>
+                  <>
+                    <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(videoLink)}>영상 열기</button>
+                    <RequestCoverCell requestId={row.request_id} />
+                  </>
                 )}
                 {report && <ReportCell reportId={report} />}
                 {isInsight && plan && <PlanCell card={plan} />}
