@@ -66,7 +66,7 @@ def test_unknown_event_type_is_rejected() -> None:
 
 def test_event_type_catalog() -> None:
     values = {t.value for t in EventType}
-    assert len(values) == 32
+    assert len(values) == 33
     for expected in (
         "data.trend_report_ready",
         "order.created",
@@ -77,6 +77,7 @@ def test_event_type_catalog() -> None:
         "support.incident_compensation_decided",
         "metric.anomaly",
         "infra.anomaly_detected",
+        "infra.recovered",
         "finance.anomaly_detected",
         "incident.resolved",
         "coupon.issued",
@@ -433,3 +434,34 @@ def test_support_incident_compensation_data() -> None:
     ):
         with pytest.raises(ValidationError):
             SupportIncidentCompensationData(**{**data.model_dump(), **bad})
+
+
+def test_infra_recovered_reuses_anomaly_data_with_recovery_fields() -> None:
+    """`infra.recovered`(11/23): 장애 신호와 같은 데이터 + 복구 방식·DejaFix 해소 시각."""
+    assert EVENT_DATA_MODELS[EventType.INFRA_RECOVERED] is InfraAnomalyData
+    envelope = EventEnvelope.model_validate(
+        {
+            "event_id": "evt_infra_2",
+            "type": "infra.recovered",
+            "occurred_at": "2026-10-22T05:50:00+00:00",
+            "context_id": None,
+            "source": "infra",
+            "idempotency_key": "infra.recovered:dejafix:1001",
+            "data": {
+                "component": "payment",
+                "metric_code": "error_rate_5xx",
+                "detected_at": "2026-10-22T05:39:30Z",
+                "source_ref": "zabbix:event:1001",
+                "recovery": None,
+                "recovered_at": "2026-10-22T05:48:10Z",
+            },
+        }
+    )
+    data = InfraAnomalyData.model_validate(envelope.data)
+    assert data.recovered_at is not None and data.recovered_at.minute == 48
+    assert data.recovery is None
+    # 기존 장애 신호는 새 칸 없이 그대로 통과 (추가만)
+    old = InfraAnomalyData.model_validate(
+        {"component": "payment", "metric_code": "x", "detected_at": "2026-10-22T05:39:30Z"}
+    )
+    assert old.recovery is None and old.recovered_at is None

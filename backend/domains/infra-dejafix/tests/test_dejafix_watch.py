@@ -265,3 +265,102 @@ def test_run_forever_skips_round_without_url(caplog: pytest.LogCaptureFixture) -
     assert seen == []
     assert sleeps == [7, 7]
     assert not caplog.records
+
+
+# ---------------------------------------------------------------- 복구 신호 infra.recovered (11/23)
+
+RESOLVED_AT = "2026-11-09T05:03:20Z"
+
+
+def _rounds(
+    lists: list[list[dict] | None], detail: dict | None = None, detail_status: int = 200
+) -> list:
+    """회차마다 목록을 바꿔 가며 run_once. 목록이 None이면 그 회차 조회가 500으로 실패한다."""
+    detail_calls: list[str] = []
+    state = {"i": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/api/incidents/"):
+            detail_calls.append(request.url.path)
+            if detail_status != 200:
+                return httpx.Response(detail_status, json={"error": "x"})
+            return httpx.Response(200, json={"data": detail})
+        rows = lists[state["i"]]
+        if rows is None:
+            return httpx.Response(500, json={"error": "down"})
+        return httpx.Response(200, json={"data": rows, "meta": {"next_cursor": None}})
+
+    async def go():
+        out = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            for i in range(len(lists)):
+                state["i"] = i
+                try:
+                    out.append(await dejafix_watch.run_once(URL, NOW, client))
+                except httpx.HTTPStatusError:
+                    out.append("failed")
+        return out
+
+    return asyncio.run(go()), detail_calls
+
+
+def _resolved_detail(id_: int = 7) -> dict:
+    row = _incident(id_, tags=PAYMENT, status="resolved")
+    row["resolved_at"] = RESOLVED_AT
+    return row
+
+
+def test_recovered_after_two_successful_misses_with_dejafix_resolved_time() -> None:
+    open_ = _incident(7, tags=PAYMENT)
+    rounds, details = _rounds([[open_], [], []], detail=_resolved_detail())
+    assert [len(r) for r in rounds] == [1, 0, 1]  # 첫 번째로 빠진 회차는 아직 안 보냄
+    assert details == ["/api/incidents/7"]
+    rec = rounds[2][0]
+    assert rec.type == EventType.INFRA_RECOVERED
+    assert rec.idempotency_key == "infra.recovered:dejafix:7"
+    assert rec.data["component"] == "payment" and rec.data["metric_code"] == "payment_http_fail"
+    assert rec.data["source_ref"] == rounds[0][0].data["source_ref"] == "zabbix:event:97"
+    # 감시 시각(NOW)이 아니라 DejaFix 해소 시각
+    assert rec.data["recovered_at"] == "2026-11-09T05:03:20Z"
+    assert rec.data["recovery"] is None
+    assert [e.type for e in events.MOCK_PUBLISHED] == [
+        EventType.INFRA_ANOMALY_DETECTED,
+        EventType.INFRA_RECOVERED,
+    ]
+
+
+def test_recovered_only_once() -> None:
+    rounds, details = _rounds([[_incident(7, tags=PAYMENT)], [], [], [], []], _resolved_detail())
+    assert [len(r) for r in rounds] == [1, 0, 1, 0, 0]
+    assert len(details) == 1
+
+
+def test_failed_poll_does_not_count_as_missing() -> None:
+    """조회 실패(500)는 빠진 것으로 세지 않는다: 실패·빠짐·실패면 아직 한 번만 빠진 것."""
+    rounds, details = _rounds([[_incident(7, tags=PAYMENT)], None, [], None], _resolved_detail())
+    assert rounds[1] == "failed" and rounds[3] == "failed"
+    assert rounds[2] == [] and details == []
+
+
+def test_reappearing_resets_the_count() -> None:
+    inc = _incident(7, tags=PAYMENT)
+    rounds, details = _rounds([[inc], [], [inc], []], _resolved_detail())
+    assert all(r == [] for r in rounds[1:]) and details == []
+
+
+def test_detail_still_problem_is_not_recovery() -> None:
+    """목록에서만 빠지고(예: limit) 상세는 아직 problem이면 복구로 보지 않는다."""
+    still = _incident(7, tags=PAYMENT)
+    rounds, details = _rounds([[still], [], []], detail=still)
+    assert rounds[2] == [] and details == ["/api/incidents/7"]
+
+
+def test_detail_error_waits_for_next_round() -> None:
+    rounds, details = _rounds([[_incident(7, tags=PAYMENT)], [], [], []], detail_status=502)
+    assert all(r == [] for r in rounds[1:])
+    assert details == ["/api/incidents/7", "/api/incidents/7"]  # 다음 회차에 다시 확인
+
+
+def test_untagged_incident_never_gets_recovery() -> None:
+    rounds, details = _rounds([[_incident(8)], [], []], _resolved_detail(8))
+    assert all(r == [] for r in rounds) and details == []
