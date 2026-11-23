@@ -216,3 +216,42 @@ class RequestVideoCoverOutput(AxModel):
     changed: bool  # 같은 것을 다시 고르면 false(승인은 그대로)
     cover_rev: int = Field(ge=0)
     approvals_reset: list[str] = Field(default_factory=list)  # 무효가 된 승인: instagram·youtube
+
+
+# ---- 제작 기록 영상의 썸네일 후보 3장 (2026-11-23). Higgsfield로 만든 그림(AI 표시 XMP 포함)이고
+# 상태는 기록의 render.thumbnails. 만들기는 사람 결정(C `generate_creative_thumbnails`) 뒤에만,
+# 고르지 않으면 첫 후보가 기본값이고 유튜브 승인 해시에 들어간다
+CREATIVE_THUMBNAILS_REQUEST_SKILL = "creative_thumbnails_request"
+CREATIVE_THUMBNAIL_SELECT_SKILL = "creative_thumbnail_select"
+CREATIVE_THUMBNAIL_ID_PATTERN = r"^thm_[0-9a-f]{12}$"
+
+
+class CreativeThumbnailsRequestInput(AxModel):
+    """후보 3장 만들기를 사람 결정에 올린다. 후보가 이미 있으면 `regenerate`일 때만 다시 만든다."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    regenerate: bool = False
+    who: str | None = Field(default=None, max_length=80)
+
+
+class CreativeThumbnailsOutput(AxModel):
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    # render.thumbnails: {status, error, candidates[{media_id, kind, sha256, is_ai_generated}],
+    # chosen, cover_rev, review_id, aspect, ...}
+    thumbnails: dict[str, Any]
+
+
+class CreativeThumbnailSelectInput(AxModel):
+    """후보(`render.thumbnails.candidates[].media_id`) 안의 값만. 승인 대기면 그 승인은 무효."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    media_id: str = Field(pattern=CREATIVE_THUMBNAIL_ID_PATTERN)
+    who: str | None = Field(default=None, max_length=80)
+
+
+class CreativeThumbnailSelectOutput(AxModel):
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    cover_media_id: str = Field(pattern=CREATIVE_THUMBNAIL_ID_PATTERN)
+    changed: bool  # 같은 것을 다시 고르면 false(승인은 그대로)
+    cover_rev: int = Field(ge=0)
+    approvals_reset: list[str] = Field(default_factory=list)  # 무효가 된 승인: youtube

@@ -14,6 +14,11 @@
 - 그 아래 태그에서 고른 해시태그 줄을 붙인다(설명 전체 3~5개, #AXcellent 포함, 이미 있으면 안 붙임)
 - 제목·줄거리는 외부 입력이라 LLM 데이터 블록(`untrusted`)에만 넣는다. LLM이 없으면 고정 문구 초안
 - 어느 캠페인 영상인지(`render.youtube.campaign_id`, 11/23, 선택)는 `set_campaign`으로 남긴다
+- 썸네일(11/23, `creative_thumbnails.py`): Higgsfield 후보 3장 중 고른 것(안 고르면 첫 장)을
+  승인 해시에 넣고(`media_id:파일 sha256:cover_rev`), 올리기 직전에 지금 값과 다시 맞춘다
+  (다르면 `cover_changed`로 올리지 않는다). 올린 뒤 `thumbnails.set`을 부르고, 채널이 맞춤
+  썸네일을 못 쓰면(미인증 등) 영상은 그대로 두고 `thumbnail.applied=false`·사유를 남긴다.
+  후보가 없는 기록은 해시가 예전과 같다
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from ax_agent_template.execute import execute
 from ax_contracts.schemas import Evidence, ExecuteDecision, RequestMeta
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
+from marketing_agent import creative_thumbnails as _thumbs
 
 logger = logging.getLogger(__name__)
 
@@ -391,9 +397,15 @@ async def request_upload(meta: RequestMeta, record_id: str, who: str | None) -> 
     if not configured():
         raise YoutubeError("youtube_not_connected")
     privacy = cur.get("privacy") or "unlisted"
-    digest = hashlib.sha256(
-        f"{cur['title']}|{cur['description']}|{privacy}|{video['sha256']}".encode()
-    ).hexdigest()[:16]
+    # 썸네일: 고르지 않았으면 첫 후보를 적고 승인 해시에 넣는다(후보 없는 기록은 옛 해시 그대로)
+    _thumbs.ensure_cover(record_id)
+    cover = _thumbs.current_cover(record_id)
+    if cover is not None and not cover["ok"]:
+        raise YoutubeError("cover_missing")
+    seed = f"{cur['title']}|{cur['description']}|{privacy}|{video['sha256']}"
+    if cover is not None:
+        seed += f"|{cover['token']}"
+    digest = hashlib.sha256(seed.encode()).hexdigest()[:16]
     key = f"{meta.context_id}:{PUBLISH_ACTION}:{record_id}:{digest}"
     params = {
         "record_id": record_id,
@@ -406,6 +418,8 @@ async def request_upload(meta: RequestMeta, record_id: str, who: str | None) -> 
         "requested_by": (who or "")[:80],
         "summary": f"유튜브 올리기({privacy}): {cur['title']} (AI 생성 영상)",
     }
+    if cover is not None:  # 승인자가 볼 썸네일(AI 표시가 들어간 그림)
+        params |= {"cover_media_id": cover["media_id"], "cover_token": cover["token"]}
     decision = await execute(
         PUBLISH_ACTION,
         params,
@@ -513,9 +527,31 @@ async def send_thumbnail(video_id: str, jpeg: bytes) -> None:
             raise YoutubeError(f"thumbnail_http_{sent.status_code}")
 
 
+async def apply_thumbnail(video_id: str, cover: dict[str, Any] | None) -> dict[str, Any] | None:
+    """승인받은 썸네일을 붙인다. 채널이 맞춤 썸네일을 못 받으면 영상은 그대로 두고 사유만 남긴다."""
+    if cover is None:
+        return None
+    try:
+        await send_thumbnail(video_id, cover["path"].read_bytes())
+    except Exception as error:  # noqa: BLE001 - 영상은 올라갔다. 썸네일만 못 붙였다고 남긴다
+        code = str(error) if isinstance(error, YoutubeError) else type(error).__name__
+        logger.warning("youtube 썸네일 못 붙임: %s (%s)", code, video_id)
+        return {"media_id": cover["media_id"], "applied": False, "reason": code}
+    return {"media_id": cover["media_id"], "applied": True, "reason": None}
+
+
+def reset_for_cover(record_id: str) -> bool:
+    """썸네일이 바뀌면: 승인 대기 중인 올리기를 초안으로 되돌린다(다시 승인받아야 한다)."""
+    if _get(record_id).get("status") != "awaiting_approval":
+        return False
+    _put(record_id, status="draft", error="cover_changed", key=None, review_id=None, params=None)
+    return True
+
+
 async def _upload(record_id: str) -> None:
     cur = _get(record_id)
     part = cur.get("part") or "video"
+    cover: dict[str, Any] | None = None
     try:
         info = (_creative.store().get_render(record_id).get(part)) or {}
         name = str(info.get("asset") or "")
@@ -523,6 +559,11 @@ async def _upload(record_id: str) -> None:
             raise YoutubeError("video_not_ready")
         # 같은 기록 폴더(creative/<기록>/)의 파일만 읽는다(직접 올린 완성 영상은 final.mp4)
         data = (_render.asset_path(record_id, "video").parent / name).read_bytes()
+        # 썸네일도 승인받은 그 값이어야 한다(승인 뒤 바꿨거나 파일이 바뀌었으면 올리지 않는다)
+        cover = _thumbs.current_cover(record_id)
+        approved = (cur.get("params") or {}).get("cover_token")
+        if (cover["token"] if cover is not None else None) != approved:
+            raise YoutubeError("cover_changed")
         video_id = await send_video(cur, data)
     except Exception as error:  # noqa: BLE001 - 어떤 실패든 기록에 남긴다(올리는 중으로 멈추지 않게)
         code = str(error) if isinstance(error, YoutubeError) else type(error).__name__
@@ -536,6 +577,7 @@ async def _upload(record_id: str) -> None:
         video_id=video_id,
         url=f"https://youtu.be/{video_id}",
         uploaded_at=_now().isoformat(),
+        thumbnail=await apply_thumbnail(video_id, cover),
     )
 
 

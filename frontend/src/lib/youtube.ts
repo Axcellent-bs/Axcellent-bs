@@ -49,6 +49,8 @@ export interface YoutubeState {
   at?: string;
   /** 어느 캠페인(cmp_…) 영상인지(11/23, 선택). 재무 캠페인 결과의 유튜브 조회수가 이 값으로 영상을 찾는다 */
   campaign_id?: string | null;
+  /** 올린 뒤 붙인 썸네일(11/23). 채널이 맞춤 썸네일을 못 쓰면 applied=false·reason(예: thumbnail_http_403) */
+  thumbnail?: { media_id: string; applied: boolean; reason?: string | null } | null;
 }
 
 export interface YoutubeDraftEdits {
@@ -128,4 +130,13 @@ export const YOUTUBE_ERROR_KO: Record<string, string> = {
   invalid_credentials: "유튜브 연결 키가 거절됐어요(다시 연결 필요)",
   interrupted: "서버가 다시 켜져 올리기가 중단됐어요",
   video_changed: "승인받은 뒤 영상 파일이 바뀌어 올리지 않았어요. 다시 요청해 주세요",
+  cover_changed: "승인받은 뒤 썸네일이 바뀌어 올리지 않았어요. 다시 요청해 주세요",
+  cover_missing: "고른 썸네일 파일을 찾지 못했어요. 썸네일을 다시 만들어 주세요",
 };
+
+/** 올린 뒤 썸네일 결과 한 줄. 썸네일을 붙이지 않았으면 null */
+export function youtubeThumbnailText(t: YoutubeState["thumbnail"]): string | null {
+  if (!t) return null;
+  if (t.applied) return "고른 썸네일을 붙였어요.";
+  return `썸네일은 붙이지 못해 유튜브 기본 썸네일이에요(채널이 맞춤 썸네일을 쓸 수 없을 수 있어요: ${t.reason ?? "알 수 없음"}).`;
+}
