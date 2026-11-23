@@ -4,6 +4,7 @@
 `AX_SITE_ADAPTER_DIR`을 정하지 않았고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 설계 1-4)
 `<회사 폴더>/catbooks/site_adapter/`(옛 폴더 `.data/site_adapter`는 처음 읽을 때 통째로 옮긴다).
 `AX_COMPANY_FOLDERS=off`면 옛 폴더가 비어 있을 때 회사 폴더 값으로 되살린다.
+위는 캣북스 얘기다. 다른 회사는 `<회사 폴더>/<회사 ID>/site_adapter/`에 따로 둔다(`adapter_dir`).
 - 점 경로 `contact.name`: 그 값 (값이 null이면 None, 경로가 없으면 `MissingField`)
 - `sum:a,b`: 정수 칸들의 합 (null은 0)
 - `const:<값>`: 그 글자 그대로
@@ -27,7 +28,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
-from ax_agent_template import company_files
+from ax_agent_template import company_files, company_scope
+from ax_agent_template.companies import company_path
 
 MAPPING_DIR_ENV = "AX_SITE_ADAPTER_DIR"
 DEFAULT_DIR = Path(__file__).resolve().parents[5] / ".data" / "site_adapter"
@@ -211,8 +213,23 @@ class SiteMapping(BaseModel):
 ADAPTER_DIR_NAME = "site_adapter"
 
 
-def adapter_dir() -> Path:
-    """변환기 폴더. 환경변수 → 회사 폴더(켰을 때) → 기본 `backend/.data/site_adapter`."""
+def adapter_dir(company_id: str | None = None) -> Path:
+    """그 회사의 변환기 폴더(짝·키·장부). 회사는 준 값 → 지금 요청 회사 → 캣북스.
+
+    - 캣북스: 환경변수 → 회사 폴더(켰을 때, 옛 폴더는 처음에 옮긴다) → 기본
+      `backend/.data/site_adapter` (예전 그대로)
+    - 다른 회사(여러 회사 설계 6.3): 늘 `<회사 폴더>/<회사 ID>/site_adapter`. 환경변수·옛 폴더는
+      캣북스 것이라 쓰지도 옮기지도 않는다. 회사 폴더를 정하지 않았으면
+      `backend/.data/companies/<회사 ID>/site_adapter`
+    """
+    cid = company_scope.scope_id(company_id or company_scope.active())
+    if cid != company_scope.CATBOOKS:
+        found = company_path(cid, ADAPTER_DIR_NAME)
+        return (
+            found
+            if found is not None
+            else DEFAULT_DIR.parent / "companies" / cid / ADAPTER_DIR_NAME
+        )
     raw = os.getenv(MAPPING_DIR_ENV, "").strip()
     if not raw and company_files.folders_on():
         return company_files.company_file(ADAPTER_DIR_NAME)

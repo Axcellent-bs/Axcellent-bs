@@ -414,7 +414,7 @@ async def test_adapter_connection_is_read_after_adapter_fix(
         adapter={"base_url": "https://nubi.example"},
         tenant="nubi",
     )
-    monkeypatch.setattr(cc, "read_connection", lambda: adapter)
+    monkeypatch.setattr(cc, "read_connection", lambda company_id=None: adapter)
     monkeypatch.setenv(tenant.TENANT_ENV, "nubi")
     shop.put(order("NB-1", "2026-11-20T01:00:00Z"))
 

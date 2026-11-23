@@ -102,13 +102,15 @@ def is_tenant(name: str) -> bool:
 
 def current() -> str | None:
     """지금 회사 id. 연결 전·모르는 회사면 None."""
-    from ax_agent_template.company_connection import read_connection
+    from ax_agent_template.company_connection import company_of, read_connection
+    from ax_agent_template.company_scope import CATBOOKS
 
     name = os.getenv(TENANT_ENV, "").strip()
     if not name:
-        found = read_connection()
+        found = read_connection()  # 지금 요청 회사의 연결 (요청 밖이면 캣북스)
         name = (found.tenant or "") if found else ""
-    if not name:
+    if not name and company_of() == CATBOOKS:
+        # 설치 기록은 캣북스 연결이 남긴 것이다. 다른 회사 요청에는 쓰지 않는다(설정이 섞이지 않게)
         name = _remembered()
     return name if is_tenant(name) else None
 

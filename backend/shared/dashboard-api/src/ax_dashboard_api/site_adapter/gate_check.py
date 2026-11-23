@@ -6,6 +6,7 @@
 - 요청 본문의 `context_id`로 safety 실행 기록(`GET /api/safety/executions?context_id=`)을 읽고,
   같은 `idempotency_key`·테넌트의 기록을 찾는다. 도메인은 `execute()`와 shop-api 쓰기에 같은 키를
   쓴다(고객지원 `claim_handlers.process_claim_queue`, 마케팅 `handlers.issue_coupon`).
+  테넌트는 경로의 회사로 본다(`request_tenant`): 다른 회사 요청의 기록이면 `tenant_mismatch`로 거절
   본문에 `execution_id`가 없어 하나를 바로 찾는 경로(`/executions/{execution_id}`)로는 찾지 못한다
 - 통과 조건: 기록의 `action`이 동작에 맞고(`refund_request`·`issue_coupon`), 기록을 낸 서비스가
   보낸 서비스와 같고, `decision.status == "executed"`, 금액이 기록 `params`와 같음
@@ -24,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import config
+from ax_agent_template import company_scope, config
 from ax_contracts.schemas import TENANT_ID_DEFAULT
 from ax_dashboard_api.envelope import ApiError
 
@@ -82,6 +83,19 @@ def amount_matches(action: str, claimed: dict[str, Any], params: dict[str, Any])
     return claimed.get("buyer_id") == params.get("buyer_id")
 
 
+def request_tenant() -> str:
+    """이 변환기 요청의 회사가 safety 기록·할 일함에 남는 테넌트 값.
+
+    캣북스(경로에 회사 없음)는 예전 그대로 `TENANT_ID`(기본 shop-demo). 다른 회사
+    (`/site-adapter/<회사 ID>`)는 그 회사 ID = 그 회사 AI 요청의 `meta.tenant_id`
+    (`execute()`가 safety 기록에 그대로 싣는다).
+    """
+    cid = company_scope.active()
+    if cid is None or cid == company_scope.CATBOOKS:
+        return os.getenv("TENANT_ID", TENANT_ID_DEFAULT)
+    return cid
+
+
 async def _records(context_id: str, action: str, service: str) -> list[Any]:
     try:
         token = config.agent_token(TOKEN_NAME)
@@ -118,8 +132,9 @@ async def confirm(
     """판정 2: 통과면 확인한 safety `execution_id`. 아니면 403·503 `ApiError`."""
     if not context_id:
         raise _not_passed(action, service, "no_context_id")
-    tenant = os.getenv("TENANT_ID", TENANT_ID_DEFAULT)
+    tenant = request_tenant()
     found: dict[str, Any] | None = None
+    other_company = False
     for record in await _records(context_id, action, service):
         request = record.get("request") if isinstance(record, dict) else None
         if not isinstance(request, dict):
@@ -127,11 +142,14 @@ async def confirm(
         if (
             request.get("idempotency_key") == idempotency_key
             and request.get("context_id") == context_id
-            and request.get("tenant_id", TENANT_ID_DEFAULT) == tenant
         ):
-            found = record  # 테넌트마다 키는 하나다 (safety `by_key`)
+            if request.get("tenant_id", TENANT_ID_DEFAULT) == tenant:
+                found = record  # 테넌트마다 키는 하나다 (safety `by_key`)
+            else:
+                other_company = True
     if found is None:
-        raise _not_passed(action, service, "no_record")
+        # 같은 키의 기록이 다른 회사 요청(meta.tenant_id)이면: 경로의 회사와 달라 거절
+        raise _not_passed(action, service, "tenant_mismatch" if other_company else "no_record")
     request = found["request"]
     decision = found.get("decision")
     execution_id = found.get("execution_id")

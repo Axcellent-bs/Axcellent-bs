@@ -1,0 +1,75 @@
+"""dashboard-api 요청마다 회사 고르기 (여러 회사 설계 6.2·6.3, 2026-11-23).
+
+회사 연결·변환기 저장소(`company_connection.read_connection`·`adapter_dir`)는 회사를 안 주면
+`company_scope.active()`로 고른다. 이 미들웨어가 요청마다 그 값을 걸어 둔다.
+
+- 변환기 `/site-adapter/<회사 ID>/api/...`·`/site-adapter/<회사 ID>/health`: 경로의 회사.
+  경로에서 회사를 떼고(`/site-adapter/api/...`) 같은 라우터로 넘긴다. AI들은
+  `config.agent_url("shop-api")`로 자기 요청 회사(meta.tenant_id)의 경로를 받는다
+  (`company_connection.adapter_path`)
+- 변환기 `/site-adapter/api/...`(회사 없음): 캣북스. 예전 주소 그대로
+  (5단계 "거절 없이 경고만" 동안 회사 ID 없는 요청은 캣북스로 본다는 `company_scope` 규칙)
+- 화면 `/api/dashboard/company-connection`·`/api/dashboard/site-adapter`: 로그인 세션의 회사.
+  세션이 아닌 사람 토큰(공용 토큰)은 캣북스(예전 그대로)
+- 그 밖의 경로는 건드리지 않는다
+
+`SessionCompanyMiddleware` 안쪽에서 돌아야 세션 회사를 읽는다(`main.py`에서 그보다 먼저 더한다.
+Starlette는 나중에 더한 미들웨어가 바깥이다).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from ax_agent_template import company_scope
+from ax_agent_template.companies import canonical_company_id
+from ax_dashboard_api.envelope import session_company
+
+ADAPTER_PREFIX = "/site-adapter"
+SCREEN_PREFIXES = ("/api/dashboard/company-connection", "/api/dashboard/site-adapter")
+
+
+def adapter_company(path: str) -> tuple[str, str] | None:
+    """`/site-adapter/<회사 ID>/<나머지>`면 (정식 회사 ID, 회사를 뗀 경로). 아니면 None.
+
+    회사 자리 다음이 `api/...` 또는 `health`일 때만 회사로 본다
+    (`/site-adapter/api/shop/...`·`/site-adapter/health`는 예전 캣북스 주소).
+    """
+    if not path.startswith(ADAPTER_PREFIX + "/"):
+        return None
+    segment, _, rest = path[len(ADAPTER_PREFIX) + 1 :].partition("/")
+    if not (rest == "health" or rest.startswith("api/")):
+        return None
+    cid = canonical_company_id(segment)
+    if cid is None:
+        return None
+    return cid, f"{ADAPTER_PREFIX}/{rest}"
+
+
+def _screen(path: str) -> bool:
+    return any(path == p or path.startswith(p + "/") for p in SCREEN_PREFIXES)
+
+
+class CompanyRouteMiddleware:
+    """요청의 회사를 `company_scope.using`으로 걸어 둔다 (변환기 경로·회사 연결 화면만)."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        found = adapter_company(path)
+        if found is not None:
+            cid, rest = found
+            inner = {**scope, "path": rest, "raw_path": rest.encode("utf-8")}
+            with company_scope.using(cid):
+                await self.app(inner, receive, send)
+            return
+        if _screen(path):
+            with company_scope.using(session_company()):
+                await self.app(scope, receive, send)
+            return
+        await self.app(scope, receive, send)

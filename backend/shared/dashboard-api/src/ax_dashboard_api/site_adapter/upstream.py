@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import pinned_http
+from ax_agent_template import company_scope, pinned_http
 from ax_agent_template.company_connection import read_connection
 from ax_dashboard_api.site_adapter.mapping import Paging, ResourceMap, SiteMapping, adapter_dir
 
@@ -76,12 +76,18 @@ def _max_pages() -> int:
 
 
 def saved_token() -> str:
-    """고객사 API 키: 변환기 폴더의 `token` 파일, 없으면 `AX_SITE_API_TOKEN`. 없으면 ""."""
+    """지금 회사의 고객사 API 키: 그 회사 변환기 폴더의 `token` 파일. 없으면 "".
+
+    `.env`의 `AX_SITE_API_TOKEN`은 설치 하나에 하나라 캣북스일 때만 대신 쓴다
+    (다른 회사 고객사에 캣북스 키가 가지 않게).
+    """
     try:
         token = (adapter_dir() / TOKEN_FILE).read_text(encoding="utf-8").strip()
     except OSError:
         token = ""
-    return token or os.getenv(TOKEN_ENV, "").strip()
+    if token or company_scope.scope_id(company_scope.active()) != company_scope.CATBOOKS:
+        return token
+    return os.getenv(TOKEN_ENV, "").strip()
 
 
 def save_token(token: str) -> None:
@@ -146,7 +152,8 @@ async def fetch_all(
 ) -> tuple[list[dict[str, Any]], bool]:
     """자원 하나를 끝까지 읽는다. (원본 행들, 최대 쪽 수에서 멈췄는지)."""
     url = base_url() + res.path
-    key = (url, since)
+    # 회사를 키에 넣는다: 두 회사가 같은 주소를 써도 키·짝이 다르면 응답을 나누지 않는다
+    key = (f"{company_scope.scope_id(company_scope.active())}|{url}", since)
     hit = _cache.get(key)
     if hit and time.monotonic() - hit[0] < _cache_seconds():
         return list(hit[1]), hit[2]
