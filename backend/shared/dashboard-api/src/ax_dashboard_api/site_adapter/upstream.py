@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import pinned_http
+from ax_agent_template import company_scope, pinned_http
 from ax_agent_template.company_connection import read_connection
 from ax_dashboard_api.site_adapter.mapping import Paging, ResourceMap, SiteMapping, adapter_dir
 
@@ -76,12 +76,18 @@ def _max_pages() -> int:
 
 
 def saved_token() -> str:
-    """고객사 API 키: 변환기 폴더의 `token` 파일, 없으면 `AX_SITE_API_TOKEN`. 없으면 ""."""
+    """지금 회사의 고객사 API 키: 그 회사 변환기 폴더의 `token` 파일. 없으면 "".
+
+    `.env`의 `AX_SITE_API_TOKEN`은 설치 하나에 하나라 캣북스일 때만 대신 쓴다
+    (다른 회사 고객사에 캣북스 키가 가지 않게).
+    """
     try:
         token = (adapter_dir() / TOKEN_FILE).read_text(encoding="utf-8").strip()
     except OSError:
         token = ""
-    return token or os.getenv(TOKEN_ENV, "").strip()
+    if token or company_scope.scope_id(company_scope.active()) != company_scope.CATBOOKS:
+        return token
+    return os.getenv(TOKEN_ENV, "").strip()
 
 
 def save_token(token: str) -> None:
@@ -90,8 +96,11 @@ def save_token(token: str) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / TOKEN_FILE
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(token, encoding="utf-8")
-    os.chmod(tmp, 0o600)
+    # 처음부터 주인만 읽게 만든다(쓰고 나서 chmod하면 그 사이 다른 사용자가 읽을 틈이 있다)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(token)
+    os.chmod(tmp, 0o600)  # 남아 있던 tmp(다른 권한)를 덮어쓴 경우
     os.replace(tmp, path)
 
 
@@ -146,7 +155,8 @@ async def fetch_all(
 ) -> tuple[list[dict[str, Any]], bool]:
     """자원 하나를 끝까지 읽는다. (원본 행들, 최대 쪽 수에서 멈췄는지)."""
     url = base_url() + res.path
-    key = (url, since)
+    # 회사를 키에 넣는다: 두 회사가 같은 주소를 써도 키·짝이 다르면 응답을 나누지 않는다
+    key = (f"{company_scope.scope_id(company_scope.active())}|{url}", since)
     hit = _cache.get(key)
     if hit and time.monotonic() - hit[0] < _cache_seconds():
         return list(hit[1]), hit[2]

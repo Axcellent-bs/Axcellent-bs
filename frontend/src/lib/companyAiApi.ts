@@ -2,8 +2,8 @@
 // 키 값은 요청 본문으로만 나가고 어디에도 남기지 않는다. 실패하면 서버 문장(error.message)과 코드를 그대로 담아 던진다.
 import { ApiError, failureError } from "./apiError";
 import {
-  readCompanyAi, readHiggsfieldAccount, readSettings, readStatus, readUsage,
-  type AiStatus, type AiUsage, type CompanyAiAdmin, type CompanyAiSettings, type HiggsfieldAccount, type KeyName, type SettingsBody,
+  readCompanyAi, readHiggsfieldAccount, readInstagramAccount, readSettings, readStatus, readUsage,
+  type AiStatus, type AiUsage, type CompanyAiAdmin, type CompanyAiSettings, type HiggsfieldAccount, type InstagramAccount, type KeyName, type SettingsBody,
 } from "./companyAi";
 import { DASHBOARD_API_URL } from "./env";
 import { getSession } from "./humanSession";
@@ -79,3 +79,14 @@ export async function higgsfieldConnectUrl(): Promise<string> {
 export const higgsfieldComplete = (code: string, state: string) => call(`${HF}/complete`, { code, state });
 export const higgsfieldDisconnect = () => call(`${HF}/disconnect`, {});
 export const getHiggsfieldAccount = async (): Promise<HiggsfieldAccount> => must(readHiggsfieldAccount(await call(`${HF}/connection`)));
+
+// 인스타그램 로그인 연결(Meta 통합 로그인). 같은 순서: 동의 화면 → 돌아오면 complete. switch면 로그인을 다시 묻는다
+const IG = `${DASHBOARD_API_URL}/api/dashboard/marketing/instagram`;
+export async function instagramConnectUrl(switchAccount = false): Promise<string> {
+  const d = (await call(`${IG}/connect`, { switch: switchAccount })) as { url?: unknown };
+  if (typeof d.url !== "string" || !/^https:\/\/www\.facebook\.com\/v[0-9.]+\/dialog\/oauth\?/.test(d.url)) throw new Error("인스타그램 연결 주소를 받지 못했어요.");
+  return d.url;
+}
+export const instagramComplete = (code: string, state: string) => call(`${IG}/complete`, { code, state });
+export const instagramDisconnect = () => call(`${IG}/disconnect`, {});
+export const getInstagramAccount = async (): Promise<InstagramAccount> => must(readInstagramAccount(await call(`${IG}/connection`)));

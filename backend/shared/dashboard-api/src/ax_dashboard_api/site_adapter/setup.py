@@ -23,7 +23,9 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ax_agent_template import company_connection as store
+from ax_agent_template import company_scope
 from ax_agent_template import tenant as tenants
+from ax_agent_template.companies import canonical_company_id
 from ax_dashboard_api.accounts import require_session_role
 from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
@@ -111,6 +113,23 @@ class SaveIn(BaseModel):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def pick_tenant(given: str | None, found: store.Connection | None) -> str | None:
+    """연결에 저장할 회사 설정: 준 값 → 저장된 회사. 회사 연결 화면도 이것을 쓴다.
+
+    - 준 값은 설정 폴더가 있어야 한다(없으면 422 `UNKNOWN_TENANT`)
+    - 캣북스가 아닌 세션 회사는 자기 회사 설정만 고를 수 있다(다르면 422 `TENANT_NOT_OWN`).
+      다른 회사(캣북스 포함)의 설정을 자기 연결에 붙이지 못하게(#1634 리뷰 2)
+    """
+    if given:
+        if not tenants.is_tenant(given):
+            raise ApiError(422, "UNKNOWN_TENANT", f"회사 설정이 없어요: {given}")
+        company = store.company_of()
+        if company != company_scope.CATBOOKS and canonical_company_id(given) != company:
+            raise ApiError(422, "TENANT_NOT_OWN", "우리 회사 설정만 고를 수 있어요")
+        return given
+    return found.tenant if found else None
 
 
 def _base(url: str) -> str:
@@ -325,11 +344,7 @@ async def save(body: SaveIn, request: Request) -> dict:
     except ValueError as exc:
         raise ApiError(422, "MAPPING_BROKEN", f"키 헤더: {exc}") from exc
     _complete(m)
-    tenant = body.tenant or None
-    if tenant and not tenants.is_tenant(tenant):
-        raise ApiError(422, "UNKNOWN_TENANT", f"회사 설정이 없어요: {tenant}")
-    if tenant is None and (saved := store.read_connection()):
-        tenant = saved.tenant
+    tenant = pick_tenant(body.tenant, store.read_connection())
     given = (body.token or "").strip()
     token = _token(given, base)
     counts = await verify(base, m, token)

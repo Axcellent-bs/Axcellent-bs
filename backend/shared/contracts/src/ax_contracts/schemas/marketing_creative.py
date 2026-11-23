@@ -201,6 +201,63 @@ class RequestVideoYoutubeOutput(AxModel):
     youtube: dict[str, Any]  # 제작 기록 render.youtube와 같은 모양
 
 
+# ---- 인스타그램 올리기 (2026-11-23). 제작 기록 영상·의뢰로 만든 영상을 회사 인스타 계정에
+# 릴스로 올린다. 유튜브 올리기와 같은 흐름이다: AI 캡션·해시태그 초안(사람이 고친다)
+# → 올리기 요청은 늘 사람 승인(C `publish_instagram_video`) → 승인되면 AI 라벨을 입힌 영상만
+# 릴스로 게시하고 게시물 주소(permalink)를 남긴다.
+# 상태는 제작 기록 render.instagram, 의뢰 영상은 post_draft_id별 표
+CREATIVE_INSTAGRAM_DRAFT_SKILL = "creative_instagram_draft"
+CREATIVE_INSTAGRAM_REQUEST_SKILL = "creative_instagram_request"
+REQUEST_VIDEO_INSTAGRAM_DRAFT_SKILL = "request_video_instagram_draft"
+REQUEST_VIDEO_INSTAGRAM_REQUEST_SKILL = "request_video_instagram_request"
+INSTAGRAM_CAPTION_MAX = 2200
+INSTAGRAM_HASHTAG_MAX = 5
+
+
+class CreativeInstagramDraftInput(AxModel):
+    """AI 캡션·해시태그 초안 만들기(처음·`regenerate`)나 사람이 고친 값 저장. 비운 칸은 그대로."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    regenerate: bool = False
+    caption: str | None = Field(default=None, max_length=INSTAGRAM_CAPTION_MAX)
+    hashtags: list[str] | None = Field(default=None, max_length=INSTAGRAM_HASHTAG_MAX)
+    part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+
+
+class CreativeInstagramRequestInput(AxModel):
+    """초안대로 인스타 릴스 올리기를 사람 승인(C `publish_instagram_video`)에 올린다."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    who: str | None = Field(default=None, max_length=80)
+
+
+class CreativeInstagramOutput(AxModel):
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    instagram: dict[str, Any]  # render.instagram
+
+
+class RequestVideoInstagramDraftInput(AxModel):
+    """의뢰 영상의 AI 캡션·해시태그 초안 또는 사람이 고친 값. 올리는 파일은 늘 AI 라벨 영상이다."""
+
+    post_draft_id: str = Field(pattern=REQUEST_VIDEO_DRAFT_ID_PATTERN)
+    regenerate: bool = False
+    caption: str | None = Field(default=None, max_length=INSTAGRAM_CAPTION_MAX)
+    hashtags: list[str] | None = Field(default=None, max_length=INSTAGRAM_HASHTAG_MAX)
+
+
+class RequestVideoInstagramRequestInput(AxModel):
+    """초안대로 의뢰 영상의 인스타 릴스 올리기를 사람 승인(C `publish_instagram_video`)에 올린다."""
+
+    post_draft_id: str = Field(pattern=REQUEST_VIDEO_DRAFT_ID_PATTERN)
+    who: str | None = Field(default=None, max_length=80)
+
+
+class RequestVideoInstagramOutput(AxModel):
+    post_draft_id: str = Field(pattern=REQUEST_VIDEO_DRAFT_ID_PATTERN)
+    request_id: str | None = None  # 의뢰 번호(wr_…)
+    instagram: dict[str, Any]  # 제작 기록 render.instagram과 같은 모양
+
+
 # ---- 의뢰로 만든 영상(wr_…)의 썸네일 후보 고르기 (2026-11-23). 후보 3장은 라벨 입힌 영상에서 뽑은
 # 그림(AI 표시 포함)이다. 고르지 않으면 첫 후보가 기본값이고, 게시·유튜브 승인 해시에 들어간다
 REQUEST_VIDEO_COVER_SKILL = "request_video_cover_select"
@@ -221,3 +278,42 @@ class RequestVideoCoverOutput(AxModel):
     changed: bool  # 같은 것을 다시 고르면 false(승인은 그대로)
     cover_rev: int = Field(ge=0)
     approvals_reset: list[str] = Field(default_factory=list)  # 무효가 된 승인: instagram·youtube
+
+
+# ---- 제작 기록 영상의 썸네일 후보 3장 (2026-11-23). Higgsfield로 만든 그림(AI 표시 XMP 포함)이고
+# 상태는 기록의 render.thumbnails. 만들기는 사람 결정(C `generate_creative_thumbnails`) 뒤에만,
+# 고르지 않으면 첫 후보가 기본값이고 유튜브 승인 해시에 들어간다
+CREATIVE_THUMBNAILS_REQUEST_SKILL = "creative_thumbnails_request"
+CREATIVE_THUMBNAIL_SELECT_SKILL = "creative_thumbnail_select"
+CREATIVE_THUMBNAIL_ID_PATTERN = r"^thm_[0-9a-f]{12}$"
+
+
+class CreativeThumbnailsRequestInput(AxModel):
+    """후보 3장 만들기를 사람 결정에 올린다. 후보가 이미 있으면 `regenerate`일 때만 다시 만든다."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    regenerate: bool = False
+    who: str | None = Field(default=None, max_length=80)
+
+
+class CreativeThumbnailsOutput(AxModel):
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    # render.thumbnails: {status, error, candidates[{media_id, kind, sha256, is_ai_generated}],
+    # chosen, cover_rev, review_id, aspect, ...}
+    thumbnails: dict[str, Any]
+
+
+class CreativeThumbnailSelectInput(AxModel):
+    """후보(`render.thumbnails.candidates[].media_id`) 안의 값만. 승인 대기면 그 승인은 무효."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    media_id: str = Field(pattern=CREATIVE_THUMBNAIL_ID_PATTERN)
+    who: str | None = Field(default=None, max_length=80)
+
+
+class CreativeThumbnailSelectOutput(AxModel):
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    cover_media_id: str = Field(pattern=CREATIVE_THUMBNAIL_ID_PATTERN)
+    changed: bool  # 같은 것을 다시 고르면 false(승인은 그대로)
+    cover_rev: int = Field(ge=0)
+    approvals_reset: list[str] = Field(default_factory=list)  # 무효가 된 승인: youtube

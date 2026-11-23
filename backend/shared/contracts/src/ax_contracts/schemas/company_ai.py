@@ -39,6 +39,10 @@ COMPANY_AI_KEY_NAMES: tuple[str, ...] = (
     # Higgsfield 계정 연결(원격 MCP + OAuth, 회사 구독 크레딧, 11/23): 회사 관리자가 동의해서 받은
     # 갱신 토큰. 연결·갱신(토큰이 바뀔 때)은 기계가 `store_oauth_token`으로 넣는다
     "MARKETING_HIGGSFIELD_MCP_REFRESH_TOKEN",
+    # 인스타그램 로그인 연결(Meta 통합 로그인, 11/23): 회사 관리자가 동의해서 받은 60일 장기 토큰.
+    # 연결·연장(값이 바뀐다)은 기계가 `store_oauth_token`으로 넣는다. 사람이 직접 넣던
+    # `MARKETING_IG_ACCESS_TOKEN`과 따로다(쓸 API 주소는 연결할 때 판정해 회사별로 남긴다)
+    "MARKETING_IG_OAUTH_REFRESH_TOKEN",
 )
 
 CompanyAiCoderMode = Literal["company", "separate"]

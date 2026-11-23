@@ -894,11 +894,17 @@ VIDEO_REFUSALS = {
     "draft_missing": (409, "DRAFT_MISSING"),
     "video_not_ready": (409, "VIDEO_NOT_READY"),
     "youtube_not_connected": (409, "YOUTUBE_NOT_CONNECTED"),
+    "instagram_not_connected": (409, "INSTAGRAM_NOT_CONNECTED"),
+    "label_failed": (409, "LABEL_FAILED"),
+    "media_dir_not_configured": (409, "MEDIA_DIR_NOT_CONFIGURED"),
+    "media_dir_mismatch": (409, "MEDIA_DIR_MISMATCH"),
     "already_requested": (409, "ALREADY_REQUESTED"),
     # 의뢰 영상 썸네일: 후보 밖 값 · 이미 올라간 영상 · 후보 파일이 기록과 다름
     "cover_not_candidate": (422, "COVER_NOT_CANDIDATE"),
     "cover_locked": (409, "COVER_LOCKED"),
     "cover_missing": (409, "COVER_MISSING"),
+    # 제작 기록 썸네일 후보 만들기: 회사 Higgsfield 계정도 키도 없음
+    "not_connected": (409, "HIGGSFIELD_NOT_CONNECTED"),
     "bad_asset": (422, "BAD_ASSET"),
     "file_missing": (409, "FILE_MISSING"),
     "gate_held": (409, "GATE_HELD"),
@@ -996,6 +1002,47 @@ async def _script_result(request: AgentRequest) -> dict[str, Any]:
         f"마케팅이 요청을 처리하지 못했다 ({result.outcome})"
     )
     raise ApiError(status, code, str(message))
+
+
+THUMB_ID = re.compile(r"^thm_[0-9a-f]{12}$")
+THUMB_DIR = "thumbs"
+
+
+async def creative_thumbnails_call(record_id: str, regenerate: bool, who: str) -> dict[str, Any]:
+    """제작 기록 영상 썸네일 후보 3장 만들기를 사람 결정에(`creative_thumbnails_request`, C).
+
+    승인 전에는 아무것도 만들지 않는다."""
+    payload = {"record_id": record_id, "regenerate": regenerate, "who": who}
+    return await _creative_read("creative_thumbnails_request", payload)
+
+
+async def creative_thumbnail_select_call(record_id: str, media_id: str, who: str) -> dict[str, Any]:
+    """제작 기록 썸네일 고르기(`creative_thumbnail_select`). 후보 밖 422, 올린 뒤 409."""
+    payload = {"record_id": record_id, "media_id": media_id, "who": who}
+    return await _creative_read("creative_thumbnail_select", payload)
+
+
+async def creative_thumbnail_file(record_id: str, media_id: str) -> Path:
+    """제작 기록 썸네일 후보 그림(AI 표시 포함 JPEG). 기록과 이름·해시가 같은 파일만(없으면 404).
+
+    기록은 요청 회사 것만 읽히므로(다른 회사 기록은 마케팅이 not_found) 다른 회사 그림도 404다."""
+    missing = ApiError(404, "NOT_FOUND", "썸네일 후보가 없다")
+    if not THUMB_ID.match(media_id):
+        raise missing
+    rec = await creative_record_call(record_id)
+    thumbs = (rec.get("render") or {}).get("thumbnails") or {}
+    found = next((c for c in thumbs.get("candidates") or [] if c.get("media_id") == media_id), None)
+    sha = found.get("sha256") if isinstance(found, dict) else None
+    raw_root = (os.getenv(MEDIA_DIR_ENV) or "").strip()
+    if not (isinstance(sha, str) and raw_root):
+        raise missing
+    root = Path(raw_root).resolve()
+    path = (creative_root(root) / record_id / THUMB_DIR / f"{media_id}.jpg").resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise missing
+    if hashlib.sha256(path.read_bytes()).hexdigest() != sha:  # 기록 뒤 바뀐 파일은 내주지 않는다
+        raise missing
+    return path
 
 
 def creative_root(root: Path) -> Path:
@@ -1220,6 +1267,38 @@ async def request_video_youtube_request_call(post_draft_id: str, who: str | None
     if who:
         payload["who"] = who
     return await _request_video_youtube("request_video_youtube_request", payload)
+
+
+async def instagram_draft_call(record_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """인스타 릴스 캡션·해시태그 초안(마케팅 `creative_instagram_draft`). 올리지는 않는다."""
+    return await _creative_read("creative_instagram_draft", {"record_id": record_id, **body})
+
+
+async def instagram_request_call(record_id: str, who: str | None) -> dict[str, Any]:
+    """인스타 릴스 올리기를 사람 승인에 올린다(마케팅 `creative_instagram_request`)."""
+    payload: dict[str, Any] = {"record_id": record_id}
+    if who:
+        payload["who"] = who
+    return await _creative_read("creative_instagram_request", payload)
+
+
+async def request_video_instagram_draft_call(
+    post_draft_id: str, body: dict[str, Any]
+) -> dict[str, Any]:
+    """의뢰로 만든 영상의 인스타 캡션 초안(마케팅 `request_video_instagram_draft`)."""
+    return await _request_video_youtube(
+        "request_video_instagram_draft", {"post_draft_id": post_draft_id, **body}
+    )
+
+
+async def request_video_instagram_request_call(
+    post_draft_id: str, who: str | None
+) -> dict[str, Any]:
+    """의뢰로 만든 영상(AI 라벨 입힌 파일)의 인스타 릴스 올리기를 사람 승인에 올린다."""
+    payload: dict[str, Any] = {"post_draft_id": post_draft_id}
+    if who:
+        payload["who"] = who
+    return await _request_video_youtube("request_video_instagram_request", payload)
 
 
 async def campaigns_list_call(limit: int) -> dict[str, Any]:

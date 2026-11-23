@@ -24,6 +24,14 @@
 - 바꿀 때마다 `<연결 파일>.history.jsonl`에 한 줄씩 쌓는다 (언제·누가·무엇을·이전 주소·새 주소).
 - 파일이 없으면 연결이 없는 것이다(로컬 개발 기본, 경고 없음).
   깨졌으면 경고를 한 번 남기고 없는 것으로 본다.
+- 회사별 연결(여러 회사 설계 6.2, 2026-11-23): 회사마다 연결 한 줄(`<회사 폴더>/<회사 ID>/
+  company_connection.json`). 함수마다 `company_id`를 받고, 안 주면 지금 요청 회사
+  (`company_scope.active()`, skill 요청의 `meta.tenant_id`), 그것도 없으면 캣북스다.
+  - 캣북스: 위 이관·되돌리기 그대로(옛 단일 파일은 캣북스 것이다)
+  - 다른 회사: 옛 단일 파일을 옮기지도 되살리지도 않는다. 늘 그 회사 폴더
+    (`AX_COMPANY_FOLDERS=off`여도 그 회사 값은 회사 폴더에만 있으므로 그대로 읽는다)
+  - kind=adapter의 AI용 주소: 캣북스는 `/site-adapter`(예전 그대로), 다른 회사는
+    `/site-adapter/<회사 ID>` (`adapter_path`). 변환기가 경로의 회사로 그 회사 설정을 고른다
 """
 
 from __future__ import annotations
@@ -38,6 +46,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
+
+from ax_agent_template import company_scope
 
 CONNECTION_FILE_ENV = "AX_COMPANY_CONNECTION_FILE"
 ALLOWED_HOSTS_ENV = "AX_COMPANY_SHOP_ALLOWED_HOSTS"
@@ -88,13 +98,32 @@ CONNECTION_NAME = "company_connection.json"
 HISTORY_SUFFIX = ".history.jsonl"
 
 
-def connection_path() -> str:
-    """연결 파일을 읽고 쓰는 경로. 회사 폴더를 켰으면 캣북스 폴더(옛 파일은 처음에 옮긴다)."""
+def company_of(company_id: str | None = None) -> str:
+    """연결을 고를 회사: 준 값 → 지금 요청 회사(`company_scope.active()`) → 캣북스."""
+    return company_scope.scope_id(company_id or company_scope.active())
+
+
+def adapter_path(company_id: str | None = None) -> str:
+    """kind=adapter일 때 AI들이 부를 변환기 경로. 캣북스는 예전 그대로 `/site-adapter`."""
+    cid = company_of(company_id)
+    return ADAPTER_PATH if cid == company_scope.CATBOOKS else f"{ADAPTER_PATH}/{cid}"
+
+
+def connection_path(company_id: str | None = None) -> str:
+    """연결 파일을 읽고 쓰는 경로. 회사 폴더를 켰으면 그 회사 폴더(캣북스는 옛 파일을 옮긴다).
+
+    다른 회사는 옛 단일 파일(캣북스 것)을 건드리지 않고 늘 `<회사 폴더>/<회사 ID>/`다.
+    """
     anchor = connection_file()
     if not anchor:
         return ""
     from ax_agent_template import company_files
+    from ax_agent_template.companies import company_path
 
+    cid = company_of(company_id)
+    if cid != company_scope.CATBOOKS:
+        other = company_path(cid, CONNECTION_NAME)
+        return str(other) if other is not None else ""
     if not company_files.folders_on():
         # 되돌리기(off): 옛 자리가 비어 있으면 회사 폴더 값으로 되살린다
         company_files.restore_old(CONNECTION_NAME, target=Path(anchor), extras=(HISTORY_SUFFIX,))
@@ -254,10 +283,13 @@ def _adapter(raw: Any, path: str) -> dict[str, str]:
 _cache: tuple[str, int, int, Connection | None] | None = None
 
 
-def read_connection() -> Connection | None:
-    """저장된 회사 연결. 파일 경로가 없거나 파일이 없거나 깨졌으면 None."""
+def read_connection(company_id: str | None = None) -> Connection | None:
+    """그 회사의 저장된 연결(기본: 지금 요청 회사, 없으면 캣북스). 경로·파일이 없거나 깨졌으면 None.
+
+    캐시 키에 경로가 들어가므로 회사가 바뀌면 다시 읽는다(다른 회사 값이 섞이지 않는다).
+    """
     global _cache
-    path = connection_path()
+    path = connection_path(company_id)
     if not path:
         return None
     try:
@@ -276,27 +308,29 @@ def read_connection() -> Connection | None:
     return found
 
 
-def shop_api_override() -> str | None:
-    """화면에서 정한 판매 서버 주소. 없거나 꺼져 있으면(내부 데이터 모드) None.
+def shop_api_override(company_id: str | None = None) -> str | None:
+    """화면에서 정한 그 회사의 판매 서버 주소. 없거나 꺼져 있으면(내부 데이터 모드) None.
 
-    kind=adapter면 고객사 주소가 아니라 dashboard-api 사이트 변환기 주소를 준다.
+    kind=adapter면 고객사 주소가 아니라 dashboard-api 사이트 변환기 주소를 준다
+    (캣북스 `/site-adapter`, 다른 회사 `/site-adapter/<회사 ID>`).
     """
-    found = read_connection()
+    cid = company_of(company_id)
+    found = read_connection(cid)
     if not found or not found.enabled:
         return None
     if found.kind == "adapter":
         from ax_agent_template.config import agent_url  # config가 이 모듈을 import한다
 
-        return agent_url("dashboard-api") + ADAPTER_PATH
+        return agent_url("dashboard-api") + adapter_path(cid)
     return found.shop_api_url
 
 
-def company_hosts() -> frozenset[str]:
-    """저장된 회사 연결이 가리키는 호스트들 (판매 서버·사이트 변환기 고객사 API, 소문자).
+def company_hosts(company_id: str | None = None) -> frozenset[str]:
+    """그 회사 연결이 가리키는 호스트들 (판매 서버·사이트 변환기 고객사 API, 소문자).
 
     AI들이 회사 판매 서버를 부를 때 이 호스트만 `pinned_http`로 검사한 IP에 붙인다.
     """
-    found = read_connection()
+    found = read_connection(company_id)
     if not found:
         return frozenset()
     urls = [found.shop_api_url, *(found.adapter or {}).values()]
@@ -307,12 +341,18 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def _history_path() -> Path:
-    path = connection_path()
-    return Path(path).with_name(Path(path).name + HISTORY_SUFFIX)
+def _history_path(company_id: str | None = None) -> Path | None:
+    path = connection_path(company_id)
+    return Path(path).with_name(Path(path).name + HISTORY_SUFFIX) if path else None
 
 
-def _record(action: str, before: Connection | None, after: Connection | None, by: str) -> None:
+def _record(
+    action: str,
+    before: Connection | None,
+    after: Connection | None,
+    by: str,
+    company_id: str | None = None,
+) -> None:
     """바꾼 기록 한 줄 (감사용). 쓰지 못해도 연결 변경은 막지 않고 경고만 남긴다."""
     line = {
         "at": _now(),
@@ -323,19 +363,23 @@ def _record(action: str, before: Connection | None, after: Connection | None, by
         "to": after.shop_api_url if after else None,
         "to_enabled": after.enabled if after else None,
     }
+    history = _history_path(company_id)
+    if history is None:
+        return
     try:
-        with _history_path().open("a", encoding="utf-8") as f:
+        with history.open("a", encoding="utf-8") as f:
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
     except OSError as exc:
         logger.warning("회사 연결 기록을 남기지 못했다: %s", exc)
 
 
-def read_history(limit: int = 20) -> list[dict[str, Any]]:
-    """최근 변경 기록 (새것부터). 없거나 읽을 수 없으면 빈 목록."""
-    if not connection_file():
+def read_history(limit: int = 20, company_id: str | None = None) -> list[dict[str, Any]]:
+    """그 회사의 최근 변경 기록 (새것부터). 없거나 읽을 수 없으면 빈 목록."""
+    history = _history_path(company_id) if connection_file() else None
+    if history is None:
         return []
     try:
-        lines = _history_path().read_text(encoding="utf-8").splitlines()
+        lines = history.read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
     out: list[dict[str, Any]] = []
@@ -360,9 +404,14 @@ def save_connection(
     kind: Kind = "shop_api",
     adapter: dict[str, str] | None = None,
     tenant: str | None = None,
+    company_id: str | None = None,
 ) -> Connection:
-    """연결을 저장한다(임시 파일에 쓰고 바꿔치기). 파일 경로가 없으면 RuntimeError."""
-    path = connection_path()
+    """그 회사의 연결을 저장한다(임시 파일에 쓰고 바꿔치기). 파일 경로가 없으면 RuntimeError.
+
+    회사는 `company_id` → 지금 요청 회사 → 캣북스. 다른 회사 줄만 바꾸고 캣북스 줄은 그대로다.
+    """
+    cid = company_of(company_id)
+    path = connection_path(cid)
     if not path:
         raise RuntimeError(f"{CONNECTION_FILE_ENV}가 설정되지 않아 저장할 수 없다")
     url = validate_shop_url(url)
@@ -375,8 +424,11 @@ def save_connection(
 
         if not is_tenant(tenant):
             raise ValueError(f"회사 설정이 없습니다: {tenant}")
-        remember(tenant)
-    before = read_connection()
+        if cid == company_scope.CATBOOKS:
+            # 설치 기록(`install_tenant.json`)은 설치 하나에 하나라 캣북스 연결만 남긴다
+            # (다른 회사 연결이 캣북스 회사 설정을 덮어쓰지 않게)
+            remember(tenant)
+    before = read_connection(cid)
     saved = Connection(
         shop_api_url=url,
         verified_at=verified_at,
@@ -395,19 +447,20 @@ def save_connection(
     action = "save" if before is None or before.shop_api_url != saved.shop_api_url else "mode"
     if action == "mode" and before is not None and before.enabled == saved.enabled:
         action = "recheck"
-    _record(action, before, saved, updated_by)
+    _record(action, before, saved, updated_by, cid)
     return saved
 
 
-def clear_connection(updated_by: str = "unknown") -> bool:
-    """연결 파일을 지운다. 지웠으면 True, 원래 없었으면 False."""
-    path = connection_path()
+def clear_connection(updated_by: str = "unknown", company_id: str | None = None) -> bool:
+    """그 회사의 연결 파일을 지운다. 지웠으면 True, 원래 없었으면 False."""
+    cid = company_of(company_id)
+    path = connection_path(cid)
     if not path:
         return False
-    before = read_connection()
+    before = read_connection(cid)
     try:
         os.remove(path)
     except FileNotFoundError:
         return False
-    _record("clear", before, None, updated_by)
+    _record("clear", before, None, updated_by, cid)
     return True

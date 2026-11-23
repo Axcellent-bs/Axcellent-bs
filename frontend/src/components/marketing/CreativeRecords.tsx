@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router";
 import { Tabs } from "@/components/connect/parts";
 import { shortDateTime } from "@/lib/format";
 import { RECORD_ID, getCreativeRecord, listCreativeRecords, thumbSrc, type CreativeRecord, type CreativeRecordSummary } from "@/lib/creativeRecords";
+import { thumbChip } from "@/lib/creativeThumbnails";
 import { SheetBoard } from "./SheetBoard";
 import { StoryboardView } from "./StoryboardMaker";
 import { PromptBox } from "./PromptParts";
@@ -74,6 +75,7 @@ function Detail({ id }: { id: string }) {
 
 function Row({ r }: { r: CreativeRecordSummary }) {
   const src = thumbSrc(r.thumbnail_base64);
+  const thumb = thumbChip(r.render?.thumbnails);
   return (
     <li>
       <Link to={`/marketing/records?id=${r.record_id}`} className="flex items-center gap-4 rounded-2xl px-3 py-3 hover:bg-ink-50">
@@ -88,6 +90,7 @@ function Row({ r }: { r: CreativeRecordSummary }) {
           <span className="flex gap-1">
             {stageChips(r).map((c) => <span key={c} className={`chip ${c === "시트만" ? "bg-ink-50 text-ink-500" : "bg-brand-50 text-brand-700"}`}>{c}</span>)}
           </span>
+          {thumb && <span className={`chip ${r.render?.thumbnails === "done" ? "bg-emerald-50 text-emerald-800" : "bg-ink-50 text-ink-700"}`}>{thumb}</span>}
           <span className="tabular-nums text-ink-500">{shortDateTime(r.created_at)}</span>
         </span>
       </Link>

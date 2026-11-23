@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { campaignOptions, type MarketingCampaign } from "@/lib/campaignLinks";
 import { marketingCampaigns } from "@/lib/marketingCampaignsApi";
-import { YOUTUBE_ERROR_KO, requestRequestVideoYoutubeUpload, requestYoutubeUpload, saveRequestVideoYoutubeDraft, saveYoutubeDraft, type YoutubeDraftEdits, type YoutubePrivacy, type YoutubeState } from "@/lib/youtube";
+import { YOUTUBE_ERROR_KO, youtubeThumbnailText, requestRequestVideoYoutubeUpload, requestYoutubeUpload, saveRequestVideoYoutubeDraft, saveYoutubeDraft, type YoutubeDraftEdits, type YoutubePrivacy, type YoutubeState } from "@/lib/youtube";
 
 // 제작 기록 영상 → AXcellent 유튜브 (RenderPanel 안, 2026-11-23).
 // 1) AI가 제목·설명·태그 초안을 쓴다(고칠 수 있다) 2) [유튜브 올리기 요청]은 늘 사람 승인(안전 처리 로그)
@@ -94,7 +94,10 @@ export function YoutubePanel(props: Target & { youtube?: YoutubeState | null; on
       <p className="text-xs text-ink-500">{listFailed ? "캠페인 목록을 읽지 못했어요. 잠시 뒤 다시 열어 주세요." : "고르면 그 캠페인 결과를 재무에 보낼 때 이 영상의 유튜브 조회수가 함께 실려요(올린 영상만, 못 읽으면 비워 보내요)."}</p>
       {!anyVideo && !youtube?.title && <p className="text-xs text-ink-500">영상(Higgsfield 영상이나 직접 올린 완성 영상)이 생기면 유튜브에 올릴 수 있어요. 제목·설명 초안은 지금 만들어 둘 수 있어요.</p>}
       {status === "done" && youtube?.url ? (
-        <p className="text-sm text-ink-900">유튜브에 올렸어요: <a href={youtube.url} target="_blank" rel="noreferrer" className="text-brand-700 underline">{youtube.url}</a> <span className="text-xs text-ink-500">({PRIVACY_KO[youtube.privacy ?? "unlisted"]})</span></p>
+        <div className="space-y-1">
+          <p className="text-sm text-ink-900">유튜브에 올렸어요: <a href={youtube.url} target="_blank" rel="noreferrer" className="text-brand-700 underline">{youtube.url}</a> <span className="text-xs text-ink-500">({PRIVACY_KO[youtube.privacy ?? "unlisted"]})</span></p>
+          {youtubeThumbnailText(youtube.thumbnail) && <p className="text-xs text-ink-500">{youtubeThumbnailText(youtube.thumbnail)}</p>}
+        </div>
       ) : !youtube?.title ? (
         <button type="button" className="btn-ghost text-xs" disabled={busy !== null} onClick={() => void run("draft", () => save({}))}>
           {busy === "draft" ? "AI가 쓰는 중…" : "AI로 유튜브 제목·설명 쓰기"}
