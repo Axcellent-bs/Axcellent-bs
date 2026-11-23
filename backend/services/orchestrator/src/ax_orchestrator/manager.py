@@ -334,7 +334,7 @@ class IncidentManager:
                 self._component(env), env.occurred_at, ref if isinstance(ref, str) else None
             )
             if target is not None:
-                # DejaFix가 감시보다 먼저 풀렸다고 알려 복구 시각이 열린 시각보다 앞서면 열린 시각으로 둔다
+                # 복구 시각이 열린 시각보다 앞서면(DejaFix가 먼저 풀림) 열린 시각으로 둔다
                 target.recovered_at = max(_recovered_time(env), target.opened_at)
                 _keep_recovery(target, env.data)
                 # 사람이 해제하길 기다리던 복구 검증이 있으면 이어서 돈다 (#909)
