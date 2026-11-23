@@ -1,5 +1,6 @@
 import type { InstagramPostState } from "./instagramPost";
 import type { YoutubeState } from "./youtube";
+import type { ThumbnailsState } from "./creativeThumbnails";
 import { failureError } from "./apiError";
 import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import type { CharacterSheetResult } from "./characterSheet";
@@ -19,7 +20,7 @@ export interface CreativeRecordSummary {
   storyboard_title_ko?: string | null;
   shot_count: number;
   storyboard_at?: string | null;
-  /** 단계별 Higgsfield 상태(sheet_image·board_image·video) */
+  /** 단계별 상태(sheet_image·board_image·video·final_video·youtube·thumbnails) */
   render?: Record<string, string>;
 }
 
@@ -51,7 +52,7 @@ export interface CreativeRecord {
   storyboard?: StoryboardResult | null;
   storyboard_at?: string | null;
   /** Higgsfield 그림·영상 */
-  render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState; instagram?: InstagramPostState };
+  render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState; thumbnails?: ThumbnailsState; instagram?: InstagramPostState };
 }
 
 const PATH = "/api/dashboard/marketing/creative-records";

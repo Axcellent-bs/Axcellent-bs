@@ -3,12 +3,13 @@ import { Link } from "react-router";
 import { useAuthedMedia } from "@/lib/authedMedia";
 import { InstagramPanel } from "./InstagramPanel";
 import { HIGGSFIELD_URL, acceptFor, isVideoPart, pickDropped, storyboardVideoPrompt, uploadProblem } from "@/lib/higgsfieldWeb";
+import { ThumbnailPicker } from "./ThumbnailPicker";
 import { YoutubePanel } from "./YoutubePanel";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
 // 다른 도구로 만든 결과(그림·완성 영상)는 칸마다 [파일 올리기]로 직접 붙인다.
-// SNS·미디어 카드, 제작 기록 상세, AI 대화방 카드가 같이 쓴다. 만드는 중·승인 대기면 5초마다 다시 읽는다
+// SNS·미디어 카드, 제작 기록 상세, AI 대화방 카드가 같이 쓴다(영상이 생기면 썸네일 3장 고르기 칸 `ThumbnailPicker`도 여기 있다). 만드는 중·승인 대기면 5초마다 다시 읽는다
 // (기록을 읽을 때 마케팅이 영상 승인 여부를 다시 확인해 승인됐으면 만들기 시작한다).
 
 const POLL_MS = 5_000;
@@ -219,6 +220,8 @@ export function RenderPanel({ recordId }: { recordId: string }) {
       <div className="border-t border-ink-100 pt-3">
         <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError} />
       </div>
+      <ThumbnailPicker recordId={recordId} state={render.thumbnails} youtubeStatus={render.youtube?.status}
+        hasVideo={render.video?.status === "done" || render.final_video?.status === "done"} onChanged={() => void load()} />
       <YoutubePanel recordId={recordId} youtube={render.youtube} hasVideo={render.video?.status === "done"}
         hasFinal={render.final_video?.status === "done"} onChanged={() => void load()} />
       <InstagramPanel recordId={recordId} instagram={render.instagram} hasVideo={render.video?.status === "done"}

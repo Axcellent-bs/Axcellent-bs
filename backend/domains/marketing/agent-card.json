@@ -159,6 +159,30 @@
       "priority": "recommended"
     },
     {
+      "id": "creative_thumbnails_request",
+      "description": "제작 기록(input.record_id: CR-…) 영상(완성 영상 우선, 없으면 Higgsfield 영상)의 썸네일 후보 3장(캐릭터 클로즈업+제목 자리·핵심 장면·액션/감정 순간, 영상 비율 16:9 또는 9:16, 글자 없음) 만들기를 사람 결정(C generate_creative_thumbnails)에 올린다. 회사 Higgsfield 계정(MCP, 구독 크레딧)이 있으면 그 계정, 없으면 키 길, 둘 다 없으면 not_connected. 키 길만 이미지 월 예산을 건다. 보류되면 render.thumbnails.status=awaiting_approval·review_id, 승인 뒤 기록을 읽을 때(creative_record_get) 같은 키로 다시 물어 executed면 만들고 AI 표시(XMP)를 붙여 creative/<기록>/thumbs/에 저장한다. 영상이 생기면 기록을 읽을 때 한 번 저절로 요청된다. 후보가 있으면 regenerate=true일 때만 다시 만든다. 거절 outcome: not_found·video_not_ready·not_connected·model_not_configured·credits_insufficient·higgsfield_reconnect_needed·quota_exceeded·quota_not_configured·storage_error·in_progress·cover_locked.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeThumbnailsRequestInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeThumbnailsOutput",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "creative_thumbnail_select",
+      "description": "제작 기록(input.record_id) 썸네일 후보(render.thumbnails.candidates[].media_id, Higgsfield로 만든 AI 표시 포함 그림 3장) 중 하나(input.media_id)를 고른다. 후보 밖 값은 cover_not_candidate. 고르지 않으면 첫 후보가 기본값이고 유튜브(publish_youtube) 승인 해시에 들어간다. 승인 대기 중에 바꾸면 그 승인을 무효로 한다(유튜브는 초안으로). 이미 올라간 영상이면 cover_locked. 기록만 바꾸며 게시·비용은 없다. 거절 outcome: not_found·cover_not_candidate·cover_locked.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeThumbnailSelectInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeThumbnailSelectOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "brand_characters_list",
       "description": "요청 회사(meta.tenant_id)의 대표 캐릭터 목록(최대 3개, 마지막에 표시한 것이 기본). 이름·제작 기록 번호(CR-…)·작은 미리보기·시트 그림 유무·저장 시각·권리 확인한 사람과 때. 다른 회사 기록은 보이지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_brand.py#BrandCharactersListInput",

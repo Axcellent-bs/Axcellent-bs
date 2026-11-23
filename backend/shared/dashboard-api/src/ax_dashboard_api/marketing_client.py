@@ -903,6 +903,8 @@ VIDEO_REFUSALS = {
     "cover_not_candidate": (422, "COVER_NOT_CANDIDATE"),
     "cover_locked": (409, "COVER_LOCKED"),
     "cover_missing": (409, "COVER_MISSING"),
+    # 제작 기록 썸네일 후보 만들기: 회사 Higgsfield 계정도 키도 없음
+    "not_connected": (409, "HIGGSFIELD_NOT_CONNECTED"),
     "bad_asset": (422, "BAD_ASSET"),
     "file_missing": (409, "FILE_MISSING"),
     "gate_held": (409, "GATE_HELD"),
@@ -937,6 +939,47 @@ async def creative_video_call(record_id: str, who: str | None) -> dict[str, Any]
     if who:
         payload["who"] = who
     return await _creative_read("creative_video_request", payload)
+
+
+THUMB_ID = re.compile(r"^thm_[0-9a-f]{12}$")
+THUMB_DIR = "thumbs"
+
+
+async def creative_thumbnails_call(record_id: str, regenerate: bool, who: str) -> dict[str, Any]:
+    """제작 기록 영상 썸네일 후보 3장 만들기를 사람 결정에(`creative_thumbnails_request`, C).
+
+    승인 전에는 아무것도 만들지 않는다."""
+    payload = {"record_id": record_id, "regenerate": regenerate, "who": who}
+    return await _creative_read("creative_thumbnails_request", payload)
+
+
+async def creative_thumbnail_select_call(record_id: str, media_id: str, who: str) -> dict[str, Any]:
+    """제작 기록 썸네일 고르기(`creative_thumbnail_select`). 후보 밖 422, 올린 뒤 409."""
+    payload = {"record_id": record_id, "media_id": media_id, "who": who}
+    return await _creative_read("creative_thumbnail_select", payload)
+
+
+async def creative_thumbnail_file(record_id: str, media_id: str) -> Path:
+    """제작 기록 썸네일 후보 그림(AI 표시 포함 JPEG). 기록과 이름·해시가 같은 파일만(없으면 404).
+
+    기록은 요청 회사 것만 읽히므로(다른 회사 기록은 마케팅이 not_found) 다른 회사 그림도 404다."""
+    missing = ApiError(404, "NOT_FOUND", "썸네일 후보가 없다")
+    if not THUMB_ID.match(media_id):
+        raise missing
+    rec = await creative_record_call(record_id)
+    thumbs = (rec.get("render") or {}).get("thumbnails") or {}
+    found = next((c for c in thumbs.get("candidates") or [] if c.get("media_id") == media_id), None)
+    sha = found.get("sha256") if isinstance(found, dict) else None
+    raw_root = (os.getenv(MEDIA_DIR_ENV) or "").strip()
+    if not (isinstance(sha, str) and raw_root):
+        raise missing
+    root = Path(raw_root).resolve()
+    path = (creative_root(root) / record_id / THUMB_DIR / f"{media_id}.jpg").resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise missing
+    if hashlib.sha256(path.read_bytes()).hexdigest() != sha:  # 기록 뒤 바뀐 파일은 내주지 않는다
+        raise missing
+    return path
 
 
 def creative_root(root: Path) -> Path:

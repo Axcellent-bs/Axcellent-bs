@@ -180,6 +180,8 @@ SERVICES: tuple[Service, ...] = (
             "youtube_uploads_list",
             "list_marketing_campaigns",
             "creative_record_attach",
+            "creative_thumbnails_request",
+            "creative_thumbnail_select",
             "brand_characters_list",
             "brand_character_mark",
             "brand_character_unmark",

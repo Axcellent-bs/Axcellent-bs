@@ -198,6 +198,17 @@ async def test_publish_instagram_video_always_needs_a_human(gate: Gate, act) -> 
 
 
 @pytest.mark.asyncio
+async def test_creative_thumbnails_always_need_a_human(gate: Gate, act) -> None:
+    """영상 썸네일 후보 만들기는 저절로 요청돼도 크레딧이 나가기 전에 사람이 정한다(C, 마케팅만)."""
+    held = await gate.execute(
+        act("generate_creative_thumbnails", "marketing", "thm-1", count=3, media_kind="image")
+    )
+    assert (held.grade, held.status) == ("C", "held")
+    other = await gate.execute(act("generate_creative_thumbnails", "data", "thm-2"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
 async def test_confirm_spec_rules(gate: Gate, act) -> None:
     clean = dict(open_questions=0, warnings=0, basis_count=2, irreversible_count=0)
     ok = await gate.execute(act("confirm_spec", "planning", "spec-ok", **clean))
