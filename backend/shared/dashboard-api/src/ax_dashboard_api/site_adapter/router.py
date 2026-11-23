@@ -4,8 +4,9 @@
 - ③ 사이트에 없는 자료: 각 주소의 응답 모양 그대로 빈 값 (`meta.source = "site_adapter"`)
 - 고객지원 접수 동기화(POST): 변환기 장부에 기록만 (에이전트 토큰 또는 판매 서버 서비스 키 필요)
 - ③-쓰기(환불·쿠폰·배너·신청 결과·문의 화면 값·롤백·장애 해제): `writes`가 판정한다.
-  환불·쿠폰은 safety 실행 기록 확인(판정 2, `gate_check`)을 지나야 받는다. 직접 쓰기(W3) 전이라
-  받은 쓰기는 모두 할 일함(`applied: "pending_human"`)
+  환불·쿠폰은 safety 실행 기록 확인(판정 2, `gate_check`)을 지나야 받는다. 짝 파일에 쓰기 짝이
+  있고 회사 연결에서 그 동작을 켰으면 고객사에 직접 쓰고(`applied: "site"`, W3), 아니면 할 일함
+  (`applied: "pending_human"`)
 - 그 밖: 404 `NOT_MAPPED` (문의·신청 읽기는 다음 PR)
 
 읽기는 shop-api처럼 토큰 없이 받는다(dashboard-api는 사내망에만 있다).
@@ -402,7 +403,7 @@ async def sync_write(
     return await _sync(request, kind, seq, action, authorization)
 
 
-# ---------------------------------------------------------------- ③-쓰기 (W2: 관문 확인 뒤 할 일함)
+# ---------------------------------------------------------------- ③-쓰기 (직접 쓰기·할 일함)
 
 
 def _agent(authorization: str | None, action: WriteAction) -> str:
@@ -469,6 +470,8 @@ async def refund(
             # 환불 id·주문 취소 여부는 사람이 사이트에서 처리한 뒤에야 안다: 싣지 않는다
             response={"payment_id": payment_id, "refund_amount": amount},
             gate_claim={"refund_amount": amount},
+            source=body,
+            path_values={"payment_id": payment_id},
         )
     )
 
@@ -494,6 +497,7 @@ async def coupon_issue(
             response=dict(picked),
             task_id_fields=("coupon_id",),
             gate_claim={k: picked[k] for k in ("buyer_id", "count", "unit_value")},
+            source=body,
         )
     )
 
@@ -516,6 +520,8 @@ async def banner_post(
             # 공지 문구는 고객에게 보일 글이라 사람이 그대로 올릴 수 있게 싣는다
             summary={k: body.get(k) for k in ("notice_id", "text", "valid_from", "valid_to")},
             response={"notice_id": notice_id, "context_id": _context(body)},
+            source=body,
+            path_values={"notice_id": notice_id},
         )
     )
 
@@ -535,6 +541,7 @@ async def banner_end(
             context_id=None,
             summary={"notice_id": notice_id},
             response={"notice_id": notice_id},
+            path_values={"notice_id": notice_id},
         )
     )
 
@@ -557,6 +564,7 @@ async def payment_rollback(
             summary={"to_version": to_version},
             # 되돌렸는지는 사람이 한 뒤에야 안다: 전후 버전을 비워 인프라 확인이 성공으로 보지 않게
             response={"before": None, "version": None, "to_version": to_version},
+            source=body,
         )
     )
 
@@ -598,6 +606,8 @@ async def claim_result(request: Request, seq: str, authorization: str | None) ->
                 "result": body.get("result"),
             },
             response={"ok": True},
+            source=body,
+            path_values={"seq": seq},
         )
     )
 
@@ -644,8 +654,35 @@ async def inquiry_view(request: Request, seq: str, authorization: str | None) ->
                 "view_digest": view_digest,
             },
             response={"ok": True},
+            # 본문 식 `view.answer`: 사이트의 답변 칸 하나에 고객지원 답변 글을 모아 넣는다
+            source={**body, "view": {**view, "answer": _answer_text(view)}},
+            path_values={"seq": seq},
         )
     )
+
+
+def _answer_text(view: dict[str, Any]) -> str | None:
+    """고객이 볼 답변 글: `view.answer`가 있으면 그것, 없으면 상담원(`agent`) 메시지 글을 순서대로
+    빈 줄로 이어 붙인 것. 답변이 아직 없으면 None (직접 쓰기에서 계산 실패 → 할 일함).
+
+    사이트(누비투어·스터디온에듀)는 문의마다 답변 칸이 하나이고 다시 보내면 고쳐 쓰므로,
+    답변이 늘 때마다 모은 글 전체를 다시 보낸다.
+    """
+    given = view.get("answer")
+    if isinstance(given, str) and given.strip():
+        return given.strip()
+    messages = view.get("messages")
+    if not isinstance(messages, list):
+        return None
+    texts = [
+        m["text"].strip()
+        for m in messages
+        if isinstance(m, dict)
+        and m.get("role") == "agent"
+        and isinstance(m.get("text"), str)
+        and m["text"].strip()
+    ]
+    return "\n\n".join(texts) or None
 
 
 # ---------------------------------------------------------------- 그 밖

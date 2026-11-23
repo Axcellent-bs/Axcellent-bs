@@ -11,7 +11,7 @@
 
 쓰기 짝(`writes`, 동작 → `WriteMap`)은 추가 필드다. 없으면 모든 쓰기가 할 일함으로 간다(예전
 짝 파일 그대로 읽힘). 쓰기 본문 식은 위 셋에 `path:`·`key_code:`·`now_plus:`·`json:`·`link:`를
-더한다. 지금(W1)은 모양만 검사하고, 계산은 직접 쓰기(W3)에서 한다.
+더한다. 여기서는 모양만 검사하고, 계산은 직접 쓰기(`direct.evaluate`)에서 한다.
 """
 
 from __future__ import annotations

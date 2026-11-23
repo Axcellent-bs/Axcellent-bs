@@ -57,6 +57,7 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeYoutubeDraftInput,
     CreativeYoutubeOutput,
     CreativeYoutubeRequestInput,
+    InstagramStatusOutput,
     RequestVideoYoutubeDraftInput,
     RequestVideoYoutubeOutput,
     RequestVideoYoutubeRequestInput,
@@ -1010,6 +1011,19 @@ async def youtube_status(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=_evidence(["youtube_status"], f"유튜브 연결 {out.connection}", []),
+    )
+
+
+async def instagram_status(request: AgentRequest) -> AgentResult:
+    """회사 인스타 연결 상태·프로필 주소(read, 60초 캐시). 토큰 값은 돌려주지 않는다."""
+    from marketing_agent import instagram_profile
+
+    out = InstagramStatusOutput(**await instagram_profile.status())
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["instagram_status"], f"인스타 연결 {out.connection}", []),
     )
 
 
@@ -2154,6 +2168,7 @@ HANDLERS = {
     "creative_youtube_draft": creative_youtube_draft,
     "creative_youtube_request": creative_youtube_request,
     "youtube_status": youtube_status,
+    "instagram_status": instagram_status,
     "youtube_video_stats": youtube_video_stats,
     "youtube_uploads_list": youtube_uploads_list,
     "creative_record_attach": creative_record_attach,

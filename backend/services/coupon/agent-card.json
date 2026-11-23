@@ -197,6 +197,18 @@
       "priority": "recommended"
     },
     {
+      "id": "instagram_status",
+      "description": "회사 인스타그램 연결 상태(read): missing_keys·invalid_credentials·ok(username·프로필 주소)·error. 회사마다 60초 캐시. 토큰 값은 돌려주지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#InstagramStatusInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#InstagramStatusOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "youtube_video_stats",
       "description": "회사 유튜브 채널(로그인한 회사의 연결)에 올린 영상의 조회수·좋아요·댓글 수를 YouTube Data API videos.list(part=statistics)로 읽는다(read). input은 video_ids(11자) 또는 record_ids(CR-…, render.youtube.video_id로 찾음). 영상마다 5분 캐시. 숨긴 좋아요·댓글은 None(모름), 못 찾은 영상은 not_found. 읽지 못하면 status=unknown과 reason(no_videos·missing_keys·invalid_credentials·stats_http_<코드>·error). 키·토큰 값은 돌려주지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_youtube_stats.py#YoutubeVideoStatsInput",

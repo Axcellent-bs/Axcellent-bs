@@ -18,7 +18,7 @@ from typing import Any
 from ax_agent_template import config
 from ax_agent_template.client import call_agent
 from ax_contracts.schemas import AgentRequest, AgentResult, ErrorCode, RequestMeta, TaskStatus
-from ax_dashboard_api.envelope import ApiError, ServiceDisabled
+from ax_dashboard_api.envelope import ApiError, ServiceDisabled, tenant_meta
 
 AGENT_NAME = "dashboard-api"
 # 화면(상담원) 호출의 사건 ID 접두사. 계약 `ContextPrefix`에 없는 임시 값이라 이 상수 한 곳에서만
@@ -38,7 +38,7 @@ def _meta(context_id: str, key: str | None, tenant_id: str | None = None) -> Req
         token=config.agent_token(AGENT_NAME),
         deadline=datetime.now(UTC) + timedelta(seconds=DEADLINE_SECONDS),
         idempotency_key=key,
-        **({"tenant_id": tenant_id} if tenant_id else {}),  # 개인 MCP 창구: 토큰의 회사
+        **tenant_meta(tenant_id),  # 명시 값 먼저, 없으면 세션 회사
     )
 
 

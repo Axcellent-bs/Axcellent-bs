@@ -306,6 +306,8 @@ AXcellent는 사이트 코드를 고치지 않는다. 아래는 사이트를 만
 1. **W1 쓰기 뼈대**: `writes` 짝 필드(추가), 쓰기 장부, 서비스 허용 표, 판정 표 1·3·4·6과 할 일함 넣기(② 구현을 여기서 같이 한다). 직접 쓰기는 아직 없음 → 모든 쓰기가 할 일함.
 2. **W2 관문 확인**: safety `GET /api/safety/executions/{execution_id}` 추가(또는 `context_id` 목록), 환불·쿠폰 기록 확인(판정 2). 확인 실패 시험.
 3. **W3 직접 쓰기 + 문의 답변**: 고객사 호출(시간 초과·응답 처리, 판정 5·7), ① 문의 읽기 짝과 `link:` 장부, `inquiry_answer` 직접 쓰기(누비투어·스터디온에듀). 고객지원의 문의 화면 값 쓰기가 사이트 답변으로 간다.
+   - (11/23 W3 구현 메모) 직접 쓰기 실행·판정 5·본문 식·`link:` 장부(`<변환기 폴더>/links.json`)까지 했다. **① 문의 읽기 짝은 다음 PR로 남겼다**: 고객지원은 문의함(`GET /admin/inquiries?state=new`)에서 `seq`·`key`·`context_id`·`buyer_id`(`buy_<숫자>` 형식 필수)·`customer_name`·`order_id`·`subject`·`message`를, 열린 문의(`GET /admin/inquiries/open`, `after`·`next_after`)에서 `seq`·`support_inquiry_id`·`view_digest`를 읽는다. 누비투어 v1 문의에는 회원 번호가 없고(`member: true/false`만) 비회원 문의도 있어 `buyer_id` 짝과 `synced` 기록에 따른 `state=new` 거르기·열린 문의 목록까지 새로 정해야 한다. 그때 문의 번호를 줄 때 `links.remember("inquiries", seq, 사이트 id)`를 같이 적는다
+   - 정한 것: `view.answer`는 고객지원 화면 값에 없는 칸이라 변환기가 상담원(`agent`) 메시지 글을 순서대로 빈 줄로 이어 만든다(사이트 답변 칸은 하나, 다시 보내면 고침). 답변이 아직 없으면 계산 실패로 할 일함. 짝 `ok`에 없는 2xx·3xx(리다이렉트는 따라가지 않음)는 `unknown`. 직접 쓰기는 시간당 60번(`AX_SITE_ADAPTER_WRITES_PER_HOUR`), 응답 본문은 64KB까지만 읽는다. 오류 응답에 `error.site_code`·`site_status`·`site_message`(120자까지, 장부에는 안 남김)를 더 싣는다
 4. **W4 화면**: 회사 연결 "동작별 직접 쓰기" 켜기(기본 꺼짐)·"최근 사이트 쓰기"·"키에 쓰기 권한 없음", 결과 칩 "사이트에 반영됨"/"사이트 반영 대기".
 5. **W5 사이트가 경로를 더한 뒤**: 고객별 쿠폰(스터디온에듀 `private` 쿠폰 + `grants`, 11/20 생김. 공용 쿠폰은 W3 뒤 바로 가능)·메시지함 안내(`/inbox`), 환불·신청 결과(사이트 `decision` 경로), 공지. 사이트 경로마다 PR 하나.
 6. 롤백·장애 해제: 도메인 클라이언트가 `context_id`를 보내게 바꾼 뒤 따로 정한다(그때까지 할 일함).

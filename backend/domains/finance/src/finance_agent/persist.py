@@ -7,6 +7,7 @@
 - 경로가 없으면(테스트·단독 실행) 아무것도 하지 않는다
 - `FINANCE_STATE_FILE`을 안 정했고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`, 여러 회사 설계 1-6)
   `<회사 폴더>/catbooks/finance_state.json` (옛 자리에 있으면 처음 읽을 때 옮긴다, `company_folder`)
+- 캣북스 밖 회사 기록은 회사마다 따로 쓴다(`company_state_file`, 여러 회사 5단계)
 - 몇 초마다 바뀐 것만 쓰고, 서버를 끌 때 한 번 더 쓴다
 - 임시 파일에 쓴 뒤 바꿔 끼워 반쯤 쓴 파일이 남지 않게 한다
 - 읽다가 형식이 틀리면 버리지 않고 옆에 `.broken`으로 옮기고 빈 상태로 시작한다
@@ -18,12 +19,16 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
+from ax_agent_template import company_files
+from ax_agent_template.companies import company_path
 from ax_contracts.schemas import TENANT_ID_DEFAULT
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 from finance_agent import company_folder, exports
-from finance_agent.handlers import State
+from finance_agent.handlers import State, company_states
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +43,27 @@ STATE_NAME = "finance_state.json"
 def state_file() -> Path | None:
     """`FINANCE_STATE_FILE` → 회사 폴더(`<회사 폴더>/catbooks/finance_state.json`) → None."""
     return company_folder.path_for(STATE_ENV, STATE_NAME)
+
+
+def company_state_file(company_id: str) -> Path | None:
+    """캣북스 밖 회사의 기록 파일 (여러 회사 5단계). 캣북스는 `state_file()`.
+
+    `FINANCE_STATE_FILE`을 정했으면 그 옆 `finance_state.<회사>.json`, 아니면 회사 폴더를 켰을 때
+    `<회사 폴더>/<회사>/finance_state.json`, 둘 다 없으면 None(저장하지 않음).
+    """
+    if company_id == TENANT_ID_CATBOOKS:
+        return state_file()
+    pinned = os.getenv(STATE_ENV, "").strip()
+    if pinned:
+        path = Path(pinned)
+        return path.with_name(f"{path.stem}.{company_id}{path.suffix}")
+    if not company_files.folders_on():
+        return None
+    path = company_path(company_id, STATE_NAME)
+    if path is not None and not path.parent.exists():  # 회사 폴더는 0700 (company_folder와 같다)
+        path.parent.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(mode=company_files.DIR_MODE, exist_ok=True)
+    return path
 
 
 def dump(s: State) -> dict[str, Any]:
@@ -210,10 +236,26 @@ def save(s: State, path: Path, last: str | None = None) -> str:
     return mark
 
 
+def save_companies(last: dict[str, str]) -> dict[str, str]:
+    """캣북스 밖 회사 기록을 회사마다 쓴다(바뀐 것만). 회사 → 지문을 돌려준다."""
+    marks = dict(last)
+    for cid, s in company_states().items():
+        path = company_state_file(cid)
+        if path is None:
+            continue
+        try:
+            marks[cid] = save(s, path, marks.get(cid))
+        except Exception:  # 다음 회차에 다시 쓴다. 한 회사가 막혀도 다른 회사는 쓴다
+            logger.exception("%s 재무 기록 저장 중 오류", cid)
+    return marks
+
+
 async def save_loop(get_state: Any, path: Path, last: str | None) -> None:
+    others: dict[str, str] = {}
     while True:
         await asyncio.sleep(SAVE_SECONDS)
         try:
             last = save(get_state(), path, last)
         except Exception:  # 다음 회차에 다시 쓴다
             logger.exception("재무 기록 저장 중 오류")
+        others = save_companies(others)

@@ -1633,6 +1633,14 @@ async def marketing_youtube_status() -> dict:
     return ok(await marketing_client.youtube_status_call())
 
 
+@router.get("/marketing/instagram/status")
+async def marketing_instagram_status() -> dict:
+    """회사 인스타 연결 상태·프로필 주소(마케팅 `instagram_status`, read)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "인스타 연결 상태는 실제 모드에서만 된다")
+    return ok(await marketing_client.instagram_status_call())
+
+
 @router.post("/marketing/creative-records/{record_id}/youtube/draft")
 async def marketing_youtube_draft(
     body: YoutubeDraftBody,
