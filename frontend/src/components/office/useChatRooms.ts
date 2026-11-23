@@ -7,6 +7,10 @@ import { buildRooms, type ChatRoom } from "@/lib/chatRooms";
 import { finance, type ExecutionRecord } from "@/lib/finance";
 import { orchestrator } from "@/lib/orchestrator";
 import type { CommLine } from "@/lib/types";
+import { clearRoom, hideIncidentRoom, listHiddenRooms, listRoomClears, undoClearRoom, unhideIncidentRoom } from "@/lib/officeRoom";
+import { clearMap } from "@/lib/roomCleanup";
+
+const CLEANUP_POLL_MS = 30_000;
 
 // 대화 기록(/agents/chat)과 AI 오피스(/agents/office)가 같이 쓰는 방 데이터.
 // 출처 세 곳(총괄 사건·안전 관문 실행·공통 로그 소통)을 3초마다 읽고, 단톡방 사람 대화(useOfficeTalk)를 섞어
@@ -32,8 +36,21 @@ export interface ChatRooms {
   talk: OfficeTalk;
   all: ChatRoom;
   incidentRooms: ChatRoom[];
-  /** 방 id → 그 방 대화 (전체·장애 방) */
+  /** 방 id → 그 방 대화 (전체·장애 방). 원래 기록 그대로(AI 오피스 그림 계산이 쓴다) */
   items: Record<string, ChatItem[]>;
+  /** 방 id → 내 화면에 보일 대화 (/clear 한 시각 앞은 뺀다). 대화 칸은 이것을 그린다 */
+  shown: Record<string, ChatItem[]>;
+  /** 서버가 숨긴(모두에게) 장애·이슈 방 (방 목록에서 빠진 방) */
+  hiddenIncidentRooms: ChatRoom[];
+  /** 방 id → 내가 /clear 한 시각 */
+  clears: Readonly<Record<string, string>>;
+  /** 장애·이슈 방 숨기기·되돌리기, /clear·되돌리기. 실패하면 서버 문장으로 던진다 */
+  cleanup: {
+    hide: (room: string) => Promise<void>;
+    unhide: (room: string) => Promise<void>;
+    clear: (room: string) => Promise<void>;
+    undoClear: (room: string) => Promise<void>;
+  };
   /** 방 id → 안 읽은 말풍선 수 */
   unseen: Record<string, number>;
   /** 그 방을 지금까지 읽은 것으로 */
@@ -86,9 +103,33 @@ export function useChatRooms({ enabled = true, rooms }: { enabled?: boolean; roo
   // 고객 의뢰(사람 토큰이 있을 때만): 끝난 의뢰(ctx_wr_)의 뒤 조회 줄을 사건처럼 거른다. 의뢰 넘김 카드·오피스 자리와 같은 값
   const work = useWorkRequests(enabled);
   const requests = work.rows;
-  const { all, incidents: incidentRooms, items } = useMemo(
-    () => buildRooms({ incidents, executions, comms, talk: talk.items, requests: requests ?? [] }),
-    [incidents, executions, comms, talk.items, requests],
+
+  // 11/23 대화방 정리: 서버가 숨긴 장애 방(모두에게)·내 /clear 시각. 다른 사람이 숨긴 방도 보이게 30초마다 다시 읽는다.
+  // 사람 토큰이 없으면 읽지 못해 아무것도 빼지 않는다(지금처럼 보인다)
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+  const [clears, setClears] = useState<Record<string, string>>({});
+  const loadCleanup = useCallback(async () => {
+    const [h, c] = await Promise.allSettled([listHiddenRooms(), listRoomClears()]);
+    if (h.status === "fulfilled") setHiddenIds(h.value);
+    if (c.status === "fulfilled") setClears(clearMap(c.value));
+  }, []);
+  useEffect(() => {
+    if (!enabled) return;
+    void loadCleanup();
+    const t = setInterval(() => { if (!document.hidden) void loadCleanup(); }, CLEANUP_POLL_MS);
+    return () => clearInterval(t);
+  }, [enabled, loadCleanup]);
+  const cleanup = useMemo(() => ({
+    hide: async (room: string) => { await hideIncidentRoom(room); await loadCleanup(); },
+    unhide: async (room: string) => { await unhideIncidentRoom(room); await loadCleanup(); },
+    clear: async (room: string) => { await clearRoom(room); await loadCleanup(); },
+    undoClear: async (room: string) => { await undoClearRoom(room); await loadCleanup(); },
+  }), [loadCleanup]);
+  const hidden = useMemo(() => new Set(hiddenIds), [hiddenIds]);
+
+  const { all, incidents: incidentRooms, hiddenIncidents: hiddenIncidentRooms, items, shown } = useMemo(
+    () => buildRooms({ incidents, executions, comms, talk: talk.items, requests: requests ?? [], hidden, clears }),
+    [incidents, executions, comms, talk.items, requests, hidden, clears],
   );
 
   // 읽음: 방마다 본 말풍선 수. 화면을 열 때 이미 있던 방은 지금까지를 읽은 것으로 두고(열자마자 배지가 쌓이지 않게),
@@ -117,6 +158,6 @@ export function useChatRooms({ enabled = true, rooms }: { enabled?: boolean; roo
 
   return {
     incidents, executions, comms, orchConn, safetyConn, commConn, commTruncated, orchMock, loaded, refresh,
-    talk, all, incidentRooms, items, unseen, markSeen,
+    talk, all, incidentRooms, items, unseen, markSeen, shown, hiddenIncidentRooms, clears, cleanup,
   };
 }

@@ -8,7 +8,7 @@ import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestTitle } from "@/lib/requestHandoffs";
 import { REQUEST_STATUS, type WorkRequestRow } from "@/lib/workRequests";
-import { madeVideo, perfStep, PLAN_LOOKUP_MIN_MS, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, resultStep, showRequestCard, stepRows, type PerfStepView, type PlanCardView, type PlanLookup, type StepDot } from "@/lib/requestCards";
+import { hiddenRequestLine, madeVideo, perfStep, PLAN_LOOKUP_MIN_MS, planCard, planLookupDue, proposalOfRequest, requestActionError, requestEditError, reportIdOfRequest, resultStep, showRequestCard, stepRows, type PerfStepView, type PlanCardView, type PlanLookup, type StepDot } from "@/lib/requestCards";
 import { dataAi, type RequestVideoPerformance } from "@/lib/data";
 import { planDocPath } from "@/lib/planDoc";
 import { planId } from "@/lib/format";
@@ -148,6 +148,33 @@ function PlanCell({ card }: { card: PlanCardView }) {
   );
 }
 
+/** 삭제한 의뢰의 접힌 한 줄. [되돌리기] → unhideRequest → 목록 다시 읽기. 실패하면 줄 아래에 이유 */
+function HiddenRequestLine({ requestId, line }: { requestId: string; line: { text: string; canUndo: boolean } }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const undo = () => {
+    setBusy(true);
+    setError(null);
+    orchestrator.unhideRequest(requestId)
+      .then(() => refreshWorkRequests())
+      .catch((e: unknown) => {
+        const err = requestEditError(e);
+        setError(err.text);
+        if (err.reload) void refreshWorkRequests();
+      })
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="mt-2 text-xs text-ink-500" aria-label={`삭제한 의뢰 ${requestId}`}>
+      <p>
+        {line.text}
+        {line.canUndo && <> · <button type="button" className="underline hover:text-ink-700 disabled:opacity-50" disabled={busy} onClick={undo}>되돌리기</button></>}
+      </p>
+      {error && <p role="alert" className="mt-1 text-red-700">{error}</p>}
+    </div>
+  );
+}
+
 export function RequestProgressCard({ requestId }: { requestId: string }) {
   const navigate = useNavigate();
   const { row, hasToken, tasks } = useRequest(requestId);
@@ -162,6 +189,9 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   const perf = usePerf(requestId, hasToken && made);
   const proposals = usePlanLookup(insightDone, `${row?.updated_at ?? ""}|${perf.tick}`);
   if (!showRequestCard(hasToken, requestId) || !row) return null;
+  // 삭제한 의뢰: 카드 대신 회색 한 줄 (되돌리면 카드 전체가 다시 보인다)
+  const hiddenLine = hiddenRequestLine(row, requestTitle(row, tasks), hasToken);
+  if (hiddenLine) return <HiddenRequestLine requestId={row.request_id} line={hiddenLine} />;
   const proposal = proposalOfRequest(row, proposals);
   const found = proposal ? proposals?.find((p) => p.id === proposal) : undefined;
   const plan = found ? planCard(found, row.request_id) : null;
@@ -191,10 +221,9 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
         <span className={`chip text-[11px] ${st.tone}`}>{st.label}</span>
         <span className="chip bg-ink-100 text-[11px] tabular-nums text-ink-500">{row.request_id}</span>
         {stale !== null && <span className="chip bg-ink-100 text-[11px] text-ink-500" title={`${STALE_HOURS}시간 넘게 바뀌지 않아 AI 오피스 자리 상태에는 쓰지 않아요`}>오래 멈춤 · {stale}시간</span>}
-        {row.hidden_at && <span className="chip bg-ink-100 text-[11px] text-ink-500">삭제한 의뢰</span>}
       </p>
-      {/* 11/23 의뢰 정리 메뉴 (고객 의뢰 넘김 카드와 같은 함수) */}
-      {!row.hidden_at && <RequestActions row={row} title={requestTitle(row, tasks)} />}
+      {/* 11/23 의뢰 정리 메뉴 (고객 의뢰 넘김 카드와 같은 함수). 삭제한 의뢰는 위에서 한 줄로 접는다 */}
+      <RequestActions row={row} title={requestTitle(row, tasks)} />
       <ol className="space-y-2">
         {rows.map((s, i) => {
           const report = s.skill === "trend_report_create" ? reportIdOfRequest(row, s.stepId) : null;
