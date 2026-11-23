@@ -5,6 +5,7 @@ import { sessionAuth } from "./humanToken";
 import type { AgentDiagnosisRow, DiagnosisDelivery } from "./agentDiagnosis";
 import type { DemoRequest, OrchIncident } from "./agentChat";
 import type { WorkRequestRow, WorkRequestTask } from "./workRequests";
+import type { Department, DepartmentsMeta } from "./adminRelay";
 
 // 총괄(orchestrator) API. 응답은 ax-backend 규약 {data, meta}. 형식은 orchestrator/src/ax_orchestrator/main.py 기준.
 
@@ -56,6 +57,8 @@ export const orchestrator = {
   health: () => call<{ status: string }>("/health"),
   /** 이슈 목록 (열린 순서). 각 항목에 steps·events·pending_holds가 모두 들어 있다 */
   incidents: () => callRaw<OrchIncident[], IncidentsMeta>("/api/incidents"),
+  /** 부서 카드·사용량(총괄이 부른 호출을 센 실측). 총괄을 직접 읽는다(캣북스를 거치지 않는다) */
+  departments: () => callRaw<Department[], DepartmentsMeta>("/api/departments"),
   /** 접수된 고객 의뢰 (최근 것부터, 최대 100건)와 고를 수 있는 일 목록. 사람 토큰이 필요하다 */
   workRequests: () =>
     getAuthed<WorkRequestRow[], { tasks: WorkRequestTask[] }>("/api/requests", SAFETY_HUMAN_TOKEN),
