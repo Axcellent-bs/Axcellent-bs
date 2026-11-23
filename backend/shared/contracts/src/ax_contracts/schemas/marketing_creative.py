@@ -105,6 +105,8 @@ class CreativeRecordAttachOutput(AxModel):
 CREATIVE_YOUTUBE_DRAFT_SKILL = "creative_youtube_draft"
 CREATIVE_YOUTUBE_REQUEST_SKILL = "creative_youtube_request"
 YOUTUBE_STATUS_SKILL = "youtube_status"
+# 유튜브 영상이 어느 캠페인 영상인지(11/23, 선택). 빈 문자열이면 연결을 푼다
+YOUTUBE_CAMPAIGN_LINK_PATTERN = r"^(cmp_[A-Za-z0-9][A-Za-z0-9_-]{0,63})?$"
 
 
 class CreativeYoutubeDraftInput(AxModel):
@@ -117,6 +119,9 @@ class CreativeYoutubeDraftInput(AxModel):
     tags: list[str] | None = Field(default=None, max_length=15)
     privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
     part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+    # 어느 캠페인(cmp_…) 영상인지(11/23, 추가). 비우면(None) 그대로, ""면 연결을 푼다.
+    # 올린 뒤에도 바꿀 수 있다(올리기와 상관없는 표시라 승인이 필요 없다)
+    campaign_id: str | None = Field(default=None, pattern=YOUTUBE_CAMPAIGN_LINK_PATTERN)
 
 
 class CreativeYoutubeRequestInput(AxModel):
@@ -141,6 +146,21 @@ class YoutubeStatusOutput(AxModel):
     connection: str
     channel: str | None = None
     checked_at: str
+    # 채널 주소(연결됐을 때. @핸들이 있으면 youtube.com/@핸들, 없으면 channel/<id>) — 11/23
+    channel_url: str | None = None
+
+
+class InstagramStatusInput(AxModel):
+    """입력 없음(지금 회사의 인스타 연결 상태를 본다)."""
+
+
+class InstagramStatusOutput(AxModel):
+    """인스타 연결: missing_keys · invalid_credentials · ok · error. 토큰 값은 없다(11/23)."""
+
+    connection: str
+    username: str | None = None
+    profile_url: str | None = None
+    checked_at: str
 
 
 # ---- 의뢰로 만든 영상(wr_…)의 유튜브 올리기 (2026-11-23). 제작 기록 유튜브와 같은 흐름이다.
@@ -159,6 +179,8 @@ class RequestVideoYoutubeDraftInput(AxModel):
     description: str | None = Field(default=None, max_length=5000)
     tags: list[str] | None = Field(default=None, max_length=15)
     privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
+    # 어느 캠페인(cmp_…) 영상인지(11/23, 추가). 비우면(None) 그대로, ""면 연결을 푼다
+    campaign_id: str | None = Field(default=None, pattern=YOUTUBE_CAMPAIGN_LINK_PATTERN)
 
 
 class RequestVideoYoutubeRequestInput(AxModel):

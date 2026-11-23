@@ -114,11 +114,17 @@ export interface CampaignRecord {
   content_category?: string | null; format?: "shorts" | "reels" | null; production_cost_krw?: number | null;
   views?: number | null; views_point?: "1h" | "1d" | "3d" | "7d" | null;
   cost_per_view?: number | null; view_cost_status?: "measured" | "measuring" | "no_views" | "no_production_cost" | "zero_views";
+  // 회사 유튜브 조회수(11/23): 마케팅이 이 캠페인에 연결한 유튜브 영상을 읽은 값(누적). views와 따로 온다
+  youtube_views?: number | null; youtube_views_at?: string | null; youtube_video_ids?: string[] | null;
+  /** 조회당 제작비에 쓴 조회수 합과 출처 */
+  views_total?: number | null; views_from?: { video_performance: number | null; youtube: number | null };
 }
 /** 콘텐츠 카테고리별 조회당 제작비 (CMP-007). 게시 7일 조회수를 잰 캠페인만 합한다 */
 export interface CategoryViewCost {
   content_category: string; campaigns: string[]; production_cost_krw: number; views: number;
   measuring: number; latest_production_krw: number | null; cost_per_view: number | null; format?: "shorts" | "reels" | null;
+  /** views의 출처: 데이터 영상 성과 7일 합 + 회사 유튜브 합 (11/23, 옛 응답에는 없다) */
+  performance_views?: number; youtube_views?: number;
 }
 export interface BudgetReview {
   review_id: string; campaign_id: string; campaign_name: string; channel: string; requested_krw: number; approved_limit_krw: number;

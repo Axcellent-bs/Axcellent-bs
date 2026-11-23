@@ -26,9 +26,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header
 
 from ax_agent_template import events
+from ax_agent_template.company_scope import scope_id
 from ax_agent_template.logging import log_event
 from ax_agent_template.server import verify_token
 from ax_contracts.schemas import (
+    TENANT_ID_ALIASES,
     TENANT_ID_DEFAULT,
     EventEnvelope,
     EventType,
@@ -39,7 +41,7 @@ from ax_contracts.schemas import (
     HandoffTask,
 )
 from ax_dashboard_api.auth import bearer, require_human
-from ax_dashboard_api.envelope import ApiError, ok
+from ax_dashboard_api.envelope import ApiError, ok, session_company
 
 DB_ENV = "AX_HANDOFF_DB"
 SOURCE = "dashboard-api"
@@ -107,7 +109,9 @@ class HandoffStore:
     def list(
         self, tenant_id: str, unit: str | None = None, status: HandoffStatus | None = None
     ) -> list[HandoffTask]:
-        where, args = ["tenant_id = ?"], [tenant_id]
+        # 옛 행은 별칭(shop-demo)으로 저장돼 있다. 같은 회사의 이름을 모두 본다
+        names = _names(tenant_id)
+        where, args = [f"tenant_id IN ({','.join('?' * len(names))})"], [*names]
         if unit:
             where.append("assignee_unit = ?")
             args.append(unit)
@@ -151,8 +155,14 @@ def reset_store() -> None:
         _store, _store_key = None, None
 
 
+def _names(company: str) -> list[str]:
+    """회사 정식 id와 그 옛 별칭(저장된 옛 행이 쓴 이름)."""
+    return [company, *(a for a, c in TENANT_ID_ALIASES.items() if c == company)]
+
+
 def _tenant() -> str:
-    return os.getenv("TENANT_ID", TENANT_ID_DEFAULT)
+    """이 요청의 회사(정식 id). 세션이면 그 회사, 공용 토큰이면 설치 `TENANT_ID`(옛 동작)."""
+    return scope_id(session_company() or os.getenv("TENANT_ID", TENANT_ID_DEFAULT))
 
 
 def _agent_from(authorization: str | None) -> str:
@@ -194,7 +204,7 @@ def list_handoffs(unit: str | None = None, status: HandoffStatus | None = None) 
 async def complete_handoff(task_id: str, body: HandoffCompleteBody) -> dict[str, Any]:
     store = get_store()
     task = store.get(task_id)
-    if task is None:
+    if task is None or scope_id(task.tenant_id) != _tenant():  # 다른 회사 건은 없는 것처럼
         raise ApiError(404, "NOT_FOUND", f"할 일을 찾을 수 없다: {task_id}")
     if task.status != HandoffStatus.OPEN:
         raise ApiError(409, "ALREADY_CLOSED", f"이미 끝난 일이다: {task_id} ({task.status.value})")

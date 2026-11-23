@@ -40,13 +40,44 @@ def find(resource: str, shop_key: str) -> str | None:
     return _read(adapter_dir()).get(resource, {}).get(shop_key)
 
 
+def _save(folder: Path, book: dict[str, dict[str, str]]) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    tmp = folder / (FILE + ".tmp")
+    tmp.write_text(json.dumps(book, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, folder / FILE)
+
+
 def remember(resource: str, shop_key: str, site_id: str) -> None:
     """번호 짝 하나를 적는다(같은 번호면 고쳐 쓴다)."""
     folder = adapter_dir()
     with _lock:
-        folder.mkdir(parents=True, exist_ok=True)
         book = _read(folder)
+        if book.get(resource, {}).get(shop_key) == site_id:
+            return  # 같은 짝이면 다시 쓰지 않는다 (받은함을 읽을 때마다 부른다)
         book.setdefault(resource, {})[shop_key] = site_id
-        tmp = folder / (FILE + ".tmp")
-        tmp.write_text(json.dumps(book, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.replace(tmp, folder / FILE)
+        _save(folder, book)
+
+
+def numbers(resource: str, site_ids: list[str]) -> dict[str, int]:
+    """고객사 id마다 shop-api 정수 번호(`seq`). 처음 보는 id는 다음 번호를 새로 적는다.
+
+    shop-api 받은함 번호는 정수다(고객지원이 `int(seq)`로 읽는다). 고객사 id(누비투어 cuid)는
+    정수가 아니라, 처음 본 순서대로 1부터 번호를 매기고 같은 id는 늘 같은 번호를 준다.
+    """
+    folder = adapter_dir()
+    with _lock:
+        book = _read(folder)
+        rows = book.setdefault(resource, {})
+        known = {site: int(seq) for seq, site in rows.items() if seq.isdigit()}
+        last = max([int(seq) for seq in rows if seq.isdigit()], default=0)
+        changed = False
+        for site_id in site_ids:
+            if site_id in known:
+                continue
+            last += 1
+            rows[str(last)] = site_id
+            known[site_id] = last
+            changed = True
+        if changed:
+            _save(folder, book)
+    return {site_id: known[site_id] for site_id in site_ids}

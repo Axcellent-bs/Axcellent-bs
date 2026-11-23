@@ -301,6 +301,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         DAILY_CLOSING_SCHEDULE.update(interval_seconds=0, next_run_at=None)
         if saved_to is not None:
             persist.save(state(), saved_to)
+            persist.save_companies({})  # 캣북스 밖 회사 기록(여러 회사 5단계)
         await events.stop_consumer()
 
 

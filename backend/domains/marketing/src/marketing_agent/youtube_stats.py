@@ -60,13 +60,20 @@ def _count(raw: Any) -> int | None:
     return value if value >= 0 else None
 
 
-def _link_of(rec: dict[str, Any], yt: dict[str, Any]) -> str | None:
+def _links(rec: dict[str, Any], yt: dict[str, Any]) -> list[str]:
+    """기록·render.youtube에 남은 연결 번호들(render.youtube 먼저, 같은 값은 한 번)."""
+    found: list[str] = []
     for source in (yt, rec):
         for key in LINK_KEYS:
             value = source.get(key)
             if isinstance(value, str) and value.strip():
-                return value.strip()[:80]
-    return None
+                found.append(value.strip()[:80])
+    return list(dict.fromkeys(found))
+
+
+def _link_of(rec: dict[str, Any], yt: dict[str, Any]) -> str | None:
+    links = _links(rec, yt)
+    return links[0] if links else None
 
 
 def uploads(limit: int = 50, campaign_id: str | None = None) -> list[YoutubeUpload]:
@@ -81,9 +88,10 @@ def uploads(limit: int = 50, campaign_id: str | None = None) -> list[YoutubeUplo
         video_id = str(yt.get("video_id") or "")
         if not re.fullmatch(YOUTUBE_VIDEO_ID_PATTERN, video_id):
             continue
-        link = _link_of(rec, yt)
-        if campaign_id and link != campaign_id:
-            continue
+        links = _links(rec, yt)
+        if campaign_id and campaign_id not in links:
+            continue  # 사람이 고른 캠페인(campaign_id)이나 의뢰 번호 중 하나가 맞아야 한다
+        link = campaign_id or (links[0] if links else None)
         out.append(
             YoutubeUpload(
                 record_id=row["record_id"],
@@ -101,7 +109,10 @@ def uploads(limit: int = 50, campaign_id: str | None = None) -> list[YoutubeUplo
 
 
 def request_uploads(limit: int = 50, campaign_id: str | None = None) -> list[YoutubeRequestUpload]:
-    """의뢰로 만든 영상 중 올리기가 끝난 것(이 회사). campaign_id(wr_…)를 주면 그 의뢰 것만."""
+    """의뢰로 만든 영상 중 올리기가 끝난 것(이 회사).
+
+    campaign_id를 주면 그 의뢰(wr_…) 것이나 사람이 그 캠페인(cmp_…) 영상으로 고른 것만.
+    """
     out: list[YoutubeRequestUpload] = []
     for post_draft_id, yt in _creative.store().request_youtube_all(_creative.KEEP).items():
         if yt.get("status") != "done":
@@ -110,7 +121,8 @@ def request_uploads(limit: int = 50, campaign_id: str | None = None) -> list[You
         if not re.fullmatch(YOUTUBE_VIDEO_ID_PATTERN, video_id):
             continue
         request_id = str(yt.get("request_id") or "").strip()[:80] or None
-        if campaign_id and request_id != campaign_id:
+        linked = str(yt.get("campaign_id") or "").strip()[:80] or None
+        if campaign_id and campaign_id not in (request_id, linked):
             continue
         out.append(
             YoutubeRequestUpload(
@@ -121,6 +133,7 @@ def request_uploads(limit: int = 50, campaign_id: str | None = None) -> list[You
                 uploaded_at=yt.get("uploaded_at"),
                 title=yt.get("title"),
                 privacy=yt.get("privacy"),
+                campaign_id=linked,
             )
         )
         if len(out) >= limit:

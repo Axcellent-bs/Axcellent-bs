@@ -5,7 +5,7 @@ import {
   putCompanyAiKey, youtubeComplete, youtubeConnectUrl, youtubeDisconnect,
 } from "@/lib/companyAiApi";
 import { fetchHiggsfieldStatus, type HiggsfieldStatus } from "@/lib/higgsfield";
-import { fetchYoutubeStatus, type YoutubeStatus } from "@/lib/youtube";
+import { fetchInstagramStatus, fetchYoutubeStatus, type InstagramStatus, type YoutubeStatus } from "@/lib/youtube";
 import { useVisibleInterval } from "@/lib/visibleInterval";
 
 // 마케팅 › SNS·미디어의 "SNS 계정 연결". 회사마다 자기 Higgsfield·유튜브·인스타 계정을 쓴다(로그인한 회사 기준, 11/23).
@@ -57,12 +57,24 @@ function ytView(s: YoutubeStatus | null): { tone: Tone; label: string } {
   return { tone: "off", label: "연결 전" };
 }
 
-function Status({ name, tone, label }: { name: string; tone: Tone; label: string }) {
+function igView(s: InstagramStatus | null, hasKeys: boolean | null): { tone: Tone; label: string } {
+  if (!s) return hasKeys === null ? { tone: "off", label: "확인 중" } : { tone: hasKeys ? "ok" : "off", label: hasKeys ? "연결됨" : "연결 전" };
+  if (s.connection === "ok") return { tone: "ok", label: s.username ? `연결됨 · @${s.username}` : "연결됨" };
+  if (s.connection === "invalid_credentials") return { tone: "bad", label: "토큰 다시 넣기 필요" };
+  if (s.connection === "error") return { tone: "wait", label: "닿지 않음" };
+  return { tone: "off", label: "연결 전" };
+}
+
+/** 연결된 계정의 프로필 주소만 링크로(https만) */
+const safeLink = (url?: string | null): string | null => (url && /^https:\/\/(www\.)?(youtube|instagram)\.com\//.test(url) ? url : null);
+
+function Status({ name, tone, label, href }: { name: string; tone: Tone; label: string; href?: string | null }) {
   return (
-    <span className="flex items-center gap-2 text-sm text-ink-900">
+    <span className="flex flex-wrap items-center gap-2 text-sm text-ink-900">
       <span className={`inline-block h-2.5 w-2.5 rounded-full ${DOT[tone]}`} aria-hidden="true" />
       <span className="font-medium">{name}</span>
       <span className="text-ink-700">{label}</span>
+      {href && <a href={href} target="_blank" rel="noreferrer" className="text-xs text-brand-700 underline" aria-label={`${name} 프로필 열기`}>프로필 열기 ↗</a>}
     </span>
   );
 }
@@ -72,6 +84,7 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
   const [denied, setDenied] = useState<string | null>(null);
   const [hf, setHf] = useState<HiggsfieldStatus | null>(null);
   const [yt, setYt] = useState<YoutubeStatus | null>(null);
+  const [ig, setIg] = useState<InstagramStatus | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [hfKey, setHfKey] = useState("");
@@ -80,9 +93,10 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
   const [userId, setUserId] = useState("");
 
   const loadStatus = useCallback(async () => {
-    const [h, y] = await Promise.allSettled([fetchHiggsfieldStatus(), fetchYoutubeStatus()]);
+    const [h, y, i] = await Promise.allSettled([fetchHiggsfieldStatus(), fetchYoutubeStatus(), fetchInstagramStatus()]);
     if (h.status === "fulfilled") setHf(h.value);
     if (y.status === "fulfilled") setYt(y.value);
+    if (i.status === "fulfilled") setIg(i.value);
   }, []);
   const loadAdmin = useCallback(async () => {
     try {
@@ -135,13 +149,17 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
   const blocked = !admin?.secret_store.enabled;
   const hfLook = hfView(hf);
   const ytLook = ytView(yt);
+  const igLook = igView(ig, admin ? igOn : null);
+  const ytLink = yt?.connection === "ok" ? safeLink(yt.channel_url) : null;
+  const igLink = ig?.connection === "ok" ? safeLink(ig.profile_url) : null;
 
   if (compact) {
     return (
       <section className="card flex flex-wrap items-center gap-x-6 gap-y-2 px-6 py-4" aria-label="SNS 계정 연결 상태" aria-live="polite">
         <h2 className="text-sm font-semibold">SNS 계정 연결</h2>
         <Status name="Higgsfield" {...hfLook} />
-        <Status name="유튜브" {...ytLook} />
+        <Status name="유튜브" {...ytLook} href={ytLink} />
+        <Status name="인스타그램" {...igLook} href={igLink} />
         {onManage && <button type="button" className="btn-ghost ml-auto text-xs" onClick={onManage}>계정·연결에서 바꾸기</button>}
       </section>
     );
@@ -219,7 +237,7 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
           )}
         </div>
         <div className="space-y-2 rounded-xl border border-ink-100 p-4">
-          <Status name="유튜브" {...ytLook} />
+          <Status name="유튜브" {...ytLook} href={ytLink} />
           <p className="text-xs text-ink-500">채널 주인 구글 계정으로 동의하면 이 회사 채널에 영상을 올릴 수 있어요</p>
           {canEdit && (
             <div className="flex flex-wrap gap-2">
@@ -235,7 +253,7 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
           )}
         </div>
         <div className="space-y-2 rounded-xl border border-ink-100 p-4">
-          <Status name="인스타그램" tone={igOn ? "ok" : "off"} label={admin ? (igOn ? "연결됨" : "연결 전") : "—"} />
+          <Status name="인스타그램" {...igLook} href={igLink} />
           <p className="text-xs text-ink-500">Meta에서 받은 Instagram 토큰과 계정 ID를 넣어요</p>
           {canEdit && (
             <>

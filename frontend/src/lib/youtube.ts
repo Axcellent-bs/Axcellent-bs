@@ -15,6 +15,21 @@ export interface YoutubeStatus {
   connection: YoutubeConnection;
   channel?: string | null;
   checked_at: string;
+  /** 채널 주소(연결됐을 때) */
+  channel_url?: string | null;
+}
+
+/** 회사 인스타 연결 상태(GET /marketing/instagram/status). 토큰 값은 오지 않는다 */
+export interface InstagramStatus {
+  connection: "ok" | "missing_keys" | "invalid_credentials" | "error" | string;
+  username?: string | null;
+  profile_url?: string | null;
+  checked_at: string;
+}
+
+export async function fetchInstagramStatus(): Promise<InstagramStatus> {
+  const res = await fetch(`${DASHBOARD_API_URL}${BASE}/instagram/status`, { headers: { ...dashboardAuth() }, cache: "no-store" });
+  return readJson<InstagramStatus>(res, "인스타 연결 상태를 읽지 못했어요");
 }
 
 /** 제작 기록의 render.youtube */
@@ -32,6 +47,8 @@ export interface YoutubeState {
   url?: string;
   error?: string | null;
   at?: string;
+  /** 어느 캠페인(cmp_…) 영상인지(11/23, 선택). 재무 캠페인 결과의 유튜브 조회수가 이 값으로 영상을 찾는다 */
+  campaign_id?: string | null;
 }
 
 export interface YoutubeDraftEdits {
@@ -41,6 +58,8 @@ export interface YoutubeDraftEdits {
   tags?: string[];
   privacy?: YoutubePrivacy;
   part?: "video" | "final_video";
+  /** ""면 캠페인 연결을 푼다. 올린 뒤에도 바꿀 수 있다 */
+  campaign_id?: string;
 }
 
 const BASE = "/api/dashboard/marketing";
