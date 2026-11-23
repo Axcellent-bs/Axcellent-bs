@@ -135,6 +135,19 @@ def _owner(row: dict[str, Any]) -> str:
     return company_scope.scope_id(row.get("company_id"))
 
 
+def _visible_to(row: dict[str, Any], cid: str) -> bool:
+    """회사 관리자에게 보이는 키 줄: 그 회사가 연결한(또는 연결했던) 키만.
+
+    아직 아무 회사도 연결하지 않은 키(`company_id`·회사 정보 없음, 상태 issued)는 운영자만 본다.
+    운영팀이 누비용으로 발급해 둔 키의 메모·가린 키가 캣북스 관리자 목록에 뜨지 않게 한다.
+    회사별 전의 옛 줄(`company_id` 없음)은 연결했거나 회사 정보가 남은 것만 캣북스 것으로 본다.
+    """
+    if row.get("company_id"):
+        return _owner(row) == cid
+    used = row.get("status") != "issued" or bool(row.get("company"))
+    return used and cid == company_scope.CATBOOKS
+
+
 def _sees_all(authorization: str | None) -> bool:
     """키 줄을 전부 보는 사람: 공용 토큰(예전 그대로)·운영자 세션. 그 밖은 자기 회사 키 줄만."""
     token = human_auth.bearer(authorization)
@@ -165,7 +178,7 @@ def _state(data: dict[str, Any] | None = None, *, everyone: bool = True) -> dict
     cid = _cid()
     company = _record(data, cid)
     by_id = {k["id"]: k for k in data["keys"]}
-    listed = data["keys"] if everyone else [k for k in data["keys"] if _owner(k) == cid]
+    listed = data["keys"] if everyone else [k for k in data["keys"] if _visible_to(k, cid)]
     rows = [
         {
             "id": k["id"],

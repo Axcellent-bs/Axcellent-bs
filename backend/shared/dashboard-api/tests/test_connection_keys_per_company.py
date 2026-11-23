@@ -225,3 +225,27 @@ def test_old_file_without_company_ids_is_catbooks(client, people, root) -> None:
         BASE + "/connect", json={"key": "AXC-AAAA-BBBB-CCCC", **NUBI}, headers=people["nubi"]
     )
     assert res.status_code == 422 and res.json()["error"]["code"] == "KEY_IN_USE"
+
+
+def test_unconnected_key_is_seen_only_by_the_operator(client, people) -> None:
+    """누비용으로 발급만 해 둔 키(아직 아무도 연결 안 함)는 운영자만 본다(#1645 사후 리뷰 1)."""
+    _cat_connected(client, people)
+    nubi_key = _issue(client, people, "누비 IT")
+    cat = _get(client, people["cat"])
+    assert [r["memo"] for r in cat["keys"]] == ["캣북스 IT"]  # 누비용 메모·가린 키는 안 보임
+    assert "누비 IT" not in json.dumps(cat, ensure_ascii=False)
+    assert _get(client, people["nubi"])["keys"] == []  # 연결 전이라 누비 관리자도 아직 안 봄
+    assert {r["memo"] for r in _get(client, people["op"])["keys"]} == {"캣북스 IT", "누비 IT"}
+    # 누비가 연결하면 누비에게만 보인다
+    client.post(BASE + "/connect", json={"key": nubi_key["key"], **NUBI}, headers=people["nubi"])
+    assert [r["memo"] for r in _get(client, people["nubi"])["keys"]] == ["누비 IT"]
+    assert [r["memo"] for r in _get(client, people["cat"])["keys"]] == ["캣북스 IT"]
+
+
+def test_catbooks_still_sees_its_own_key_after_disconnecting(client, people) -> None:
+    """끊은 키는 회사 칸이 남아 그 회사에 계속 보인다(다시 연결할 때 미리 채움과 같은 이유)."""
+    _cat_connected(client, people)
+    client.post(BASE + "/disconnect", headers=people["cat"])
+    rows = _get(client, people["cat"])["keys"]
+    assert [(r["memo"], r["status"]) for r in rows] == [("캣북스 IT", "issued")]
+    assert _get(client, people["nubi"])["keys"] == []

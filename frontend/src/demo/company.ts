@@ -116,7 +116,11 @@ export const refreshServerCompany = refreshCompany
 try { void refreshCompany() } catch { loaded = true /* fetch가 없는 환경 */ }
 // 로그인·로그아웃하면 그 사람 토큰으로 다시 읽는다. 아직 회사를 모르면 다 읽을 때까지 Guarded가 기다린다
 onSessionChange(() => {
-  if (getSession() && !getCompany()) { loaded = false; notify() }
+  // 사람이 바뀌면 새 응답 전에 지난 사람의 회사·키 줄을 바로 비운다(다른 회사 정보가 잠깐 보이지 않게).
+  // 로그인 중이면 공개 정보(늘 캣북스)로도 채우지 않고 다 읽을 때까지 Guarded가 기다린다
+  company = null; keys = []; keysRead = Boolean(getSession())
+  if (getSession()) { loaded = false }
+  notify()
   try { void refreshCompany() } catch { loaded = true; notify() }
 })
 
