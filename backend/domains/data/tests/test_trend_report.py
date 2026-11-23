@@ -444,7 +444,8 @@ def test_recommendation_keeps_only_valid_ids_and_digit_free_lines(tmp_path: Path
         {"kind": "scene", "text": "틀린 종류", "evidence": [good]},
     ]})  # fmt: skip
     section, calls, limits = asyncio.run(tr.recommendation_section(report, llm))
-    assert calls == 1
+    # 11/23: 결론이 버려지면 결론만 한 번 다시 묻는다(가짜 LLM은 같은 답이라 다시 버린다)
+    assert calls == 2 and [c[0] for c in llm.calls] == ["_Recommendation", "_Conclusion"]
     assert section.conclusion is None  # 숫자 든 결론은 버림
     assert [m.kind for m in section.materials] == ["hashtag"]
     assert section.materials[0].evidence == [catalog[good][0]]  # 근거 문장은 코드가 붙임
