@@ -36,6 +36,20 @@ class DraftNoticeInput(AxModel):
     valid_to: UtcDatetime | None = None
 
 
+TextSource = Literal["ai", "template"]
+
+
+class NoticeTextCheck(AxModel):
+    """AI 문안 검증 결과(코드 규칙). 통과하지 못하면 고정 템플릿 문구를 쓴다.
+
+    `reasons`는 실패 이유 코드다(`too_long`, `number_not_in_facts` 등). `llm_unavailable`이면
+    LLM이 없거나 답을 받지 못해 검증할 문안이 없었다는 뜻이다.
+    """
+
+    passed: bool
+    reasons: list[str] = Field(default_factory=list)
+
+
 class NoticeDraft(AxModel):
     draft_id: str
     kind: NoticeKind
@@ -45,6 +59,11 @@ class NoticeDraft(AxModel):
     promises: list[Promise]
     valid_from: UtcDatetime | None = None
     valid_to: UtcDatetime | None = None
+    # 문안 출처: LLM이 쓰고 검증을 통과했으면 "ai", 아니면 고정 템플릿 "template"
+    source: TextSource = "template"
+    text_check: NoticeTextCheck | None = None
+    # 같은 사실이면 같은 값인 고정 템플릿 문구. 같은 문구의 배너를 같이 쓸 때 기준으로 쓴다
+    template_text: str | None = None
 
 
 class PublishNoticeInput(AxModel):
@@ -90,6 +109,8 @@ class NoticeView(AxModel):
     context_id: str | None = None  # 게시한 사건(`ctx_inc_`). 같은 사건의 공지를 가려내는 데 쓴다
     published_at: UtcDatetime | None = None  # 게시한 시각(UTC)
     unknown_reason: str | None = None
+    source: TextSource | None = None  # 문안 출처("ai"·"template")
+    text_check: NoticeTextCheck | None = None
 
 
 class ListActiveNoticesInput(AxModel):
