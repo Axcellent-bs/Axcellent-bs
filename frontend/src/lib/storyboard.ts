@@ -15,6 +15,12 @@ export interface StoryboardShot {
   composition_ko: string;
   has_character: boolean;
   prompt_en: string;
+  /** 대본을 따라 만든 칸이면 그 장면의 시간·말하는 사람·대사·자막(11/23). 옛 기록은 없다 */
+  start_s?: number | null;
+  end_s?: number | null;
+  speaker_ko?: string;
+  line_ko?: string;
+  caption_ko?: string;
 }
 
 export interface StoryboardResult {
@@ -27,6 +33,9 @@ export interface StoryboardResult {
   sheet_prompt_en: string;
   negative_prompt_en: string;
   record_id?: string | null; // 붙인 제작 기록 번호
+  /** 기록의 대본 장면을 칸으로 썼는지, 대본의 끝 CTA(11/23) */
+  script_used?: boolean;
+  cta_ko?: string;
 }
 
 export const SHOT_COUNTS = [6, 9, 12] as const;

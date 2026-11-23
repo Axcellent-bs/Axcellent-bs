@@ -67,6 +67,12 @@ class StoryboardShot(AxModel):
     composition_ko: str = Field(min_length=1, max_length=200)  # 화면 안 배치 (어디에 무엇)
     has_character: bool  # 캐릭터가 화면에 나오는지 (풍경·물건만인 칸은 false)
     prompt_en: str = Field(min_length=1, max_length=1500)
+    # 대본을 따라 만든 칸이면(11/23, 추가) 그 장면의 시간·대사·자막. 대본 없이 만든 칸은 비어 있다
+    start_s: float | None = None
+    end_s: float | None = None
+    speaker_ko: str = Field(default="", max_length=40)
+    line_ko: str = Field(default="", max_length=200)
+    caption_ko: str = Field(default="", max_length=60)
 
 
 class StoryboardPromptOutput(AxModel):
@@ -79,3 +85,5 @@ class StoryboardPromptOutput(AxModel):
     sheet_prompt_en: str = Field(min_length=1, max_length=12000)  # 한 장짜리 스토리보드 시트
     negative_prompt_en: str = Field(min_length=1, max_length=1000)
     record_id: str | None = None  # 붙인 제작 기록 번호. 붙이지 않았으면 None
+    script_used: bool = False  # 기록의 대본 장면을 칸으로 썼는지(11/23, 추가)
+    cta_ko: str = Field(default="", max_length=120)  # 대본의 끝 CTA(대본이 없으면 빈 칸)

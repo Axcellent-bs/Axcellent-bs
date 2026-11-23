@@ -1,8 +1,10 @@
 import type { StoryboardResult, StoryboardShot } from "@/lib/storyboard";
+import { spanLabel } from "@/lib/creativeScript";
 import { CopyButton, PromptBox } from "./PromptParts";
 
 // 마케팅 › SNS·미디어 › 스토리보드 결과 보기 (CharacterSheetMaker가 만든 결과를 그린다).
 // 칸마다 번호·샷 크기·카메라 앵글·장면·화면 배치와 구도 그림을 보여 주고, 칸별·시트 한 장 프롬프트를 복사하게 한다.
+// 대본을 따라 만든 스토리보드(script_used)면 칸마다 대본 장면의 시간·대사·자막도 보인다(11/23).
 
 const HORIZON: Record<string, number> = { eye_level: 52, low: 72, high: 26, ground: 82, dutch: 52, birds_eye: -10 };
 
@@ -81,6 +83,13 @@ function ShotCard({ shot }: { shot: StoryboardShot }) {
         </div>
         <p className="text-sm text-ink-900">{shot.scene_ko}</p>
         <p className="text-xs text-ink-500">{shot.composition_ko}</p>
+        {shot.start_s != null && shot.end_s != null && (
+          <div className="space-y-1 rounded-lg bg-ink-50 p-2 text-xs text-ink-700">
+            <span className="tabular-nums text-ink-500">대본 {spanLabel({ start_s: shot.start_s, end_s: shot.end_s })}</span>
+            {shot.line_ko && <p><span className="text-ink-500">{shot.speaker_ko || "내레이션"}:</span> “{shot.line_ko}”</p>}
+            {shot.caption_ko && <p><span className="text-ink-500">자막</span> {shot.caption_ko}</p>}
+          </div>
+        )}
         <details className="text-xs">
           <summary className="cursor-pointer text-ink-500">이 칸 프롬프트</summary>
           <div className="mt-2 space-y-1">
@@ -98,7 +107,8 @@ export function StoryboardView({ r }: { r: StoryboardResult }) {
     <div className="space-y-5">
       <div>
         <p className="text-base font-semibold text-ink-900">{r.title_ko}</p>
-        <p className="text-sm text-ink-500">{r.logline_ko}{r.character_used ? " · 이미지 시트 캐릭터 사용" : ""}</p>
+        <p className="text-sm text-ink-500">{r.logline_ko}{r.character_used ? " · 이미지 시트 캐릭터 사용" : ""}{r.script_used ? " · 대본 장면을 따름" : ""}</p>
+        {r.cta_ko && <p className="text-xs text-ink-500">끝 문장(CTA): {r.cta_ko}</p>}
       </div>
       <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="스토리보드 칸">
         {r.shots.map((s) => <ShotCard key={s.no} shot={s} />)}
