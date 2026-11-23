@@ -58,6 +58,7 @@ from ax_contracts.schemas.data import (
     TrendSearchSection,
 )
 from data_agent import instagram_store as st
+from data_agent import number_words as nw
 from data_agent.skills import caption_noise
 from data_agent.skills import trend_report_brief as tb
 
@@ -937,6 +938,45 @@ def check_material(text: str) -> tuple[str | None, str | None]:
 Recommended = tuple[TrendRecommendationSection, int, list[str]]
 
 
+class _Conclusion(BaseModel):
+    """결론만 다시 물을 때 (11/23)."""
+
+    conclusion: str = ""
+
+
+# 결론이 버려졌을 때 한 번만 다시 묻는다: 숫자 없이 다시 써라 + 버린 이유
+_RETRY_TEXT = (
+    "\n- 앞서 준 결론 한 줄은 버렸다 (이유: {why}). conclusion 한 줄만 숫자(0~9) 없이 다시 써라."
+    " 나이대·길이도 말로 쓴다(예: 이십대, 삼십 초)"
+)
+CONCLUSION_MAX = 120
+
+
+def brief_words(brief: TrendReportBrief) -> dict[str, str]:
+    """프롬프트 데이터의 의뢰 칸. 나이대·길이 숫자는 말로 (LLM이 숫자를 따라 쓰지 않게)."""
+    gender = tb.GENDER_WORD[brief.target_gender] if brief.target_gender else None
+    return {
+        "의뢰_제품": brief.product or "모름",
+        "의뢰_타깃": nw.target_words(gender, brief.target_ages),
+        "의뢰_형식": nw.seconds_to_words(brief.format) or "모름",
+    }
+
+
+def check_conclusion(text: str, brief: TrendReportBrief) -> tuple[str | None, str | None]:
+    """(결론, 버린 이유). 그 의뢰의 나이대·초 표현만 허용하고 그 밖의 숫자는 버린다."""
+    from data_agent.skills.trend_memes import check_line
+
+    seconds = nw.seconds_in(" ".join([brief.format or "", *(brief.format_parts or [])]))
+    stripped = nw.strip_brief_numbers(text, brief.target_ages, seconds)
+    ok, why = check_line(stripped)
+    if ok is None:
+        return None, why
+    line = " ".join(text.split())
+    if len(line) > CONCLUSION_MAX:
+        return None, "설명이 너무 길어 버림"
+    return line, None
+
+
 async def recommendation_section(report: TrendReport, llm: Any, *,
                                  context_id: str | None = None) -> Recommended:  # fmt: skip
     """(섹션, LLM 호출 수, 한계 문장). 근거가 하나도 없으면 LLM을 부르지 않는다."""
@@ -944,7 +984,6 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
 
     from ax_agent_template.llm import LLMFormatError, LLMNotConfiguredError
     from data_agent.llm_budget import no_llm
-    from data_agent.skills.trend_memes import check_line
 
     out = TrendRecommendationSection(status="running", music_note=MUSIC_NOTE)
     catalog = evidence_catalog(report)
@@ -952,8 +991,7 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
         out.status, out.reason = "unknown", "섹션 1~4에 근거가 없어 추천을 만들지 않음"
         return out, 0, []
     brief = report.brief
-    data = {"의뢰_제품": brief.product or "모름", "의뢰_타깃": tb.target_word(brief),
-            "의뢰_형식": brief.format or "모름"}  # fmt: skip
+    data = brief_words(brief)  # 11/23: 나이대·길이 숫자는 말로 (TR-0A49)
     if brief.theme:  # 11/20: 결론이 의뢰 주제를 다루게
         data["의뢰_주제"] = brief.theme
     data.update({f"근거_{k}": word for k, (_, word, _) in catalog.items()})
@@ -970,11 +1008,25 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
         out.status, out.reason = "unknown", f"LLM 호출 실패 ({type(error).__name__})"
         return out, 1, []
     limits: list[str] = []
-    out.conclusion, why = check_line(answer.conclusion)
+    calls = 1
+    out.conclusion, why = check_conclusion(answer.conclusion, brief)
     out.materials, dropped, partial = pick_materials(answer.materials, catalog)
     limits += partial
     if dropped:
         limits.append("버린 재료: " + "; ".join(dropped))
+    if out.conclusion is None:  # 11/23: 결론만 한 번 다시 묻는다 (하루 상한을 거치는 호출 1번)
+        calls += 1
+        first = why
+        try:
+            again = await llm.structured(_PROMPT + _RETRY_TEXT.format(why=why), _Conclusion,
+                                         untrusted=data, context_id=context_id)  # fmt: skip
+            out.conclusion, why = check_conclusion(again.conclusion, brief)
+        except LLMNotConfiguredError as error:
+            why = f"{first}; 다시 묻지 못함 ({no_llm(error)})"
+        except Exception as error:  # noqa: BLE001 - 형식 오류·호출 실패: 첫 이유 그대로
+            why = f"{first}; 다시 묻기 실패 ({type(error).__name__})"
+        if out.conclusion is not None:
+            limits.append(f"결론을 숫자 없이 다시 받음 (처음 답: {first})")
     if out.conclusion is None:
         limits.append(f"결론 한 줄을 버림 ({why})")
     # 11/23: 추천은 결론 한 줄과 재료 하나 이상이 있어야 known (예전에는 결론 또는 콘티)
@@ -984,7 +1036,7 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
         out.status, out.reason = "unknown", why or "쓸 수 있는 결론이 없음"
     else:
         out.status, out.reason = "unknown", "근거가 있는 재료가 하나도 없음"
-    return out, 1, limits
+    return out, calls, limits
 
 
 def pick_materials(
