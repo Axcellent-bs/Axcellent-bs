@@ -136,3 +136,12 @@ hr 연동 항목 규칙 (`domain/handover.py`, 시연값):
 - 연결이 없으면 요청을 실패시키지 않고 200 + `error` 메시지("연결된 레포가 없어…")와 `status: blocked`를 준다. 연결을 붙인 뒤 다시 보내면 이어 간다. LLM 오류·시간 초과(60초)도 `error` 메시지 한 줄(예외 종류만, 내용·비밀 값 없음).
 - 오류: 409 `LLM_NOT_CONFIGURED`(가장 먼저 본다, 아무것도 안 적음) · 400 `INVALID_INPUT`(형식, 모르는 연결) · 404 `NOT_FOUND`(대화 없음) · 403 `FORBIDDEN`(남의 대화) · 409 `THREAD_BUSY`(답하는 중) · 409 `THREAD_CLOSED`(끝낸 대화) · 409 `WRONG_ROLE`(planning 서비스) · 409 `GATE_REJECTED`.
 - 메시지 하나를 적을 때마다 관문 `dev_chat`(A, 대상 `chat-1:m2`, 사건 `ctx_chat_1`). LLM은 `coder`와 같은 설정, 테스트는 `dev_chat.set_llm()`(`tests/test_dev_chat.py`, 답까지 기다리려면 `set_background(False)`, 뒤에서 답하기·끝내기·A2A는 `tests/test_dev_chat_direct.py`).
+
+## 코딩 에이전트 LLM 키 (회사 AI 키, 2026-11-23)
+
+- 코딩 에이전트는 **회사 AI 키를 먼저** 쓴다. 관리자가 시스템 관리 › 회사 연결 › 공통 AI 도구 연결에서 넣은 키다(키 저장소 tenant=지금 회사, 코딩 "따로 설정"이면 `DEV_CODER_LLM_API_KEY`, 아니면 `LLM_API_KEY`). 읽기: `ax_agent_template.company_ai`
+- 회사 키가 없으면 예전 고객사 키 파일(`DEV_LLM_KEY_STORE`), 그것도 없으면 서버 설정(`DEV_LLM_*`·`LLM_*`)과 체험 한도
+- 키 저장소가 db 모드면 예전 파일에 새로 넣지 않는다(`POST /coding-settings/company-key` → 409 `MOVED_TO_COMPANY_AI`)
+- 예전 파일 옮기기(한 번, 서버에서): `uv run python -m dev_agent.migrate_llm_key --dry-run` → `uv run python -m dev_agent.migrate_llm_key`
+  - 코딩 따로 키로 넣고 코딩 설정을 "따로 설정"(예전 주소·모델)으로, 예전 파일은 `.moved`
+  - 결과 코드만 출력(값 없음): `imported` · `same_as_company` · `conflict`(다른 코딩 키가 이미 있음, 아무것도 안 바꿈) · `no_legacy_file` · `secret_store_not_db` · `no_company`

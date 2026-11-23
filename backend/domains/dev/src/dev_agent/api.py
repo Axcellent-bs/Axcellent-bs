@@ -793,6 +793,12 @@ def add_settings_routes(router: APIRouter, get_service: Callable[[], Any]) -> No
 
         키를 비우면 이전 키를 그대로 두고 주소·모델만 바꾼다. 응답에는 끝 4자리만 준다."""
         svc = get_service()
+        if not llm_key.legacy_writes_allowed():
+            return _err(
+                409,
+                "MOVED_TO_COMPANY_AI",
+                "코딩 키는 시스템 관리 › 회사 연결 › 공통 AI 도구 연결에서 넣어요",
+            )
         body = await _body(request)
         if body is None:
             return _err(400, "INVALID_INPUT", "본문은 JSON 객체여야 한다")

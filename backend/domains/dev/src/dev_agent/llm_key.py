@@ -6,6 +6,15 @@
   `PLANNING_LLM_KEY_STORE`도 읽음. run_all.sh가 git에 안 올라가는 backend/.data/에
   둔다)에만 둔다. 화면·로그·상태 파일(planning_state)로는 돌려주지 않는다 (넣었는지와 끝 4자리만).
 - 주소·모델을 비우면 서버 설정(`DEV_LLM_*`·`LLM_*`)의 주소·모델을 쓴다.
+
+회사 AI 키로 옮김(2026-11-23, 회사 공간 나누기 7단계 "회사별 LLM 키"):
+- 먼저 회사 AI 키를 본다. 관리자가 회사 연결 › 공통 AI 도구 연결에 넣은 키다
+  (키 저장소 tenant=지금 회사. 코딩 에이전트 "따로 설정"이면 `DEV_CODER_LLM_API_KEY`,
+  아니면 회사 키 `LLM_API_KEY`). 읽기는 `ax_agent_template.company_ai`
+- 회사 키가 없을 때만 위의 예전 파일 키(BYOK)를 쓴다. 예전 파일은
+  `python -m dev_agent.migrate_llm_key`로 회사 AI 키(코딩 따로 키)로 옮기고 `.moved`로 남긴다
+- 키 저장소가 db 모드면 예전 파일에 새로 넣지 않는다(`legacy_writes_allowed`).
+  넣는 곳은 공통 AI 도구 연결
 """
 
 from __future__ import annotations
@@ -14,6 +23,7 @@ import json
 import os
 from dataclasses import asdict, dataclass, field, replace
 
+from ax_agent_template import company_ai
 from ax_agent_template.llm import LLMSettings
 from dev_agent import llm_env
 
@@ -102,12 +112,32 @@ def clear() -> None:
     _save()
 
 
+def legacy_writes_allowed() -> bool:
+    """예전 파일 키(BYOK)에 새로 넣어도 되나. 키 저장소가 db 모드면 공통 AI 도구 연결에서 넣는다."""
+    from ax_secret_store import is_db_mode
+
+    return not is_db_mode()
+
+
+def _company() -> company_ai.CompanyLlm | None:
+    return company_ai.coder_llm()
+
+
 def active() -> bool:
-    return _key is not None
+    """서버 기본 키가 아닌 고객사 키(회사 AI 키 또는 예전 파일 키)로 도나."""
+    return _company() is not None or _key is not None
 
 
 def apply(base: LLMSettings) -> LLMSettings:
-    """서버 설정 위에 고객사 키(와 주소·모델)를 얹는다. 고객사 키가 없으면 그대로."""
+    """서버 설정 위에 고객사 키(와 주소·모델)를 얹는다. 회사 AI 키 → 예전 파일 키 → 그대로."""
+    company = _company()
+    if company is not None:
+        return replace(
+            base,
+            api_key=company.api_key,
+            base_url=company.base_url or base.base_url,
+            model=company.model or base.model,
+        )
     if _key is None:
         return base
     return replace(
@@ -119,7 +149,16 @@ def apply(base: LLMSettings) -> LLMSettings:
 
 
 def public() -> dict:
-    """화면에 보여 줄 모양 (키 값은 넣지 않는다)."""
+    """화면에 보여 줄 모양 (키 값은 넣지 않는다). 회사 AI 키면 `source`: company·coder."""
+    company = _company()
+    if company is not None:
+        return {
+            "key_set": True,
+            "key_hint": _hint(company.api_key),
+            "base_url": company.base_url,
+            "model": company.model,
+            "source": company.source,
+        }
     if _key is None:
         return {"key_set": False, "key_hint": "", "base_url": "", "model": ""}
     return {
