@@ -161,6 +161,14 @@ def client(root: Path, sites: Sites) -> Iterator[TestClient]:
         ("/site-adapter/NUBI/api/shop/orders", None),  # 회사 ID 형식이 아님
         ("/site-adapter/nubi/other", None),
         ("/api/dashboard/site-adapter", None),
+        # 예약 이름은 회사 ID가 아니다 (#1634 리뷰 권장)
+        ("/site-adapter/api/health", None),
+        ("/site-adapter/health/api/shop/x", None),
+        # 경로 넘기기·개행·한 글자는 회사 ID로 읽지 않는다 (ASGI 경로는 `%2e%2e`를 `..`로 풀어 준다)
+        ("/site-adapter/../api/shop/orders", None),
+        ("/site-adapter/%2e%2e/api/shop/orders", None),
+        ("/site-adapter/nubi\n/api/shop/orders", None),
+        ("/site-adapter/n/api/shop/orders", None),
     ],
 )
 def test_adapter_company_reads_the_path(path: str, expected: Any) -> None:
@@ -465,3 +473,163 @@ def test_refund_route_with_other_company_record_is_refused(
     assert res.status_code == 403 and res.json()["error"]["code"] == "GATE_NOT_PASSED"
     assert handoffs.get_store().list("nubi") == []
     handoffs.reset_store()
+
+
+# ---- #1634 리뷰 반영 (재헌 님 11/23 16:25) ----
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("install", [None, "shop-demo", "catbooks"])
+@pytest.mark.parametrize("recorded", ["shop-demo", "catbooks"])
+async def test_gate_reads_catbooks_alias_as_the_same_company(
+    safety_records: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    install: str | None,
+    recorded: str,
+) -> None:
+    """리뷰 3: 캣북스 AI가 정식 ID(`catbooks`)로 보내도, 옛 별칭(`shop-demo`)으로 보내도
+    `/site-adapter`(캣북스) 게이트를 지난다. 설치 값 `TENANT_ID`가 무엇이든 같다."""
+    if install is not None:
+        monkeypatch.setenv("TENANT_ID", install)
+    safety_records.append(_record(recorded))
+    assert await _confirm() == "exe_1"
+    with company_scope.using("nubi"), pytest.raises(ApiError) as caught:
+        await _confirm()  # 누비 경로로는 캣북스 기록(어느 이름이든)을 받지 않는다
+    assert caught.value.status_code == 403
+
+
+def test_gate_same_company_rules() -> None:
+    assert gate_check.same_company("shop-demo", "catbooks")
+    assert gate_check.same_company("catbooks", "shop-demo")
+    assert gate_check.same_company("nubi", "nubi")
+    assert not gate_check.same_company("nubi", "catbooks")
+    assert not gate_check.same_company(None, "catbooks")  # 형식이 틀린 값은 어느 회사도 아님
+    assert not gate_check.same_company("NUBI", "nubi")
+
+
+def test_refund_route_on_catbooks_path_takes_the_canonical_id(
+    client: TestClient, safety_records: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """리뷰 3 경로 시험: 캣북스 기록이 `catbooks`여도 `/site-adapter` 환불이 게이트 403이 아니다."""
+    handoffs.reset_store()
+    monkeypatch.setenv("TENANT_ID", "shop-demo")
+    _connect("catbooks", CAT_SITE, CAT_KEY)
+    for recorded in ("shop-demo", "catbooks"):
+        safety_records.clear()
+        safety_records.append(_record(recorded))
+        res = client.post(
+            "/site-adapter/api/shop/payments/pay_1/refund",
+            json={"refund_amount": 1000, "idempotency_key": KEY, "context_id": "ctx_n"},
+            headers={"authorization": "Bearer sup-tok"},
+        )
+        assert res.status_code != 403, res.text
+        assert res.json().get("error", {}).get("code") != "GATE_NOT_PASSED"
+    handoffs.reset_store()
+
+
+@pytest.fixture
+def tenant_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """회사 설정 폴더 셋(캣북스·누비·스터디온)."""
+    folder = tmp_path / "tenants"
+    for cid in ("catbooks", "nubi", "studyon"):
+        (folder / cid).mkdir(parents=True)
+        (folder / cid / tenants.TENANT_FILE).write_text(f'name = "{cid}"\n', encoding="utf-8")
+    monkeypatch.setenv(tenants.TENANTS_DIR_ENV, str(folder))
+    return folder
+
+
+@pytest.mark.parametrize("other", ["catbooks", "studyon", "shop-demo"])
+def test_other_company_admin_cannot_pick_another_company_tenant(
+    client: TestClient,
+    people: dict[str, dict[str, str]],
+    nubi: Any,
+    tenant_dirs: Path,
+    other: str,
+) -> None:
+    """리뷰 2: 캣북스가 아닌 세션은 자기 회사 설정만 고른다. 남의 것이면 422, 저장도 안 한다."""
+    if other == "shop-demo":
+        (tenant_dirs / other).mkdir()
+        (tenant_dirs / other / tenants.TENANT_FILE).write_text('name = "x"\n', encoding="utf-8")
+    body = {"base_url": NUBI_SITE, "token": NUBI_KEY, "mapping": _mapping(nubi), "tenant": other}
+    res = client.post(SCREEN + "/save", json=body, headers=people["nubi"])
+    assert res.status_code == 422 and res.json()["error"]["code"] == "TENANT_NOT_OWN", res.text
+    res = client.put(CONN, json={"url": NUBI_SITE, "tenant": other}, headers=people["nubi"])
+    assert res.status_code == 422 and res.json()["error"]["code"] == "TENANT_NOT_OWN", res.text
+    assert cc.read_connection("nubi") is None
+
+
+def test_other_company_admin_can_pick_its_own_tenant(
+    client: TestClient, people: dict[str, dict[str, str]], nubi: Any, tenant_dirs: Path
+) -> None:
+    body = {"base_url": NUBI_SITE, "token": NUBI_KEY, "mapping": _mapping(nubi), "tenant": "nubi"}
+    res = client.post(SCREEN + "/save", json=body, headers=people["nubi"])
+    assert res.status_code == 200, res.text
+    saved = cc.read_connection("nubi")
+    assert saved is not None and saved.tenant == "nubi"
+
+
+def test_catbooks_admin_keeps_choosing_tenants(
+    client: TestClient, people: dict[str, dict[str, str]], nubi: Any, tenant_dirs: Path
+) -> None:
+    """캣북스(설치 주인)는 예전처럼 설정 폴더가 있는 회사를 고를 수 있다. 없는 폴더는 422."""
+    body = {"base_url": CAT_SITE, "token": CAT_KEY, "mapping": _mapping(nubi), "tenant": "nubi"}
+    res = client.post(SCREEN + "/save", json=body, headers=people["cat"])
+    assert res.status_code == 200, res.text
+    body["tenant"] = "nowhere"
+    res = client.post(SCREEN + "/save", json=body, headers=people["cat"])
+    assert res.status_code == 422 and res.json()["error"]["code"] == "UNKNOWN_TENANT"
+
+
+def test_one_company_does_not_see_another_company_key_mapping_or_history(
+    client: TestClient, people: dict[str, dict[str, str]], nubi: Any
+) -> None:
+    """권장: 누비 관리자는 캣북스의 키 저장 여부·짝·연결·이력을 보지 않는다."""
+    body = {"base_url": CAT_SITE, "token": CAT_KEY, "mapping": _mapping(nubi)}
+    assert client.post(SCREEN + "/save", json=body, headers=people["cat"]).status_code == 200
+    cat = client.get(SCREEN, headers=people["cat"]).json()["data"]
+    assert cat["token_saved"] is True and cat["mapping"] is not None
+    mine = client.get(SCREEN, headers=people["nubi"]).json()["data"]
+    assert mine["token_saved"] is False
+    assert mine["mapping"] is None and mine["connection"] is None
+    state = client.get(CONN, headers=people["nubi"]).json()["data"]
+    assert state["history"] == [] and state["connection"] is None
+    assert CAT_SITE not in json.dumps(state) and CAT_SITE not in json.dumps(mine)
+
+
+def test_saved_key_file_is_owner_only_from_the_start(root: Path) -> None:
+    """권장: 변환기 키 파일은 처음부터 0600 (POSIX에서만 권한 비트를 본다)."""
+    import os
+    import stat
+
+    with company_scope.using("nubi"):
+        up.save_token(NUBI_KEY)
+        path = m.adapter_dir() / up.TOKEN_FILE
+    assert path.read_text(encoding="utf-8") == NUBI_KEY
+    assert not path.with_suffix(".tmp").exists()
+    if os.name == "posix":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_shop_relay_follows_the_session_company(
+    client: TestClient, people: dict[str, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """권장: 판매 서버 중계(`shop_relay`)도 세션 회사의 연결 주소로 간다. 공용 토큰은 캣북스."""
+    from ax_dashboard_api import shop_relay
+
+    _connect("catbooks", CAT_SITE, CAT_KEY)
+    _connect("nubi", NUBI_SITE, NUBI_KEY)
+    monkeypatch.setenv(shop_relay.VIEWER_TOKEN_ENV, "v" * shop_relay.VIEWER_TOKEN_MIN_LENGTH)
+    asked: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        asked.append(str(request.url))
+        return httpx.Response(200, json={"data": []})
+
+    monkeypatch.setattr(shop_relay, "TRANSPORT", httpx.MockTransport(handle))
+    for headers in (people["nubi"], people["cat"], {}):
+        assert client.get("/api/dashboard/shop/banners", headers=headers).status_code == 200
+    assert asked == [
+        "http://dash:8020/site-adapter/nubi/api/shop/banners",
+        "http://dash:8020/site-adapter/api/shop/banners",
+        "http://dash:8020/site-adapter/api/shop/banners",
+    ]

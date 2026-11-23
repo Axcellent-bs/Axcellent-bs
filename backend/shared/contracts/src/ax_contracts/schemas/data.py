@@ -2752,6 +2752,9 @@ class LlmStatus(AxModel):
     # 메시지 앞 200자 (키·토큰 모양은 가림)
     request: str | None = None
     error_message: str | None = Field(default=None, max_length=200)
+    # 여러 회사 6+ (11/23, 추가만): 쓰는 키 종류. company면 key_source가
+    # "<회사> 회사 키(…끝4자리)"(값 아님). 예전 응답은 없다
+    key_kind: Literal["company", "server", "none"] | None = None
 
 
 class LlmTaskUsage(AxModel):

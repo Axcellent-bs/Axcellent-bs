@@ -96,8 +96,11 @@ def save_token(token: str) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / TOKEN_FILE
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(token, encoding="utf-8")
-    os.chmod(tmp, 0o600)
+    # 처음부터 주인만 읽게 만든다(쓰고 나서 chmod하면 그 사이 다른 사용자가 읽을 틈이 있다)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(token)
+    os.chmod(tmp, 0o600)  # 남아 있던 tmp(다른 권한)를 덮어쓴 경우
     os.replace(tmp, path)
 
 

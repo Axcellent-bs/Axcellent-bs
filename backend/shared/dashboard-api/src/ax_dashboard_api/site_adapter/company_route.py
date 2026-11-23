@@ -29,6 +29,8 @@ from ax_agent_template.companies import canonical_company_id
 from ax_dashboard_api.envelope import session_company
 
 ADAPTER_PREFIX = "/site-adapter"
+# `/site-adapter/` 바로 뒤에 와도 회사 ID가 아닌 이름 (예전 캣북스 경로 `api/...`·`health`)
+RESERVED_SEGMENTS = frozenset({"api", "health"})
 SCREEN_PREFIXES = (
     "/api/dashboard/company-connection",
     "/api/dashboard/site-adapter",
@@ -49,6 +51,8 @@ def adapter_company(path: str) -> tuple[str, str] | None:
     if not path.startswith(ADAPTER_PREFIX + "/"):
         return None
     segment, _, rest = path[len(ADAPTER_PREFIX) + 1 :].partition("/")
+    if segment in RESERVED_SEGMENTS:
+        return None  # 예전 캣북스 주소의 자리 이름은 회사 ID로 읽지 않는다
     if not (rest == "health" or rest.startswith("api/")):
         return None
     cid = canonical_company_id(segment)

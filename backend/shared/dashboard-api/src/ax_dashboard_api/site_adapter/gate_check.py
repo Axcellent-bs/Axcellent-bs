@@ -6,7 +6,8 @@
 - 요청 본문의 `context_id`로 safety 실행 기록(`GET /api/safety/executions?context_id=`)을 읽고,
   같은 `idempotency_key`·테넌트의 기록을 찾는다. 도메인은 `execute()`와 shop-api 쓰기에 같은 키를
   쓴다(고객지원 `claim_handlers.process_claim_queue`, 마케팅 `handlers.issue_coupon`).
-  테넌트는 경로의 회사로 본다(`request_tenant`): 다른 회사 요청의 기록이면 `tenant_mismatch`로 거절
+  테넌트는 경로의 회사로 본다(`request_tenant`): 다른 회사 요청의 기록이면 `tenant_mismatch`로 거절.
+  비교는 양쪽을 정식 ID로 바꿔서 한다(`same_company`, `shop-demo` = `catbooks`)
   본문에 `execution_id`가 없어 하나를 바로 찾는 경로(`/executions/{execution_id}`)로는 찾지 못한다
 - 통과 조건: 기록의 `action`이 동작에 맞고(`refund_request`·`issue_coupon`), 기록을 낸 서비스가
   보낸 서비스와 같고, `decision.status == "executed"`, 금액이 기록 `params`와 같음
@@ -26,6 +27,7 @@ from typing import Any
 import httpx
 
 from ax_agent_template import company_scope, config
+from ax_agent_template.companies import canonical_company_id
 from ax_contracts.schemas import TENANT_ID_DEFAULT
 from ax_dashboard_api.envelope import ApiError
 
@@ -96,6 +98,16 @@ def request_tenant() -> str:
     return cid
 
 
+def same_company(recorded: Any, tenant: str) -> bool:
+    """기록의 테넌트와 경로의 회사가 같은 회사인지. 별칭(`shop-demo`)은 정식 ID로 바꿔 비교.
+
+    캣북스 AI가 정식 ID로 보내도, 설치 값 `TENANT_ID`가 옛 별칭이어도 같은 회사로 본다.
+    형식이 틀린 값은 어느 회사와도 같지 않다.
+    """
+    left, right = canonical_company_id(recorded), canonical_company_id(tenant)
+    return left is not None and left == right
+
+
 async def _records(context_id: str, action: str, service: str) -> list[Any]:
     try:
         token = config.agent_token(TOKEN_NAME)
@@ -143,7 +155,7 @@ async def confirm(
             request.get("idempotency_key") == idempotency_key
             and request.get("context_id") == context_id
         ):
-            if request.get("tenant_id", TENANT_ID_DEFAULT) == tenant:
+            if same_company(request.get("tenant_id", TENANT_ID_DEFAULT), tenant):
                 found = record  # 테넌트마다 키는 하나다 (safety `by_key`)
             else:
                 other_company = True

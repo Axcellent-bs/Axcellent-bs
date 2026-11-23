@@ -11,6 +11,7 @@ import { messageWidth } from "@/lib/chatView";
 import type { FoldLine } from "@/lib/safetyFold";
 import { quietLogText } from "@/lib/quietLog";
 import { Link } from "@/lib/nav";
+import { clearDividerText } from "@/lib/roomCleanup";
 
 // 메신저형 대화 그리기. 대화 기록(/agents/chat)과 AI 오피스 단톡방이 같이 쓴다.
 // - 남: 왼쪽 흰 말풍선 + 아바타 + 이름. 같은 쪽이 3분 안에 이어 말하면 아바타·이름을 생략한다
@@ -272,6 +273,25 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label, panes = 1 }
 
 /** 답을 쓰는 중인 부서: "개발 AI가 답을 쓰는 중…" */
 /** 대화 칸 맨 아래(입력칸 위) 한 줄: "작업 기록 N줄 접힘" + 실패 칩 + [작업 기록 보기]. 접을 줄이 없으면 그리지 않는다 */
+/** /clear 구분선 (11/23, 시안 ③): "HH:mm · 여기까지 지웠어요 (나만 안 보여요) · 되돌리기". 내 화면에서만 */
+export function ClearDivider({ clearedAt, onUndo }: { clearedAt: string; onUndo: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const undo = () => {
+    setBusy(true);
+    setError(null);
+    onUndo().catch((e: unknown) => setError(e instanceof Error ? e.message : "되돌리지 못했어요")).finally(() => setBusy(false));
+  };
+  return (
+    <div role="separator" aria-label="지운 자리" className="my-2 flex items-center gap-2 text-xs text-ink-500">
+      <span className="h-px flex-1 bg-ink-100" aria-hidden="true" />
+      <span className="break-keep">{clearDividerText(clearedAt)} · <button type="button" className="text-brand-700 underline" disabled={busy} onClick={undo}>되돌리기</button></span>
+      <span className="h-px flex-1 bg-ink-100" aria-hidden="true" />
+      {error && <span role="alert" className="text-red-700">{error}</span>}
+    </div>
+  );
+}
+
 export function WorkLogBar({ logCount, failCount, show, onToggle }: { logCount: number; failCount: number; show: boolean; onToggle: () => void }) {
   if (logCount === 0) return null;
   return (

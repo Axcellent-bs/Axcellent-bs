@@ -62,6 +62,9 @@ export default function AgentOffice() {
   const liveRooms = useMemo(() => [room], [room]);
   const data = useChatRooms({ rooms: liveRooms });
   const { incidents, orchConn, safetyConn, commConn, talk } = data;
+  // 11/23 보고 있던 장애 방을 누가 삭제(모두에게 숨김)하면 전체 대화방으로 간다
+  const roomHidden = data.hiddenIncidentRooms.some((r) => r.id === room);
+  useEffect(() => { if (roomHidden) setRoom(ALL_ROOM); }, [roomHidden]);
   const [retrying, setRetrying] = useState(false);
   const retry = () => {
     setRetrying(true);
@@ -109,7 +112,8 @@ export default function AgentOffice() {
     return v;
   }, [baseView, busyStr]);
   // 단톡방: 고른 방의 대화(기록 + 그 방 사람 대화)
-  const chatItems = useMemo(() => data.items[room] ?? [], [data.items, room]);
+  // 11/23 /clear: 단톡방 칸은 내가 지운 시각 뒤만 그린다(data.shown). 오피스 그림(걷기·불꽃)은 위에서 원래 기록(data.items)으로 그대로
+  const chatItems = useMemo(() => data.shown[room] ?? [], [data.shown, room]);
   // 사람 대화의 처음 본 시각 (기존 seenRef·deriveOffice 입력과 따로). 처음 불러온 지난 대화는 0 = 애니메이션 없음
   const humanSeenRef = useRef(new Map<string, number>());
   const humanSeen = useMemo(() => {
@@ -246,6 +250,9 @@ export default function AgentOffice() {
             inc={roomInc}
             room={room}
             talk={talk}
+            clearedAt={data.clears[room]}
+            onClear={() => data.cleanup.clear(room)}
+            onUndoClear={() => data.cleanup.undoClear(room)}
           />
         )}
     </div>

@@ -5,6 +5,7 @@ import { mergeTalk } from "@/lib/officeTalk";
 import type { CommLine } from "@/lib/types";
 import type { WorkRequestRow } from "@/lib/workRequests";
 import { cardContextsIn } from "@/lib/requestCards";
+import { afterClear, withoutServerHidden } from "@/lib/roomCleanup";
 
 // AI 대화방의 방 목록과 방별 대화. 대화 기록(/agents/chat)과 AI 오피스(/agents/office)가 같이 쓴다.
 // 방은 세 가지다.
@@ -40,6 +41,10 @@ export interface RoomSources {
   talk: ChatItem[];
   /** 고객 의뢰(사람 토큰이 있을 때만). 끝난 의뢰의 뒤 조회 줄을 거르는 데 쓴다 */
   requests?: WorkRequestRow[];
+  /** 11/23 서버가 숨긴(모두에게) 장애·이슈 방. 방 목록에서 뺀다 (lib/roomCleanup.ts) */
+  hidden?: ReadonlySet<string>;
+  /** 11/23 내가 /clear 한 방 → 지운 시각. 그 앞 말풍선은 내 화면·안 읽은 수·미리보기에서 뺀다 */
+  clears?: Readonly<Record<string, string>>;
 }
 
 /** 장애 방 짧은 번호: 사건 번호 앞 4자리 ("#066f") */
@@ -109,21 +114,27 @@ function lastLine(items: ChatItem[]): { preview?: string; lastAt?: string } {
   return {};
 }
 
-/** 전체 대화방 + 장애·이슈 방 (진행 중 먼저). 1:1 방은 화면이 부서 목록으로 따로 붙인다 */
-export function buildRooms(src: RoomSources): { all: ChatRoom; incidents: ChatRoom[]; items: Record<string, ChatItem[]> } {
+/** 전체 대화방 + 장애·이슈 방 (진행 중 먼저). 1:1 방은 화면이 부서 목록으로 따로 붙인다.
+ *  items는 원래 대화(AI 오피스 그림 계산이 그대로 쓴다), shown은 /clear 뒤 내 화면에 보일 대화(대화 칸·안 읽은 수·미리보기).
+ *  서버가 숨긴 장애·이슈 방은 incidents(방 목록)에서 빼고 hiddenIncidents로 따로 준다 */
+export function buildRooms(src: RoomSources): {
+  all: ChatRoom; incidents: ChatRoom[]; hiddenIncidents: ChatRoom[]; items: Record<string, ChatItem[]>; shown: Record<string, ChatItem[]>;
+} {
   const items: Record<string, ChatItem[]> = { [ALL_ROOM]: roomItems(ALL_ROOM, src) };
   for (const inc of src.incidents) items[inc.context_id] = roomItems(inc.context_id, src);
-  const all: ChatRoom = { id: ALL_ROOM, kind: "all", title: ALL_ROOM_TITLE, count: messageCount(items[ALL_ROOM]), ...lastLine(items[ALL_ROOM]) };
-  const incidents = sortIncidentRooms(src.incidents).map((inc): ChatRoom => ({
+  const shown: Record<string, ChatItem[]> = Object.fromEntries(Object.entries(items).map(([id, list]) => [id, afterClear(list, src.clears?.[id])]));
+  const all: ChatRoom = { id: ALL_ROOM, kind: "all", title: ALL_ROOM_TITLE, count: messageCount(shown[ALL_ROOM]), ...lastLine(shown[ALL_ROOM]) };
+  const rooms = sortIncidentRooms(src.incidents).map((inc): ChatRoom => ({
     id: inc.context_id,
     kind: "incident",
     title: incidentRoomTitle(inc),
     longTitle: incidentTitle(inc),
     status: inc.status,
-    count: messageCount(items[inc.context_id]),
-    ...lastLine(items[inc.context_id]),
+    count: messageCount(shown[inc.context_id]),
+    ...lastLine(shown[inc.context_id]),
   }));
-  return { all, incidents, items };
+  const hidden = src.hidden ?? new Set<string>();
+  return { all, incidents: withoutServerHidden(rooms, hidden), hiddenIncidents: rooms.filter((r) => hidden.has(r.id)), items, shown };
 }
 
 /**

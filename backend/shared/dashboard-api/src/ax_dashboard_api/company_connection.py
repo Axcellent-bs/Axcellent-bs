@@ -62,13 +62,10 @@ class ConnectionIn(BaseModel):
     tenant: str | None = Field(None, max_length=64)
 
 
-def pick_tenant(given: str | None, found: store.Connection | None) -> str | None:
-    """저장할 회사: 준 값(설정 폴더가 있어야 함, 없으면 422) → 저장된 회사."""
-    if given:
-        if not tenants.is_tenant(given):
-            raise ApiError(422, "UNKNOWN_TENANT", f"회사 설정이 없어요: {given}")
-        return given
-    return found.tenant if found else None
+# 저장할 회사: 준 값(설정 폴더가 있어야 함, 없으면 422) → 저장된 회사.
+# 캣북스가 아닌 세션 회사는 자기 회사 설정만(다르면 422).
+# 변환기 저장과 같은 규칙이라 그쪽 함수를 쓴다
+pick_tenant = adapter_setup.pick_tenant
 
 
 def tenant_state() -> dict[str, Any]:

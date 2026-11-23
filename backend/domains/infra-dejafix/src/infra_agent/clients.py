@@ -17,6 +17,7 @@ import httpx
 from ax_agent_template import call_agent, pinned_http
 from ax_agent_template.company_connection import shop_api_override
 from ax_agent_template.config import agent_token, agent_url, is_mock
+from ax_agent_template.config import shop_api_url as company_shop_api_url
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 
 FAULTS_PATH = "/api/shop/admin/faults"
@@ -231,8 +232,12 @@ def _unknown_reason(output: dict[str, Any], unknown: list[str], summary: str) ->
 
 
 def shop_api_url() -> str:
-    """shop-api 주소: 회사 연결 → `AX_SHOP_API_URL` → `http://shop-api:8010`."""
-    return shop_api_override() or os.getenv("AX_SHOP_API_URL") or "http://shop-api:8010"
+    """shop-api 주소: 요청 회사의 연결 → (캣북스만) `AX_SHOP_API_URL` → `http://shop-api:8010`.
+
+    캣북스가 아닌 회사는 설치 값으로 빠지지 않고 그 회사 변환기 경로다
+    (템플릿 `config.shop_api_url`).
+    """
+    return company_shop_api_url(os.getenv("AX_SHOP_API_URL") or "http://shop-api:8010")
 
 
 def default_shop() -> ShopClient:
