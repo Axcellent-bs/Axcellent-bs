@@ -5,10 +5,12 @@ import { companyConnection, type ConnectionState } from '@/lib/companyConnection
 import { HUMAN_TOKEN_SET } from '@/lib/env'
 import { ago } from '@/lib/format'
 import { preview, siteAdapter, unfilled, type SiteAdapterState, type SiteMapping, type SiteProposal, type SiteResource } from '@/lib/siteAdapter'
+import SiteWrites from './SiteWrites'
 
 // 다른 형식 API·플랫폼으로 만든 사이트 연결: 고객사 자기 API를 사이트 변환기로 잇는다(사이트 코드는 건드리지 않음).
 // 순서: 주소·키 → 1. 둘러보기(목록 경로 찾기, 경로를 고르면 짝 제안) → 짝 확인(칸·주문 상태) → 2. 연결(첫 쪽을 실제로 바꿔 본 뒤 저장).
-// 연결하면 AI들의 판매 서버 주소가 변환기로 바뀐다. 읽기만 바꾸고, 사이트에 쓰는 일은 사람 할 일로 넘어간다.
+// 연결하면 AI들의 판매 서버 주소가 변환기로 바뀐다. 사이트에 쓰는 일은 연결 뒤 "사이트 쓰기"(SiteWrites)에서
+// 동작마다 짝을 정하고 켜야 사이트로 가고, 그 전에는 사람 할 일로 넘어간다.
 const LABEL: Record<SiteResource, Record<string, string>> = {
   orders: {
     order_id: '주문 번호', status: '주문 상태', created_at: '주문 시각', updated_at: '바뀐 시각',
@@ -233,11 +235,15 @@ export default function SiteAdapterConnect({ onState, tenant }: { onState?: (s: 
             <button type="button" className="btn-primary" onClick={save} disabled={busy !== null || blanks.length > 0 || !base.trim() || !canWrite}>{busy === 'save' ? '확인하고 연결하는 중…' : '2. 연결'}</button>
             {blanks.length > 0 && <span className="text-xs text-amber-800">아직 정하지 않은 칸: {blanks.join(', ')}</span>}
           </div>
-          <p className="text-xs leading-5 text-ink-500">연결하면 사이트에서 첫 쪽을 다시 읽어 바꿔 보고, 통과해야 저장해요. 키는 서버에만 저장되고 화면에 다시 보이지 않아요. 환불·쿠폰처럼 사이트에 쓰는 일은 사람 할 일로 넘어가요.</p>
+          <p className="text-xs leading-5 text-ink-500">연결하면 사이트에서 첫 쪽을 다시 읽어 바꿔 보고, 통과해야 저장해요. 키는 서버에만 저장되고 화면에 다시 보이지 않아요. 다시 연결해도 아래 사이트 쓰기 짝·켜기는 그대로 남아요.</p>
         </div>
       )}
       {done && <p role="status" className="text-sm text-emerald-800">{done}</p>}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      {linked && state?.configured && state.mapping && (
+        <SiteWrites baseUrl={state.connection?.adapter?.base_url ?? ''} authHeader={state.mapping.auth_header}
+          authScheme={state.mapping.auth_scheme} canWrite={canWrite} />
+      )}
     </section>
   )
 }

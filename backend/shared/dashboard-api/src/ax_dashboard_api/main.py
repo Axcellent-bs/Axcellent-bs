@@ -40,6 +40,7 @@ from ax_dashboard_api.secret_routes import router as secret_router
 from ax_dashboard_api.site_adapter.company_route import CompanyRouteMiddleware
 from ax_dashboard_api.site_adapter.router import router as site_adapter_router
 from ax_dashboard_api.site_adapter.setup import router as site_adapter_setup_router
+from ax_dashboard_api.site_adapter.write_setup import router as site_adapter_write_router
 from ax_dashboard_api.youtube_oauth import router as youtube_oauth_router
 from ax_secret_store import startup_check
 
@@ -176,6 +177,8 @@ app.include_router(shop_relay.router)
 # 사이트 변환기: 회사 연결이 kind=adapter면 AI들의 shop-api 주소가 여기다
 app.include_router(site_adapter_router)
 app.include_router(site_adapter_setup_router)
+# 회사 연결 › 사이트 쓰기 (W4): 쓰기 짝·받은함 짝·동작별 직접 쓰기·최근 사이트 쓰기
+app.include_router(site_adapter_write_router)
 # 변화 감지기 상태 (사람 토큰): 고객사 판매 기록을 읽어 바뀐 것만 내부 이벤트로 만든다
 app.include_router(change_detector.router)
 

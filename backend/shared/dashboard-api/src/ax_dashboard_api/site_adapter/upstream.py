@@ -19,7 +19,13 @@ import httpx
 
 from ax_agent_template import company_scope, pinned_http
 from ax_agent_template.company_connection import read_connection
-from ax_dashboard_api.site_adapter.mapping import Paging, ResourceMap, SiteMapping, adapter_dir
+from ax_dashboard_api.site_adapter.mapping import (
+    Paging,
+    ResourceMap,
+    SiteMapping,
+    adapter_dir,
+    local_path,
+)
 
 TOKEN_ENV = "AX_SITE_API_TOKEN"
 TOKEN_FILE = "token"
@@ -199,21 +205,60 @@ async def first_page(url: str, paging: Paging, headers: dict[str, str]) -> list[
     return [r for r in items if isinstance(r, dict)]
 
 
-async def get_paths(base: str, headers: dict[str, str]) -> list[str]:
-    """고객사 `openapi.json`에서 GET으로 읽는 목록 경로(`{}` 없는 것). 없으면 빈 목록."""
+WRITE_METHODS = ("post", "put", "patch", "delete")
+MAX_WRITE_PATHS = 200
+
+
+async def _openapi_paths(base: str, headers: dict[str, str]) -> dict[str, Any]:
+    """고객사 `openapi.json`의 `paths`. 없거나 못 읽으면 빈 표."""
     try:
         async with _client() as client:
             body = await _get(client, base + "/openapi.json", {}, headers)
     except UpstreamError:
-        return []
+        return {}
     paths = body.get("paths") if isinstance(body, dict) else None
-    if not isinstance(paths, dict):
-        return []
+    return paths if isinstance(paths, dict) else {}
+
+
+def list_paths(paths: dict[str, Any]) -> list[str]:
+    """GET으로 읽는 목록 경로(`{}` 없는 것)."""
     return sorted(
         p
         for p, ops in paths.items()
         if isinstance(p, str) and "{" not in p and isinstance(ops, dict) and "get" in ops
     )
+
+
+def write_paths(paths: dict[str, Any]) -> list[dict[str, str]]:
+    """쓰기 짝 후보: POST·PUT·PATCH·DELETE 경로와 메서드 (회사 연결 › 사이트 쓰기 짝, W4).
+
+    경로는 짝 파일과 같은 검사(`local_path`)를 지난 것만, 상한까지만 준다(믿지 않는 응답).
+    """
+    out: list[dict[str, str]] = []
+    for p, ops in sorted(paths.items(), key=lambda kv: str(kv[0])):
+        if not isinstance(p, str) or not isinstance(ops, dict) or len(p) > 300:
+            continue
+        try:
+            local_path(p)
+        except ValueError:
+            continue
+        out.extend({"method": m.upper(), "path": p} for m in WRITE_METHODS if m in ops)
+        if len(out) >= MAX_WRITE_PATHS:
+            break
+    return out[:MAX_WRITE_PATHS]
+
+
+async def get_paths(base: str, headers: dict[str, str]) -> list[str]:
+    """고객사 `openapi.json`에서 GET으로 읽는 목록 경로(`{}` 없는 것). 없으면 빈 목록."""
+    return list_paths(await _openapi_paths(base, headers))
+
+
+async def get_all_paths(
+    base: str, headers: dict[str, str]
+) -> tuple[list[str], list[dict[str, str]]]:
+    """목록 경로와 쓰기 경로 후보를 `openapi.json` 한 번 읽어 같이 준다."""
+    paths = await _openapi_paths(base, headers)
+    return list_paths(paths), write_paths(paths)
 
 
 async def ping() -> bool:
