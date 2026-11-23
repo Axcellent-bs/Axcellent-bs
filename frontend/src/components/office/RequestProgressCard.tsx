@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { speaker } from "@/lib/agentChat";
 import { orchestrator } from "@/lib/orchestrator";
+import { VIDEO_WAIT_LABEL, videoApproval } from "@/lib/requestCharacter";
+import { RequestCreative } from "@/components/office/RequestCreative";
 import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestTitle } from "@/lib/requestHandoffs";
@@ -199,7 +201,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                 <p className="flex flex-wrap items-center gap-1.5">
                   <b className="font-semibold">{s.dept ? `${speaker(s.dept).replace(/\s*AI$/, "")} · ` : ""}{s.label}</b>
                   <span className={`chip text-[11px] ${s.chip.tone}`} title={isInsight && proposal ? (found?.spec ? `${proposal} · ${found.spec}` : proposal) : undefined}>
-                    {isInsight && proposal ? (plan?.chip ?? planId(proposal)) : s.chip.label}
+                    {isInsight && proposal ? (plan?.chip ?? planId(proposal)) : videoApproval(row)?.stepId === s.stepId ? VIDEO_WAIT_LABEL : s.chip.label}
                   </span>
                 </p>
                 {s.muted && <p className="text-xs text-ink-500">{s.muted}</p>}
@@ -247,6 +249,8 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
           </li>
         )}
       </ol>
+      {/* 11/23 홍보 영상: [이미지 시트][스토리보드] 대화방 안 패널 · 영상 승인 대기면 [승인 화면 열기] */}
+      <RequestCreative row={row} plan={found?.videoPlan ?? null} />
     </section>
   );
 }

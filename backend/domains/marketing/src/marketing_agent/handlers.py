@@ -40,6 +40,13 @@ from ax_contracts.schemas.ad_metrics import (
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.finance import ContentFormat
+from ax_contracts.schemas.marketing_brand import (
+    BrandCharacterMarkInput,
+    BrandCharacterMarkOutput,
+    BrandCharactersListInput,
+    BrandCharactersListOutput,
+    BrandCharacterUnmarkInput,
+)
 from ax_contracts.schemas.marketing_campaigns import (
     ListMarketingCampaignsInput,
     ListMarketingCampaignsOutput,
@@ -89,6 +96,7 @@ from marketing_agent import character_sheet as _character_sheet
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import higgsfield_status as _higgsfield_status
+from marketing_agent import request_creative as _request_creative
 from marketing_agent import request_video_youtube as _request_youtube
 from marketing_agent import storyboard as _storyboard
 from marketing_agent import youtube as _youtube
@@ -834,6 +842,75 @@ async def creative_record_get(request: AgentRequest) -> AgentResult:
         output=out.model_dump(mode="json"),
         evidence=_evidence(["creative_records"], f"제작 기록 {data.record_id}", []),
     )
+
+
+def _brand_done(
+    request: AgentRequest, record_id: str, marked: bool, dropped: str | None
+) -> AgentResult:
+    items = _creative.store().brand_characters()
+    out = BrandCharacterMarkOutput(record_id=record_id, marked=marked, dropped=dropped, items=items)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill], f"대표 캐릭터 {record_id} {'표시' if marked else '표시 뗌'}", []
+        ),
+    )
+
+
+async def brand_characters_list(request: AgentRequest) -> AgentResult:
+    """요청 회사의 대표 캐릭터(read). 다른 회사 기록은 보이지 않는다."""
+    data = _parse(request, BrandCharactersListInput)
+    if isinstance(data, AgentResult):
+        return data
+    items = _creative.store().brand_characters()
+    out = BrandCharactersListOutput.model_validate({"items": items})
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["brand_characters"], f"대표 캐릭터 {len(items)}개", []),
+    )
+
+
+async def brand_character_mark(request: AgentRequest) -> AgentResult:
+    """제작 기록을 회사 대표 캐릭터로 표시한다. 사람이 권리를 확인해야 한다(누가·언제 남김).
+
+    기록의 표시 칸만 바꾸는 기록 관리라(제작 기록 남기기와 같다) 외부로 나가는 일·비용이 없다.
+    """
+    data = _parse(request, BrandCharacterMarkInput)
+    if isinstance(data, AgentResult):
+        return data
+    if not data.rights_confirmed or not data.who:
+        message = "우리 회사가 쓸 권리가 있는 그림인지 확인해 주세요"
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="rights_not_confirmed",
+            output={"message": message},
+        )
+    dropped = _creative.store().mark_brand(data.record_id, data.who)
+    if dropped is False:
+        return _result(
+            request, TaskStatus.FAILED, outcome="not_found", output={"message": "기록이 없다"}
+        )
+    return _brand_done(request, data.record_id, True, dropped or None)
+
+
+async def brand_character_unmark(request: AgentRequest) -> AgentResult:
+    """대표 캐릭터 표시만 뗀다(제작 기록은 남는다)."""
+    data = _parse(request, BrandCharacterUnmarkInput)
+    if isinstance(data, AgentResult):
+        return data
+    if not _creative.store().unmark_brand(data.record_id):
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="not_found",
+            output={"message": "대표 캐릭터가 아니다"},
+        )
+    return _brand_done(request, data.record_id, False, None)
 
 
 def _safe_render(fn: Any) -> None:
@@ -1814,9 +1891,13 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
 
 
 async def _generate_media_sync(request: AgentRequest) -> AgentResult:
-    result = await generate_media_flow(
-        request, ledger=STATE.media_ledger, from_decision=_from_decision
-    )
+    if isinstance(request.input, dict) and request.input.get(_request_creative.INPUT_KEY):
+        # 11/23 회사 캐릭터를 고른 홍보 영상 의뢰: 시트·스토리보드 그림(B) → 영상(C, 사람 승인)
+        result = await _request_creative.make_video(request, STATE.media_ledger)
+    else:
+        result = await generate_media_flow(
+            request, ledger=STATE.media_ledger, from_decision=_from_decision
+        )
     # 의뢰 영상 초안이면 완료 직전에 AI 라벨을 입혀 초안에 연결한다(동기·비동기 공통)
     return await request_video.attach_label_after_generate(request, result, store=STATE.sns)
 
@@ -2172,6 +2253,9 @@ HANDLERS = {
     "youtube_video_stats": youtube_video_stats,
     "youtube_uploads_list": youtube_uploads_list,
     "creative_record_attach": creative_record_attach,
+    "brand_characters_list": brand_characters_list,
+    "brand_character_mark": brand_character_mark,
+    "brand_character_unmark": brand_character_unmark,
     "receive_campaign_brief": receive_campaign_brief,
     "record_campaign_ad_metrics": record_campaign_ad_metrics,
     "get_campaign_ad_metrics": get_campaign_ad_metrics,

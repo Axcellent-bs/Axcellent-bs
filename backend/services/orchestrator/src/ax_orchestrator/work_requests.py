@@ -125,6 +125,11 @@ class WorkRequests:
         self._rows: dict[str, dict[str, Any]] = {}
         self._store = store
 
+    @property
+    def company_id(self) -> str | None:
+        """이 의뢰 기록의 회사(저장소 회사 칸). 저장소가 없으면 None (11/23)."""
+        return self._store.company_id if self._store is not None else None
+
     # ---- 저장 -----------------------------------------------------------------
     def restore(self) -> dict[str, int]:
         """저장된 의뢰를 올리고 열려 있던 것을 이어 갈 수 있게 정리한다.
@@ -231,6 +236,18 @@ class WorkRequests:
         """의뢰자의 구매자 번호를 적는다. 환불·교환 접수가 이 값으로만 구매자를 정한다."""
         row = self._row(request_id)
         row["buyer_id"] = buyer_id
+        self._save(row)
+
+    def set_brand_character(self, request_id: str, record_id: str | None, by: str | None) -> None:
+        """홍보 영상 의뢰에 쓸 회사 대표 캐릭터(마케팅 제작 기록 CR-…)를 적는다.
+
+        None이면 캐릭터 없이 만든다.
+
+        값은 기록 번호뿐이다. 영상 준비 단계가 이 값을 마케팅 입력으로 넘긴다 (11/23)."""
+        row = self._row(request_id)
+        row["brand_character_record_id"] = record_id
+        what = f"회사 캐릭터 {record_id}로 만들기" if record_id else "캐릭터 없이 만들기"
+        row["log"].append({"at": now().isoformat(), "message": f"{what} ({by or '사람'})"})
         self._save(row)
 
     def set_carry(self, request_id: str, step_id: str, value: dict[str, Any] | None) -> None:

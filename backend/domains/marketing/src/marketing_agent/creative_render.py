@@ -38,8 +38,10 @@ from typing import Any
 
 import httpx
 
+from ax_agent_template import company_scope as _request_company
 from ax_agent_template.execute import execute
 from ax_contracts.schemas import Evidence, ExecuteDecision, RequestMeta
+from marketing_agent import company_scope as _company_scope
 from marketing_agent import creative_records as _creative
 from marketing_agent.media import usage as usage_mod
 from marketing_agent.media.config import (
@@ -143,8 +145,23 @@ def configured(kind: str) -> str | None:
     return None
 
 
+COMPANIES_DIR = "companies"
+
+
+def company_part(company_id: str | None) -> Path:
+    """미디어 폴더 안 회사 자리(11/23). 캣북스는 지금 자리 그대로, 다른 회사는 `companies/<회사>`.
+
+    dashboard-api(`marketing_client.creative_asset`)가 같은 규칙으로 파일을 찾는다."""
+    cid = _company_scope.scope_id(company_id)
+    if cid == _company_scope.scope_id(None):
+        return Path()
+    return Path(COMPANIES_DIR) / cid
+
+
 def _dir(record_id: str) -> Path:
-    return MediaSettings.from_env().media_dir / "creative" / record_id
+    """기록 파일 폴더: 요청 회사(`company_scope.active()`) 자리 아래 `creative/<기록 번호>`."""
+    base = MediaSettings.from_env().media_dir / company_part(_request_company.active())
+    return base / "creative" / record_id
 
 
 def asset_path(record_id: str, part: str) -> Path:
@@ -173,6 +190,9 @@ async def wait_idle() -> None:
     """테스트용: 돌고 있는 렌더가 끝나기를 기다린다."""
     while _tasks:
         await asyncio.gather(*list(_tasks), return_exceptions=True)
+        # 끝난 일은 완료 콜백이 다음 차례에 표에서 지운다. 한 번 양보하지 않으면 끝난 일만 남은 채로
+        # 같은 자리를 돈다(끝난 일을 기다리는 await는 양보하지 않는다)
+        await asyncio.sleep(0)
 
 
 def _safe(fn: Callable[[], Any]) -> None:
