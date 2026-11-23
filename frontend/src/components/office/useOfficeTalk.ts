@@ -5,7 +5,7 @@ import { ALL_ROOM, type ChatItem } from "@/lib/agentChat";
 import { POLL_MS, classifyFailure, isAnswering } from "@/lib/directChat";
 import { ROOM_POLL_MS, listOfficeRoom, touchOfficeRoom, type OfficeEntry } from "@/lib/officeRoom";
 import { loadOwners, saveOwner } from "@/lib/directThreads";
-import { notThreadOwner, officeSendBody, ownsThread, senderName, threadDisplay } from "@/lib/officeTalkView";
+import { notThreadOwner, officeSendBody, ownsThread, roomCardField, senderName, threadDisplay } from "@/lib/officeTalkView";
 import { placeRequestCards } from "@/lib/requestCards";
 import { SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { useSession, type Account } from "@/demo/session";
@@ -268,6 +268,7 @@ export function useOfficeTalk(): OfficeTalk {
           ...(m.kind === "handoff" ? { handoff: { requestId: t.requestId ?? null } } : {}),
           ...(m.id === goId ? { goKey: a.key } : {}),
           ...(m.card?.kind === "creative" ? { creative: m.card } : {}),
+          ...roomCardField(m, t.id),
         });
       }
     }
