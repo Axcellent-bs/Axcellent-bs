@@ -45,3 +45,64 @@ def test_broken_mapping_raises(adapter_dir: Path) -> None:
     (adapter_dir / "mapping.json").write_text('{"version": 2}', encoding="utf-8")
     with pytest.raises(m.MappingError):
         m.load_mapping()
+
+
+ANSWER = {
+    "method": "POST",
+    "path": "/api/v1/inquiries/{site_id}/answer",
+    "path_params": {"site_id": "link:inquiries.seq"},
+    "body": {
+        "answer": "view.answer",
+        "code": "key_code:AX",
+        "ends": "first:expires_at,now_plus:30",
+        "once": "json:true",
+        "seq": "path:seq",
+    },
+    "ok": [200],
+}
+
+
+def test_write_map_reads() -> None:
+    found = m.WriteMap.model_validate(ANSWER)
+    assert found.method == "POST" and found.path_params == {"site_id": "link:inquiries.seq"}
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"method": "GET"},
+        {"path": "https://evil.example/x"},
+        {"path": "//evil.example/x"},
+        {"path": "/api/v1/x?key=1"},
+        {"path_params": {}},  # {site_id}에 짝이 없다
+        {"path_params": {"site_id": "link:inquiries.seq", "extra": "a"}},
+        {"ok": [500]},
+        {"ok": []},
+        {"body": {"code": "key_code:ax!"}},
+        {"body": {"code": "key_code:" + "A" * 31}},
+        {"body": {"at": "now_plus:soon"}},
+        {"body": {"flag": "json:{not json"}},
+        {"body": {"id": "link:inquiries"}},
+        {"body": {"x": "a..b"}},
+        {"body": {"x": ""}},
+        {"unknown": 1},
+    ],
+)
+def test_write_map_rejects_bad_shapes(change: dict) -> None:
+    with pytest.raises(ValueError):
+        m.WriteMap.model_validate({**ANSWER, **change})
+
+
+def test_mapping_with_writes_and_unknown_action(adapter_dir: Path) -> None:
+    import json
+
+    path = adapter_dir / "mapping.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["writes"] = {"inquiry_answer": ANSWER}
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    found = m.load_mapping()
+    assert found is not None and set(found.writes) == {"inquiry_answer"}
+    raw["writes"] = {"drop_table": ANSWER}  # 동작 이름은 코드에 고정된 것만
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(m.MappingError):
+        m.load_mapping()
