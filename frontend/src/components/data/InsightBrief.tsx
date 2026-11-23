@@ -9,6 +9,7 @@ import { AgeBars } from "@/components/data/AgeBars";
 import { useCompany } from "@/demo/company";
 import { DeliveryBadge, usePlanningRecord } from "@/components/data/ReportInsights";
 import { deliveryOf, proposalFor } from "@/lib/handoffView";
+import { llmKeyChip } from "@/lib/llmStatusView";
 import { useSession } from "@/demo/session";
 import { CopyId, FoldRow, RestFacts, ShortsCard, TileRow, factLinks, shortsThumbs, shortsTiles, verdictOf } from "@/components/data/ShortsCard";
 import { DATA_SERVER, dataAi, kpiLive, type BriefGate, type DataFact, type HeldBack, type InsightPastResult, type LlmStatus, type TrendInsight, type TrendInsightBriefOutput } from "@/lib/data";
@@ -268,9 +269,13 @@ const LLM_TONE: Record<string, string> = {
 function LlmStatusLine({ s }: { s: LlmStatus | null | undefined }) {
   if (!s || s.state === "ok" || !s.title) return null;
   const where = [s.model && `모델 ${s.model}`, s.base_host && `주소 ${s.base_host}`].filter(Boolean).join(" · ");
+  const chip = llmKeyChip(s);
   return (
     <div role="status" className={`border px-4 py-3 text-sm ${LLM_TONE[s.tone] ?? LLM_TONE.blue}`}>
-      <p className="font-bold">{s.title}</p>
+      <p className="flex flex-wrap items-center gap-1.5 font-bold">
+        {s.title}
+        {chip && <span className="chip bg-surface text-[11px] font-semibold text-ink-700">{chip}</span>}
+      </p>
       {s.detail && <p>{s.detail}</p>}
       {s.error_message && <p className="text-xs opacity-80">공급자 메시지{s.request ? ` (${s.request})` : ""}: {s.error_message}</p>}
       {where && <p className="text-xs opacity-80">{where}</p>}
