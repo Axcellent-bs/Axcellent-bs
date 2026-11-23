@@ -32,11 +32,17 @@ COMPANIES_FILE = "companies.json"
 COMPANIES_DIR_ENV = "AX_COMPANIES_DIR"
 COMPANIES_DIR = "companies"
 _CONNECTION_FILE_ENV = "AX_COMPANY_CONNECTION_FILE"  # company_connection.CONNECTION_FILE_ENV
+DEFAULT_COMPANY_ENV = "AX_DEFAULT_COMPANY"
+# 기본 회사를 아무 데서도 못 정했을 때의 마지막 값.
+# 코드 안에 남은 유일한 기본값 리터럴(옛 호환).
+# 다른 모듈은 이 값을 직접 쓰지 말고 `default_company_id()`를 부른다
+LEGACY_DEFAULT_COMPANY = TENANT_ID_CATBOOKS
 _ID_RE = re.compile(TENANT_ID_PATTERN)
 # 회사 목록 파일이 없을 때의 한 줄: 지금 이 설치의 회사(캣북스).
-# 만든 시각은 회사 목록이 생긴 날(설계 1-2)로 둔다
+# 만든 시각은 회사 목록이 생긴 날(설계 1-2)로 둔다.
+# 옛 호환 이름이다(LEGACY_DEFAULT_COMPANY의 회사 한 줄). 새 코드는 `default_company_id()`를 쓴다
 CATBOOKS = Company(
-    company_id=TENANT_ID_CATBOOKS,
+    company_id=LEGACY_DEFAULT_COMPANY,
     name="캣북스",
     industry="",
     site_url="",
@@ -44,6 +50,7 @@ CATBOOKS = Company(
 )
 
 logger = logging.getLogger("ax.companies")
+_legacy_warned = False
 
 
 def canonical_company_id(value: Any) -> str | None:
@@ -86,13 +93,10 @@ def _read_rows(path: Path) -> list[Any] | None:
     return rows
 
 
-def list_companies() -> list[Company]:
-    """회사 목록. 파일이 없거나 깨졌거나 맞는 줄이 없으면 캣북스 하나."""
-    path = companies_file()
-    rows = _read_rows(path) if path is not None else None
+def _valid_companies(rows: list[Any], path: Path | None) -> list[Company]:
     out: list[Company] = []
     seen: set[str] = set()
-    for row in rows or []:
+    for row in rows:
         try:
             company = Company.model_validate(row)  # TenantId가 별칭을 정식 id로 바꾼다
         except ValidationError:
@@ -102,7 +106,59 @@ def list_companies() -> list[Company]:
             continue
         seen.add(company.company_id)
         out.append(company)
-    return out or [CATBOOKS]
+    return out
+
+
+def list_companies() -> list[Company]:
+    """회사 목록. 파일이 없거나 깨졌거나 맞는 줄이 없으면 기본 회사(기본은 캣북스) 하나."""
+    path = companies_file()
+    rows = _read_rows(path) if path is not None else None
+    out = _valid_companies(rows or [], path)
+    if out:
+        return out
+    # 파일이 없을 때: 옛 동작 그대로 기본 회사 한 줄.
+    # 기본 회사가 env로 캣북스 말고 정해졌으면 그 id로 한 줄
+    cid = _env_default()
+    if cid is None or cid == CATBOOKS.company_id:
+        return [CATBOOKS]
+    return [CATBOOKS.model_copy(update={"company_id": cid, "name": cid})]
+
+
+def _env_default() -> str | None:
+    raw = os.getenv(DEFAULT_COMPANY_ENV, "").strip()
+    if not raw:
+        return None
+    cid = canonical_company_id(raw)
+    if cid is None:
+        logger.warning("%s 값이 회사 ID 규칙에 맞지 않아 무시한다: %r", DEFAULT_COMPANY_ENV, raw)
+    return cid
+
+
+def default_company_id() -> str:
+    """이 설치의 기본 회사 ID(정식 id). 절대 raise하지 않는다.
+
+    순서: env `AX_DEFAULT_COMPANY`(별칭은 정식 id로) → 회사 목록 파일에 회사가 정확히 하나면 그 id
+    → 옛 호환 `LEGACY_DEFAULT_COMPANY`(프로세스당 한 번 경고).
+    """
+    global _legacy_warned
+    cid = _env_default()
+    if cid is not None:
+        return cid
+    path = companies_file()
+    rows = _read_rows(path) if path is not None else None
+    if rows is not None:
+        found = _valid_companies(rows, path)
+        if len(found) == 1:
+            return found[0].company_id
+    if not _legacy_warned:
+        _legacy_warned = True
+        logger.warning(
+            "기본 회사를 정하지 않아 옛 기본값 %r을 쓴다. "
+            "%s를 설정하거나 회사 목록을 두자(옛 호환, 곧 없앤다)",
+            LEGACY_DEFAULT_COMPANY,
+            DEFAULT_COMPANY_ENV,
+        )
+    return LEGACY_DEFAULT_COMPANY
 
 
 def company_ids() -> list[str]:

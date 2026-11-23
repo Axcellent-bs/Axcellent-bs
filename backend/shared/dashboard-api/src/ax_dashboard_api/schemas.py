@@ -417,7 +417,11 @@ class ConversationListItem(BaseModel):
     preview: str
     awaiting_reply: bool
     language: str = "ko"  # 고객이 마지막으로 쓴 언어 (ko·en·ja·zh·other)
-    tenant_id: str = "shop-demo"  # 어느 회사(고객사)의 문의인지. 회사별로 따로 본다
+    # 어느 회사(고객사)의 문의인지. 회사별로 따로 본다.
+    # 리터럴을 그대로 둔다: default_company_id()는 env 없을 때 `catbooks`를 줘서 응답 값이
+    # `shop-demo`에서 바뀐다(1단계는 동작 불변).
+    # 실제 값은 support가 채워 보내고 이 기본값은 목 자료용이다
+    tenant_id: str = "shop-demo"
     triage: Triage | None = None  # "분류 필요" 표시 (없으면 일반 문의)
     # 판매 서버 자료를 다시 만들기 전에 받은 문의("옛 자료").
     # 접수일과 설정값만 비교한 표시이고 상태·재무와 무관하다

@@ -207,3 +207,62 @@ def test_a_password_change_keeps_the_company_in_the_new_token(client) -> None:
         "catbooks",
         "member",
     )
+
+
+def _two_companies(tmp_path: Path) -> None:
+    (tmp_path / "companies.json").write_text(
+        json.dumps(
+            {
+                "companies": [
+                    {"company_id": "catbooks", "name": "캣북스", "created_at": AT},
+                    {"company_id": "nubi", "name": "누비투어", "created_at": AT},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_a_new_account_without_a_company_joins_the_default_company(client, tmp_path) -> None:
+    op = _login(client)["token"]
+    data = _make(client, op, "member", "m@example.com")
+    assert data["companies"] == CATBOOKS_MEMBER  # 회사가 하나뿐인 지금 설치: 그대로 캣북스
+    row = next(r for r in _rows(tmp_path) if r["email"] == "m@example.com")
+    assert "memberships" not in row  # 캣북스는 칸 없이도 같은 뜻이라 파일 모양이 그대로
+
+
+def test_the_default_company_follows_the_install_setting(client, tmp_path, monkeypatch) -> None:
+    _two_companies(tmp_path)
+    monkeypatch.setenv(company_list.DEFAULT_COMPANY_ENV, "nubi")
+    op = _login(client)["token"]
+    data = _make(client, op, "member", "m@example.com")
+    assert data["companies"] == [{"company_id": "nubi", "role": "member"}]
+
+
+def test_a_new_account_joins_only_the_company_it_was_created_for() -> None:
+    row = accounts._new_row("n", "n@example.com", "member", "pw-for-tests-123", "nubi")
+    assert row["memberships"] == [{"company_id": "nubi", "role": "member"}]  # 캣북스에는 안 넣는다
+    alias = accounts._new_row("n", "n2@example.com", "admin", "pw-for-tests-123", "shop-demo")
+    assert "memberships" not in alias  # 별칭 → 캣북스 → 칸 없음(옛 규칙으로 캣북스)
+
+
+def test_an_operator_gets_no_membership() -> None:
+    row = accounts._new_row("o", "o@example.com", "operator", "pw-for-tests-123", "nubi")
+    assert "memberships" not in row
+
+
+def test_an_admin_of_another_company_creates_members_in_that_company(client, tmp_path) -> None:
+    _two_companies(tmp_path)
+    op = _login(client)["token"]
+    _make(client, op, "admin", "ad@example.com")
+    _set_field(tmp_path, "ad@example.com", "memberships", [{"company_id": "nubi", "role": "admin"}])
+    admin = _login(client, "ad@example.com", "admin-pass-1234")["token"]
+    data = _make(client, admin, "member", "m@example.com")
+    assert data["companies"] == [{"company_id": "nubi", "role": "member"}]
+
+
+def test_the_old_catbooks_name_still_syncs_catbooks() -> None:
+    row = {"memberships": [{"company_id": "catbooks", "role": "admin"}]}
+    accounts._sync_catbooks_membership(row, "member")
+    assert row["memberships"] == CATBOOKS_MEMBER

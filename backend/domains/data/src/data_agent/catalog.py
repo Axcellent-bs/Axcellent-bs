@@ -4,8 +4,11 @@ data 엔진에서 회사마다 다른 것(지표 목록·나쁜 방향·장애 �
 카테고리 이름)을 코드가 아니라 카탈로그 파일에서 읽는다. 캣북스는 `catalogs/catbooks.toml`.
 
 - 어느 카탈로그를 쓸지: 환경변수 `DATA_TENANT_CATALOG` → 회사 연결에서 고른 회사의 `catalog`.
-  회사 연결 전이면 `catbooks`의 지표 이름표를 쓴다(계약상 지표가 1개 이상이어야 해서
-  빈 카탈로그가 없다. 판매 서버는 연결 안 됨이라 숫자는 들어오지 않는다).
+  둘 다 없으면 `AX_TENANT` → 이 설치의 기본 회사
+  (`ax_agent_template.companies.default_company_id()`)의 이름표 `catalogs/<회사>.toml`을 쓴다
+  (계약상 지표가 1개 이상이어야 해서 빈 카탈로그가 없다. 아무것도 정하지 않은 옛 설치는
+  기본 회사가 `catbooks`라 지금과 같다). 그 파일이 없으면 다른 회사 것으로 갈음하지 않고
+  이유를 적어 ValueError로 알린다.
   이름이면 `catalogs/<이름>.toml`, `.toml`로 끝나면 그 파일 경로다.
 - 테스트는 `use_catalog()`로 바꿔 끼운다.
 - 카탈로그에 없는 지표는 이름을 그대로 쓰고 나쁜 방향은 증가로 본다(지어내지 않는다).
@@ -19,11 +22,12 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
+from ax_agent_template.companies import default_company_id
 from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas.data import CatalogMetric, MetricCatalog
 
 CATALOG_ENV = "DATA_TENANT_CATALOG"
-DEFAULT_CATALOG = "catbooks"  # 회사 연결 전 지표 이름표 (위 설명)
+TENANT_ENV = "AX_TENANT"
 CATALOG_DIR = Path(__file__).resolve().parent / "catalogs"
 
 _loaded: dict[str, MetricCatalog] = {}
@@ -40,14 +44,26 @@ def load_catalog(name_or_path: str) -> MetricCatalog:
         return MetricCatalog.model_validate(tomllib.load(f))
 
 
+def fallback_catalog(env: Mapping[str, str] | None = None) -> str:
+    """카탈로그를 따로 정하지 않았을 때 쓸 이름: `AX_TENANT` → 기본 회사."""
+    given = ((os.environ if env is None else env).get(TENANT_ENV) or "").strip()
+    return given or default_company_id()
+
+
 def current(env: Mapping[str, str] | None = None) -> MetricCatalog:
     """지금 쓰는 카탈로그. `use_catalog`로 바꿔 끼웠으면 그것, 아니면 `DATA_TENANT_CATALOG`."""
     if _override is not None:
         return _override
     given = (os.environ if env is None else env).get(CATALOG_ENV)
-    key = (given or tenant_setting(CATALOG_ENV) or DEFAULT_CATALOG).strip()
+    key = (given or tenant_setting(CATALOG_ENV) or fallback_catalog(env)).strip()
     if key not in _loaded:
-        _loaded[key] = load_catalog(key)
+        try:
+            _loaded[key] = load_catalog(key)
+        except FileNotFoundError as error:
+            raise ValueError(
+                f"지표 카탈로그를 찾을 수 없습니다: {key!r} "
+                f"({CATALOG_ENV}를 정하거나 catalogs/{key}.toml을 두세요)"
+            ) from error
     return _loaded[key]
 
 
