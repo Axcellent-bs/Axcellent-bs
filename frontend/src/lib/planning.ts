@@ -367,7 +367,8 @@ export interface CodingSettings {
   models?: Partial<Record<CodingStep, string>> // 서버 AI 단계별 모델 (비운 단계는 기본 모델)
   model_default?: string | null
   // 고객사 API 키(BYOK): 넣었는지·끝 4자리만. 있으면 체험 한도 대신 월 예산만 본다
-  company_key?: { key_set: boolean; key_hint: string; base_url: string; model: string }
+  /** source: company(회사 AI 키)·coder(코딩 따로 키). 없으면 예전 고객사 키 */
+  company_key?: { key_set: boolean; key_hint: string; base_url: string; model: string; source?: 'company' | 'coder' }
   budget?: { month: string; limit: number | null; used: number } // 서버 AI 월 예산 (토큰)
 }
 // 토큰 한도 (비율 표시용). 한 번 읽어 화면들이 같이 쓴다. 못 읽으면 서버 기본값
@@ -410,8 +411,6 @@ export const codingSettingsApi = (base: string) => ({
   setModels: (models: Partial<Record<CodingStep, string>>) => call<CodingSettings>(base, '/coding-settings', post({ models }, 'admin')),
   setBudget: (tokens: number | null) => call<CodingSettings>(base, '/coding-settings', post({ budget_tokens: tokens }, 'admin')),
   // 키는 보내기만 한다 (응답은 끝 4자리만). 비우면 이전 키 그대로
-  setCompanyKey: (k: { api_key?: string; base_url?: string; model?: string }) => call<CodingSettings>(base, '/coding-settings/company-key', post(k, 'admin')),
-  deleteCompanyKey: () => call<CodingSettings>(base, '/coding-settings/company-key/delete', post({}, 'admin')),
 })
 
 // ---- 직접 개발 (dev 서비스 `/api/planning/dev-tasks`). 개발팀이 기획을 바로 넣으면 코딩 에이전트가 PR까지 만든다

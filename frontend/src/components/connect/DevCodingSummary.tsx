@@ -9,6 +9,7 @@ import { Facts, Notice, SectionHead } from './parts'
 // 바꾸는 곳: 코딩 방식은 내 연결 › 고급 · 개발 요청을 누가 코딩할지, 키·모델·예산은 회사 연결 › 공통 AI 도구 연결(관리자).
 
 const MODE_KO: Record<string, string> = { auto: '자동', agent: '서버 AI', subscription: '내 Claude' }
+const KEY_SOURCE_KO: Record<string, string> = { company: '회사 AI 키', coder: '코딩 따로 키' }
 const STEPS: { id: CodingStep; label: string }[] = [
   { id: 'plan', label: '파일 고르기' },
   { id: 'write', label: '코드 쓰기' },
@@ -28,7 +29,7 @@ export default function DevCodingSummary() {
         <>
           <Facts cols={3} items={[
             ['코딩 방식', `${MODE_KO[cfg.mode] ?? cfg.mode} · 지금 ${cfg.resolved === 'agent' ? '서버 AI' : '내 Claude'}가 코딩`],
-            ['서버 AI 키', key?.key_set ? <span className="font-mono">••••{key.key_hint}</span> : '서버 기본 키 (체험)'],
+            ['서버 AI 키', key?.key_set ? <span><span className="font-mono">{key.key_hint}</span> · {KEY_SOURCE_KO[key.source ?? ''] ?? '예전 고객사 키'}</span> : '서버 기본 키 (체험)'],
             ['최근 7일 본인 Claude 연결', cfg.agents_connected.length ? cfg.agents_connected.join(', ') : '없음'],
           ]} />
           {cfg.why && <p className="text-sm text-ink-700">판단: {cfg.why}</p>}
