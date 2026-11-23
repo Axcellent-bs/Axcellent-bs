@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useAuthedMedia } from "@/lib/authedMedia";
+import { YoutubePanel } from "./YoutubePanel";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
@@ -9,7 +10,7 @@ import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, 
 // (기록을 읽을 때 마케팅이 영상 승인 여부를 다시 확인해 승인됐으면 만들기 시작한다).
 
 const POLL_MS = 5_000;
-const PENDING = new Set(["running", "awaiting_approval"]);
+const PENDING = new Set(["running", "awaiting_approval", "uploading"]);
 const STATUS_KO: Record<string, string> = {
   running: "만드는 중", done: "완료", failed: "실패", blocked: "막힘", unavailable: "설정 없음",
   awaiting_approval: "사람 승인 대기", rejected: "거절됨",
@@ -144,6 +145,8 @@ export function RenderPanel({ recordId }: { recordId: string }) {
       <div className="border-t border-ink-100 pt-3">
         <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError} />
       </div>
+      <YoutubePanel recordId={recordId} youtube={render.youtube} hasVideo={render.video?.status === "done"}
+        hasFinal={render.final_video?.status === "done"} onChanged={() => void load()} />
       {error && <p className="text-xs text-accent" role="alert">{error}</p>}
     </section>
   );

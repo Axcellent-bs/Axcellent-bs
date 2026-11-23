@@ -894,3 +894,10 @@ base_grade = "A"
 action = "attach_creative_file"
 owner = "marketing"
 base_grade = "A"
+
+# 제작 기록 영상을 AXcellent 유튜브 채널에 올리기(2026-11-23). 외부에 공개되고 되돌리기 어려워
+# 늘 사람이 승인한다(C). 제목·공개 범위·영상 sha256이 바뀌면 새 승인이 필요하다
+[[actions]]
+action = "publish_youtube"
+owner = "marketing"
+base_grade = "C"
