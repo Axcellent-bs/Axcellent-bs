@@ -1,4 +1,6 @@
 import { useCallback, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router";
+import { Tabs } from "@/components/connect/parts";
 import { Skeleton } from "@/components/finance/bits";
 import { useVisibleInterval } from "@/lib/visibleInterval";
 import { shortDateTime, won } from "@/lib/format";
@@ -18,6 +20,8 @@ import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, dr
 // 안전 장치 보류 큐(finance.reviews)에서 읽을 수 있는 마케팅 항목(publish_sns, generate_media)만 읽기 전용으로 보여 준다.
 // 보류 결정은 장애·공지·캠페인 탭의 보류 큐에서 한다. 이 탭은 결정하지 않는다.
 // 이미지 시트 · 스토리보드 카드(Higgsfield 결과는 카드 안 RenderPanel이 보여 준다).
+// 11/23 화면 정리: 카드를 한 줄로 늘어놓지 않고 탭(만들기·의뢰 영상·넘어온 기획안·승인 대기·계정·연결)으로 나눈다.
+// 고른 탭은 주소 ?view=에 남는다. 유튜브 연결에서 돌아오면(?youtube=) 계정·연결 탭을 연다.
 
 const REFRESH_MS = 15_000;
 const SNS_ACTIONS = ["publish_sns", "generate_media", "generate_creative_video", "publish_youtube"] as const;
@@ -28,6 +32,10 @@ const carouselCount = (summary?: string): number | null => {
   return m ? Number(m[1]) : null;
 };
 const fromMarketing = (requester: string) => requester === "coupon" || requester === "marketing";
+
+type View = "make" | "videos" | "briefs" | "holds" | "accounts";
+const VIEWS: readonly View[] = ["make", "videos", "briefs", "holds", "accounts"];
+const isView = (v: string | null): v is View => v !== null && (VIEWS as readonly string[]).includes(v);
 
 function Section({ title, desc, children }: { title: string; desc?: ReactNode; children: ReactNode }) {
   return (
@@ -75,28 +83,60 @@ export function SnsMedia() {
 
   useVisibleInterval(load, REFRESH_MS);
 
+  const [params, setParams] = useSearchParams();
+  const asked = params.get("view");
+  const view: View = isView(asked) ? asked : params.get("youtube") ? "accounts" : "make";
+  const pick = (next: View) => setParams((cur) => {
+    const out = new URLSearchParams(cur);
+    out.set("view", next);
+    out.delete("youtube");
+    return out;
+  }, { replace: true });
+  const tabs: { id: View; label: string; count?: number }[] = [
+    { id: "make", label: "이미지 시트 · 스토리보드" },
+    { id: "videos", label: "의뢰로 만든 영상" },
+    { id: "briefs", label: "넘어온 기획안", count: handed?.length },
+    { id: "holds", label: "사람 결정 대기", count: holds?.length },
+    { id: "accounts", label: "계정·연결" },
+  ];
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">SNS·미디어</h1>
-          <p className="mt-1 text-sm text-ink-500">마케팅 AI가 만드는 이미지·영상과 SNS 게시 흐름입니다. 이 탭에서는 넘어온 기획안의 미디어 초안을 만들 수 있고, 게시와 보류 결정은 하지 않습니다. 보류 결정은 장애·공지 또는 캠페인·쿠폰 탭의 보류 큐에서 합니다.</p>
+          <p className="mt-1 text-sm text-ink-500">이미지 시트·스토리보드로 영상을 만들고 회사 SNS에 올립니다. 게시는 늘 사람 승인을 거칩니다.</p>
         </div>
         <button className="btn-ghost ml-auto text-xs" onClick={() => void load()} disabled={loading}>{loading ? "불러오는 중" : "새로고침"}</button>
       </header>
 
-      <SnsAccountsCard />
-      <PublishControlCard />
+      <Tabs label="SNS·미디어 보기" items={tabs} value={view} onPick={pick} />
 
-      {/* 로그인한 회사의 연결 상태대로 보인다(회사마다 다른 키·채널, 11/23) */}
-      <HiggsfieldStatusCard />
+      {view === "make" && (
+        <div className="space-y-6" role="tabpanel" aria-label="이미지 시트 · 스토리보드">
+          {/* 로그인한 회사의 연결 상태대로 보인다(회사마다 다른 키·채널, 11/23) */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <HiggsfieldStatusCard />
+            <YoutubeStatusCard />
+          </div>
+          <CharacterSheetMaker />
+        </div>
+      )}
 
-      <YoutubeStatusCard />
+      {view === "videos" && <div role="tabpanel" aria-label="의뢰로 만든 영상"><RequestVideos /></div>}
 
-      <CharacterSheetMaker />
+      {view === "accounts" && (
+        <div className="space-y-6" role="tabpanel" aria-label="계정·연결">
+          <SnsAccountsCard />
+          <PublishControlCard />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <HiggsfieldStatusCard />
+            <YoutubeStatusCard />
+          </div>
+        </div>
+      )}
 
-      <RequestVideos />
-
+      {view === "briefs" && (
       <Section title="받은 기획안에서 넘어온 작업" desc="받은 기획안 탭에서 SNS·미디어로 넘긴 기획안입니다. 넘기면 글 초안과 미디어 요청 초안까지만 만들고, 아래 다음 단계는 사람이 이어서 합니다. '미디어 만들기'를 누르면 예상 비용을 확인한 뒤 저장된 종류·필드로 미디어를 만들고 초안 검사까지 합니다. 게시는 하지 않으며 사람 승인(C 등급)이 따로 필요합니다. 종류와 필드는 받은 기획안 탭에서 바꿀 수 있습니다.">
         <ol className="flex flex-wrap items-center gap-1 text-xs text-ink-700" aria-label="다음 단계">
           {["미디어 생성 (B 등급, 월 사용량 예산 검사)", "초안 검사 (AI 표시·문구·숫자)", "사람 승인 게시 (C 등급)"].map((t, i) => (
@@ -140,7 +180,9 @@ export function SnsMedia() {
                 </ul>
               )}
       </Section>
+      )}
 
+      {view === "holds" && (
       <Section title="사람 결정 대기 (SNS·미디어)" desc="안전 장치 보류 큐에서 마케팅 AI가 요청한 SNS 게시·이미지·영상 만들기를 읽기만 하는 목록입니다. 게시 승인·거절은 위 기획안 카드의 승인 패널에서 하고, 이 목록에서는 누를 수 없습니다.">
         {error ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">보류 건을 읽지 못했습니다. {error}</p>
           : holds === null ? <Skeleton stats={0} lines={2} />
@@ -161,6 +203,7 @@ export function SnsMedia() {
               </ul>
             )}
       </Section>
+      )}
     </div>
   );
 }

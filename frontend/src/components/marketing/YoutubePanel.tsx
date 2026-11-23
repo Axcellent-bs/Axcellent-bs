@@ -94,6 +94,7 @@ export function YoutubePanel({ recordId, youtube, hasVideo, hasFinal, onChanged 
               </button>
             </div>
           )}
+          <p className="text-xs text-ink-500">구글 YouTube API 감사를 받기 전에는 올린 영상이 유튜브에서 비공개로 잠길 수 있어요(감사 뒤 공개로 바꿀 수 있어요).</p>
           {status === "awaiting_approval" && <p className="text-xs text-ink-700">사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 이 제목·설명대로 올라가요.</p>}
           {status === "uploading" && <p className="animate-pulse text-xs text-ink-700">유튜브에 올리는 중이에요…</p>}
           {(status === "failed" || status === "rejected") && <p className="text-xs text-accent">{YOUTUBE_ERROR_KO[youtube?.error ?? ""] ?? youtube?.error ?? "올리지 못했어요"} · 초안을 고쳐 다시 요청할 수 있어요</p>}
