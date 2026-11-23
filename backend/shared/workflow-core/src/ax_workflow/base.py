@@ -9,7 +9,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import re
+import time
 from datetime import datetime
 from typing import Any, Literal
 
@@ -35,13 +38,20 @@ from ax_workflow.core import (
     StateService,
 )
 from ax_workflow.dev_handoff import (
+    HANDED,
+    PERMANENT,
+    SENT,
     START_DEV,
     DevSender,
+    classify,
+    fingerprint,
+    permanent_hint,
     send_to_service,
 )
 from ax_workflow.models import (
     PR,
     AutoReview,
+    HandoffFailure,
     OutMsg,
     Request,
     Spec,
@@ -197,6 +207,12 @@ class BlockParams(_Params):
     block: str
 
 
+class ResendParams(_Params):
+    """받는 쪽이 거절해 멈춘 넘기기를 다시 보낸다. key를 안 주면 멈춘 것 모두."""
+
+    key: str | None = None
+
+
 # snake_case 액션 이름 → (메서드, 입력 모델). 화면이 보내는 camelCase(`confirmSpec`)도 받는다.
 ACTIONS: dict[str, tuple[str, type[_Params]]] = {
     "inbound": ("_inbound", InboundParams),
@@ -226,11 +242,12 @@ ACTIONS: dict[str, tuple[str, type[_Params]]] = {
     "edit_block": ("_edit_block", EditBlockParams),
     "toggle_todo": ("_toggle_todo", BlockParams),
     "remove_block": ("_remove_block", BlockParams),
+    "resend_handoff": ("_resend_handoff", ResendParams),
 }
 
 
 # 서비스마다 받는 액션 (분리 4단계). 시뮬레이터·소통 창구(inbound·send·mark_read)는 둘 다 받는다
-BOTH_ACTIONS = ("inbound", "send", "mark_read")
+BOTH_ACTIONS = ("inbound", "send", "mark_read", "resend_handoff")
 
 
 DEV_ONLY_ACTIONS = (
@@ -291,6 +308,10 @@ class PlanningCore(StateService):
         self._sending: set[asyncio.Task] = set()
         self._retrying = False  # 못 보낸 넘기기를 다시 보내는 중
         self._retry_task: asyncio.Task | None = None
+        # 못 보낸 넘기기마다 다음에 다시 보낼 시각 (time.monotonic). 다시 켜면 비어 맞추기가 보낸다
+        self._due: dict[str, float] = {}
+        # 사람이 "다시 보내기"를 고른 넘기기 (skill, ctx, 입력, 멱등 키). _settle이 꺼내 보낸다
+        self._resend_pending: list[tuple[str, str, BaseModel, str]] = []
         self._send_result: ResultSender = result_sender or send_change_result
         # 원인 확인 요청을 받은 요청에 올리는 곳 (시험에서 바꿔 끼운다, None이면 실제 할 일함)
         self._cause_poster: cause_inbox.Poster | None = None
@@ -351,11 +372,20 @@ class PlanningCore(StateService):
             "known_prs": {p.id for p in s.prs},
         }
 
+    async def _apply(self, fn: Any, **params: Any) -> Any:
+        try:
+            return await super()._apply(fn, **params)
+        except BaseException:
+            self._resend_pending = []  # 실패한 액션이 줄 세운 다시 보내기는 버린다
+            raise
+
     async def _settle(self, s: State, mark: dict[str, Any]) -> None:
+        # 사람이 고른 다시 보내기는 이번 액션 몫이다. 바로 꺼내 둬서 뒤에서 실패해도 새지 않는다
+        resend, self._resend_pending = self._resend_pending, []
         await self._relate_new(s, mark["known"])
         self._relate_paths(s, mark["known_prs"])
         await self._advance(s)
-        mark["outgoing"] = self._dev_outgoing(s)
+        mark["outgoing"] = self._dev_outgoing(s) + resend
         self._to_outbox(s, mark["before"])
 
     def _after(self, s: State, mark: dict[str, Any], changed: bool) -> None:
@@ -374,36 +404,169 @@ class PlanningCore(StateService):
         self._sending.add(task)
         task.add_done_callback(self._sending.discard)
 
+    # ---- 넘기기 기록 (상태 파일 옆 `<상태 파일>.handoff.json`)
+    #
+    # 예전 빌드가 이 빌드의 상태 파일을 그대로 읽도록 `State`와 `_unsent` 모양은 그대로 둔다.
+    # 다시 보낸 횟수와 자동으로 다시 보내지 않는 넘기기(거절·할 일함)는 옆 파일에 둔다.
+
+    def _init_state(self, fresh: bool = False) -> None:
+        self._attempt_counts: dict[str, int] = {}
+        self._handoff_failed: list[HandoffFailure] = []
+        super()._init_state(fresh)
+        if not fresh:
+            self._load_handoff()
+
+    def _handoff_path(self) -> str | None:
+        return f"{self._state_path}.handoff.json" if self._state_path else None
+
+    def _load_handoff(self) -> None:
+        """옆 파일을 읽는다. 없거나 깨졌으면 빈 기록, 못 읽는 줄은 건너뛴다."""
+        path = self._handoff_path()
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict):
+            return
+        counts = data.get("attempts")
+        if isinstance(counts, dict):
+            for k, v in counts.items():
+                if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                    self._attempt_counts[str(k)] = v
+        rows = data.get("failed")
+        for row in rows if isinstance(rows, list) else []:
+            try:
+                self._handoff_failed.append(HandoffFailure.model_validate(row))
+            except ValidationError:
+                continue
+
+    def _save(self) -> None:
+        super()._save()
+        path = self._handoff_path()
+        if not path:
+            return
+        data = {
+            "attempts": {k: v for k, v in self._attempt_counts.items() if k in self._unsent},
+            "failed": [f.model_dump(mode="json") for f in self._handoff_failed],
+        }
+        try:
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(tmp, path)
+        except OSError:
+            pass
+
+    def public_snapshot(self) -> dict:
+        """화면 상태에 자동으로 다시 보내지 않는 넘기기(`handoff_failed`, 읽기 전용)를 덧붙인다."""
+        data = super().public_snapshot()
+        data["handoff_failed"] = [
+            f.model_dump(mode="json", exclude={"payload"}) for f in self._handoff_failed
+        ]
+        return data
+
+    def _forget(self, key: str) -> None:
+        self._due.pop(key, None)
+        self._unsent.pop(key, None)
+        self._attempt_counts.pop(key, None)
+
+    async def _hold_back(
+        self, kind: str, skill: str, ctx: str, body: dict, key: str, reason: str, text: str
+    ) -> None:
+        """자동으로 다시 보내지 않는 넘기기로 남기고 활동에 한 줄 (같은 기록이면 다시 안 남김)."""
+        self._forget(key)
+        fp = fingerprint(body)
+        known = next((f for f in self._handoff_failed if f.key == key), None)
+        if known and (known.kind, known.fingerprint, known.reason) == (kind, fp, reason):
+            self._save()
+            return
+        fail = HandoffFailure(
+            kind=kind, key=key, skill=skill, context_id=ctx, reason=reason, at=self.clock(),
+            fingerprint=fp, payload=body,
+        )  # fmt: skip
+        self._handoff_failed = [f for f in self._handoff_failed if f.key != key] + [fail]
+        frm, to = ("planning", "dev") if self.role == "planning" else ("dev", "planning")
+
+        async def record(s: State) -> None:
+            s.activity.append(self._act(self.clock(), ctx, frm, to, skill, "A2A", text, "A"))
+
+        await self._apply(record)  # 활동을 바꿔 끼우며 옆 파일도 저장하고 화면에 알린다
+
     async def _send_one(self, skill: str, ctx: str, payload: BaseModel, key: str) -> None:
-        """한 건 보낸다. 실패해도 상태는 그대로 두고 활동에 한 줄 남긴다."""
+        """한 건 보낸다. 실패해도 상태는 그대로 두고 활동에 한 줄 남긴다.
+
+        - 보냄: 못 보낸 기록·거절 기록을 지운다.
+        - 받는 쪽이 거절(`classify` PERMANENT): 다시 보내지 않는다. 옆 파일 기록(refused)·활동 한 줄
+          (사람이 받는 쪽을 고친 뒤 `resend_handoff`로 다시 보낸다).
+        - 사람 할 일함으로 넘어감(HANDED): 거절이 아니다. 기록(handed)과 활동 한 줄, 주기적으로
+          다시 보내지 않고 다시 켰을 때 맞추기가 다시 보낸다.
+        - 닿지 못함(TRANSIENT): `_unsent`에 두고 30초·60초·120초… 최대 15분 간격으로 다시 보낸다.
+          횟수는 옆 파일에 남는다. 활동에는 처음 실패만 남긴다."""
         try:
             how = await self._send_dev(skill, ctx, self.tenant_id, payload, key)
         except Exception:  # 넘기기 실패가 이미 바꾼 상태를 되돌리지 않게 한다
             how = "보내지 못함 (오류)"
-        if how.startswith("보냄"):
-            if self._unsent.pop(key, None) is not None:
+        kind = classify(how)
+        body = payload.model_dump(mode="json")
+        if kind == SENT:
+            was = key in self._unsent or any(f.key == key for f in self._handoff_failed)
+            self._forget(key)
+            self._handoff_failed = [f for f in self._handoff_failed if f.key != key]
+            if was:
                 self._save()
+                self.version += 1
+                self._notify()
             return
-        retry = "rejected" not in how  # 받는 쪽이 거절한 건 다시 보내도 같다
+        if kind == PERMANENT:
+            hint = permanent_hint(how)
+            note = f" ({hint})" if hint else ""
+            text = f"{skill} {how}{note} → 받는 쪽이 거절해 다시 보내지 않음 (고친 뒤 다시 보내기)"
+            await self._hold_back("refused", skill, ctx, body, key, str(how), text)
+            return
+        if kind == HANDED:
+            text = (
+                f"{skill} {how} → 사람 할 일함으로 넘어감 (받는 쪽을 다시 켜면 맞추기가 다시 보냄)"
+            )
+            await self._hold_back("handed", skill, ctx, body, key, str(how), text)
+            return
         first = key not in self._unsent
-        if retry:
-            self._unsent[key] = [skill, ctx, payload.model_dump(mode="json")]
-            self._save()
-            self._schedule_retry()
-            how += " → 30초마다 다시 보냄"
+        attempts = 1 if first else self._attempts(key) + 1
+        self._unsent[key] = [skill, ctx, body]  # 예전 모양 그대로 (횟수는 옆 파일)
+        self._attempt_counts[key] = attempts
+        self._due[key] = _monotonic() + retry_delay(attempts)
+        self._save()
+        self._schedule_retry()
         if not first:
             return  # 다시 보내기 실패는 활동에 거듭 남기지 않는다
         frm, to = ("planning", "dev") if self.role == "planning" else ("dev", "planning")
+        cap = RETRY_MAX_SECONDS // 60
+        text = f"{skill} {how} → {RETRY_SECONDS}초부터 간격을 늘려 다시 보냄 (최대 {cap}분)"
 
         async def log(s: State) -> None:
-            s.activity.append(
-                self._act(self.clock(), ctx, frm, to, skill, "A2A", f"{skill} {how}", "A")
-            )
+            s.activity.append(self._act(self.clock(), ctx, frm, to, skill, "A2A", text, "A"))
 
         await self._apply(log)
 
+    def _attempts(self, key: str) -> int:
+        """못 보낸 넘기기를 보낸 횟수. 옆 파일에 없으면(예전 빌드가 남긴 것) 1번으로 본다."""
+        return self._attempt_counts.get(key, 1)
+
+    @staticmethod
+    def _payload(skill: str, body: dict) -> BaseModel:
+        model = DevHandoffInput if skill == START_DEV else DevResultInput
+        return model.model_validate(body)
+
+    def _next_wait(self) -> float:
+        """가장 먼저 다시 보낼 넘기기까지 남은 초 (시각이 없는 건 바로)."""
+        now = _monotonic()
+        dues = [self._due.get(k, now) for k in self._unsent]
+        return max(0.0, min(dues, default=now) - now)
+
     def _schedule_retry(self) -> None:
-        """못 보낸 넘기기를 RETRY_SECONDS마다 다시 보낸다 (한 번에 하나만 돈다)."""
+        """못 보낸 넘기기를 때가 된 것부터 다시 보낸다 (한 번에 하나만 돈다)."""
         if self._retrying or not self._unsent:
             return
         self._retrying = True
@@ -411,8 +574,8 @@ class PlanningCore(StateService):
         async def loop() -> None:
             try:
                 while self._unsent:
-                    await asyncio.sleep(RETRY_SECONDS)
-                    await self.resend_unsent()
+                    await asyncio.sleep(self._next_wait())
+                    await self.resend_unsent(due_only=True)
             finally:
                 self._retrying = False
 
@@ -423,21 +586,67 @@ class PlanningCore(StateService):
             return
         self._retry_task = task  # wait_sent는 기다리지 않는다 (계속 도는 루프)
 
-    async def resend_unsent(self) -> None:
-        """못 보낸 넘기기를 한 번씩 다시 보낸다."""
-        for key, (skill, ctx, body) in list(self._unsent.items()):
-            model = DevHandoffInput if skill == START_DEV else DevResultInput
-            await self._send_one(skill, ctx, model.model_validate(body), key)
+    async def resend_unsent(self, due_only: bool = False) -> None:
+        """못 보낸 넘기기를 한 번씩 다시 보낸다. due_only면 다시 보낼 때가 된 것만.
+
+        저장된 내용을 읽지 못하는 줄은 루프를 멈추지 않게 빼서 거절 기록으로 옮긴다 (활동 한 줄)."""
+        now = _monotonic()
+        for key, entry in list(self._unsent.items()):
+            if due_only and self._due.get(key, now) > now:
+                continue
+            try:
+                skill, ctx, body = entry[:3]
+                payload = self._payload(skill, body)
+            except (TypeError, ValueError):  # ValidationError도 ValueError다
+                skill, ctx = (str(x) for x in (list(entry) + ["", ""])[:2])
+                body = entry[2] if isinstance(entry, list) and len(entry) > 2 else {}
+                body = body if isinstance(body, dict) else {}
+                reason = "저장된 내용을 읽지 못함"
+                text = f"{skill or '넘기기'} {key} {reason} → 다시 보내지 않음"
+                await self._hold_back("refused", skill, ctx, body, key, reason, text)
+                continue
+            await self._send_one(skill, ctx, payload, key)
 
     async def resync_peer(self) -> None:
         """다시 켰을 때 상대 서비스와 맞춘다: 못 보낸 것을 다시 보내고, 넘긴 기획서를 모두
-        다시 보낸다 (같은 멱등 키라 상대가 이미 가진 건 그대로, 잃은 쪽만 다시 반영)."""
+        다시 보낸다 (같은 멱등 키라 상대가 이미 가진 건 그대로, 잃은 쪽만 다시 반영).
+
+        받는 쪽이 같은 입력을 이미 거절한 넘기기(refused, 지문 같음)는 건너뛴다. 입력이 바뀌었으면
+        다시 보낸다. 사람 할 일함으로 넘어간 것(handed)은 다시 보낸다 (받는 쪽이 켜졌을 수 있다).
+        받는 쪽을 고친 뒤 거절된 건은 사람이 `resend_handoff`로 보낸다."""
         if not self.role:
             return
         await self.resend_unsent()
-        for item in self._dev_outgoing(self.state, full=True):
-            await self._send_one(*item)
+        refused = {f.key: f.fingerprint for f in self._handoff_failed if f.kind == "refused"}
+        for skill, ctx, payload, key in self._dev_outgoing(self.state, full=True):
+            if refused.get(key) == fingerprint(payload.model_dump(mode="json")):
+                continue
+            await self._send_one(skill, ctx, payload, key)
         self._save()
+
+    async def _resend_handoff(self, s: State, key: str | None = None) -> ActionResult | None:
+        """사람 버튼: 자동으로 다시 보내지 않는 넘기기를 같은 멱등 키로 다시 보낸다 (잠금 밖에서).
+
+        받는 쪽은 실패한 요청을 멱등 기록에 남기지 않아 같은 키로 다시 받는다. 기록은 보낸 결과로
+        지우거나 바꾼다 (또 거절하면 다시 남는다). 저장된 내용을 읽지 못하는 건 보낼 수 없다."""
+        picked = [f for f in self._handoff_failed if key is None or f.key == key]
+        if not picked:
+            raise ActionError("NOT_FOUND", "다시 보낼 넘기기가 없다")
+        to = "dev" if self.role == "planning" else "planning"
+        sent: list[str] = []
+        for f in picked:
+            try:
+                payload = self._payload(f.skill, f.payload)
+            except ValueError:
+                continue
+            self._resend_pending.append((f.skill, f.context_id, payload, f.key))
+            sent.append(f.key)
+            text = f"{f.skill} 사람이 다시 보냄\n지난 결과: {f.reason}"
+            act = self._act(self.clock(), f.context_id, "human", to, f.skill, "사람", text)
+            s.activity.append(act)
+        if not sent:
+            raise ActionError("INVALID_PAYLOAD", "저장된 내용을 읽지 못해 다시 보낼 수 없다")
+        return ActionResult(output={"resent": sent})
 
     async def wait_sent(self) -> None:
         """보내는 중인 넘기기가 끝날 때까지 기다린다 (테스트용)."""
@@ -632,4 +841,14 @@ class PlanningCore(StateService):
             )
 
 
-RETRY_SECONDS = 30  # 못 보낸 넘기기를 다시 보내는 간격
+RETRY_SECONDS = 30  # 못 보낸 넘기기를 처음 다시 보내기까지 (그 뒤로 두 배씩)
+RETRY_MAX_SECONDS = 15 * 60  # 다시 보내는 간격 상한
+
+
+def retry_delay(attempts: int) -> float:
+    """닿지 못한 넘기기를 attempts번 보낸 뒤 다음까지 기다릴 초: 30·60·120… 최대 15분."""
+    return float(min(RETRY_SECONDS * 2 ** max(0, attempts - 1), RETRY_MAX_SECONDS))
+
+
+def _monotonic() -> float:
+    return time.monotonic()
