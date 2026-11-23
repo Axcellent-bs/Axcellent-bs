@@ -840,6 +840,11 @@ VIDEO_REFUSALS = {
     "board_image_not_ready": (409, "BOARD_IMAGE_NOT_READY"),
     "model_not_configured": (409, "MODEL_NOT_CONFIGURED"),
     "higgsfield_key_missing": (409, "HIGGSFIELD_KEY_MISSING"),
+    # 회사 Higgsfield 계정 연결(MCP)로 만들 때
+    "credits_insufficient": (409, "HIGGSFIELD_CREDITS_INSUFFICIENT"),
+    "higgsfield_reconnect_needed": (409, "HIGGSFIELD_RECONNECT_NEEDED"),
+    "higgsfield_not_connected": (409, "HIGGSFIELD_NOT_CONNECTED"),
+    "higgsfield_app_missing": (409, "HIGGSFIELD_APP_MISSING"),
     "quota_exceeded": (409, "QUOTA_EXCEEDED"),
     "quota_not_configured": (409, "QUOTA_NOT_CONFIGURED"),
     "in_progress": (409, "IN_PROGRESS"),

@@ -22,6 +22,17 @@ Higgsfield(공식 문서 docs.higgsfield.ai, 2026-11-20 확인):
 - 미검증: 나노바나나 등 이미지 모델 경로와 요청 필드 이름은 공개 문서에 없다. 경로는 설정
   (`MARKETING_HIGGSFIELD_IMAGE_MODEL`·`MARKETING_HIGGSFIELD_VIDEO_MODEL`)로만 받고, 필드 이름은 아래
   `IMAGE_FIELDS`·`VIDEO_FIELDS` 한 곳에 모았다. 실제 키로 한 번 불러 본 뒤 맞춘다.
+
+회사 계정 연결(원격 MCP, 구독 크레딧, 2026-11-23): 요청 회사가 Higgsfield 계정을 연결했으면
+(`higgsfield_mcp_auth.connected`) 키 대신 그 계정으로 만든다(`creative_mcp.py`).
+없으면 위의 키 길 그대로.
+- 길(`route`: mcp | api)은 시작할 때 정해 기록에 남긴다. 영상은 승인받은 길·회사 그대로 만든다
+  (승인 사이에 연결을 끊었으면 키 길로 바꾸지 않고 `higgsfield_not_connected`로 실패)
+- 모델 ID는 `MARKETING_HIGGSFIELD_MCP_IMAGE_MODEL`·`MARKETING_HIGGSFIELD_MCP_VIDEO_MODEL`
+- 크레딧이 회사 구독에서 나가므로 고객사 키처럼 우리 키 월 예산을 걸지 않는다(`quota_applies`가
+  customer일 때와 같다). 장부 예약(멱등·진행 중 막기)·안전 관문(그림 B, 영상 C)·AI 생성 표시는 같다
+- 만들기 전에 예상 크레딧과 남은 크레딧을 본다(`estimate_*_cost` + `balance`, 작업을 만들지 않는다).
+  모자라면 `credits_insufficient`. 영상은 승인 요청 때와 실제로 만들기 직전에 두 번 본다
 """
 
 from __future__ import annotations
@@ -40,10 +51,16 @@ import httpx
 
 from ax_agent_template.execute import execute
 from ax_contracts.schemas import Evidence, ExecuteDecision, RequestMeta
+from marketing_agent import creative_mcp as _mcp
 from marketing_agent import creative_records as _creative
+from marketing_agent import higgsfield_mcp_auth as _mcp_auth
+from marketing_agent.higgsfield_mcp import McpError
+from marketing_agent.higgsfield_mcp_auth import McpAuthError
 from marketing_agent.media import usage as usage_mod
 from marketing_agent.media.config import (
     HIGGSFIELD_IMAGE_MODEL_ENV,
+    HIGGSFIELD_MCP_IMAGE_MODEL_ENV,
+    HIGGSFIELD_MCP_VIDEO_MODEL_ENV,
     HIGGSFIELD_VIDEO_MODEL_ENV,
     MediaSettings,
 )
@@ -53,6 +70,14 @@ logger = logging.getLogger("marketing.creative_render")
 
 API_HOST = "https://api.higgsfield.ai"
 PROVIDER = "higgsfield"
+MCP_PROVIDER = "higgsfield_mcp"  # 회사 계정 연결(구독 크레딧)
+MCP, API = "mcp", "api"
+# 연결 오류 → 기록·화면 사유 코드
+_AUTH_CODES = {
+    "not_connected": "higgsfield_not_connected",
+    "reconnect_needed": "higgsfield_reconnect_needed",
+    "client_id_missing": "higgsfield_app_missing",
+}
 IMAGE_ACTION = "generate_media"  # 기존 이미지 생성과 같은 안전 작업(B)
 VIDEO_ACTION = "generate_creative_video"  # 사람 승인(C)
 VIDEO_DURATION_ENV = "MARKETING_HIGGSFIELD_VIDEO_DURATION_S"
@@ -134,8 +159,48 @@ def video_seconds() -> int:
     return max(1, min(n, MAX_VIDEO_S))
 
 
-def configured(kind: str) -> str | None:
+def mcp_image_model() -> str:
+    return os.getenv(HIGGSFIELD_MCP_IMAGE_MODEL_ENV, "").strip()
+
+
+def mcp_video_model() -> str:
+    return os.getenv(HIGGSFIELD_MCP_VIDEO_MODEL_ENV, "").strip()
+
+
+def route() -> str:
+    """이 요청 회사가 Higgsfield 계정을 연결했으면 `mcp`(구독 크레딧), 아니면 `api`(키)."""
+    return MCP if _mcp_auth.connected() else API
+
+
+def _model(kind: str, via: str) -> str:
+    if via == MCP:
+        return mcp_image_model() if kind == "image" else mcp_video_model()
+    return image_model() if kind == "image" else video_model()
+
+
+def _provider(via: str) -> str:
+    return MCP_PROVIDER if via == MCP else PROVIDER
+
+
+def _billing_ko(via: str) -> str:
+    return "Higgsfield 회사 계정 구독 크레딧" if via == MCP else "Higgsfield"
+
+
+def _code(error: Exception) -> str:
+    """실패 사유 코드(값·응답 본문 없이)."""
+    if isinstance(error, RenderError):
+        return str(error)
+    if isinstance(error, McpAuthError):
+        return _AUTH_CODES.get(str(error), f"higgsfield_{error}")
+    if isinstance(error, McpError):
+        return "credits_insufficient" if error.code == "credits_insufficient" else f"mcp_{error}"
+    return type(error).__name__
+
+
+def configured(kind: str, via: str | None = None) -> str | None:
     """만들 수 없는 이유 코드. 되면 None."""
+    if (via or route()) == MCP:
+        return None if _model(kind, MCP) else "model_not_configured"
     if not _key():
         return "higgsfield_key_missing"
     if not (image_model() if kind == "image" else video_model()):
@@ -268,14 +333,25 @@ def _evidence(record_id: str, what: str) -> Evidence:
     )
 
 
+def _quota_applies(settings: MediaSettings, via: str) -> bool:
+    """우리 키로 만들 때만 월 예산을 건다. 회사 계정(구독 크레딧)·고객사 키는 걸지 않는다."""
+    return settings.quota_applies and via != MCP
+
+
 async def _gate_image(
-    ledger: MediaLedger, meta: RequestMeta, record_id: str, part: str
+    ledger: MediaLedger,
+    meta: RequestMeta,
+    record_id: str,
+    part: str,
+    via: str = API,
+    credits: float | None = None,
 ) -> tuple[ExecuteDecision | None, int | None, str | None]:
     """(결정, 장부 seq, 막힌 이유). 막히면 결정·seq는 None."""
     settings = MediaSettings.from_env()
     expected = usage_mod.planned("image", None)
-    cap = settings.quota("image") if settings.quota_applies else None
-    if settings.quota_applies and cap is None:
+    applies = _quota_applies(settings, via)
+    cap = settings.quota("image") if applies else None
+    if applies and cap is None:
         return None, None, "quota_not_configured"
     key = f"{meta.context_id}:creative_render:{record_id}:{part}"
     now = _now()
@@ -284,8 +360,8 @@ async def _gate_image(
             key=key,
             month=now.strftime("%Y-%m"),
             media_kind="image",
-            provider=PROVIDER,
-            model_id=image_model(),
+            provider=_provider(via),
+            model_id=_model("image", via),
             usage=expected,
             monthly_cap=cap,
             now=now,
@@ -300,15 +376,19 @@ async def _gate_image(
     params = {
         "media_kind": "image",
         "resolution": "1024x1024",
-        "provider": PROVIDER,
+        "provider": _provider(via),
         "scene_template_id": f"creative_{part}",
         "post_draft_id": record_id,
         "request_sha256": hashlib.sha256(key.encode()).hexdigest(),
         "ai_generated": True,
         "usage_unit": expected.unit,
         "usage_amount": expected.amount,
-        "summary": f"{label} 그림 생성 1장 (Higgsfield, AI 생성)",
+        "summary": f"{label} 그림 생성 1장 ({_billing_ko(via)}, AI 생성)",
     }
+    if via == MCP:
+        params["billing"] = "company_subscription"
+        if credits is not None:
+            params["credits_estimate"] = credits
     decision = await execute(
         IMAGE_ACTION,
         params,
@@ -331,15 +411,18 @@ def start_sheet(
     ref: bytes | None,
 ) -> None:
     """이미지 시트 프롬프트가 나온 직후 부른다. 설정이 없으면 기록에 이유만 남긴다."""
-    why = configured("image")
+    via = route()
+    why = configured("image", via)
     if why:
-        _set(record_id, "sheet_image", status="unavailable", error=why)
+        _set(record_id, "sheet_image", status="unavailable", error=why, route=via)
         return
-    _set(record_id, "sheet_image", status="running", error=None)
+    _set(record_id, "sheet_image", status="running", error=None, route=via)
     prompt = str(sheet.get("prompt_en") or "")
     negative = str(sheet.get("negative_prompt_en") or "")
     _spawn(
-        _render_image(ledger, meta, record_id, "sheet_image", prompt, negative, ref, SHEET_ASPECT)
+        _render_image(
+            ledger, meta, record_id, "sheet_image", prompt, negative, ref, SHEET_ASPECT, via
+        )
     )
 
 
@@ -361,9 +444,10 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str) ->
         if sheet.get("status") in ("unavailable", "failed", "blocked"):
             _set(record_id, "board_image", status="unavailable", error="sheet_image_missing")
         return  # 시트 그림이 끝나면 다시 부른다
-    why = configured("image")
+    via = route()
+    why = configured("image", via)
     if why:
-        _set(record_id, "board_image", status="unavailable", error=why)
+        _set(record_id, "board_image", status="unavailable", error=why, route=via)
         return
     try:
         ref = asset_path(record_id, "sheet_image").read_bytes()
@@ -371,7 +455,14 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str) ->
         _set(record_id, "board_image", status="failed", error="sheet_file_missing")
         return
     board_out = rec["storyboard"]
-    _set(record_id, "board_image", status="running", error=None, story_sha=_story_sha(rec))
+    _set(
+        record_id,
+        "board_image",
+        status="running",
+        error=None,
+        story_sha=_story_sha(rec),
+        route=via,
+    )
     _spawn(
         _render_image(
             ledger,
@@ -382,6 +473,7 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str) ->
             str(board_out.get("negative_prompt_en") or ""),
             ref,
             BOARD_ASPECT,
+            via,
         )
     )
 
@@ -395,8 +487,20 @@ async def _render_image(
     negative: str,
     ref: bytes | None,
     aspect: str,
+    via: str = API,
 ) -> None:
-    decision, seq, blocked = await _gate_image(ledger, meta, record_id, part)
+    cid = _mcp_auth.company() if via == MCP else None
+    params = _mcp.image_params(mcp_image_model(), prompt, negative, aspect)
+    credits: float | None = None
+    if via == MCP:
+        try:
+            credits = await _mcp_preflight(cid, "image", params)
+        except _ERRORS as error:
+            _set(record_id, part, status="blocked", error=_code(error))
+            if part == "sheet_image":
+                maybe_start_board(ledger, meta, record_id)
+            return
+    decision, seq, blocked = await _gate_image(ledger, meta, record_id, part, via, credits)
     if blocked or decision is None or seq is None:
         _set(record_id, part, status="blocked", error=blocked)
         if part == "sheet_image":
@@ -404,20 +508,12 @@ async def _render_image(
         return
     try:
         async with CLIENT() as client:
-            payload: dict[str, Any] = {
-                IMAGE_FIELDS["prompt"]: prompt[:8000],
-                IMAGE_FIELDS["aspect"]: aspect,
-            }
-            if negative:
-                payload[IMAGE_FIELDS["negative"]] = negative[:1000]
-            if ref:
-                payload[IMAGE_FIELDS["refs"]] = [await _upload(client, ref)]
-            job = await _submit(client, image_model(), payload)
-            _set(record_id, part, request_id=job)
-            url = await _wait(client, job, "image")
-            sha = await _download(client, url, asset_path(record_id, part))
-    except (RenderError, httpx.HTTPError, OSError, ValueError) as error:
-        code = str(error) if isinstance(error, RenderError) else type(error).__name__
+            if via == MCP:
+                sha = await _mcp_render(client, cid, record_id, part, "image", params, ref)
+            else:
+                sha = await _api_image(client, record_id, part, prompt, negative, ref, aspect)
+    except _ERRORS as error:
+        code = _code(error)
         logger.warning("Higgsfield %s 실패: %s (%s)", part, code, record_id)
         _safe(lambda: ledger.mark_failed(seq, _now()))
         _set(record_id, part, status="failed", error=code)
@@ -428,10 +524,10 @@ async def _render_image(
     _safe(
         lambda: ledger.settle(
             seq,
-            model_id=image_model(),
+            model_id=_model("image", via),
             usage=usage,
             usage_source="estimate",
-            result_json='{"provider":"higgsfield"}',
+            result_json=f'{{"provider":"{_provider(via)}"}}',
             now=_now(),
         )
     )
@@ -448,6 +544,65 @@ async def _render_image(
         maybe_start_board(ledger, meta, record_id)
 
 
+async def _api_image(
+    client: httpx.AsyncClient,
+    record_id: str,
+    part: str,
+    prompt: str,
+    negative: str,
+    ref: bytes | None,
+    aspect: str,
+) -> str:
+    """키 길(예전 그대로): 참조 올리기 → 만들기 → 기다리기 → 내려받기. 돌려주는 값은 sha256."""
+    payload: dict[str, Any] = {
+        IMAGE_FIELDS["prompt"]: prompt[:8000],
+        IMAGE_FIELDS["aspect"]: aspect,
+    }
+    if negative:
+        payload[IMAGE_FIELDS["negative"]] = negative[:1000]
+    if ref:
+        payload[IMAGE_FIELDS["refs"]] = [await _upload(client, ref)]
+    job = await _submit(client, image_model(), payload)
+    _set(record_id, part, request_id=job)
+    url = await _wait(client, job, "image")
+    return await _download(client, url, asset_path(record_id, part))
+
+
+# ---------------------------------------------------------------- 회사 계정(MCP)
+_ERRORS = (RenderError, McpError, McpAuthError, httpx.HTTPError, OSError, ValueError)
+
+
+async def _mcp_preflight(cid: str | None, kind: str, params: dict[str, Any]) -> float | None:
+    """예상 크레딧(모르면 None). 모자라거나 연결이 없으면 예외."""
+    if not cid:
+        raise McpAuthError("not_connected")
+    async with CLIENT() as client:
+        return await _mcp.preflight(_mcp.Higgsfield(client, cid), kind, params)
+
+
+async def _mcp_render(
+    client: httpx.AsyncClient,
+    cid: str | None,
+    record_id: str,
+    part: str,
+    kind: str,
+    params: dict[str, Any],
+    ref: bytes | None,
+) -> str:
+    """회사 계정으로: 참조 올리기 → 만들기 → 기다리기 → 내려받기. 돌려주는 값은 sha256."""
+    if not cid:
+        raise McpAuthError("not_connected")
+    hf = _mcp.Higgsfield(client, cid)
+    if ref:
+        media = await _mcp.upload(hf, ref, f"{record_id}-{part}-ref.jpg", "image/jpeg")
+        role = _mcp.IMAGE_REF_ROLE if kind == "image" else _mcp.VIDEO_START_ROLE
+        params = _mcp.with_media(params, media, role)
+    job = await _mcp.submit(hf, kind, params)
+    _set(record_id, part, request_id=job)
+    url = await _mcp.wait(hf, job, SLEEP)
+    return await _download(client, url, asset_path(record_id, part))
+
+
 # ---------------------------------------------------------------- 영상 (사람 승인)
 async def request_video(
     ledger: MediaLedger, meta: RequestMeta, record_id: str, who: str | None
@@ -462,15 +617,24 @@ async def request_video(
         return video
     if (render.get("board_image") or {}).get("status") != "done":
         raise RenderError("board_image_not_ready")
-    why = configured("video")
+    via = route()
+    why = configured("video", via)
     if why:
         raise RenderError(why)
     settings = MediaSettings.from_env()
     seconds = video_seconds()
     expected = usage_mod.UsageAmount("seconds", seconds)
-    cap = settings.quota("video") if settings.quota_applies else None
-    if settings.quota_applies and cap is None:
+    applies = _quota_applies(settings, via)
+    cap = settings.quota("video") if applies else None
+    if applies and cap is None:
         raise RenderError("quota_not_configured")
+    cid = _mcp_auth.company() if via == MCP else None
+    credits: float | None = None
+    if via == MCP:
+        try:
+            credits = await _mcp_preflight(cid, "video", _video_mcp_params(rec, seconds))
+        except _ERRORS as error:
+            raise RenderError(_code(error)) from None
     key = f"{meta.context_id}:{VIDEO_ACTION}:{record_id}"
     now = _now()
     try:
@@ -478,8 +642,8 @@ async def request_video(
             key=key,
             month=now.strftime("%Y-%m"),
             media_kind="video",
-            provider=PROVIDER,
-            model_id=video_model(),
+            provider=_provider(via),
+            model_id=_model("video", via),
             usage=expected,
             monthly_cap=cap,
             now=now,
@@ -492,16 +656,20 @@ async def request_video(
         raise RenderError("in_progress")
     seq = res.row.seq
     title = (rec.get("storyboard") or {}).get("title_ko") or record_id
-    params = {
+    params: dict[str, Any] = {
         "record_id": record_id,
-        "provider": PROVIDER,
+        "provider": _provider(via),
         "duration_s": seconds,
         "usage_unit": "seconds",
         "usage_amount": seconds,
         "ai_generated": True,
         "requested_by": (who or "")[:80],
-        "summary": f"스토리보드 영상 {seconds}초 만들기: {title} (Higgsfield, AI 생성)",
+        "summary": f"스토리보드 영상 {seconds}초 만들기: {title} ({_billing_ko(via)}, AI 생성)",
     }
+    if via == MCP:
+        params["billing"] = "company_subscription"
+        if credits is not None:
+            params["credits_estimate"] = credits
     decision = await execute(
         VIDEO_ACTION,
         params,
@@ -515,6 +683,8 @@ async def request_video(
         "context_id": meta.context_id,
         "requested_by": who,
         "params": params,
+        "route": via,
+        "company_id": cid,
     }
     if decision.status == "held":
         return _set(
@@ -561,33 +731,41 @@ async def check_video(ledger: MediaLedger, meta: RequestMeta, record_id: str) ->
     _set(record_id, "video", status="rejected", error=f"gate_{decision.status}")
 
 
-async def _render_video(
-    ledger: MediaLedger, record_id: str, seq: int, decision: ExecuteDecision
-) -> None:
-    rec = _creative.store().get(record_id) or {}
+def _video_prompt(rec: dict[str, Any]) -> str:
     board = rec.get("storyboard") or {}
-    video = (rec.get("render") or {}).get("video") or {}
-    seconds = int(video.get("seconds") or video_seconds())
-    prompt = (
+    return (
         "Animate this storyboard as one continuous short film, panel by panel in order, "
         "keeping the same characters, outfits and art style. "
         f"{board.get('style_en') or ''}"
     ).strip()
+
+
+def _video_mcp_params(rec: dict[str, Any], seconds: int) -> dict[str, Any]:
+    return _mcp.video_params(mcp_video_model(), _video_prompt(rec), VIDEO_ASPECT, seconds)
+
+
+async def _render_video(
+    ledger: MediaLedger, record_id: str, seq: int, decision: ExecuteDecision
+) -> None:
+    rec = _creative.store().get(record_id) or {}
+    video = (rec.get("render") or {}).get("video") or {}
+    seconds = int(video.get("seconds") or video_seconds())
+    via = MCP if video.get("route") == MCP else API  # 승인받은 길 그대로
     try:
         ref = asset_path(record_id, "board_image").read_bytes()
-        async with CLIENT() as client:
-            payload = {
-                VIDEO_FIELDS["prompt"]: prompt[:2000],
-                VIDEO_FIELDS["refs"]: [await _upload(client, ref)],
-                VIDEO_FIELDS["aspect"]: VIDEO_ASPECT,
-                VIDEO_FIELDS["duration"]: seconds,
-            }
-            job = await _submit(client, video_model(), payload)
-            _set(record_id, "video", request_id=job)
-            url = await _wait(client, job, "video")
-            sha = await _download(client, url, asset_path(record_id, "video"))
-    except (RenderError, httpx.HTTPError, OSError, ValueError) as error:
-        code = str(error) if isinstance(error, RenderError) else type(error).__name__
+        if via == MCP:
+            cid = video.get("company_id")
+            if not cid or not _mcp_auth.connected(cid):
+                raise McpAuthError("not_connected")  # 키 길로 바꾸지 않는다
+            params = _video_mcp_params(rec, seconds)
+            await _mcp_preflight(cid, "video", params)  # 승인 사이에 크레딧이 줄었을 수 있다
+            async with CLIENT() as client:
+                sha = await _mcp_render(client, cid, record_id, "video", "video", params, ref)
+        else:
+            async with CLIENT() as client:
+                sha = await _api_video(client, record_id, _video_prompt(rec), ref, seconds)
+    except _ERRORS as error:
+        code = _code(error)
         logger.warning("Higgsfield video 실패: %s (%s)", code, record_id)
         _safe(lambda: ledger.mark_failed(seq, _now()))
         _set(record_id, "video", status="failed", error=code)
@@ -595,10 +773,10 @@ async def _render_video(
     _safe(
         lambda: ledger.settle(
             seq,
-            model_id=video_model(),
+            model_id=_model("video", via),
             usage=usage_mod.UsageAmount("seconds", seconds),
             usage_source="estimate",
-            result_json='{"provider":"higgsfield"}',
+            result_json=f'{{"provider":"{_provider(via)}"}}',
             now=_now(),
         )
     )
@@ -611,6 +789,22 @@ async def _render_video(
         sha256=sha,
         execution_id=decision.execution_id,
     )
+
+
+async def _api_video(
+    client: httpx.AsyncClient, record_id: str, prompt: str, ref: bytes, seconds: int
+) -> str:
+    """키 길(예전 그대로). 돌려주는 값은 sha256."""
+    payload = {
+        VIDEO_FIELDS["prompt"]: prompt[:2000],
+        VIDEO_FIELDS["refs"]: [await _upload(client, ref)],
+        VIDEO_FIELDS["aspect"]: VIDEO_ASPECT,
+        VIDEO_FIELDS["duration"]: seconds,
+    }
+    job = await _submit(client, video_model(), payload)
+    _set(record_id, "video", request_id=job)
+    url = await _wait(client, job, "video")
+    return await _download(client, url, asset_path(record_id, "video"))
 
 
 def expire_stale(record_id: str) -> None:
