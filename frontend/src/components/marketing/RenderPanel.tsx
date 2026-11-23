@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useAuthedMedia } from "@/lib/authedMedia";
+import { HIGGSFIELD_URL, acceptFor, isVideoPart, pickDropped, storyboardVideoPrompt, uploadProblem } from "@/lib/higgsfieldWeb";
 import { YoutubePanel } from "./YoutubePanel";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
@@ -32,13 +33,14 @@ function Status({ part }: { part?: RenderPart | null }) {
   return <span className={`chip ${tone}`}>{STATUS_KO[s] ?? s}</span>;
 }
 
-const IS_VIDEO = (part: RenderPartKey) => part === "video" || part === "final_video";
+const IS_VIDEO = isVideoPart;
 
-function UploadButton({ recordId, part, onDone, onError }: { recordId: string; part: RenderPartKey; onDone: () => void; onError: (m: string) => void }) {
-  const input = useRef<HTMLInputElement>(null);
+/** 칸에 파일 올리기. [파일 올리기]와 끌어 놓기가 같은 검사(uploadProblem)·같은 올리기 함수를 쓴다 */
+function useUpload(recordId: string, part: RenderPartKey, onDone: () => void, onError: (m: string) => void) {
   const [busy, setBusy] = useState(false);
-  const pick = async (file?: File) => {
-    if (!file) return;
+  const upload = async (file: File) => {
+    const problem = uploadProblem(part, file);
+    if (problem) { onError(problem); return; }
     setBusy(true);
     try {
       await uploadCreativeFile(recordId, part, file);
@@ -47,14 +49,45 @@ function UploadButton({ recordId, part, onDone, onError }: { recordId: string; p
       onError(e instanceof Error ? e.message : "파일을 올리지 못했어요");
     } finally {
       setBusy(false);
-      if (input.current) input.current.value = "";
     }
   };
+  return { busy, upload };
+}
+
+function UploadButton({ part, busy, onPick }: { part: RenderPartKey; busy: boolean; onPick: (file: File) => void }) {
+  const input = useRef<HTMLInputElement>(null);
   return (
     <>
-      <input ref={input} type="file" className="hidden" accept={IS_VIDEO(part) ? "video/mp4" : "image/jpeg,image/png"} onChange={(e) => void pick(e.target.files?.[0])} />
+      <input ref={input} type="file" className="hidden" accept={acceptFor(part)}
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onPick(f); }} />
       <button type="button" className="btn-ghost ml-auto text-xs" disabled={busy} onClick={() => input.current?.click()}>{busy ? "올리는 중…" : "파일 올리기"}</button>
     </>
+  );
+}
+
+/** 영상 칸의 끌어 놓기 자리. 끌고 오는 동안 브랜드 색 점선으로 바뀐다 */
+function DropArea({ enabled, busy, onFile, onError, children }: { enabled: boolean; busy: boolean; onFile: (file: File) => void; onError: (m: string) => void; children: ReactNode }) {
+  const [over, setOver] = useState(false);
+  if (!enabled) return <>{children}</>;
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setOver(false);
+    if (busy) return;
+    const { file, problem } = pickDropped(Array.from(e.dataTransfer.files));
+    if (problem) onError(problem);
+    else if (file) onFile(file as File);
+  };
+  return (
+    <div
+      className={`rounded-xl border-2 border-dashed p-1 transition-colors ${over ? "border-brand-500 bg-brand-50" : "border-ink-300"}`}
+      onDragEnter={(e) => { e.preventDefault(); setOver(true); }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = busy ? "none" : "copy"; }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false); }}
+      onDrop={onDrop}
+    >
+      {children}
+      <p className="px-2 py-1 text-center text-xs text-ink-500">{busy ? "올리는 중…" : over ? "놓으면 올려요" : "MP4 파일을 여기로 끌어 놓아도 올라가요"}</p>
+    </div>
   );
 }
 
@@ -63,13 +96,15 @@ function Picture({ recordId, part, info, label, onChanged, onError }: { recordId
   const uploaded = info?.source === "upload";
   const busy = info?.status === "running" || info?.status === "awaiting_approval";
   const { src, failed } = useAuthedMedia(done ? assetUrl(recordId, part, info?.sha256 ?? null) : null);
+  const { busy: uploading, upload } = useUpload(recordId, part, onChanged, onError);
   return (
     <figure className="space-y-1">
       <figcaption className="flex items-center gap-2 text-xs font-medium text-ink-700">
         {label} <Status part={info} />
         {uploaded && <span className="chip bg-ink-50 text-ink-700" title={info?.by ? `${info.by}님이 올림` : undefined}>직접 올림{info?.label ? ` · ${info.label}` : ""}</span>}
-        {!busy && <UploadButton recordId={recordId} part={part} onDone={onChanged} onError={onError} />}
+        {!busy && <UploadButton part={part} busy={uploading} onPick={(f) => void upload(f)} />}
       </figcaption>
+      <DropArea enabled={IS_VIDEO(part) && !busy} busy={uploading} onFile={(f) => void upload(f)} onError={onError}>
       {done ? (
         src ? (IS_VIDEO(part)
           ? <video src={src} controls playsInline className="w-full max-w-sm rounded-xl bg-black" />
@@ -80,7 +115,39 @@ function Picture({ recordId, part, info, label, onChanged, onError }: { recordId
           {info?.status === "running" ? "Higgsfield가 만드는 중이에요 (보통 30초~2분)" : errorText(info?.error) ?? "아직 없어요"}
         </div>
       )}
+      </DropArea>
     </figure>
+  );
+}
+
+/** Higgsfield 웹 구독(Ultra)으로 만들기: 영상 요청과 같은 프롬프트를 복사하고 새 탭으로 Higgsfield를 연다(API 키 없음) */
+function HiggsfieldWeb({ styleEn }: { styleEn?: string | null }) {
+  const prompt = storyboardVideoPrompt(styleEn);
+  const [copy, setCopy] = useState<"idle" | "ok" | "failed">("idle");
+  const go = async () => {
+    // 복사를 먼저 한다(새 탭이 먼저 뜨면 이 화면이 포커스를 잃어 복사가 실패한다). 실패해도 새 탭은 연다
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopy("ok");
+    } catch {
+      setCopy("failed");
+    }
+    window.open(HIGGSFIELD_URL, "_blank", "noopener,noreferrer");
+  };
+  return (
+    <div className="space-y-1.5 rounded-xl bg-ink-50 p-3 text-xs text-ink-700">
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-ghost text-xs" onClick={() => void go()}>영상 프롬프트 복사 + Higgsfield 열기</button>
+        {copy === "ok" && <span role="status" className="text-emerald-800">프롬프트를 복사했어요</span>}
+      </div>
+      <p className="text-ink-500">Higgsfield 화면(웹 구독)에서 위 스토리보드 그림을 시작 이미지로 올리고 프롬프트를 붙여 넣어 만드세요. 만든 영상은 아래 칸에 끌어 놓거나 [파일 올리기]로 붙여요.</p>
+      {copy === "failed" && (
+        <div className="space-y-1">
+          <p role="alert" className="text-amber-800">자동 복사가 안 됐어요. 아래 프롬프트를 선택해 복사하세요.</p>
+          <textarea readOnly className="field h-24 w-full text-xs" value={prompt} aria-label="영상 프롬프트" onFocus={(e) => e.currentTarget.select()} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -141,6 +208,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
           </button>
         )}
         {!canAsk && !video?.status && render.board_image?.status !== "done" && <p className="text-xs text-ink-500">스토리보드 그림이 끝나면 영상을 요청할 수 있어요.</p>}
+        {rec?.storyboard && <HiggsfieldWeb styleEn={rec.storyboard.style_en} />}
       </div>
       <div className="border-t border-ink-100 pt-3">
         <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError} />
