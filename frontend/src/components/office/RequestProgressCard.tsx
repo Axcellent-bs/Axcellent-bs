@@ -11,7 +11,7 @@ import { dataAi, type RequestVideoPerformance } from "@/lib/data";
 import { planDocPath } from "@/lib/planDoc";
 import { planId } from "@/lib/format";
 import { STALE_HOURS, staleHours } from "@/lib/officeRequests";
-import { keyEvidence, reportHash, sortBeats } from "@/lib/trendReportView";
+import { keyEvidence, recommendationItems, reportHash } from "@/lib/trendReportView";
 import type { TrendReportDoneCard } from "@/lib/planningData";
 import type { TrendReport as Report } from "@/lib/data";
 import { DoneCard, ProgressCard } from "@/components/office/ChatCards";
@@ -52,7 +52,7 @@ function ReportCell({ reportId }: { reportId: string }) {
   if (done) return <DoneCard card={done} />;
   const finish = (r: Report) => setDone({
     kind: "trend_report_done", report_id: r.report_id, status: r.status, summary_line: r.summary_line,
-    top_evidence: keyEvidence(sortBeats(r.sections.recommendation.beats)).map((k) => k.short),
+    top_evidence: keyEvidence(recommendationItems(r.sections.recommendation)).map((k) => k.short),
     report_path: `/data/trend${reportHash(r.report_id)}`,
   });
   return <ProgressCard card={{ kind: "trend_report_progress", report_id: reportId }} onDone={finish} />;

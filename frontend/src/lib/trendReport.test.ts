@@ -5,8 +5,9 @@ import { TREND_TABS, trendTabFromHash, trendTabHash } from "./contentLoop.ts";
 import { sectionState } from "./segmentView.ts";
 import { TREND_REPORT_EXAMPLE } from "./trendReportExample.ts";
 import { TREND_REPORT_PRESETS } from "./trendReportPresets.ts";
+import type { TrendReportMaterial } from "./data.ts";
 import {
-  EMPTY_FORM, barPct, beatEvidence, beatWidths, buildInput, competitorSummary, evidenceDomId, evidenceExpanded, evidenceListClass, formFromBrief,
+  EMPTY_FORM, MATERIAL_LABEL, MATERIALS_NOTE, aiPickMode, recommendationItems, barPct, beatEvidence, beatWidths, buildInput, competitorSummary, evidenceDomId, evidenceExpanded, evidenceListClass, formFromBrief,
   hasInput, hashtagMeta, headerRows, keepPolling, keyEvidence, limitGroups, pctText, reportHash, reportIdFromHash, searchKind, searchMain,
   searchNotes, shareText, sortBeats, sortCompetitors, sortSearchRows, sourceLabel, sourceTag, targetText, traitLines, traitSentence,
 } from "./trendReportView.ts";
@@ -190,4 +191,32 @@ test("skill이 아직 없으면(403·FORBIDDEN_SKILL) 준비 중, 그 밖은 실
   assert.deepEqual(sectionState("데이터 분석 AI에서 분석 의뢰를 받지 못했습니다 (403)"), { kind: "missing" });
   assert.deepEqual(sectionState("데이터 AI가 요청을 처리하지 않았습니다 (FORBIDDEN_SKILL)"), { kind: "missing" });
   assert.equal(sectionState("데이터 분석 AI에서 분석 의뢰를 받지 못했습니다 (500)").kind, "failed");
+});
+
+// ---- 기획에 넘길 재료 (11/23): 시간별 콘티 대신. 옛 보고서(콘티만)는 그대로
+
+const MATERIALS: TrendReportMaterial[] = [
+  { kind: "hashtag", text: "#북토크 해시태그를 쓴다", evidence: ["#북토크 새로 뜸"], evidence_items: [{ id: "hashtag:1", text: "#북토크 새로 뜸", short: "#북토크 새로 뜸" }] },
+  { kind: "format", text: "릴스 형식으로", evidence: ["민음사 릴스 좋아요 평소의 3.7배"], evidence_items: [{ id: "content:1", text: "민음사 릴스 좋아요 평소의 3.7배", short: "민음사 릴스 ×3.7" }] },
+  { kind: "topic", text: "소설 주제로", evidence: ["옛 근거 문장"] },
+  { kind: "writing", text: "첫 줄을 질문으로", evidence: [], evidence_items: [{ id: "hashtag:1", text: "#북토크 새로 뜸", short: "#북토크 새로 뜸" }] },
+];
+
+test("재료가 있으면 재료 4칸, 재료 없이 콘티만 있는 옛 보고서는 콘티, 둘 다 없으면 없음", () => {
+  const old = TREND_REPORT_EXAMPLE.sections.recommendation;
+  assert.equal(aiPickMode({ ...old, materials: MATERIALS }), "materials");
+  assert.equal(aiPickMode(old), "beats"); // 옛 보고서 예시: materials 칸이 없다
+  assert.equal(aiPickMode({ ...old, materials: [] }), "beats");
+  assert.equal(aiPickMode({ ...old, beats: [], materials: [] }), "none");
+  assert.deepEqual(MATERIALS.map((m) => MATERIAL_LABEL[m.kind]), ["해시태그", "형식", "관심 주제", "글쓰기"]);
+  assert.equal(MATERIALS_NOTE, "시간별 장면은 기획이 짜요");
+});
+
+test("핵심 근거 칩·대화 카드 근거: 재료가 있으면 재료 순서, 옛 보고서는 시간 순서 콘티", () => {
+  const old = TREND_REPORT_EXAMPLE.sections.recommendation;
+  const withMaterials = { ...old, materials: MATERIALS };
+  assert.deepEqual(keyEvidence(recommendationItems(withMaterials)).map((e) => e.short), ["#북토크 새로 뜸", "민음사 릴스 ×3.7"]);
+  assert.deepEqual(recommendationItems(old), sortBeats(old.beats));
+  assert.deepEqual(keyEvidence(recommendationItems(old)), keyEvidence(sortBeats(old.beats)));
+  assert.deepEqual(beatEvidence(MATERIALS[2]), [{ id: null, text: "옛 근거 문장" }]); // 근거 id 없는 옛 문장은 그대로
 });
