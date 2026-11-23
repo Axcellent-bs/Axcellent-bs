@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { DIRECT_AGENTS } from "@/components/office/DirectChat";
 import { roomPeople } from "@/lib/chatRooms";
-import { MessengerLog, PinNotice, StatusChip, TypingLines, WorkLogBar } from "@/components/office/Messenger";
+import { ClearDivider, MessengerLog, PinNotice, StatusChip, TypingLines, WorkLogBar } from "@/components/office/Messenger";
 import { useQuietLog } from "@/components/office/useQuietLog";
 import { TalkInput } from "@/components/office/TalkInput";
 import type { OfficeTalk } from "@/components/office/useOfficeTalk";
@@ -19,7 +19,11 @@ export interface Typing { key: string; name: string; what: string }
 /** 대화 칸에 보이는 줄 수 (작업 기록을 거른 뒤 마지막 N줄) */
 const SHOWN = 80;
 
-export function OfficeChat({ items: all, typing, freshIds, title, longTitle, status, inc, room = ALL_ROOM, talk, picker, wide, onWide, big = true }: {
+export function OfficeChat({ items: all, typing, freshIds, title, longTitle, status, inc, room = ALL_ROOM, talk, picker, wide, onWide, big = true, clearedAt, onClear, onUndoClear }: {
+  /** 11/23 /clear: 내가 지운 시각(있으면 구분선)·지우기·되돌리기. items는 지운 시각 뒤만 넘긴다 */
+  clearedAt?: string;
+  onClear?: () => Promise<void>;
+  onUndoClear?: () => Promise<void>;
   items: ChatItem[]; typing: Typing[]; freshIds: ReadonlySet<string>; title: string; status?: string;
   /** 장애 방의 긴 문장 이름 (방 머리 아래 보조 줄) */
   longTitle?: string;
@@ -80,15 +84,16 @@ export function OfficeChat({ items: all, typing, freshIds, title, longTitle, sta
       </header>
       {inc && <PinNotice inc={inc} />}
       <div ref={box} onScroll={onScroll} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-4">
+        {clearedAt && onUndoClear && <ClearDivider clearedAt={clearedAt} onUndo={onUndoClear} />}
         {items.length === 0 ? (
-          <p className="py-16 text-center text-sm text-ink-500">아직 이 방에서 주고받은 말이 없어요.</p>
+          clearedAt ? null : <p className="py-16 text-center text-sm text-ink-500">아직 이 방에서 주고받은 말이 없어요.</p>
         ) : (
           <MessengerLog items={items} talk={talk} fresh={freshIds} label={`${title} 대화`} hold={{ decideHref: big ? chatHref : undefined }} />
         )}
       </div>
       <WorkLogBar logCount={lanes.logCount} failCount={lanes.failCount} show={showLog} onToggle={() => setShowLog(!showLog)} />
       <TypingLines names={typing} />
-      {talk && <TalkInput talk={talk} onSent={toBottom} where="office" room={room} roomName={inc ? title : undefined} />}
+      {talk && <TalkInput talk={talk} onSent={toBottom} where="office" room={room} roomName={inc ? title : undefined} onClear={onClear} />}
     </section>
   );
 }

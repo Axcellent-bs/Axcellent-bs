@@ -15,6 +15,7 @@ import { READER_AREAS } from "@/demo/members";
 import { useSession, type Account } from "@/demo/session";
 import { humanizePlanIds } from "@/lib/format"
 import { ACCEPT, makeCharacterSheet, shrinkImage } from "@/lib/characterSheet"
+import { NEW_THREAD_NOTE, commandHint, isClearCommand } from "@/lib/roomCleanup"
 
 // AI 대화방의 직접 대화. 사람이 부서 AI 하나를 골라 바로 말을 건다.
 // 사람 말을 바로 받는 창구: 개발 AI(dashboard-api /api/dashboard/dev-chat), 인사 AI(/api/hr/chat), 기획 AI(dashboard-api /api/dashboard/planning-chat), 마케팅 AI(dashboard-api /api/dashboard/marketing-chat), 재무 AI(dashboard-api /api/dashboard/finance-chat), 총괄 AI(dashboard-api /api/dashboard/orchestrator-chat), 인프라 AI(dashboard-api /api/dashboard/infra-chat). 나머지 AI는 창구가 생길 때까지 "준비 중"으로 둔다.
@@ -138,6 +139,8 @@ export function DirectChat({ agent, narrow = false, bare = false }: { agent: Dir
 function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; talk: Talk; account: Account; narrow: boolean }) {
   const [thread, setThread] = useState<ChatThread | null>(null);
   const [text, setText] = useState("");
+  // 11/23 /clear로 새 대화를 시작했나 (새 대화 위 "새 대화를 시작했어요" 한 줄). 지난 대화를 열면 끈다
+  const [freshStart, setFreshStart] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   // 마케팅 1:1만: 올릴 캐릭터 이미지(보내면 먼저 이미지 시트를 만들고 그 기록 번호를 말과 함께 보낸다)
   const [picked, setPicked] = useState<{ media_type: string; data_base64: string; preview: string; thumb_base64: string } | null>(null);
@@ -225,6 +228,15 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
   };
   const send = async (e?: FormEvent, said?: string) => {
     e?.preventDefault();
+    // 11/23 /clear = 새 대화 시작 (메시지로 보내지 않는다). 저장된 대화 번호를 지우고 다음 말이 새 대화를 만든다.
+    // 이전 대화는 "내 지난 대화"에 그대로 남는다
+    if (said === undefined && isClearCommand(text)) {
+      if (sending) return;
+      reset();
+      setText("");
+      setFreshStart(true);
+      return;
+    }
     const image = said === undefined ? picked : null;
     const message = (said ?? text).trim() || (image ? "이 캐릭터로 이미지 시트 만들어 줘" : "");
     if (!message || sending || readOnly || prep || locked) return;
@@ -276,6 +288,7 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
   };
   const open = (t: ChatThread) => {
     setError(null);
+    setFreshStart(false);
     api.get(t.id).then((x) => { setThread(x); if (owners[x.id] === account.id) saveThreadId(tkey, x.id); }).catch((err) => { if (!failed(err)) setError(errText(err, agent.name)); });
   };
   const removeThread = async (t: ChatThread) => {
@@ -362,6 +375,11 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
           {readOnly
             ? <p className="mb-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">다른 사람의 대화예요. 코딩 작업이 생긴 대화라 관리자에게 원문을 보여 줘요. 이어서 말할 수는 없어요.</p>
             : <p className="mb-4 rounded-xl bg-ink-50 px-3 py-2 text-xs text-ink-500">{agent.note}</p>}
+          {freshStart && (
+            <div role="separator" className="mb-3 flex items-center gap-2 text-xs text-ink-500">
+              <span className="h-px flex-1 bg-ink-100" aria-hidden="true" />{NEW_THREAD_NOTE}<span className="h-px flex-1 bg-ink-100" aria-hidden="true" />
+            </div>
+          )}
           {messages.length === 0 && !sending ? (
             <p className="py-12 text-center text-sm text-ink-500">{agent.name}에게 하고 싶은 말을 적어 보세요.</p>
           ) : (
@@ -409,7 +427,8 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
             )}
             <textarea className="field min-h-[44px] flex-1 resize-none" rows={2} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
               placeholder={`${agent.name}에게 보낼 말 (Enter 보내기, Shift+Enter 줄바꿈)`} aria-label={`${agent.name}에게 보낼 말`} disabled={!!sending || prep || !!locked} />
-            <button className="btn-primary" disabled={(!text.trim() && !picked) || !!sending || prep || !!locked || isAnswering(thread)}>보내기</button>
+            <button className="btn-primary" disabled={(!text.trim() && !picked) || !!sending || prep || !!locked || (isAnswering(thread) && !isClearCommand(text))}>보내기</button>
+            {commandHint(text, true) && <p role="status" className="w-full rounded-lg bg-brand-50 px-2 py-1 text-xs text-brand-800">{commandHint(text, true)}</p>}
             {api.close && thread && (
               <button type="button" className="btn-ghost" onClick={finish} disabled={!!sending || closing || isAnswering(thread)}>{closing ? "끝내는 중…" : "대화 끝내기"}</button>
             )}
