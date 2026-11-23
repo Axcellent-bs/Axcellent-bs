@@ -39,6 +39,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from ax_agent_template import events, llm_usage
+from ax_agent_template.companies import default_company_id
 from ax_agent_template.config import (
     MAX_PATH_LENGTH,
     PLACEHOLDER_TOKEN,
@@ -241,7 +242,10 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
         meta_raw = raw.get("meta") if isinstance(raw, dict) else None
         if not isinstance(meta_raw, dict) or not meta_raw.get("context_id"):
             return _bad_request(ErrorCode.MISSING_CONTEXT.value, "context_id가 없다")
-        if not meta_raw.get("tenant_id", "shop-demo"):
+        # 키가 없으면 기본 회사로 본다(통과). 키가 있는데 비었으면 거절한다.
+        # 기본값 채우기는 5단계에서 거절로 바꾼다. 그때까지 동작은 그대로다
+        tenant_raw = meta_raw["tenant_id"] if "tenant_id" in meta_raw else default_company_id()
+        if not tenant_raw:
             return _bad_request(ErrorCode.MISSING_CONTEXT.value, "tenant_id가 비었다")
         try:
             request = AgentRequest.model_validate(raw)

@@ -36,8 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ax_agent_template import company_connection
-from ax_agent_template.companies import canonical_company_id
-from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
+from ax_agent_template.companies import canonical_company_id, default_company_id
 
 SESSION_SECRET_ENV = "AX_SESSION_SECRET"
 ALLOW_SHARED_ENV = "AX_ALLOW_SHARED_HUMAN_TOKEN"
@@ -51,8 +50,20 @@ MIN_SECRET_LENGTH = 32
 ROLES: tuple[str, ...] = ("operator", "admin", "member")
 SHARED_ROLE = "shared"
 COMPANY_ROLES: tuple[str, ...] = ("admin", "member")  # 계약 `CompanyRole`
-# 회사가 없는 옛 토큰의 회사(1단계: 회사가 캣북스 하나). 4단계에서 옛 토큰을 거절한다
-LEGACY_COMPANY_ID = TENANT_ID_CATBOOKS
+LEGACY_COMPANY_ENV = "AX_LEGACY_COMPANY"
+
+
+def legacy_company_id() -> str:
+    """회사가 없는 옛 토큰의 회사. env `AX_LEGACY_COMPANY` → 없으면 설치의 기본 회사.
+    (1단계: 기본은 캣북스.) 4단계에서 옛 토큰을 거절한다. 부를 때마다 읽는다."""
+    return canonical_company_id(os.getenv(LEGACY_COMPANY_ENV, "").strip()) or default_company_id()
+
+
+def __getattr__(name: str) -> str:  # 옛 이름 `LEGACY_COMPANY_ID` 호환
+    if name == "LEGACY_COMPANY_ID":
+        return legacy_company_id()
+    raise AttributeError(name)
+
 
 logger = logging.getLogger("ax.human_auth")
 _revoked_in_memory: dict[str, int] = {}
@@ -235,7 +246,7 @@ def _session_company(payload: dict, role: str) -> tuple[str, str | None]:
     if "cid" not in payload:
         if "crole" in payload:
             raise _invalid()
-        return LEGACY_COMPANY_ID, role if role in COMPANY_ROLES else None
+        return legacy_company_id(), role if role in COMPANY_ROLES else None
     cid = canonical_company_id(payload["cid"])
     if cid is None:
         raise _invalid()

@@ -107,7 +107,7 @@
 #### 1) 지표 카탈로그
 data 엔진에서 회사마다 다른 것은 **지표 카탈로그** 파일 하나에 모았다. 형식은 계약 `ax_contracts.schemas.data.MetricCatalog`이다.
 
-- 파일: `src/data_agent/catalogs/<회사>.toml` (캣북스는 `catbooks.toml`). 고르는 환경변수는 `DATA_TENANT_CATALOG`(기본 `catbooks`, `.toml` 경로도 받는다).
+- 파일: `src/data_agent/catalogs/<회사>.toml` (캣북스는 `catbooks.toml`). 고르는 환경변수는 `DATA_TENANT_CATALOG`(`.toml` 경로도 받는다). 안 정하면 `AX_TENANT` → 기본 회사(`AX_DEFAULT_COMPANY` 등, 아무것도 없으면 옛 호환 `catbooks`)의 `catalogs/<회사>.toml`이고, 그 파일이 없으면 오류로 알린다.
 - 들어가는 것:
   - `metrics[]`: 감시할 지표. 순서대로 판정한다.
     - `id`·`label`(한국어)·`bad_direction`(`up`|`down`)·`unit`

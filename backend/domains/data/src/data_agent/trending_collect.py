@@ -6,7 +6,7 @@
 
 Google Trends 공개 RSS(`connectors/google_trends.py`)를 한 번 읽어 `trending_store`에 저장한다.
 지역은 회사 `trends.toml` `[trending] geo`(기본 KR, `DATA_TREND_CONFIG` → 없으면
-`config/tenants/<AX_TENANT, 기본 catbooks>/trends.toml`). 키가 필요 없다.
+`config/tenants/<AX_TENANT>/trends.toml`). 키가 필요 없다.
 같은 DB에 수집기가 둘 돌지 않게 DB 옆 `trending_collect.lock`을 잡는다(잡혀 있으면 바로 끝냄,
 끝난 pid가 남긴 잠금은 지우고 잡음, `collector_lock`).
 """

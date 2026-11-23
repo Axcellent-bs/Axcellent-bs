@@ -170,3 +170,58 @@ def test_company_path_refuses_bad_company_ids(data: Path, bad: str) -> None:
 def test_company_path_refuses_names_that_leave_the_folder(data: Path, bad: str) -> None:
     with pytest.raises(ValueError):
         companies.company_path("catbooks", bad)
+
+
+# --- default_company_id ---
+
+
+@pytest.fixture
+def clean_default(data: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.delenv(companies.DEFAULT_COMPANY_ENV, raising=False)
+    monkeypatch.setattr(companies, "_legacy_warned", False)
+    return data
+
+
+def test_default_falls_back_to_legacy(
+    clean_default: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING", logger="ax.companies"):
+        assert companies.default_company_id() == companies.LEGACY_DEFAULT_COMPANY == "catbooks"
+        assert companies.default_company_id() == "catbooks"
+    assert sum("옛 기본값" in r.message for r in caplog.records) == 1  # 한 번만 경고
+
+
+def test_default_from_env(clean_default: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(companies.DEFAULT_COMPANY_ENV, "nubi")
+    assert companies.default_company_id() == "nubi"
+    assert companies.company_ids() == ["nubi"]  # 목록 파일이 없으면 기본 회사 한 줄
+
+
+def test_default_env_alias_is_canonical(
+    clean_default: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(companies.DEFAULT_COMPANY_ENV, "shop-demo")
+    assert companies.default_company_id() == "catbooks"
+
+
+def test_default_bad_env_is_ignored(clean_default: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(companies.DEFAULT_COMPANY_ENV, "Bad Value!")
+    assert companies.default_company_id() == "catbooks"
+
+
+def test_default_single_company_list(clean_default: Path) -> None:
+    _write(clean_default / "companies.json", [ROW_A])
+    assert companies.default_company_id() == "nubi"
+
+
+def test_default_env_beats_single_company_list(
+    clean_default: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(clean_default / "companies.json", [ROW_A])
+    monkeypatch.setenv(companies.DEFAULT_COMPANY_ENV, "catbooks")
+    assert companies.default_company_id() == "catbooks"
+
+
+def test_default_two_companies_uses_legacy(clean_default: Path) -> None:
+    _write(clean_default / "companies.json", [ROW_A, {**ROW_A, "company_id": "other-co"}])
+    assert companies.default_company_id() == "catbooks"

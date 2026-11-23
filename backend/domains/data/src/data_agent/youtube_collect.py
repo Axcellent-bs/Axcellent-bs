@@ -26,7 +26,7 @@
 
 - 키: `YOUTUBE_API_KEY`. 환경변수가 먼저고, 없으면 `backend/.env`에서 읽는다(값은 출력하지 않는다)
 - 회사 키워드: `DATA_YOUTUBE_CONFIG`(회사 폴더 `youtube.toml`, `scripts/tenant_env.py`가 정함).
-  없으면 `config/tenants/<AX_TENANT, 기본 catbooks>/youtube.toml`. 코드에 키워드를 두지 않는다
+  없으면 `config/tenants/<AX_TENANT>/youtube.toml`. 코드에 키워드를 두지 않는다
 - 할당량 초과(`QUOTA_EXCEEDED`)가 나면 그 실행의 남은 호출을 멈춘다. 받은 것까지는 저장한다
 - 판정·태그 정리는 하지 않는다(스냅샷이 쌓인 뒤 별도 PR)
 - 제목은 스냅샷 표가 아니라 `video_titles`에 영상마다 한 줄로 저장한다(`youtube_store`)

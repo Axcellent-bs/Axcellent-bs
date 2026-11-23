@@ -41,6 +41,31 @@ def test_missing_context_id_is_bad_request(client, request_body) -> None:
     assert response.json()["error"]["code"] == "MISSING_CONTEXT"
 
 
+def test_missing_tenant_id_passes_with_default_company(client, request_body, monkeypatch) -> None:
+    monkeypatch.delenv("AX_DEFAULT_COMPANY", raising=False)
+    body = request_body()
+    body["meta"].pop("tenant_id", None)
+    assert client.post("/a2a", json=body).json()["status"] == "completed"
+
+
+def test_missing_tenant_id_uses_resolver_override(client, request_body, monkeypatch) -> None:
+    monkeypatch.setenv("AX_DEFAULT_COMPANY", "nubi")
+    seen: list[str] = []
+    monkeypatch.setattr(server, "default_company_id", lambda: seen.append("x") or "nubi")
+    body = request_body()
+    body["meta"].pop("tenant_id", None)
+    assert client.post("/a2a", json=body).json()["status"] == "completed"
+    assert seen == ["x"]
+
+
+def test_empty_tenant_id_is_still_rejected(client, request_body) -> None:
+    body = request_body()
+    body["meta"]["tenant_id"] = ""
+    response = client.post("/a2a", json=body)
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "MISSING_CONTEXT"
+
+
 def test_invalid_json_is_bad_request(client) -> None:
     response = client.post("/a2a", content=b"not json")
     assert response.status_code == 400
