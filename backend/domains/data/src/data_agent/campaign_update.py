@@ -18,6 +18,10 @@ data 서버 안의 주기 루틴이 캠페인마다 한 번 보낸다. 수집기
 - 의뢰 영상 갈래(11/23, `request_result`): campaign_id가 `wr_`인 등록 영상(시험 아님,
   제안 번호 있음)은 campaign_result 대신 7일 조회 ÷ 우리 릴스 중앙값으로 direction을 정해
   같은 길(`_deliver`)로 보낸다
+- 광고 숫자·유튜브 성과(11/23, `marketing_reads`): 보낼 때(같은 7일 시점·같은 플래그) 마케팅
+  `get_campaign_ad_metrics`·`youtube_uploads_list`·`youtube_video_stats`를 A2A로 읽어 facts에
+  두 줄을 더한다(못 읽으면 "못 읽음: 사유", 모르는 칸은 "모름"). 읽는 함수(`read`)는 서버 루틴이
+  `call_agent`를 넘긴다. 넘기지 않으면 읽지 않는다(기획 보내기만 보는 테스트·평가)
 - 기능 플래그 `DATA_SEND_CAMPAIGN_UPDATE`(기본 꺼짐). 꺼져 있으면 아무것도 부르지 않고 화면에는
   "자동 보내기 꺼짐"
 """
@@ -135,8 +139,9 @@ def summary_of(out: CampaignResultOutput) -> str:
     return f"{past.views_label} · 매출 {direction_of(out)}"
 
 
-def facts_of(out: CampaignResultOutput) -> list[InsightFact]:
-    """근거 숫자 (최대 12, 길이 제한). 값이 없는 칸은 넣지 않고, 마이너스는 그대로, 네 칸은 따로."""
+def facts_of(out: CampaignResultOutput, extras: Sequence[InsightFact] = ()) -> list[InsightFact]:
+    """근거 숫자 (최대 12, 길이 제한). 값이 없는 칸은 넣지 않고, 마이너스는 그대로, 네 칸은 따로.
+    `extras`(광고 숫자·유튜브 성과)는 자리를 남겨 끝에 붙인다."""
     from data_agent.past_results import to_past
 
     past = to_past(out)
@@ -155,13 +160,16 @@ def facts_of(out: CampaignResultOutput) -> list[InsightFact]:
         rows.append((f"매출 칸: {cell.label}", value))
     if verdict and verdict.low_sample:
         rows.append(("표본 적음", verdict.low_sample_reason or "기준선·주문 수가 적음"))
-    return [
+    facts = [
         InsightFact(label=clip(a, LABEL_MAX), value=clip(b, VALUE_MAX), source=SOURCE)
         for a, b in rows
-    ][:FACTS_MAX]
+    ][: FACTS_MAX - len(extras)]
+    return [*facts, *extras]
 
 
-def build_update(out: CampaignResultOutput) -> ReceiveCampaignUpdateInput:
+def build_update(
+    out: CampaignResultOutput, extras: Sequence[InsightFact] = ()
+) -> ReceiveCampaignUpdateInput:
     """기획에 보낼 성과 (stage result). 계약 모델로 만들어 길이·필수 칸을 검증한다."""
     return ReceiveCampaignUpdateInput(
         proposal_id=out.proposal_id or "",
@@ -169,7 +177,7 @@ def build_update(out: CampaignResultOutput) -> ReceiveCampaignUpdateInput:
         stage="result",
         direction=direction_of(out),  # type: ignore[arg-type]  # 네 값 중 하나
         summary=summary_of(out),
-        facts=facts_of(out),
+        facts=facts_of(out, extras),
         insight_id=out.insight_id,
     )
 
@@ -272,26 +280,51 @@ def _new_context() -> str:
     return f"ctx_req_data_result_{uuid.uuid4().hex[:12]}"
 
 
+Make = Callable[[Sequence[InsightFact]], ReceiveCampaignUpdateInput]
+
+
+def _youtube_ids(out: CampaignResultOutput) -> list[str]:
+    return [v.video_id for v in out.videos
+            if v.video_id and not v.test and v.platform != "instagram"]  # fmt: skip
+
+
 async def send_one(
-    out: CampaignResultOutput, store: SendStore, now: datetime, *, send: Send, gate: Gate
-) -> bool:
+    out: CampaignResultOutput, store: SendStore, now: datetime, *, send: Send, gate: Gate,
+    read: Send | None = None,
+) -> bool:  # fmt: skip
     """보낼 차례인 캠페인 하나를 보낸다. 기획을 불렀으면 True."""
-    return await _deliver(out.campaign_id, out.proposal_id, lambda: build_update(out), store, now,
-                          send=send, gate=gate)  # fmt: skip
+    return await _deliver(out.campaign_id, out.proposal_id,
+                          lambda extras: build_update(out, extras), store, now,
+                          send=send, gate=gate, read=read,
+                          youtube_ids=_youtube_ids(out))  # fmt: skip
+
+
+async def _extras(read: Send | None, context_id: str, campaign_id: str, proposal_id: str | None,
+                  youtube_ids: Sequence[str]) -> list[InsightFact]:  # fmt: skip
+    """광고 숫자·유튜브 성과 근거 줄 (마케팅 read). `read`가 없으면 읽지 않는다."""
+    if read is None:
+        return []
+    from data_agent import marketing_reads
+
+    return await marketing_reads.performance_facts(read, context_id, campaign_id, proposal_id,
+                                                   youtube_ids)  # fmt: skip
 
 
 async def _deliver(
-    campaign_id: str, proposal_id: str | None, make: Callable[[], ReceiveCampaignUpdateInput],
-    store: SendStore, now: datetime, *, send: Send, gate: Gate,
+    campaign_id: str, proposal_id: str | None, make: Make,
+    store: SendStore, now: datetime, *, send: Send, gate: Gate, read: Send | None = None,
+    youtube_ids: Sequence[str] = (),
 ) -> bool:  # fmt: skip
     """보내기 공통 (캠페인 경로·의뢰 영상 경로): 안전 확인 → 기획 receive_campaign_update.
-    idempotency_key "<campaign_id>:result", context_id는 줄마다 하나. 기획을 불렀으면 True."""
+    idempotency_key "<campaign_id>:result", context_id는 줄마다 하나. 기획을 불렀으면 True.
+    보내기 직전에 광고 숫자·유튜브 성과를 읽어 facts에 더한다(`read`가 있을 때)."""
     row = store.get(campaign_id) or SendRow(campaign_id)
     row.context_id = row.context_id or _new_context()
     row.proposal_id = proposal_id
     store.save(row)  # 재시도 때도 같은 context_id
+    extras = await _extras(read, row.context_id, campaign_id, proposal_id, youtube_ids)
     try:
-        update = make()
+        update = make(extras)
     except (ValidationError, ValueError) as error:
         row.state, row.reason = "not_sent", f"계약 검증 실패: {str(error)[:120]}"
         store.save(row)
@@ -346,6 +379,7 @@ async def send_ready(
     *,
     send: Send | None = None,
     gate: Gate | None = None,
+    read: Send | None = None,
 ) -> int:
     """보낼 차례인 캠페인을 보낸다. 기획을 부른 횟수. 플래그가 꺼져 있으면 0 (아무것도 안 함)."""
     if not enabled(env):
@@ -363,7 +397,7 @@ async def send_ready(
             continue
         if row is not None and _failures_today(row, now) >= RETRY_PER_DAY:
             continue  # 오늘은 3번 다 실패 → 한국 날짜가 바뀌면 다시
-        calls += await send_one(out, store, now, send=send, gate=gate)
+        calls += await send_one(out, store, now, send=send, gate=gate, read=read)
     return calls
 
 
@@ -376,6 +410,7 @@ async def send_request_ready(
     *,
     send: Send | None = None,
     gate: Gate | None = None,
+    read: Send | None = None,
 ) -> int:
     """의뢰 영상(wr_) 갈래: 7일을 쟀거나 놓친 영상을 보낸다. 같은 보내기 길·재시도·플래그."""
     from data_agent import request_result as rr
@@ -397,9 +432,12 @@ async def send_request_ready(
             continue
         if row is not None and _failures_today(row, now) >= RETRY_PER_DAY:
             continue
+        youtube_ids = [x.video_id for x in videos if x.campaign_id == v.campaign_id
+                       and x.platform == "youtube" and not x.test]  # fmt: skip
         calls += await _deliver(v.campaign_id, v.proposal_id,
-                                lambda v=v: rr.build_update(v, video_store), store, now,
-                                send=send, gate=gate)  # fmt: skip
+                                lambda extras, v=v: rr.build_update(v, video_store, extras),
+                                store, now, send=send, gate=gate, read=read,
+                                youtube_ids=youtube_ids)  # fmt: skip
     return calls
 
 
@@ -497,12 +535,15 @@ async def tick(env: Mapping[str, str], now: datetime | None = None, **kwargs: An
 
 
 async def run_forever(env: Mapping[str, str] | None = None) -> None:
-    """한 시간마다 보낼 차례인 캠페인을 보낸다 (data 서버 lifespan). 실패해도 다음 시간에 다시."""
+    """한 시간마다 보낼 차례인 캠페인을 보낸다 (data 서버 lifespan). 실패해도 다음 시간에 다시.
+    광고 숫자·유튜브 성과는 `call_agent`로 마케팅에서 읽는다."""
+    from ax_agent_template.client import call_agent
+
     env = os.environ if env is None else env
     await asyncio.sleep(FIRST_DELAY_SECONDS)
     while True:
         try:
-            calls = await tick(env)
+            calls = await tick(env, read=call_agent)
             if calls:
                 logger.info("기획에 성과 결과 보내기: 호출 %d번", calls)
         except Exception:  # noqa: BLE001 - 한 번 실패해도 루틴은 계속

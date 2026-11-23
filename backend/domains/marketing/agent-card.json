@@ -195,6 +195,32 @@
       "priority": "recommended"
     },
     {
+      "id": "youtube_video_stats",
+      "description": "회사 유튜브 채널(로그인한 회사의 연결)에 올린 영상의 조회수·좋아요·댓글 수를 YouTube Data API videos.list(part=statistics)로 읽는다(read). input은 video_ids(11자) 또는 record_ids(CR-…, render.youtube.video_id로 찾음). 영상마다 5분 캐시. 숨긴 좋아요·댓글은 None(모름), 못 찾은 영상은 not_found. 읽지 못하면 status=unknown과 reason(no_videos·missing_keys·invalid_credentials·stats_http_<코드>·error). 키·토큰 값은 돌려주지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_youtube_stats.py#YoutubeVideoStatsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_youtube_stats.py#YoutubeVideoStatsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "data",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "youtube_uploads_list",
+      "description": "회사 유튜브에 올리기가 끝난 제작 기록 목록(read): record_id·video_id·url·uploaded_at·title·privacy·campaign_id(기록에 연결된 캠페인 cmp_… 또는 의뢰 wr_…, 없으면 null). input.campaign_id를 주면 그 번호에 연결된 것만. 최근 기록부터 limit개.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_youtube_stats.py#YoutubeUploadsListInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_youtube_stats.py#YoutubeUploadsListOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "data",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "creative_video_request",
       "description": "제작 기록(input.record_id: CR-…)의 스토리보드 그림을 시작 이미지로 Higgsfield 영상 만들기를 사람 승인(C generate_creative_video)에 올린다. 영상 월 사용량 예산을 먼저 예약하고, 보류되면 render.video.status=awaiting_approval·review_id를 남긴다. 승인 뒤 기록을 읽을 때(creative_record_get) 같은 키로 관문을 다시 물어 executed면 만들고 파일을 저장한다. 거절 outcome: not_found·board_image_not_ready·model_not_configured·higgsfield_key_missing·quota_exceeded·quota_not_configured·storage_error·in_progress.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeVideoRequestInput",
