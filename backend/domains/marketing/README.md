@@ -2,7 +2,7 @@
 담당: 재헌 · 포트: 8103
 ## 1. 역할
 마케팅 에이전트. 통합 에이전트가 넘긴 사건·상품 사실로 **공지**를 만들고 게시하며, 고객지원·재무가 공지 사실과 약속을 읽을 수 있게 하고(`get_notice`), 사건 보상·캠페인 **쿠폰**을 지급한다.
-- v0은 시나리오 A 필수 skill 4개(`draft_notice`, `publish_notice`, `get_notice`, `issue_coupon`)다. 저장소는 메모리(목 모드)이고, 문안은 사실 필드만 쓰는 고정 템플릿이다(LLM 연결은 TODO).
+- v0은 시나리오 A 필수 skill 4개(`draft_notice`, `publish_notice`, `get_notice`, `issue_coupon`)다. 저장소는 메모리(목 모드)이고, 공지 문안은 LLM이 사실 필드만 보고 쓰고 코드 검증(`notice_text.py`)을 통과해야 쓴다. 실패하거나 LLM이 없으면 사실 필드만 쓰는 고정 템플릿이다(`source`, `text_check.reasons`).
 - 캠페인(`draft_campaign`·`create_campaign`·`campaign_report`)은 권장·선택이라 이후에 만든다.
 ## 2. 실행 방법
 - 서버: `docker compose -f infra/compose.yml up marketing`, 또는 `uv run uvicorn marketing_agent.main:app --port 8103`
@@ -12,7 +12,7 @@
 ## 3. 입출력 계약
 | skill | 등급 | 요청 가능 | 입력 → 출력 |
 | --- | --- | --- | --- |
-| `draft_notice` | read | orchestrator | 사건·상품 사실, `promises[]` → 공지 초안 |
+| `draft_notice` | read | orchestrator | 사건·상품 사실, `promises[]` → 공지 초안 (`source: ai\|template`, `text_check`) |
 | `publish_notice` | A | orchestrator | `draft_id` → `notice_id`, `notice.published` 발행 (`channel_code=sns` 초안은 `sns_use_publish_sns`로 거절, SNS는 `publish_sns`) |
 | `end_incident_notice` | A | orchestrator | 정상화 공지 없이 닫힌 이벤트의 장애 배너를 내린다. 쇼핑몰 배너 목록에서 같은 `context_id`의 게시 중 배너를 찾아 `DELETE`하고 메모리의 장애 공지도 끝낸다 → `ended_notice_ids`(없으면 `none_open`, 다시 불러도 같다). 총괄이 복구 신호를 받은 뒤에만 부른다 |
 | `get_notice` | read | support, finance, orchestrator | `notice_id` → 사실·약속·기간·공개 문구·상태(`published`·`ended`)·게시 사건(`context_id`)·게시 시각(`published_at`). 없으면 "확인할 수 없음" |

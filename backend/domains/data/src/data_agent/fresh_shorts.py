@@ -173,7 +173,9 @@ def _campaign_formats(env: Mapping[str, str]) -> list[str]:
         return []
     store = vp.VideoStore(path)
     try:
-        return [v.shorts_format for v in store.videos(include_test=False) if v.shorts_format]
+        # 공개 수집 대상 형식이라 모든 회사 영상 (여러 회사 1-5: 공유 수집 그대로)
+        return [v.shorts_format for v in store.videos(include_test=False, all_companies=True)
+                if v.shorts_format]  # fmt: skip
     finally:
         store.close()
 

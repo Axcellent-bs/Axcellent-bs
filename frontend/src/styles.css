@@ -65,6 +65,10 @@ body { @apply bg-canvas text-ink-900 antialiased; }
   .btn-primary { @apply btn bg-brand-600 !text-white hover:bg-brand-strong; }
   .btn-ghost { @apply btn border border-ink-100 bg-surface text-ink-700 hover:bg-ink-100; }
   .btn-quiet { @apply btn text-ink-500 hover:bg-ink-100 hover:text-ink-900; }
+  /* 대화 카드 안 동작 버튼(보고서 열기·PDF로 저장·기획서 열기·진행·멈추기·영상 열기·기획 제안 열기) 공용 크기.
+     보고서 열기(.btn 기본 크기: 글자 14px · 좌우 14px · 높이 32px)가 기준. 좁은 칸에서 줄바꿈되어도 버튼 크기는 같다.
+     btn-primary(주 동작: 열기·진행) / btn-ghost(보조: PDF·멈추기)와 같이 쓴다 */
+  .btn-card { @apply h-8 shrink-0 whitespace-nowrap px-3.5 py-0 text-sm leading-none; }
   .panel-title { @apply text-[11px] font-semibold uppercase tracking-wider text-ink-500; }
   .card { @apply bg-surface; }
   .card-title { @apply text-[15px] font-semibold text-ink-900; }
@@ -116,6 +120,7 @@ body { @apply bg-canvas text-ink-900 antialiased; }
   body.print-trend-report *:has(.trend-report-print) {
     height: auto !important; max-height: none !important; min-height: 0 !important;
     overflow: visible !important; display: block !important; position: static !important;
+    background: #fff !important;
   }
   body.print-trend-report .trend-report-print { page: trend-report; }
   body.print-trend-report .trend-report-print .print-hide { display: none !important; }
@@ -130,6 +135,16 @@ body { @apply bg-canvas text-ink-900 antialiased; }
   body.print-trend-report .trend-report-print h2,
   body.print-trend-report .trend-report-print h3 { break-after: avoid; page-break-after: avoid; }
   body.print-trend-report .trend-report-print .card { box-shadow: none; background: #fff; }
+  /* 11/23 (16쪽 중 12쪽이 빈 쪽): 게시물은 3열 · 썸네일 54×72 고정(종이 폭으로 커지지 않게), 접는 섹션 본문은 쪽 사이에서 나눠도 됨(행·카드만 안 나눔) */
+  body.print-trend-report .trend-report-print .trend-print-posts { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  body.print-trend-report .trend-report-print .card > .trend-fold-body { break-inside: auto; page-break-inside: auto; }
+  /* 표: 가로 스크롤을 풀고 종이 폭에 맞춘다. 경쟁사 표는 넘치지 않게 글자를 줄인다 */
+  body.print-trend-report .trend-report-print .trend-print-table { overflow: visible !important; }
+  body.print-trend-report .trend-report-print .trend-print-table table { min-width: 0 !important; }
+  body.print-trend-report .trend-report-print .trend-print-shrink table { font-size: 10.5px !important; }
+  body.print-trend-report .trend-report-print .trend-print-shrink .text-xs { font-size: 10px !important; }
+  /* 인쇄 직전에 못 받은 이미지(lib/printImages.ts)는 숨긴다 (빈 칸 대신 회색 칸 글자가 남는다) */
+  body.print-trend-report .trend-report-print img.print-img-failed { display: none !important; }
 }
 
 /*

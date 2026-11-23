@@ -1964,6 +1964,14 @@ export interface TrendReportBeat {
   /** v2: evidence와 같은 순서. id = "<section>:<1-based row>" */
   evidence_items?: TrendEvidenceItem[];
 }
+/** 기획에 넘길 재료 (11/23, 계약 TrendMaterial). text는 숫자 없는 짧은 말, 근거 문장은 코드가 붙인다 */
+export type TrendMaterialKind = "hashtag" | "format" | "topic" | "meme" | "writing" | "timing" | "other";
+export interface TrendReportMaterial {
+  kind: TrendMaterialKind;
+  text: string;
+  evidence: string[];
+  evidence_items?: TrendEvidenceItem[];
+}
 export interface TrendEvidenceItem {
   id: string;
   text: string;
@@ -1978,7 +1986,8 @@ export interface TrendReportSections {
   hashtags: SectionHead & { rows: TrendReportHashtagRow[]; account_names?: Record<string, string> };
   content: SectionHead & { posts: InstagramRadarPost[]; memes: TrendReportMeme[] };
   competitors: SectionHead & { rows: TrendReportCompetitorRow[]; accounts_failed: { account: string; reason: string }[] };
-  recommendation: SectionHead & { conclusion: string | null; beats: TrendReportBeat[]; music_note: string };
+  /** beats: 옛 보고서의 시간별 콘티. 11/23부터 새 보고서는 비우고 materials(기획에 넘길 재료, 최대 4)를 쓴다 */
+  recommendation: SectionHead & { conclusion: string | null; beats: TrendReportBeat[]; music_note: string; materials?: TrendReportMaterial[] };
   /** #1540 주제 후보 (옛 저장본은 없거나 기본값 waiting · theme null) */
   theme?: TrendThemeSection;
 }

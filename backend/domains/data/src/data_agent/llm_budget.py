@@ -27,6 +27,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 
 from ax_agent_template.llm import LLMNotConfiguredError
+from data_agent import company_scope
 
 # 한 작업(브리프 한 판 등)이 쓴 LLM 토큰을 세는 칸. `counting()` 안에서 부른 LLM 요청(같은 asyncio
 # 문맥)의 토큰을 더한다. 다른 곳에서 같은 요청을 계산 중이라 기다려 받은 답(#835)은 0이다
@@ -145,17 +146,26 @@ class Budget:
             if str(path) != ":memory:":
                 Path(path).parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=5.0)
-            with self._lock, self._conn:
-                self._conn.execute(
-                    "CREATE TABLE IF NOT EXISTS usage (day TEXT PRIMARY KEY,"
-                    " calls INTEGER NOT NULL, tokens INTEGER NOT NULL)"
-                )
-                self._conn.execute(
-                    "CREATE TABLE IF NOT EXISTS usage_by (day TEXT NOT NULL, skill TEXT NOT NULL,"
-                    " task TEXT NOT NULL, calls INTEGER NOT NULL, tokens INTEGER NOT NULL,"
-                    " PRIMARY KEY (day, skill, task))"
-                )
-        self._mem_by: dict[tuple[str, str, str], tuple[int, int]] = {}
+            with self._lock:
+                for table, create in self.TABLES.items():
+                    company_scope.rebuild_with_tenant_key(self._conn, table, create)
+        self._mem_by: dict[tuple[str, str, str, str], tuple[int, int]] = {}
+
+    # 여러 회사 1-5 (11/23): 하루 상한은 회사별로 센다 (설정값 그대로, 회사마다 같은 상한).
+    # 키에 tenant_id (옛 표는 다시 만들어 캣북스로). 회사는 `company_scope.active()`
+    TABLES = {
+        "usage": (
+            "CREATE TABLE IF NOT EXISTS {table} (day TEXT NOT NULL,"
+            " calls INTEGER NOT NULL, tokens INTEGER NOT NULL,"
+            " tenant_id TEXT NOT NULL DEFAULT 'catbooks', PRIMARY KEY (tenant_id, day))"
+        ),
+        "usage_by": (
+            "CREATE TABLE IF NOT EXISTS {table} (day TEXT NOT NULL, skill TEXT NOT NULL,"
+            " task TEXT NOT NULL, calls INTEGER NOT NULL, tokens INTEGER NOT NULL,"
+            " tenant_id TEXT NOT NULL DEFAULT 'catbooks',"
+            " PRIMARY KEY (tenant_id, day, skill, task))"
+        ),
+    }
 
     @staticmethod
     def today() -> date:
@@ -164,14 +174,15 @@ class Budget:
     def usage(self, env: Mapping[str, str] | None = None, day: date | None = None) -> Usage:
         env = os.environ if env is None else env
         key = (day or self.today()).isoformat()
+        cid = company_scope.active()
         with self._lock:
             if self._conn is not None:
                 row = self._conn.execute(
-                    "SELECT calls, tokens FROM usage WHERE day = ?", (key,)
+                    "SELECT calls, tokens FROM usage WHERE tenant_id = ? AND day = ?", (cid, key)
                 ).fetchone()
                 calls, tokens = (int(row[0]), int(row[1])) if row else (0, 0)
             else:
-                calls, tokens = self._mem.get(key, (0, 0))
+                calls, tokens = self._mem.get(f"{cid}|{key}", (0, 0))
         caps = _cap(env, CALLS_ENV, DEFAULT_CALLS), _cap(env, TOKENS_ENV, DEFAULT_TOKENS)
         return Usage(date.fromisoformat(key), calls, tokens, *caps)
 
@@ -195,40 +206,47 @@ class Budget:
     def add(self, calls: int, tokens: int, day: date | None = None, *,
             skill: str | None = None, task: str | None = None) -> None:  # fmt: skip
         key = (day or self.today()).isoformat()
+        cid = company_scope.active()
         by = (key, skill or "unknown", task or "unknown")
         with self._lock:
             if self._conn is not None:
                 with self._conn:
                     self._conn.execute(
-                        "INSERT INTO usage VALUES (?, ?, ?) ON CONFLICT(day) DO UPDATE SET"
+                        "INSERT INTO usage (day, calls, tokens, tenant_id) VALUES (?, ?, ?, ?)"
+                        " ON CONFLICT(tenant_id, day) DO UPDATE SET"
                         " calls = calls + excluded.calls, tokens = tokens + excluded.tokens",
-                        (key, calls, tokens),
+                        (key, calls, tokens, cid),
                     )
                     self._conn.execute(
-                        "INSERT INTO usage_by VALUES (?, ?, ?, ?, ?) ON CONFLICT(day, skill, task)"
+                        "INSERT INTO usage_by (day, skill, task, calls, tokens, tenant_id)"
+                        " VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(tenant_id, day, skill, task)"
                         " DO UPDATE SET calls = calls + excluded.calls,"
                         " tokens = tokens + excluded.tokens",
-                        (*by, calls, tokens),
+                        (*by, calls, tokens, cid),
                     )
                     old = (date.fromisoformat(key) - timedelta(days=30)).isoformat()
                     self._conn.execute("DELETE FROM usage WHERE day < ?", (old,))
                     self._conn.execute("DELETE FROM usage_by WHERE day < ?", (old,))
                 return
-            old = self._mem.get(key, (0, 0))
-            self._mem[key] = (old[0] + calls, old[1] + tokens)
-            was = self._mem_by.get(by, (0, 0))
-            self._mem_by[by] = (was[0] + calls, was[1] + tokens)
+            mem = f"{cid}|{key}"
+            old = self._mem.get(mem, (0, 0))
+            self._mem[mem] = (old[0] + calls, old[1] + tokens)
+            was = self._mem_by.get((cid, *by), (0, 0))
+            self._mem_by[(cid, *by)] = (was[0] + calls, was[1] + tokens)
 
     def by_task(self, day: date | None = None) -> list[tuple[str, str, int, int]]:
-        """(skill, 작업, 호출, 토큰) 토큰 많은 순."""
+        """(skill, 작업, 호출, 토큰) 토큰 많은 순. 그 회사 것만."""
         key = (day or self.today()).isoformat()
+        cid = company_scope.active()
         with self._lock:
             if self._conn is not None:
                 rows = self._conn.execute(
-                    "SELECT skill, task, calls, tokens FROM usage_by WHERE day = ?", (key,)
-                ).fetchall()
+                    "SELECT skill, task, calls, tokens FROM usage_by WHERE tenant_id = ?"
+                    " AND day = ?", (cid, key),
+                ).fetchall()  # fmt: skip
             else:
-                rows = [(s, t, c, n) for (d, s, t), (c, n) in self._mem_by.items() if d == key]
+                rows = [(s, t, c, n) for (co, d, s, t), (c, n) in self._mem_by.items()
+                        if co == cid and d == key]  # fmt: skip
         return sorted(((s, t, int(c), int(n)) for s, t, c, n in rows),
                       key=lambda r: (-r[3], -r[2], r[0], r[1]))  # fmt: skip
 

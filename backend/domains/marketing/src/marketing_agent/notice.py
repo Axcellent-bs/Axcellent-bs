@@ -1,7 +1,8 @@
 """공지 초안 생성과 게시 저장소. 프레임워크에 의존하지 않는다.
 
-문안은 사실 필드로만 만드는 고정 템플릿이다(LLM은 아직 연결하지 않았다). 원인은 적지 않고,
-약속 금액은 `promises[]`에서 코드가 옮겨 적는다. 외부 입력(`untrusted`)은 읽지 않는다.
+`make_draft`는 사실 필드로만 만드는 고정 템플릿 초안이다. 원인은 적지 않고, 약속 금액은
+`promises[]`에서 코드가 옮겨 적는다. 외부 입력(`untrusted`)은 읽지 않는다. LLM 문안은
+`notice_text.py`가 쓰고 검증을 통과했을 때만 이 초안의 `public_text`를 바꾼다.
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ if TYPE_CHECKING:
 _COMPONENT_LABEL = {"api": "서비스 접속", "db": "데이터 조회", "payment": "결제"}
 
 
-def _template(data: DraftNoticeInput) -> str:
+def template_text(data: DraftNoticeInput) -> str:
+    """고정 템플릿 문구. AI 문안이 검증에 실패하면 이 문구를 쓴다."""
     label = _COMPONENT_LABEL.get(data.facts.component or "", "일부 서비스")
     if data.kind == "incident_opened":
         text = f"{label} 이용이 원활하지 않은 상황을 확인했습니다. 복구되는 대로 안내드리겠습니다."
@@ -36,15 +38,18 @@ def _template(data: DraftNoticeInput) -> str:
 def make_draft(context_id: str, data: DraftNoticeInput) -> NoticeDraft:
     """같은 입력이면 같은 초안(`draft_id`도 같다)을 만든다."""
     digest = hashlib.sha256(f"{context_id}:{data.model_dump_json()}".encode()).hexdigest()[:10]
+    text = template_text(data)
     return NoticeDraft(
         draft_id=f"drf_{digest}",
         kind=data.kind,
         channel_code=data.channel_code,
-        public_text=_template(data),
+        public_text=text,
         facts=data.facts,
         promises=data.promises,
         valid_from=data.valid_from,
         valid_to=data.valid_to,
+        source="template",
+        template_text=text,
     )
 
 
@@ -155,6 +160,24 @@ class NoticeStore:
                 and self._status(notice_id, earlier) == "published"
             ):
                 return notice_id
+        return None
+
+    def live_draft_for(self, draft: NoticeDraft) -> NoticeDraft | None:
+        """같은 종류·채널·템플릿 문구로 지금 게시 중인 공지의 초안 (최근 것). 없으면 `None`.
+
+        AI 문안은 사건마다 달라질 수 있어, 같은 사실의 배너가 이미 떠 있으면 그 문구를 그대로 쓴다
+        (같은 문구의 배너를 같이 쓰는 규칙이 AI 문안에서도 그대로 돈다).
+        """
+        key = draft.template_text or draft.public_text
+        for notice_id in reversed(list(self._published)):
+            _, earlier = self._published[notice_id]
+            if (
+                earlier.kind == draft.kind
+                and earlier.channel_code == draft.channel_code
+                and (earlier.template_text or earlier.public_text) == key
+                and self._status(notice_id, earlier) == "published"
+            ):
+                return earlier
         return None
 
     def published_id(self, draft_id: str) -> str | None:
@@ -271,4 +294,6 @@ class NoticeStore:
             promises=draft.promises,
             valid_from=draft.valid_from,
             valid_to=draft.valid_to,
+            source=draft.source,
+            text_check=draft.text_check,
         )

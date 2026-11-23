@@ -16,12 +16,12 @@ import { type GridItem, gridItems, kindLabel, showGrid, thumbSrc } from "@/lib/i
 //   → 공통점·광고 재료 이유 → 대표 게시물(계정 · 지표 · 배수 · 링크 · 캡션 일부, 외부 글이라 텍스트로만). 결론이 없으면 이유를 회색으로
 // - 숫자·배수·광고 재료 판정은 서버 값. 모르면 0이 아니라 서버 이유를 보여 준다. 첫 바퀴 진행 중(판정 전)이면 그리드는 숨긴다
 
-const METRIC: Record<InstagramRadarPost["metric"], string> = { view_count: "조회", like_count: "좋아요" };
+export const METRIC: Record<InstagramRadarPost["metric"], string> = { view_count: "조회", like_count: "좋아요" };
 const n = (v: number) => v.toLocaleString("ko-KR");
-const COMPACT = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
+export const COMPACT = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
 
-/** 올린 지 얼마 */
-function ago(iso: string | null): string | null {
+/** 올린 지 얼마 (보고서 작은 게시물 카드도 쓴다) */
+export function ago(iso: string | null): string | null {
   if (!iso) return null;
   const ms = Date.now() - new Date(iso).getTime();
   if (!Number.isFinite(ms) || ms < 0) return null;

@@ -62,9 +62,11 @@ def report_path(report_id: str) -> str:
 
 
 def top_evidence(report: TrendReport) -> list[str]:
-    """콘티 근거 앞쪽 3개 (short가 있으면 그것, 같은 것은 한 번)."""
+    """추천 근거 앞쪽 3개 (short가 있으면 그것, 같은 것은 한 번).
+    재료(11/23) 먼저, 옛 보고서는 콘티."""
     out: list[str] = []
-    for beat in report.sections.recommendation.beats:
+    rec = report.sections.recommendation
+    for beat in [*rec.materials, *rec.beats]:
         items = ([e.short or e.text for e in beat.evidence_items] if beat.evidence_items
                  else list(beat.evidence))  # fmt: skip
         for text in items:

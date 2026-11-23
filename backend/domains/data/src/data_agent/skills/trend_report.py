@@ -16,8 +16,9 @@
    배수, 잘 된 게시물(지표 상위 5개)의 공통점(instagram_why `compare_facts`: 형식·첫 줄 질문·
    캡션 길이·시간대 중 평소와 차이 큰 것 최대 2개, 코드 템플릿 문장)
 5. recommendation: LLM 1번. 입력은 섹션 1~4 사실을 숫자 없이 말로 바꾼 것 + brief.
-   출력은 결론 한 줄 + 콘티 4칸(칸마다 근거 id). 근거 숫자 문장은 코드가 그 id로 붙인다.
-   없는 id·숫자 든 문장은 버린다.
+   출력은 결론 한 줄 + 기획에 넘길 재료 최대 4개(11/23, 종류마다 하나, 재료마다 근거 id).
+   근거 숫자 문장은 코드가 그 id로 붙인다. 없는 id·숫자·시간·장면 말이 든 재료는 버린다.
+   시간별 장면·대본은 기획(planning video_plan) 몫이라 새 보고서는 콘티(beats)를 비운다
    음악은 추천하지 않는다(고정 문구)
 
 인스타: 의뢰 계정(경쟁사 ∪ 추가 계정 ∪ 프리셋 계정, 최대 45)을 한 번씩 business_discovery.
@@ -28,6 +29,7 @@
 from __future__ import annotations
 
 import math
+import re
 import statistics
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -39,7 +41,6 @@ from pydantic import BaseModel, Field
 from ax_contracts.schemas.data import (
     InstagramRadarPost,
     TrendAccountFailed,
-    TrendBeat,
     TrendCompetitorRow,
     TrendCompetitorSection,
     TrendCompetitorTrait,
@@ -47,6 +48,7 @@ from ax_contracts.schemas.data import (
     TrendHashtagRow,
     TrendHashtagSection,
     TrendLimitGroups,
+    TrendMaterial,
     TrendRecommendationSection,
     TrendReport,
     TrendReportBrief,
@@ -100,7 +102,7 @@ BEAT_SLOTS = ("0-3", "3-15", "15-25", "25-30")
 STOP_CODES = frozenset({"RATE_LIMITED", "KEY_MISSING", "TOKEN_EXPIRED"})
 # 근거와 한계 (limit_groups). limits에는 METHOD → CANNOT_SEE → 이번 보고서 순으로 모두 넣는다
 METHOD_LIMITS = (
-    "숫자는 전부 코드가 계산했고, AI는 결론 한 줄과 콘티 문장만 썼다(숫자 없이)",
+    "숫자는 전부 코드가 계산했고, AI는 결론 한 줄과 재료 문장만 썼다(숫자 없이)",
     "검색·쇼핑은 최근 7일 평균 ÷ 직전 28일 평균 − 1. 네이버 값은 요청 안의 상대값(최댓값 100)이라"
     " 키워드끼리 크기는 비교하지 않는다",
     "터짐 = 같은 지표끼리 그 계정 최근 20개 중앙값의 2.5배 이상이고 7일 안에 올린 것"
@@ -877,9 +879,11 @@ _PROMPT = (
     "데이터 블록에는 트렌드 분석 의뢰의 brief(의뢰_제품·의뢰_타깃·의뢰_형식)와,"
     " 코드가 계산한 사실을 숫자 없이 말로 바꾼 근거(근거_<id>)가 있다.\n"
     "- conclusion: 이 의뢰에 맞는 콘텐츠 방향 결론 한 줄(60자 안팎)\n"
-    "- beats: 짧은 릴스 콘티 네 칸. slot은 '0-3'(훅), '3-15'(전환), '15-25'(증거), '25-30'(마무리)"
-    " 각각 한 번. text는 그 칸의 장면·자막 한 줄(60자 안팎), evidence는 그 칸이 기대는 근거 id"
-    "(근거_ 뒤의 값, 예: hashtag:1) 목록\n"
+    "- materials: 기획에 넘길 재료 최대 네 개. kind는 hashtag(해시태그)·format(형식)·"
+    "topic(관심 주제)·meme(밈)·writing(글쓰기)·timing(올리는 때)·other(그 밖) 중 하나이고 같은"
+    " kind는 한 번만. text는 무엇을 쓰라는지 짧게(40자 안팎, 예: '#북토크 해시태그를 쓴다'),"
+    " evidence는 그 재료가 기대는 근거 id(근거_ 뒤의 값, 예: hashtag:1) 목록\n"
+    "- 시간별 장면·장면 순서·몇 초·대본·자막 문장은 쓰지 말 것 (장면은 기획이 짠다)\n"
     "- 숫자(0~9)를 쓰지 말 것. 근거에 없는 사실을 지어내지 말 것. 음악·음원은 고르지 말 것\n"
     "- 경쟁사·사람을 깎아내리지 말 것\n"
     "- 의뢰_주제가 있으면 결론이 그 주제를 다루게 할 것. 근거_theme 후보는 주제 안에서 관심이 큰"
@@ -896,9 +900,38 @@ class _Beat(BaseModel):
     evidence: list[str] = Field(default_factory=list)
 
 
+class _Material(BaseModel):
+    kind: str
+    text: str = ""
+    evidence: list[str] = Field(default_factory=list)
+
+
 class _Recommendation(BaseModel):
     conclusion: str = ""
-    beats: list[_Beat] = Field(default_factory=list)
+    materials: list[_Material] = Field(default_factory=list)
+
+
+MATERIALS_MAX = 4
+MATERIAL_TEXT_MAX = 80
+MATERIAL_KINDS = ("hashtag", "format", "topic", "meme", "writing", "timing", "other")
+# 시간별 장면·대본은 기획 몫 (11/23): 이런 말이 든 재료는 버린다 (숫자는 check_line이 버림)
+_SCENE_WORDS = re.compile(
+    r"장면|씬|컷|대본|자막|타임라인|오프닝|엔딩|[몇첫]\s*초|초\s*(?:동안|안|만에|까지|부터)"
+)
+
+
+def check_material(text: str) -> tuple[str | None, str | None]:
+    """(재료 문장, 버린 이유). 숫자·시간·장면·대본 말이 있으면 버린다."""
+    from data_agent.skills.trend_memes import check_line
+
+    line, why = check_line(text)
+    if line is None:
+        return None, why
+    if _SCENE_WORDS.search(line):
+        return None, "시간·장면·대본 말이 들어 있어 버림 (장면은 기획이 짠다)"
+    if len(line) > MATERIAL_TEXT_MAX:
+        return None, "재료 문장이 너무 길어 버림"
+    return line, None
 
 
 Recommended = tuple[TrendRecommendationSection, int, list[str]]
@@ -938,41 +971,59 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
         return out, 1, []
     limits: list[str] = []
     out.conclusion, why = check_line(answer.conclusion)
-    dropped: list[str] = []
-    seen: set[str] = set()
-    for beat in answer.beats:
-        slot = beat.slot.strip()
-        if slot not in BEAT_SLOTS or slot in seen:
-            dropped.append(f"{slot or '빈 칸'}: 칸 이름이 틀리거나 겹침")
-            continue
-        text, text_why = check_line(beat.text)
-        ids = [i.strip().removeprefix("근거_") for i in beat.evidence]
-        good = list(dict.fromkeys(i for i in ids if i in catalog))
-        if text is None:
-            dropped.append(f"{slot}: {text_why}")
-            continue
-        if not good:
-            dropped.append(f"{slot}: 근거 id가 없거나 없는 id만 있음")
-            continue
-        if len(good) < len(ids):
-            limits.append(f"콘티 {slot}: 없는 근거 id는 버림")
-        seen.add(slot)
-        out.beats.append(TrendBeat(
-            slot=slot, text=text, evidence=[catalog[i][0] for i in good],  # type: ignore[arg-type]
-            evidence_items=[TrendReportEvidence(id=i, text=catalog[i][0], short=catalog[i][2])
-                            for i in good]))  # fmt: skip
-    out.beats.sort(key=lambda b: BEAT_SLOTS.index(b.slot))
+    out.materials, dropped, partial = pick_materials(answer.materials, catalog)
+    limits += partial
     if dropped:
-        limits.append("버린 콘티 칸: " + "; ".join(dropped))
+        limits.append("버린 재료: " + "; ".join(dropped))
     if out.conclusion is None:
         limits.append(f"결론 한 줄을 버림 ({why})")
-    if out.conclusion or out.beats:
+    # 11/23: 추천은 결론 한 줄과 재료 하나 이상이 있어야 known (예전에는 결론 또는 콘티)
+    if out.conclusion and out.materials:
         out.status = "known"
-        if out.conclusion is None:
-            out.reason = why
+    elif out.conclusion is None:
+        out.status, out.reason = "unknown", why or "쓸 수 있는 결론이 없음"
     else:
-        out.status, out.reason = "unknown", why or "쓸 수 있는 결론·콘티가 없음"
+        out.status, out.reason = "unknown", "근거가 있는 재료가 하나도 없음"
     return out, 1, limits
+
+
+def pick_materials(
+    items: Sequence[_Material], catalog: Mapping[str, tuple[str, str, str]]
+) -> tuple[list[TrendMaterial], list[str], list[str]]:
+    """(재료, 버린 이유, 한계). 근거 id가 없는 재료·숫자·시간·장면 말이 든 재료는 버리고,
+    같은 kind는 처음 것 하나만, 최대 4개. 근거 문장은 코드가 근거 목록에서 붙인다."""
+    out: list[TrendMaterial] = []
+    dropped: list[str] = []
+    limits: list[str] = []
+    seen: set[str] = set()
+    for m in items:
+        kind = m.kind.strip().lower()
+        if kind not in MATERIAL_KINDS:
+            dropped.append(f"{kind or '빈 종류'}: 모르는 종류")
+            continue
+        if kind in seen:
+            dropped.append(f"{kind}: 같은 종류는 하나만")
+            continue
+        text, text_why = check_material(m.text)
+        if text is None:
+            dropped.append(f"{kind}: {text_why}")
+            continue
+        ids = [i.strip().removeprefix("근거_") for i in m.evidence]
+        good = list(dict.fromkeys(i for i in ids if i in catalog))
+        if not good:
+            dropped.append(f"{kind}: 근거 id가 없거나 없는 id만 있음")
+            continue
+        if len(good) < len(ids):
+            limits.append(f"재료 {kind}: 없는 근거 id는 버림")
+        if len(out) >= MATERIALS_MAX:
+            dropped.append(f"{kind}: 재료는 {MATERIALS_MAX}개까지")
+            continue
+        seen.add(kind)
+        out.append(TrendMaterial(
+            kind=kind, text=text, evidence=[catalog[i][0] for i in good],  # type: ignore[arg-type]
+            evidence_items=[TrendReportEvidence(id=i, text=catalog[i][0], short=catalog[i][2])
+                            for i in good]))  # fmt: skip
+    return out, dropped, limits
 
 
 # ---------------------------------------------------------------- 보고서 하나

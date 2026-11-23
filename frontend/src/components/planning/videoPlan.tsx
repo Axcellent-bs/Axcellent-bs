@@ -1,37 +1,70 @@
-// 기획 제안 "3 영상 제작안" (기획 → 마케팅 영상 제작안, 보기만). 값은 기획 state proposals[].video_plan 그대로 (lib/videoPlan.ts)
-// 콘셉트·대본 · 장면 표(장면·시간·화면 구성·자막) · 접기(장면별 영상 생성 프롬프트·공통 화풍·공통 금지, 인쇄 때는 펼침)
-import { useState } from 'react'
+// 영상 제작안 스토리보드 (기획 제안·기획서 화면, 보기만). 값은 기획 state proposals[].video_plan 그대로 (lib/videoPlan.ts)
+// 11/23 재현 님 시안 ④: 콘셉트 한 줄 → 길이·비율·장면·대상·근거 → 장면 시간표 막대(폭 = 시간 비율) → 장면 카드
+// (번호·역할·시간·화면 구성·자막) → 대본·영상 생성 프롬프트는 접기(인쇄 때는 펼침). 장면 그림 칸은 지금은 색 칸이고,
+// 이미지 시안이 생기면 그 자리에 들어간다.
+// RequestDecideBar: 대화방 의뢰 카드에서 ?request=wr_…로 들어왔고 그 의뢰의 사람 확인이 대기 중이면 화면 아래 고정 줄에
+// [다음 단계 진행]·[여기서 멈추기]. 대화 카드와 같은 동작(orchestrator.decideRequestStep)이다
+import { useEffect, useState, type ReactNode } from 'react'
 import { Tag } from '@/components/planning-common/parts'
 import { usePrinting } from '@/lib/print'
 import { sceneTime, videoPlanChip, type VideoPlanView } from '@/lib/videoPlan'
+import { sceneRole, sceneShares } from '@/lib/videoStoryboard'
+import { orchestrator } from '@/lib/orchestrator'
+import { proposalOfRequest, requestActionError, stepRows } from '@/lib/requestCards'
+import type { WorkRequestRow } from '@/lib/workRequests'
 
-export function VideoPlanSection({ v, no = 3 }: { v: VideoPlanView; no?: number }) {
+/** 접는 칸 (시안의 "제목 · 회색 설명 ›" 줄). 인쇄 때는 펼친다 */
+export function Fold({ title, note, children, defaultOpen = false }: { title: string; note?: string; children: ReactNode; defaultOpen?: boolean }) {
   const printing = usePrinting()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
   return (
-    <section className="pp-part" aria-label="영상 제작안">
-      <h3 className="pp-part-h"><span className="pp-no">{no}</span>영상 제작안<Tag>{videoPlanChip(v)}</Tag></h3>
-      <dl className="pp-fields">
-        <dt>콘셉트</dt><dd>{v.concept}</dd>
-        {v.script && <><dt>대본</dt><dd className="vp-script">{v.script}</dd></>}
+    <details className="sb-fold" open={open || printing} onToggle={(e) => { if (!printing) setOpen(e.currentTarget.open) }}>
+      <summary><b>{title}</b>{note && <span className="sb-fold-note">{note}</span>}</summary>
+      <div className="sb-fold-body">{children}</div>
+    </details>
+  )
+}
+
+export interface StoryBasis { report: string | null; points: string[] }
+
+export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlanView; audience?: string | null; basis?: StoryBasis; children?: ReactNode }) {
+  const shares = sceneShares(v.scenes)
+  return (
+    <section className="pp-part sb" aria-label="영상 제작안">
+      <h3 className="pp-part-h">영상 제작안<Tag>{videoPlanChip(v)}</Tag></h3>
+      <p className="sb-concept">{v.concept}</p>
+      <dl className="sb-meta">
+        <div><dt>길이</dt><dd>{v.durationS}초</dd></div>
+        <div><dt>비율</dt><dd>{v.aspect}</dd></div>
+        <div><dt>장면</dt><dd>{v.scenes.length}</dd></div>
+        {audience && <div><dt>대상</dt><dd>{audience}</dd></div>}
+        {basis && (basis.report || basis.points.length > 0) && (
+          <div className="sb-basis"><dt>근거</dt><dd>{[basis.report ? `보고서 ${basis.report}` : null, ...basis.points].filter(Boolean).join(' · ')}</dd></div>
+        )}
       </dl>
-      <div className="vp-scenes">
-        <table className="vp-table">
-          <thead><tr><th scope="col">장면</th><th scope="col">시간</th><th scope="col">화면 구성</th><th scope="col">자막</th></tr></thead>
-          <tbody>
-            {v.scenes.map((s) => (
-              <tr key={s.n}>
-                <td>{s.n}</td>
-                <td className="vp-nowrap">{sceneTime(s)}</td>
-                <td>{s.visual}</td>
-                <td>{s.caption || '–'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <details className="pp-body vp-prompts" open={open || printing} onToggle={(e) => { if (!printing) setOpen(e.currentTarget.open) }}>
-        <summary>장면별 영상 생성 프롬프트 · 공통 화풍 · 공통 금지</summary>
+      <ol className="sb-bar" aria-label="장면 시간표">
+        {v.scenes.map((s, i) => (
+          <li key={s.n} className={`sb-c${i % 4}`} style={{ flexBasis: `${shares[i]}%` }} title={`장면 ${s.n} · ${sceneTime(s)}`}>{s.n} · {sceneTime(s)}</li>
+        ))}
+      </ol>
+      <ol className="sb-cards">
+        {v.scenes.map((s, i) => (
+          <li key={s.n} className="sb-card">
+            <div className={`sb-shot sb-c${i % 4}`} aria-hidden="true"><span>장면 그림 자리</span></div>
+            <div className="sb-card-body">
+              <div className="sb-card-top">{s.n} · {sceneRole(i, v.scenes.length)} · {sceneTime(s)}</div>
+              <p className="sb-visual">{s.visual}</p>
+              {s.caption && <span className="sb-caption">자막: {s.caption}</span>}
+            </div>
+          </li>
+        ))}
+      </ol>
+      {v.script && (
+        <Fold title="대본 전체" note={`${v.script.length}자`}>
+          <p className="vp-script">{v.script}</p>
+        </Fold>
+      )}
+      <Fold title="영상 생성 프롬프트" note="장면별 영문 · 공통 화풍 · 금지">
         <ol className="vp-prompt-list">
           {v.scenes.map((s) => <li key={s.n}><b>장면 {s.n}</b> <span className="mono">{s.prompt}</span></li>)}
         </ol>
@@ -39,7 +72,46 @@ export function VideoPlanSection({ v, no = 3 }: { v: VideoPlanView; no?: number 
           <dt>공통 화풍</dt><dd className="mono">{v.style || '–'}</dd>
           <dt>공통 금지</dt><dd className="mono">{v.negative || '–'}</dd>
         </dl>
-      </details>
+      </Fold>
+      {children}
     </section>
+  )
+}
+
+/** 의뢰 사람 확인 줄. 의뢰를 못 읽거나(사람 토큰 없음 등), 이 제안의 의뢰가 아니거나, 확인할 단계가 없으면 안 그린다 */
+export function RequestDecideBar({ request, proposal }: { request: string | null; proposal: string }) {
+  const [row, setRow] = useState<WorkRequestRow | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!request) return
+    let live = true
+    orchestrator.workRequest(request).then((r) => { if (live) setRow(r) }).catch(() => { if (live) setRow(null) })
+    return () => { live = false }
+  }, [request])
+  if (!request || !row) return null
+  if (proposalOfRequest(row, [{ id: proposal }]) !== proposal) return null
+  const step = stepRows(row).find((s) => s.decide)
+  if (!step?.decide && !done) return null
+  const decide = (approved: boolean) => {
+    if (!step) return
+    setBusy(true)
+    setError(null)
+    orchestrator.decideRequestStep(row.request_id, step.stepId, approved)
+      .then(() => setDone(approved ? `${step.decide?.approve ?? '진행'}했어요. 결과는 대화방 의뢰 카드에서 이어서 보여요.` : '여기서 멈췄어요.'))
+      .catch((e: unknown) => setError(requestActionError(e).text))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <div className="sb-decide print-hide" role="region" aria-label={`의뢰 ${row.request_id} 사람 확인`}>
+      {done ? <span>{done}</span> : (
+        <>
+          <span className="sb-decide-text">확인 후 버튼을 눌러 주세요. 진행하면 다음 단계로 넘어가요.{error && <span role="alert" className="sb-decide-err"> {error}</span>}</span>
+          <button type="button" className="btn-primary" disabled={busy} onClick={() => decide(true)}>{step?.decide?.approve}</button>
+          <button type="button" className="btn-ghost" disabled={busy} onClick={() => decide(false)}>{step?.decide?.stop}</button>
+        </>
+      )}
+    </div>
   )
 }

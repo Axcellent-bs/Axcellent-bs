@@ -6,7 +6,8 @@
 - `PUT  /api/dashboard/site-adapter`: 짝을 받아 첫 쪽을 실제로 바꿔 보고, 통과하면
   짝 파일·키 파일을 쓰고 회사 연결을 `kind=adapter`로 저장한다
 
-쓰기(POST·PUT)는 사람 토큰만 된다. 주소 정책은 회사 연결과 같다(`check_host`).
+쓰기(POST·PUT)는 사람 토큰만 되고, 로그인 세션이면 운영자·관리자만(`EDITORS`).
+주소 정책은 회사 연결과 같다(`check_host`).
 키는 변환기 폴더의 `token` 파일에만 두고 응답·로그·오류 문구에 넣지 않는다.
 """
 
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ax_agent_template import company_connection as store
 from ax_agent_template import tenant as tenants
+from ax_dashboard_api.accounts import require_session_role
 from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
 from ax_dashboard_api.site_adapter import propose, resources, upstream
@@ -43,6 +45,9 @@ router = APIRouter(
     prefix="/api/dashboard/site-adapter",
     dependencies=[Depends(require_human)],
 )
+# 둘러보기·저장은 운영자·고객사 관리자 세션만. 일반회원 세션은 403 ROLE_REQUIRED
+# (회사 연결과 같은 규칙, 회사 간 격리 시험 6). 공용 토큰은 그대로 둔다
+EDITORS = [Depends(require_session_role("operator", "admin"))]
 
 MAX_TOKEN = 1024
 # shop-api 주문 상태 (contracts `shop_sales.py`)
@@ -189,7 +194,7 @@ def get_state() -> dict:
     return ok(_state())
 
 
-@router.post("/propose")
+@router.post("/propose", dependencies=EDITORS)
 async def propose_mapping(body: ProposeIn) -> dict:
     """저장하지 않고 둘러본다. 경로 둘을 다 주면 첫 쪽을 읽어 짝을 제안한다."""
     base = _base(body.base_url)
@@ -298,8 +303,10 @@ def _restore(backup: dict[str, str | None]) -> None:
             path.write_text(text, encoding="utf-8")
 
 
-@router.post("/save")  # PUT과 같다(운영 서버 nginx 게이트가 POST만 열 수 있어서)
-@router.put("")
+@router.post(
+    "/save", dependencies=EDITORS
+)  # PUT과 같다(운영 서버 nginx 게이트가 POST만 열 수 있어서)
+@router.put("", dependencies=EDITORS)
 async def save(body: SaveIn, request: Request) -> dict:
     """짝을 확인하고 저장한다. 저장하면 AI들의 판매 서버 주소가 변환기로 바뀐다."""
     if not store.connection_file():

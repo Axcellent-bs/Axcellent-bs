@@ -292,8 +292,8 @@ def test_insight_of_a_finished_report_is_the_planning_input(tmp_path: Path) -> N
     assert again.products == [] and again.product_ids == [] and again.content_format is None
     assert again.generated_at == report.finished_at
     assert again.body_md and "## 결론" in again.body_md and len(again.body_md) <= 8000
-    # 콘티 근거가 가리키는 행이 먼저
-    beat_ids = [e.id for b in report.sections.recommendation.beats for e in b.evidence_items]
+    # 추천 근거(11/23: 재료)가 가리키는 행이 먼저
+    beat_ids = [e.id for m in report.sections.recommendation.materials for e in m.evidence_items]
     first = ti.row_facts(report)[beat_ids[0]]
     assert again.facts[0].label == ti.clip(first[0], 120)
     # 두 번 불러도 같은 결과
