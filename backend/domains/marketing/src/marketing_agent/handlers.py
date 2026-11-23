@@ -1002,14 +1002,15 @@ async def youtube_uploads_list(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     items = _youtube_stats.uploads(data.limit, data.campaign_id)
-    out = YoutubeUploadsListOutput(items=items, total=len(items))
+    requested = _youtube_stats.request_uploads(data.limit, data.campaign_id)
+    out = YoutubeUploadsListOutput(items=items, total=len(items), request_items=requested)
     return _result(
         request,
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=_evidence(
             ["youtube_uploads_list"],
-            f"올린 유튜브 영상 {out.total}개",
+            f"올린 유튜브 영상 {out.total}개 · 의뢰 영상 {len(requested)}개",
             [i.record_id for i in items],
         ),
     )

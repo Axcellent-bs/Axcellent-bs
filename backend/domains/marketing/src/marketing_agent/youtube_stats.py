@@ -22,6 +22,7 @@ import httpx
 from ax_contracts.schemas.marketing_youtube_stats import (
     YOUTUBE_STATS_MAX,
     YOUTUBE_VIDEO_ID_PATTERN,
+    YoutubeRequestUpload,
     YoutubeUpload,
     YoutubeVideoStat,
 )
@@ -92,6 +93,34 @@ def uploads(limit: int = 50, campaign_id: str | None = None) -> list[YoutubeUplo
                 title=yt.get("title"),
                 privacy=yt.get("privacy"),
                 campaign_id=link,
+            )
+        )
+        if len(out) >= limit:
+            break
+    return out
+
+
+def request_uploads(limit: int = 50, campaign_id: str | None = None) -> list[YoutubeRequestUpload]:
+    """의뢰로 만든 영상 중 올리기가 끝난 것(이 회사). campaign_id(wr_…)를 주면 그 의뢰 것만."""
+    out: list[YoutubeRequestUpload] = []
+    for post_draft_id, yt in _creative.store().request_youtube_all(_creative.KEEP).items():
+        if yt.get("status") != "done":
+            continue
+        video_id = str(yt.get("video_id") or "")
+        if not re.fullmatch(YOUTUBE_VIDEO_ID_PATTERN, video_id):
+            continue
+        request_id = str(yt.get("request_id") or "").strip()[:80] or None
+        if campaign_id and request_id != campaign_id:
+            continue
+        out.append(
+            YoutubeRequestUpload(
+                post_draft_id=post_draft_id[:80],
+                request_id=request_id,
+                video_id=video_id,
+                url=yt.get("url") or f"https://youtu.be/{video_id}",
+                uploaded_at=yt.get("uploaded_at"),
+                title=yt.get("title"),
+                privacy=yt.get("privacy"),
             )
         )
         if len(out) >= limit:

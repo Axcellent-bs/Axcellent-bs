@@ -181,3 +181,18 @@ def test_cards_list_both_skills_as_read_for_data_and_dashboard(card: Path) -> No
         assert skills[skill]["grade"] == "read"
         assert skills[skill]["allowed_requesters"] == ["data", "dashboard-api"]
         assert skill in handlers.HANDLERS
+
+
+def test_uploads_list_includes_request_video_uploads(env: dict[str, Any]) -> None:
+    """의뢰로 만든 영상을 올린 것도 목록에 나온다(데이터가 의뢰 번호로 찾는다)."""
+    env["store"].set_request_youtube("pd_req_1", "wr_abc0000001", {
+        "status": "done", "video_id": VID_A, "url": f"https://youtu.be/{VID_A}",
+        "request_id": "wr_abc0000001", "title": "의뢰 영상", "privacy": "unlisted"})  # fmt: skip
+    env["store"].set_request_youtube("pd_req_2", "wr_other00001", {
+        "status": "awaiting_approval", "request_id": "wr_other00001"})  # fmt: skip
+    every = _call("youtube_uploads_list", {}).output
+    assert every["total"] == 0
+    got = [(i["post_draft_id"], i["video_id"], i["request_id"]) for i in every["request_items"]]
+    assert got == [("pd_req_1", VID_A, "wr_abc0000001")]
+    only = _call("youtube_uploads_list", {"campaign_id": "wr_other00001"}).output
+    assert only["request_items"] == []
