@@ -22,7 +22,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from ax_workflow.auth import require_human
+from ax_workflow.auth import acting, require_human, session_decider
 from ax_workflow.autocheck import merge_risk_paths
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import PR
@@ -51,6 +51,7 @@ STATES = ("open", "merged", "closed", "all")
 VCS_STATUS = {
     "not_found": 404,
     "conflict": 409,
+    "head_moved": 409,  # 승인한 머리 커밋 뒤에 새 커밋이 올라와 머지하지 않음
     "read_only": 409,
     "invalid": 400,
     "rate_limited": 429,
@@ -71,12 +72,23 @@ async def resume_op(spec: dict[str, Any]) -> tuple[Callable[[], Awaitable[Any]],
     if spec["op"] == "merge":
         method = str(spec.get("method") or "merge")
 
+        approved = str(spec.get("head") or "")  # 보류 때 머리 커밋 (승인은 그 코드에 대한 것)
+
         async def merge() -> Any:
             head = await adapter.describe_change(number)
             if head.state != "open":
                 now = "머지됨" if head.state == "merged" else head.state
                 raise Stale(f"레포 PR #{number}는 이미 {now}")
-            return await adapter.merge_change(number, method)
+            if not approved:
+                return await adapter.merge_change(number, method)
+            cur = (await adapter.get_change(number)).head_sha
+            if cur and cur != approved:
+                raise Stale(
+                    f"레포 PR #{number}에 새 커밋이 올라와 승인한 코드와 다르다"
+                    f" ({approved[:12]} → {cur[:12]})"
+                )
+            # 그 사이(확인과 병합 사이)에 올라와도 형상관리가 거절한다 (sha)
+            return await adapter.merge_change(number, method, sha=approved)
 
         return merge, f"레포 PR #{number} 머지함"
     if spec["op"] == "revert":
@@ -507,6 +519,9 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
     async def merge_repo_pr(
         number: int, request: Request, connection: str | None = None
     ) -> dict | JSONResponse:
+        # 세션 모드면 로그인 세션만 머지한다 (공용 토큰은 403 SESSION_REQUIRED), 그 계정을 남긴다
+        who = session_decider(request.headers.get("authorization"))
+
         async def run() -> dict:
             body = await _body(request)
             method = str(body.get("method") or "merge")
@@ -518,7 +533,8 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             linked = _linked(svc, cid).get(number)
             if linked is not None and not linked.merged:
                 # AI가 만든 PR: 내부 사람 머지 흐름 그대로 (관문·감사 기록·작업 완료 처리)
-                await svc.dispatch({"type": "merge_pr", "pr": linked.id})
+                with acting(who):
+                    await svc.dispatch({"type": "merge_pr", "pr": linked.id})
                 after = next((p for p in svc.state.prs if p.id == linked.id), None)
                 if after is None or not after.merged:
                     raise RepoError(502, "VCS_MERGE_FAILED", f"{linked.id} 머지하지 못했다")
@@ -527,20 +543,42 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
             change = await adapter.get_change(number)
             if change.merged:
                 raise RepoError(409, "VCS_CONFLICT", f"이미 병합된 변경: {number}")
-            text = f"사람이 레포 PR #{number} 머지 ({method})"
+            text = f"사람이 레포 PR #{number} 머지 ({method})" + (f" · {who}" if who else "")
+            # 관문 키를 (PR, 머리 커밋)마다 하나로: 두 번 클릭·다시 보내기·둘이 같이 누르기는 같은
+            # 키라 보류 건이 하나고 이전 판정을 재생한다. 새 커밋이 올라오면 새 키 (새 판정).
+            # 머리를 모르는 부품이면 예전처럼 누를 때마다 새 키
+            # 거절·만료·건너뜀으로 끝난 뒤 다시 누르면 새 키 (hold_resume.fresh_target)
+            sha = change.head_sha
+            key = (
+                hold_resume.fresh_target(
+                    svc.holds, f"repo:{cid}", "merge_pr",
+                    vcs_bridge.merge_target(f"{cid}#{number}", sha),
+                )
+                if sha
+                else None
+            )  # fmt: skip
+
+            async def merge() -> Any:
+                # 관문이 본 머리 커밋일 때만 병합한다 (그 사이 새 커밋이면 형상관리가 거절)
+                if sha:
+                    return await adapter.merge_change(number, method, sha=sha)
+                return await adapter.merge_change(number, method)
+
             await svc.repo_write(
                 "merge_pr",
                 f"{cid}#{number}",
                 text,
                 _size_params(cid, change),
-                lambda: adapter.merge_change(number, method),
+                merge,
                 resume={
                     "op": "merge",
                     "connection": cid,
                     "number": number,
                     "method": method,
+                    "head": sha,
                     **hold_resume.repo_of(cid),
                 },
+                key_target=key,
             )
             head = await adapter.describe_change(number)
             return ok({"pr": _plain(head), "via": "repo", "internal": None})

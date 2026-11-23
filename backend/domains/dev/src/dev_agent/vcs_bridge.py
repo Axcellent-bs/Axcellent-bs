@@ -16,7 +16,7 @@ from datetime import datetime
 
 from ax_workflow.models import PR, RepoCandidate, RepoTarget
 from dev_agent import repo_routing, vcs
-from dev_agent.vcs.base import VcsAdapter, VcsError
+from dev_agent.vcs.base import HEAD_MOVED, VcsAdapter, VcsError
 
 AUTO_ONE = "자동 (연결 1개)"
 
@@ -202,10 +202,11 @@ async def update_pr(pr: PR, files: dict[str, str], message: str) -> Note | None:
     return Note(True, "vcs.updated", f"{pr.id} → 형상관리 변경 #{pr.vcs_number} 수정 커밋")
 
 
-async def merge_pr(pr: PR, connection_id: str | None = None) -> Note | None:
+async def merge_pr(pr: PR, connection_id: str | None = None, sha: str | None = None) -> Note | None:
     """④ 실제로 병합한다. 목 설정이면 None. 실패하면 ok False (PR은 병합하지 않은 채로 둔다).
 
-    PR을 올린 연결(`target`)에서 병합한다."""
+    PR을 올린 연결(`target`)에서 병합한다. `sha`(관문이 승인한 머리 커밋)를 주면 머리가 그것일
+    때만 병합한다 (승인과 병합 사이에 새 커밋이 올라오면 "새 커밋이 올라와 머지하지 않음")."""
     try:
         adapter = active(connection_id or _connection_of(pr))
     except VcsError as exc:
@@ -218,8 +219,13 @@ async def merge_pr(pr: PR, connection_id: str | None = None) -> Note | None:
         return Note(False, "vcs.merge_failed", f"{pr.id} 형상관리 변경 번호가 없어 병합하지 않음")
     try:
         # 리뷰·수정을 PR 전에 끝내 PR 하나가 커밋 하나다. 이력이 그대로 남는 merge commit으로 합친다
-        await adapter.merge_change(pr.vcs_number, method="merge")
+        if sha:
+            await adapter.merge_change(pr.vcs_number, method="merge", sha=sha)
+        else:
+            await adapter.merge_change(pr.vcs_number, method="merge")
     except VcsError as exc:
+        if exc.code == HEAD_MOVED:
+            return Note(False, "vcs.merge_failed", f"{pr.id} {HEAD_MOVED_TEXT}")
         # 앞선 시도에서 병합만 되고 상태 반영이 버려졌으면 이미 병합된 것으로 본다
         if exc.code != "conflict" or not await _already_merged(adapter, pr.vcs_number):
             why = merge_fail_reason(exc.code, exc.message)
@@ -227,6 +233,7 @@ async def merge_pr(pr: PR, connection_id: str | None = None) -> Note | None:
     return Note(True, "vcs.merged", f"{pr.id} → 형상관리 변경 #{pr.vcs_number} 병합")
 
 
+HEAD_MOVED_TEXT = "새 커밋이 올라와 머지하지 않음 (승인한 코드와 다름 → 사람이 다시 머지)"
 CONFLICT_MARK = "conflict · 충돌"  # 머지 실패 글에 이게 있으면 다시 쓰기로 풀린다
 
 
@@ -237,6 +244,8 @@ BLOCKED_WORDS = ("status check", "required", "review", "protected", "approv", "r
 def merge_fail_reason(code: str, message: str = "") -> str:
     """머지 실패 이유: 충돌(다시 쓰기로 풀림) · 보호 규칙·필수 체크(사람 판단) · 그 밖."""
     low = message.lower()
+    if code == HEAD_MOVED:
+        return HEAD_MOVED_TEXT
     if code in ("conflict", "invalid", "forbidden") and any(w in low for w in BLOCKED_WORDS):
         return f"보호 규칙·필수 체크에 막힘 ({code})"
     if code == "conflict":
@@ -257,6 +266,24 @@ async def change_state(pr: PR) -> str | None:
         return (await adapter.describe_change(pr.vcs_number)).state
     except VcsError:
         return None
+
+
+async def head_of(pr: PR) -> str:
+    """형상관리에서 본 PR 머리 커밋. 목 설정·번호 없음이면 "" (머리를 묶지 않는다).
+    읽기 실패면 `VcsError` (머리를 모르면 머지하지 않는다: 부르는 쪽이 한 줄로).
+    사람·자동 머지 관문 키를 (PR, 머리 커밋)마다 하나로 두는 데 쓴다 (`merge_target`)."""
+    if pr.vcs_number is None:
+        return ""
+    adapter = active(_connection_of(pr))
+    if adapter is None:
+        return ""
+    return (await adapter.get_change(pr.vcs_number)).head_sha
+
+
+def merge_target(pr_id: str, head: str) -> str:
+    """`merge_pr` 관문 대상(멱등 키 끝). 머리 커밋을 알면 `PR #n:<12자>` — 같은 머리면 다시 눌러도·
+    다시 보내도·둘이 같이 눌러도 같은 키(이전 판정 재생), 새 커밋이 올라오면 새 키(새 판정)."""
+    return f"{pr_id}:{head[:12]}" if head else pr_id
 
 
 async def checks_state(pr: PR) -> str | None:

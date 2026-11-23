@@ -112,9 +112,12 @@ def clean_context() -> contextvars.Context:
     """뒤에서 따로 도는 작업(코딩 실행 등)용 문맥. 이어서 하던 보류 건·적어 둔 것을 물려받지 않는다.
 
     물려받으면 나중에 그 작업이 새로 보류될 때 이미 닫힌 보류 건에 이어 붙는다."""
+    from ax_workflow import auth
+
     ctx = contextvars.copy_context()
     ctx.run(_resuming.set, None)
     ctx.run(_recipe.set, None)
+    ctx.run(auth._actor.set, None)  # 사람 결정을 한 사람도 물려받지 않는다
     return ctx
 
 
@@ -261,6 +264,25 @@ class HoldStore:
             self._save()
 
 
+# 이 보류 건으로 끝난 키는 다시 물어도 같은 판정만 재생한다 (관문 멱등). 사람이 다시 누르면 새 키
+REFUSED_DONE: frozenset[str] = frozenset({"rejected", "expired", "skipped"})
+
+
+def fresh_target(store: HoldStore, ctx: str, action: str, target: str) -> str:
+    """사람 버튼 관문 대상. 같은 대상의 보류가 거절·만료·건너뜀으로 끝났으면 `:r<n>`을 붙인다.
+
+    고정 키(PR·머리 커밋마다 하나)는 두 번 클릭·다시 보내기를 한 보류 건으로 묶지만, 거절·만료된
+    판정을 영원히 재생한다. 끝난 건수만큼 새 키를 써서 사람이 다시 승인을 받을 수 있게 한다.
+    보류가 열려 있는 동안은 건수가 그대로라 같은 키(같은 보류 건)다."""
+    base = f"{ctx}:{action}:{target}"
+    done = sum(
+        1
+        for r in store.rows.values()
+        if r.status in REFUSED_DONE and (r.key == base or r.key.startswith(f"{base}:r"))
+    )
+    return f"{target}:r{done}" if done else target
+
+
 # ---- 결정 → 이어서 하기
 
 Resumer = Callable[["DevService", HeldAction], Awaitable[str]]
@@ -287,6 +309,9 @@ async def decide(
         )
         store.close(review_id, status, why + (f" ({by})" if by else ""))
         await _log(svc, row, f"{_label(row)} 보류 {review_id} {why}")
+        if row.kind == "policy_demote":  # 막힌 축소를 닫음 → 줄인 단계로 보던 것도 푼다
+            word = "보류 만료" if status == "expired" else "보류 거절"
+            await svc.drop_shrink_pending(int(row.args["frm"]), int(row.args["to"]), word)
         return store.get(review_id)
     claimed = store.claim(review_id, by)
     if claimed is None:
@@ -414,7 +439,19 @@ async def _merge_pr(svc: DevService, row: HeldAction) -> str:
         raise Stale(f"{p.id}는 이미 머지됨")
     if p.closed:
         raise Stale(f"{p.id}는 닫힘")
-    await svc.merge_pr(p.id)  # 형상관리 병합 실패는 MERGE_FAILED (실패로 남는다)
+    from dev_agent import vcs_bridge
+
+    # 승인은 보류 때 머리 커밋에 대한 것이다. 그 뒤 새 커밋이 올라왔으면 이어서 하지 않는다
+    # (다시 부르면 새 키로 새 판정을 받는다: 사람이 다시 머지 버튼)
+    held = row.args.get("head")
+    try:
+        now: str | None = await vcs_bridge.head_of(p)
+    except Exception:  # noqa: BLE001 - 못 읽으면 머지 쪽이 실패로 남긴다 (MERGE_FAILED)
+        now = None
+    if held and now is not None and now != held:
+        raise Stale(f"{p.id}에 새 커밋이 올라와 승인한 코드와 다르다 ({held[:12]} → {now[:12]})")
+    # 같은 머리면 보류 때와 같은 키 (`_do_merge`). 형상관리 병합 실패는 MERGE_FAILED (실패로 남는다)
+    await svc.merge_pr(p.id)
     after = svc._find_pr(svc.state, p.id)
     if after is None or not after.merged:
         raise ActionError("MERGE_FAILED", f"{p.id} 머지되지 않음")

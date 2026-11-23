@@ -22,12 +22,14 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ax_workflow.auth import (
+    acting,
     check_admin,
     check_caller,
     check_human,
     require_admin,
     require_caller,
     require_human,
+    session_decider,
 )
 from ax_workflow.base import (
     SIMULATOR_ACTIONS,
@@ -38,7 +40,7 @@ from ax_workflow.base import (
 )
 from ax_workflow.metrics import compute_metrics
 from ax_workflow.models import dump
-from ax_workflow.rules import AUTO_LEVELS, PROMOTE_AFTER, auto_limit
+from ax_workflow.rules import AUTO_LEVELS, PROMOTE_AFTER, auto_limit, effective_level
 from ax_workflow.trace import code_of, trace_of, trace_text
 
 KEEPALIVE_SECONDS = 15.0
@@ -102,8 +104,16 @@ async def _body(request: Request) -> dict | None:
     return body if isinstance(body, dict) else None
 
 
-def add_common_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
-    """두 서비스가 같이 쓰는 읽기·액션·SSE·초기화."""
+def add_common_routes(
+    router: APIRouter,
+    get_service: Callable[[], Any],
+    session_actions: frozenset[str] = frozenset(),
+) -> None:
+    """두 서비스가 같이 쓰는 읽기·액션·SSE·초기화.
+
+    `session_actions`: 승인 같은 사람 결정 액션(snake_case). 세션 모드면 로그인 세션 토큰만 받고
+    (공용 토큰은 403 `SESSION_REQUIRED`) 그 계정을 결정한 사람으로 남긴다 (`auth.acting`).
+    세션 설정이 꺼진 로컬·시험 모드는 예전처럼 사람 토큰이면 된다."""
 
     @router.get("/state")
     def get_state() -> dict:
@@ -220,6 +230,9 @@ def add_common_routes(router: APIRouter, get_service: Callable[[], Any]) -> None
         return _ok(
             {
                 **dump(pol),
+                # 줄이기가 관문에서 보류 중이면 자동 처리는 줄인 단계로 한다 (`limit`도 그 단계)
+                "shrink_pending": pol.shrink_pending,
+                "effective_level": effective_level(pol),
                 "limit": auto_limit(pol),
                 "levels": [lv.model_dump() for lv in AUTO_LEVELS],
                 "promote_after": PROMOTE_AFTER,
@@ -239,8 +252,15 @@ def add_common_routes(router: APIRouter, get_service: Callable[[], Any]) -> None
             check_human(authorization)
             return _err(400, "INVALID_ACTION", "JSON이 아니다")
         _check_action(body, authorization)
+        raw = body.get("type") if isinstance(body, dict) else None
+        who = (
+            session_decider(authorization)
+            if isinstance(raw, str) and action_name(raw) in session_actions
+            else None
+        )
         try:
-            result = await svc.dispatch(body)
+            with acting(who):
+                result = await svc.dispatch(body)
         except ActionError as exc:
             status = 403 if exc.code == "SIMULATOR_DISABLED" else 400
             return _err(status, exc.code, exc.message)

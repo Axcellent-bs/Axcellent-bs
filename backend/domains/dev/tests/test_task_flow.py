@@ -78,7 +78,7 @@ class Merges(MockVcsAdapter):
         self.seed_files(FILES)
         self.block: VcsError | None = None
 
-    async def merge_change(self, number: int, method: str = "squash"):
+    async def merge_change(self, number: int, method: str = "squash", sha: str | None = None):
         if self.block is not None:
             raise self.block
         return await super().merge_change(number, method)

@@ -506,6 +506,11 @@ class AutoPolicy(DomainModel):
     history: list[AutoRun] = Field(default_factory=list)
     proposal: AutoProposal | None = None
     log: list[AutoLog] = Field(default_factory=list)
+    # 장애 연결로 줄여야 하는데 관문이 줄이기를 아직 실행하지 않은 목표 단계 (보류·거절).
+    # 있으면 자동 처리는 `level`이 아니라 이 단계로 본다
+    # (줄이기는 승인 없이, rules.effective_level).
+    # 줄이기가 실행되거나 사람이 그 보류 건을 거절하면 비운다
+    shrink_pending: int | None = None
 
 
 class ChatPlan(DomainModel):

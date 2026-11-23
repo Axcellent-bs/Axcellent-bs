@@ -313,6 +313,8 @@ export interface AutoPolicy {
   paths?: string
   streak?: number
   proposal?: AutoProposal | null
+  /** 장애 연결로 줄여야 하는데 관문이 아직 줄이지 않은 목표 단계 (보류 중). 있으면 자동 처리는 이 단계로 한다 */
+  shrinkPending?: number | null
 }
 /** 연속 정상이 기준에 닿아 서버가 낸 한 단계 승급 제안 (승인은 운영자, approve_promotion) */
 export interface AutoProposal { to: number; t: string; why: string }

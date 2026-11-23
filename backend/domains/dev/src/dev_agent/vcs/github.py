@@ -35,6 +35,7 @@ from dev_agent.vcs.base import (
     GRAPH_LIMIT,
     GRAPH_MAX,
     GRAPH_MESSAGE_CHARS,
+    HEAD_MOVED,
     ISSUE_LIST_LIMIT,
     ISSUE_STATES,
     LIST_LIMIT,
@@ -353,6 +354,7 @@ class GithubVcsAdapter:
             url=pr.get("html_url"),
             # 열린 PR의 merge_commit_sha는 시험 머지라 머지된 것만 쓴다
             merge_sha=(str(pr.get("merge_commit_sha") or "") or None) if merged else None,
+            head_sha=str((pr.get("head") or {}).get("sha") or ""),
             files=tuple(
                 ChangedFile(
                     path=f["filename"],
@@ -518,13 +520,27 @@ class GithubVcsAdapter:
                 if exc.code not in ("not_found", "invalid"):
                     raise
 
-    async def merge_change(self, number: int, method: str = "squash") -> Change:
+    async def merge_change(
+        self, number: int, method: str = "squash", sha: str | None = None
+    ) -> Change:
         if method not in MERGE_METHODS:
             raise VcsError("invalid", f"모르는 병합 방식: {method}")
         pr = await self._call("GET", f"/pulls/{int(number)}")
         if pr.get("merged") or pr.get("merged_at"):
             raise VcsError("conflict", f"이미 병합된 변경: {number}")
-        await self._call("PUT", f"/pulls/{int(number)}/merge", json={"merge_method": method})
+        head = str((pr.get("head") or {}).get("sha") or "")
+        if sha and head != sha:
+            raise VcsError(HEAD_MOVED, f"새 커밋이 올라와 머지하지 않음: {number}")
+        body = {"merge_method": method, **({"sha": sha} if sha else {})}
+        try:
+            # GitHub는 sha가 머리와 다르면 409(Head branch was modified)로 거절한다
+            await self._call("PUT", f"/pulls/{int(number)}/merge", json=body)
+        except VcsError as exc:
+            if sha and exc.code == "conflict":
+                now = await self._call("GET", f"/pulls/{int(number)}")
+                if str((now.get("head") or {}).get("sha") or "") != sha:
+                    raise VcsError(HEAD_MOVED, f"새 커밋이 올라와 머지하지 않음: {number}") from exc
+            raise
         return await self.get_change(number)
 
     async def get_trace_meta(self, number: int) -> TraceMeta:

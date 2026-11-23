@@ -27,11 +27,14 @@ LIST_LIMIT = 2000
 CheckState = Literal["passed", "failed", "pending"]
 
 
+HEAD_MOVED = "head_moved"
+
+
 class VcsError(Exception):
     """연결 부품 오류. 메시지에 토큰을 넣지 않는다.
 
     code: `not_found`·`unauthorized`·`forbidden`·`conflict`·`invalid`·`rate_limited`·
-    `unavailable`·`read_only`·`config`
+    `unavailable`·`read_only`·`config`·`head_moved`(승인한 머리 커밋 뒤에 새 커밋이 올라옴)
     """
 
     def __init__(self, code: str, message: str):
@@ -93,6 +96,8 @@ class Change:
     url: str | None = None
     files: tuple[ChangedFile, ...] = ()
     merge_sha: str | None = None  # 병합 커밋 (병합된 것만)
+    # 머리 커밋 (모르면 ""). 사람 머지 관문 키를 (PR, 머리 커밋)마다 하나로 묶는 데 쓴다
+    head_sha: str = ""
 
     @property
     def changed_paths(self) -> list[str]:
@@ -468,8 +473,13 @@ class VcsAdapter(Protocol):
         """③-2 열린 병합 요청 브랜치에 커밋 하나를 더한다. `execute()` 뒤에만 부른다."""
         ...
 
-    async def merge_change(self, number: int, method: str = "squash") -> Change:
-        """④ 병합. `execute()` 뒤에만 부른다."""
+    async def merge_change(
+        self, number: int, method: str = "squash", sha: str | None = None
+    ) -> Change:
+        """④ 병합. `execute()` 뒤에만 부른다.
+
+        `sha`(승인한 머리 커밋)를 주면 머리가 그것일 때만 병합한다. 다르면 `VcsError`
+        (`HEAD_MOVED`, 새 커밋이 올라옴 → 승인한 코드가 아니라 병합하지 않는다)."""
         ...
 
     async def close_change(self, number: int) -> None:

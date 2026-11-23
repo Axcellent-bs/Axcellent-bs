@@ -1142,7 +1142,7 @@ def test_merge_conflict_retry_closes_pr_and_rewrites(service: PlanningService, a
     class Conflict(MockVcsAdapter):
         clash = True
 
-        async def merge_change(self, number: int, method: str = "squash"):
+        async def merge_change(self, number: int, method: str = "squash", sha: str | None = None):
             if self.clash:
                 raise VcsError("conflict", "merge conflict")
             return await super().merge_change(number, method)
@@ -1840,7 +1840,7 @@ def test_agent_rewrites_once_after_merge_conflict(
     class Conflict(MockVcsAdapter):
         clash = True
 
-        async def merge_change(self, number: int, method: str = "squash"):
+        async def merge_change(self, number: int, method: str = "squash", sha: str | None = None):
             if self.clash:
                 raise VcsError("conflict", "merge conflict")
             return await super().merge_change(number, method)

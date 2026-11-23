@@ -51,8 +51,15 @@ _SMALL_WORDS = re.compile("문구|오타|라벨")
 ROLLBACK_LOOKBACK = timedelta(minutes=30)
 
 
+def effective_level(policy: AutoPolicy) -> int:
+    """자동 처리에 쓰는 단계. 줄이기가 관문에서 아직 실행되지 않았어도(`shrink_pending`) 줄인
+    단계로 본다 (요구사항 FR-ATL-005·008: 줄이는 쪽은 승인 없이 즉시). 넓히는 쪽은 그렇지 않다."""
+    pending = policy.shrink_pending
+    return policy.level if pending is None else max(0, min(policy.level, pending))
+
+
 def auto_limit(policy: AutoPolicy) -> dict:
-    level = AUTO_LEVELS[policy.level]
+    level = AUTO_LEVELS[effective_level(policy)]
     return {"level": level.level, "lines": level.lines, "files": level.files, "paths": policy.paths}
 
 
@@ -66,7 +73,8 @@ def estimate(title: str) -> tuple[int, int]:
 def check_simple(title: str, policy: AutoPolicy) -> AutoCheck:
     """간단 요청 판정. 전부 통과하면 사람 확정·사람 머지 없이 끝까지 간다."""
     limit = auto_limit(policy)
-    if policy.level == 0:
+    lv = effective_level(policy)
+    if lv == 0:
         return AutoCheck(
             ok=False,
             reasons=[
@@ -79,7 +87,6 @@ def check_simple(title: str, policy: AutoPolicy) -> AutoCheck:
     rejected = "버튼만" in title  # 인사 ② check_plan 기각 이력 (목)
     lines, files = estimate(title)
     small = lines <= limit["lines"] and files <= limit["files"]
-    lv = policy.level
     if small:
         size = (
             f"예상 변경 {lines}줄·{files}파일 "

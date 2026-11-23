@@ -778,7 +778,7 @@ def test_domain_opens_and_merges_through_adapter(service: PlanningService) -> No
 
 def test_domain_merge_failure_keeps_pr_unmerged(service: PlanningService) -> None:
     class BrokenMerge(MockVcsAdapter):
-        async def merge_change(self, number: int, method: str = "squash"):
+        async def merge_change(self, number: int, method: str = "squash", sha: str | None = None):
             raise VcsError("conflict", "merge conflict")
 
     adapter = BrokenMerge()
@@ -868,7 +868,7 @@ def test_domain_simple_request_opens_and_merges(service: PlanningService) -> Non
 
 def test_domain_simple_request_merge_failure_waits(service: PlanningService) -> None:
     class BrokenMerge(MockVcsAdapter):
-        async def merge_change(self, number: int, method: str = "squash"):
+        async def merge_change(self, number: int, method: str = "squash", sha: str | None = None):
             raise VcsError("conflict", "merge conflict")
 
     vcs.set_vcs(BrokenMerge())
@@ -962,7 +962,7 @@ def test_open_conflict_with_other_tasks_branch_opens_new_branch() -> None:
 class HoldMerge(MockVcsAdapter):
     """자동 머지만 막는다 (사람이 GitHub에서 직접 머지·닫는 상황을 만든다)."""
 
-    async def merge_change(self, number: int, method: str = "squash"):
+    async def merge_change(self, number: int, method: str = "squash", sha: str | None = None):
         if self._entry(number).change.merged:
             raise VcsError("conflict", "이미 병합된 변경")  # GitHub 부품과 같은 답
         raise VcsError("invalid", "required status check")
