@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { KEY_LABEL, keyHintKo, keyResultKo, type CompanyAiAdmin, type KeyName } from "@/lib/companyAi";
-import { deleteCompanyAiKey, errText, getCompanyAi, putCompanyAiKey, youtubeConnectUrl, youtubeDisconnect } from "@/lib/companyAiApi";
+import { KEY_LABEL, keyHintKo, keyResultKo, readYoutubeReturn, type CompanyAiAdmin, type KeyName } from "@/lib/companyAi";
+import { deleteCompanyAiKey, errText, getCompanyAi, putCompanyAiKey, youtubeComplete, youtubeConnectUrl, youtubeDisconnect } from "@/lib/companyAiApi";
 
 // 마케팅 › SNS·미디어 맨 위. 회사마다 자기 인스타·유튜브 계정을 연결한다(로그인한 회사 기준, 11/23).
 // - 값은 그 회사의 키 저장소에만 들어간다(tenant=회사 ID). 화면에는 끝 4자리만 보인다
-// - 유튜브: [유튜브 채널 연결] → 구글 동의 화면(채널 주인 계정) → 돌아오면 ?youtube=connected
+// - 유튜브: [유튜브 채널 연결] → 구글 동의 화면(채널 주인 계정) → 돌아오면 ?youtube=finish#코드 →
+//   이 화면이 로그인한 계정으로 complete를 부른다(연결을 시작한 계정·회사일 때만 서버가 넣는다)
 // - 인스타: Meta에서 받은 Instagram 토큰·계정 ID를 관리자가 넣는다
 // - 바꾸기는 고객사 관리자만. 관리자가 아니면 안내만 보인다
 
@@ -45,8 +46,25 @@ export function SnsAccountsCard() {
   useEffect(() => {
     void load();
     const back = new URLSearchParams(window.location.search).get("youtube");
-    if (back) setMsg(BACK_KO[back] ?? "유튜브 연결을 마치지 못했어요");
-  }, [load]);
+    if (back !== "finish") {
+      if (back) setMsg(BACK_KO[back] ?? "유튜브 연결을 마치지 못했어요");
+      return;
+    }
+    // 구글에서 돌아왔다: 코드는 주소의 # 뒤에만 있다. 주소에서 바로 지우고, 로그인한 이 계정으로 마친다
+    const got = readYoutubeReturn(window.location.hash);
+    const url = new URL(window.location.href);
+    url.hash = "";
+    url.searchParams.delete("youtube");
+    window.history.replaceState(null, "", url.toString());
+    if (!got) {
+      setMsg(BACK_KO.bad_state);
+      return;
+    }
+    void run(async () => {
+      await youtubeComplete(got.code, got.state);
+      return BACK_KO.connected;
+    });
+  }, [load]); // 돌아온 순간 한 번만 (run은 매 렌더 새로 만들어져 넣지 않는다)
 
   const run = async (fn: () => Promise<string | void>) => {
     setBusy(true);

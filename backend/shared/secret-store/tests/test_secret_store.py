@@ -394,3 +394,55 @@ def test_retenant_cli_prints_names_only(
     assert "MARKETING_VIDEO_API_KEY\tmoved" in out and DUMMY not in out
     after = SecretService.from_env()
     assert after.reveal_for_runtime("catbooks", "MARKETING_VIDEO_API_KEY") == DUMMY
+
+
+# ---- OAuth 토큰 칸 (store_oauth_token) ----
+
+TOKEN = "SHOP_CAFE24_REFRESH_TOKEN"
+
+
+def test_oauth_token_slot_stores_and_rotates_without_human_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_mode(monkeypatch)
+    svc = SecretService.from_env()
+    assert svc.store_oauth_token("catbooks", TOKEN, DUMMY, "cafe24_oauth") == "stored"
+    assert svc.list_requests(["catbooks"]) == []  # 대기 요청 없이 바로 들어간다
+    assert resolver.get_secret(TOKEN, tenant="catbooks") == DUMMY
+    assert svc.store_oauth_token("catbooks", TOKEN, DUMMY2, "refresh", expect=DUMMY) == "rotated"
+    assert resolver.get_secret(TOKEN, tenant="catbooks") == DUMMY2
+    assert resolver.get_secret(TOKEN, tenant="nubi") == ""  # 회사마다 따로
+    actions = [h["action"] for h in svc.history(["catbooks"])]
+    assert "oauth_store" in actions and "oauth_rotate" in actions
+    assert DUMMY not in str(svc.history(["catbooks"]))
+
+
+def test_oauth_rotate_refuses_when_someone_refreshed_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """갱신 토큰이 바뀌는 플랫폼: 먼저 바꾼 새 토큰을 옛 값 기준 갱신이 덮어쓰면 연결이 끊긴다."""
+    db_mode(monkeypatch)
+    svc = SecretService.from_env()
+    svc.store_oauth_token("catbooks", TOKEN, DUMMY, "cafe24_oauth")
+    svc.store_oauth_token("catbooks", TOKEN, DUMMY2, "refresh-a", expect=DUMMY)
+    with pytest.raises(SecretStoreError) as stale:
+        svc.store_oauth_token(
+            "catbooks", TOKEN, "DUMMY-NOT-A-REAL-KEY-0003", "refresh-b", expect=DUMMY
+        )
+    assert stale.value.code == errors.STALE_TOKEN
+    assert resolver.get_secret(TOKEN, tenant="catbooks") == DUMMY2
+    with pytest.raises(SecretStoreError) as missing:
+        svc.store_oauth_token("nubi", TOKEN, DUMMY, "refresh", expect=DUMMY)
+    assert missing.value.code == errors.STALE_TOKEN
+
+
+def test_oauth_slot_cannot_touch_other_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """회사 AI 키·에이전트 토큰 같은 값은 이 길로 못 바꾼다(사람 승인 그대로)."""
+    db_mode(monkeypatch)
+    svc = SecretService.from_env()
+    put(svc, "catbooks", "LLM_API_KEY", DUMMY)
+    for name in ("LLM_API_KEY", "AX_AGENT_TOKENS", "MARKETING_VIDEO_API_KEY"):
+        with pytest.raises(SecretStoreError) as err:
+            svc.store_oauth_token("catbooks", name, DUMMY2, "oauth")
+        assert err.value.code == errors.NOT_OAUTH_NAME
+    assert resolver.get_secret("LLM_API_KEY", tenant="catbooks") == DUMMY
