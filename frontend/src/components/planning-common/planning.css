@@ -1323,9 +1323,10 @@ table.rq-table td { padding-top: 9px; padding-bottom: 9px; }
 .sb-c3 { --sb: #2f8fc4; }
 .sb-bar { display: flex; gap: 2px; list-style: none; margin: 0 0 10px; padding: 0; }
 .sb-bar > li { min-width: 0; padding: 5px 4px; background: var(--sb); color: #fff; font-size: 12px; font-weight: 600; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 4px; }
-.sb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; list-style: none; margin: 0 0 10px; padding: 0; }
+/* 장면 수만큼 같은 폭으로 줄 전체를 채운다 (위 시간표 막대와 같은 폭). 좁은 화면은 2칸 */
+.sb-cards { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 10px; list-style: none; margin: 0 0 10px; padding: 0; }
 .sb-card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface, #fff); display: flex; flex-direction: column; }
-.sb-shot { aspect-ratio: 4 / 3; background: linear-gradient(160deg, color-mix(in srgb, var(--sb) 70%, #1b1640), color-mix(in srgb, var(--sb) 55%, #fff)); display: flex; align-items: flex-end; padding: 8px; }
+.sb-shot { aspect-ratio: 16 / 9; background: linear-gradient(160deg, color-mix(in srgb, var(--sb) 70%, #1b1640), color-mix(in srgb, var(--sb) 55%, #fff)); display: flex; align-items: flex-end; padding: 8px; }
 .sb-shot span { background: rgb(0 0 0 / 0.45); color: #fff; font-size: 11.5px; padding: 2px 6px; border-radius: 4px; }
 .sb-card-body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 4px; }
 .sb-card-top { font-size: 12px; color: var(--text-3); }
@@ -1341,7 +1342,8 @@ table.rq-table td { padding-top: 9px; padding-bottom: 9px; }
 .sb-decide { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface, #fff); font-size: 13px; color: var(--text-2); }
 .sb-decide-text { flex: 1; min-width: 200px; }
 .sb-decide-err { color: var(--danger, #cf3d34); }
-@media print { .sb-cards { grid-template-columns: repeat(4, 1fr); } .sb-card { break-inside: avoid; } }
+@media (max-width: 720px) { .sb-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media print { .sb-card { break-inside: avoid; } }
 .vp-prompt-list { margin: 8px 0 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.6; }
 .vp-prompt-list .mono { overflow-wrap: anywhere; }
 /* 인쇄 머리글 (기획서·제안 PDF): 화면에서는 .print-only로 숨는다 */

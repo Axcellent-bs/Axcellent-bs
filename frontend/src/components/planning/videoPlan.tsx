@@ -4,7 +4,7 @@
 // 이미지 시안이 생기면 그 자리에 들어간다.
 // RequestDecideBar: 대화방 의뢰 카드에서 ?request=wr_…로 들어왔고 그 의뢰의 사람 확인이 대기 중이면 화면 아래 고정 줄에
 // [다음 단계 진행]·[여기서 멈추기]. 대화 카드와 같은 동작(orchestrator.decideRequestStep)이다
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Tag } from '@/components/planning-common/parts'
 import { usePrinting } from '@/lib/print'
 import { sceneTime, videoPlanChip, type VideoPlanView } from '@/lib/videoPlan'
@@ -47,7 +47,7 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
           <li key={s.n} className={`sb-c${i % 4}`} style={{ flexBasis: `${shares[i]}%` }} title={`장면 ${s.n} · ${sceneTime(s)}`}>{s.n} · {sceneTime(s)}</li>
         ))}
       </ol>
-      <ol className="sb-cards">
+      <ol className="sb-cards" style={{ '--n': v.scenes.length } as CSSProperties}>
         {v.scenes.map((s, i) => (
           <li key={s.n} className="sb-card">
             <div className={`sb-shot sb-c${i % 4}`} aria-hidden="true"><span>장면 그림 자리</span></div>
