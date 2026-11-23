@@ -60,6 +60,42 @@
       "priority": "required"
     },
     {
+      "id": "deploy_version",
+      "description": "사람이 승인한 개발 배포(dev 배포 기록 request_id, approved_by 필수: 비면 approval_required)를 도구 연결의 그 서비스 배포 도구(GitHub Actions 워크플로 디스패치·Jenkins buildWithParameters, 환경 구분이 없어 운영 배포로 본다)로 띄운다. 반드시 execute(deploy_version)를 거치고 멱등 키는 request_id·service·version이다: 같은 요청을 다시 보내도 두 번 띄우지 않는다. 배포 도구가 연결되지 않았으면 failed no_deploy_tool(성공을 지어내지 않음). 관문 보류면 input-required(승인 뒤 같은 요청을 다시 보내면 실행), 도구 오류면 failed deploy_failed + 처리 순서(retryable false). 결과 output에 tool·run_id·url·status(dispatched)를 준다. 끝날 때까지 기다리지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#DeployVersionInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#DeployVersionOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dev"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "deploy_run_status",
+      "description": "deploy_version으로 띄운 실행(service·run_id)의 지금 상태를 배포 도구 최근 실행에서 읽는다. status running·succeeded·failed, 목록에서 못 찾으면 unknown. Jenkins 대기열 id(queue-N)는 빌드 번호로 바꿔 run_id에 주고, 아직 빌드가 없으면 resolving true. 배포 도구가 없으면 failed no_deploy_tool, 도구를 못 읽으면 failed tool_unavailable. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#DeployRunStatusInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#DeployRunStatusOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dev"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
+      "id": "deploy_tool_services",
+      "description": "배포 도구(GitHub Actions·Jenkins)가 연결된 서비스 목록(service·tool, 서비스마다 하나)을 도구 연결 보관함에서 읽는다. 개발 배포 요청의 서비스가 배포 도구로 나갈 수 있는지 확인할 때 쓴다. 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#DeployToolServicesInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#DeployToolServicesOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dev"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
       "id": "infra_chat_send",
       "description": "말을 저장하고 status answering으로 바로 돌려준다(답은 뒤에서 붙이고 talking으로 되돌림, 화면은 infra_chat_get으로 다시 읽음). thread_id가 없으면 새 대화. LLM은 코드가 모은 인프라 사실(최근 배포, 쇼핑몰 결제 서버 상태, 최근 진단, 총괄 사건의 인프라 단계)만 풀어 쓴다. 거절 outcome: invalid_input·forbidden(남의 대화)·not_found·llm_not_configured·thread_closed·thread_busy. 인프라 AI 직접 대화(dashboard-api /api/dashboard/infra-chat). 조회·설명만 하고 배포·롤백·장애의 상태를 바꾸지 않는다. 대화 기록만 저장해 execute()를 부르지 않는다. who는 dashboard-api가 사람 토큰에서 채운다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/infra.py#InfraChatSendInput",

@@ -458,6 +458,10 @@ SERVICES: tuple[Service, ...] = (
             "verify_recovery",
             # 같은 유형 과거 장애의 처리 방식(장애 상태 해제) 다시 하기
             "release_fault",
+            # 승인된 개발 배포를 연결된 배포 도구로 띄우기·그 실행 상태 읽기 (dev → infra)
+            "deploy_version",
+            "deploy_run_status",
+            "deploy_tool_services",
             # 사람과 직접 대화 (dashboard-api /api/dashboard/infra-chat)
             "infra_chat_send",
             "infra_chat_list",

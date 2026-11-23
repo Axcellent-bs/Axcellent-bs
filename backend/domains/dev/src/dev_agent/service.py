@@ -600,8 +600,10 @@ class DevService(PlanningCore):
                  "decided_by": inp.decided_by},
             )  # fmt: skip
             dep = await get_deploy_store().request(self, inp.pr_numbers, inp.env)
-            wait = dep.status == "requested"
-            how = f"{dep.id} 사람 승인 대기 ({', '.join(dep.approval_reasons)})" if wait else dep.id
+            # 승인 이유가 없어도(ready) 배포 실행은 사람이 누른다
+            wait = dep.status in ("requested", "ready")
+            why = ", ".join(dep.approval_reasons) or "배포 실행은 사람이 누름"
+            how = f"{dep.id} 사람 승인 대기 ({why})" if wait else dep.id
             s.activity.append(
                 self._act(self.clock(), ctx, requester, "dev", "receive_release_order", "A2A",
                           f"{text} → 배포 요청 {how}", "A")

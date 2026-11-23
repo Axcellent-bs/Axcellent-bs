@@ -72,6 +72,9 @@ class Runtime:
     rollbacks: dict[str, dict[str, Any]] = field(default_factory=dict)  # idempotency_key → 결과
     # 같은 롤백(멱등 키)을 한 번에 하나씩만 처리한다: 동시에 온 같은 요청이 두 번 배포하지 않게
     rollback_locks: KeyLocks = field(default_factory=KeyLocks)
+    # 배포 실행(deploy_version): 멱등 키 → 도구를 부른 결과. 같은 키는 다시 띄우지 않는다
+    deploys: dict[str, Any] = field(default_factory=dict)
+    deploy_locks: KeyLocks = field(default_factory=KeyLocks)
     releases: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )  # 과거 처리 방식 다시 하기 결과

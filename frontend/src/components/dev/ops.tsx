@@ -6,13 +6,14 @@ import { ActivityList, Grade, State, Stats } from '@/components/planning-common/
 import { Ref, convoHref, go, hrefOf, prName, prSlug, repoPrHref, toPath, idText } from '@/components/planning-common/links'
 import { Flow, Pairs, Step, mergedLabel } from '@/components/planning-common/flow'
 import { apiBase, deployApi, kst, type DeployCheck, type Deployment } from '@/lib/planning'
-import { deployExecuted, deployStatusText, deployedPrCount, incidentStageText, needsToolLink, revertText, type Tone } from '@/lib/devOps'
+import { deployExecuted, deployRunView, deployStatusText, deployedPrCount, incidentStageText, needsToolLink, revertText, type Tone } from '@/lib/devOps'
 import { currentIncidents, DejafixNotConnectedError, readableTitle, SEVERITY, type Incident as LiveIncident } from '@/lib/dejafix'
 import { ApproverField, useApproverName } from '@/components/finance/ApproverName'
 import { useVisibleInterval } from '@/lib/visibleInterval'
 import { Link } from '@/lib/nav'
 
 const TOOLS = '/system/tools' // 도구 연결 (배포 도구·DejaFix·data 신호원)
+const DEPLOY_TOOLS = '/system/tools?item=deploy' // 도구 연결 → 배포 도구
 const HOLDS = '/dev/work/holds' // 안전 확인 (사람 확인으로 보류된 되돌리기·배포 되돌리기)
 const DEPLOY_POLL_MS = 15_000
 const LIVE_POLL_MS = 30_000
@@ -67,7 +68,7 @@ export function Ops({ s, item }: { s: S; item?: string }) {
           <Stats items={[
             { label: '처리 중인 장애', value: openInc ?? '-', hint: `${liveHint} · PR 연결한 사건 ${s.incidents.length}건 · 원인 PR ${broken}건`, href: toPath('work/aftercare'), tone: openInc ? 'alert' : 'quiet' },
             { label: '머지 전', value: open.length, href: toPath('work/prs'), tone: q(open.length) },
-            { label: '배포된 PR', value: deployed ?? '-', hint: '배포 도구가 실제로 배포한 것만', tone: q(deployed ?? 0) },
+            { label: '배포된 PR', value: deployed ?? '-', hint: '배포 도구에서 끝난 배포만', tone: q(deployed ?? 0) },
             { label: '자동 머지', value: merged.filter((p) => p.auto).length, tone: 'quiet' },
             { label: '사람 머지', value: merged.filter((p) => !p.auto).length, tone: 'quiet' },
           ]} />
@@ -93,7 +94,7 @@ export function Ops({ s, item }: { s: S; item?: string }) {
 }
 
 // ---------------------------------------------------------------- 배포 기록·배포 후 확인 (dev 서비스 REST, SSE 상태와 따로 읽는다)
-// 배포 도구 연결(실행기)이 아직 없다: 승인한 배포는 "승인됨 · 실제 배포 안 함"으로 보인다
+// 승인한 배포는 개발 AI가 도구 연결의 배포 도구(인프라 AI 경유)로 한 번 보낸다. 못 보냈으면 이유를 그대로 보인다
 const VERDICT: Record<DeployCheck['verdict'], [string, Tone]> = { ok: ['정상', 'green'], watch: ['지켜보는 중', 'neutral'], suspect: ['문제 의심', 'amber'] }
 const APPROVAL: Record<string, string> = { prod: '운영 서버 배포', protected_path: '보호 파일 포함' }
 const ROLLBACK = { B: '자동으로 되돌릴 수 있음', C: '되돌리려면 사람 승인 필요' }
@@ -104,17 +105,18 @@ function Deployments({ s, rows, err, reload }: { s: S; rows: Deployment[] | null
   const [busy, setBusy] = useState('')
   // 승인자: 로그인했으면 계정 이름, 공용 토큰이면 적어 낸 이름 (안전 확인 큐와 같은 규칙). 없으면 승인 버튼이 꺼진다
   const [approver, setApprover, approverName] = useApproverName()
-  const run = (id: string, kind: 'approve' | 'check', done: string) => {
+  const run = (id: string, kind: 'approve' | 'dispatch' | 'check' | 'refresh', done: string) => {
     const api = deployApi(apiBase('dev'))
-    if (kind === 'approve' && !approverName) { toast.show('승인자 이름을 먼저 적으세요.'); return }
+    if ((kind === 'approve' || kind === 'dispatch') && !approverName) { toast.show('승인자 이름을 먼저 적으세요.'); return }
     setBusy(`${id}:${kind}`)
-    ;(kind === 'approve' ? api.approve(id, approverName ?? '') : api.check(id))
+    ;(kind === 'approve' ? api.approve(id, approverName ?? '') : kind === 'dispatch' ? api.dispatch(id, approverName ?? '') : kind === 'refresh' ? api.refresh(id) : api.check(id))
       .then(() => { toast.show(done); void reload() })
       .catch((e: Error) => toast.show(e.message))
       .finally(() => setBusy(''))
   }
   if (rows === null) return null
-  const waiting = rows.some((d) => d.status === 'requested')
+  // 사람이 눌러야 하는 배포 (승인 대기 · 승인 이유 없음 · 승인했지만 보내지 않음)
+  const waiting = rows.some((d) => d.status === 'requested' || d.status === 'ready' || d.run?.state === 'not_sent')
   return (
     <section className="flow-sec">
       <h2>배포 · 배포 후 확인</h2>
@@ -126,18 +128,29 @@ function Deployments({ s, rows, err, reload }: { s: S; rows: Deployment[] | null
             const c = dep.check
             const rb = c?.rollback
             const executed = deployExecuted(dep)
+            const rv = deployRunView(dep.run)
             return (
               <Step key={dep.id} name={kst(dep.at).slice(6) || '-'} on={executed && c?.verdict !== 'suspect'} title={<><span className="mono idc" title={dep.id}>{idText(dep.id)}</span> {dep.version ?? '-'} · {dep.env} <Chip v={deployStatusText(dep)} /></>}>
                 <Pairs items={[
                   ['PR', dep.pr_numbers.map((n, i) => <span key={n}>{i > 0 && ', '}<Ref s={s} id={`PR #${n}`} /></span>)],
+                  ...(dep.status === 'requested' || dep.status === 'ready' ? [['실행 대상', <><b className="mono">{dep.version ?? '버전 모름'}</b> · 운영 배포 도구로 실행 <span className="muted small">(배포 실행은 사람이 눌러야 해요)</span></>] as [string, ReactNode]] : []),
                   ...(dep.approval_reasons.length ? [['승인', <>{dep.approval_reasons.map((r) => APPROVAL[r] ?? r).join(' · ')}{dep.protected_paths.length > 0 && <span className="mono small"> {dep.protected_paths.join(', ')}</span>}{dep.approved_by && ` · ${dep.approved_by}`}</>] as [string, ReactNode]] : []),
-                  ...(!executed && dep.status !== 'requested' ? [['실행', <>{dep.note || '배포 도구 미연결 — 실제 배포는 안 함'} · <Link href={TOOLS} className="plain-link">배포 도구 연결</Link></>] as [string, ReactNode]] : []),
+                  ...(rv ? [['실행', <>
+                    <Chip v={[rv.text, rv.tone]} />
+                    {rv.url && <> · <a href={rv.url} target="_blank" rel="noreferrer" className="plain-link">실행 보기</a></>}
+                    {rv.needsTool && <> · <Link href={DEPLOY_TOOLS} className="plain-link">도구 연결에서 배포 도구 설정</Link></>}
+                    {rv.held && <> · <Link href={HOLDS} className="plain-link">안전 확인 보기</Link></>}
+                    {dep.run?.checked_at && <span className="muted small"> · {kst(dep.run.checked_at)} 확인</span>}
+                  </>] as [string, ReactNode]]
+                    : !executed && dep.status !== 'requested' && dep.status !== 'ready' ? [['실행', <>{dep.note || '실제 배포는 안 함'}</>] as [string, ReactNode]] : []),
                   ['확인', c ? <><Chip v={VERDICT[c.verdict] ?? [c.verdict, 'neutral']} /> · {c.window_minutes}분 · {kst(c.at)}</> : executed ? '없음' : '실제 배포 뒤에 해요'],
                   ...(c ? [['근거', <><ul>{c.evidence.map((e) => <li key={e}>{e}</li>)}</ul>{needsToolLink(c) && <Link href={TOOLS} className="plain-link">도구 연결에서 신호원(DejaFix·data) 잇기</Link>}</>] as [string, ReactNode]] : []),
                   ...(rb ? [['롤백', <><Grade g={rb.grade} /> {ROLLBACK[rb.grade]} <span className="muted small mono">원인 후보 {rb.suspect_count} · 확신도 낮음 {rb.low_confidence} · 되돌릴 수 없음 {rb.irreversible_count} · 이전 롤백 {rb.prior_rollbacks}</span> · <Link href={HOLDS} className="plain-link">안전 확인 보기</Link></>] as [string, ReactNode]] : []),
                 ]} />
                 <div className="actions">
-                  {dep.status === 'requested' && <Button size="small" variant="primary" disabled={!!busy || !approverName} title={approverName ? undefined : '승인자 이름을 먼저 적으세요'} onClick={() => run(dep.id, 'approve', `${dep.id} 승인 기록 (실제 배포는 안 함)`)}>배포 승인</Button>}
+                  {(dep.status === 'requested' || dep.status === 'ready') && <Button size="small" variant="primary" disabled={!!busy || !approverName} title={approverName ? `${dep.version ?? '버전 모름'} — 운영 배포 도구로 실행` : '승인자 이름을 먼저 적으세요'} onClick={() => run(dep.id, 'approve', `${dep.id} ${dep.version ?? ''} 승인함 · 결과는 실행 줄에서 확인`)}>{dep.status === 'ready' ? '배포 실행' : '배포 승인'} · <span className="mono">{dep.version ?? '버전 모름'}</span></Button>}
+                  {rv?.canSend && <Button size="small" variant="primary" disabled={!!busy || !approverName} title={`${dep.version ?? '버전 모름'} — 운영 배포 도구로 실행`} onClick={() => run(dep.id, 'dispatch', `${dep.id} 배포 실행 · 결과는 실행 줄에서 확인`)}>배포 실행 · <span className="mono">{dep.version ?? '버전 모름'}</span></Button>}
+                  {rv?.canRefresh && dep.status === 'running' && <Button size="small" disabled={!!busy} onClick={() => run(dep.id, 'refresh', `${dep.id} 실행 상태 다시 읽음`)}>실행 상태 새로 보기</Button>}
                   {executed && dep.status !== 'running' && <Button size="small" disabled={!!busy} onClick={() => run(dep.id, 'check', `${dep.id} 배포 후 확인`)}>배포 후 확인 다시 하기</Button>}
                 </div>
               </Step>

@@ -196,9 +196,12 @@ def test_check_evidence_has_no_cause_wording() -> None:
 
 def test_build_deployment_dev_approved_prod_waits() -> None:
     dev = build_deployment(1, [_pr(28, ["shop-api/payment/config.py"])], "dev", T0)
-    # 배포 도구가 없어 실제로 배포하지 않는다: 승인 이유가 없어도 '배포됨'이 아니다
-    assert dev.status == "approved"
+    # 운영 배포 도구라 승인 이유가 없어도 저절로 나가지 않는다
+    # 사람이 눌러야 한다 ('배포됨'이 아니다)
+    assert dev.status == "ready"
     assert dev.executed is False
+    assert dev.note == "배포 실행은 사람이 눌러야 해요"
+    assert len(dev.uid) == 8
     assert dev.approval_reasons == []
     prod = build_deployment(2, [_pr(28, ["shop-api/payment/config.py"])], "prod", T0)
     assert prod.status == "requested"
@@ -413,8 +416,9 @@ def test_rest_prod_needs_approval_then_check(client, service) -> None:
 
 def test_rest_dev_deploy_recorded_not_executed(client) -> None:
     body = client.post(f"{BASE}/deployments", json={"pr_numbers": [28]}).json()
-    assert body["data"]["status"] == "approved"
-    assert body["meta"]["needs_approval"] is False
+    assert body["data"]["status"] == "ready"
+    assert body["data"]["executed"] is False
+    assert body["meta"]["needs_approval"] is True  # 배포 실행은 사람이 누른다
 
 
 def test_rest_recheck_seed(client, service) -> None:
@@ -546,10 +550,23 @@ def test_mock_mode_keeps_seed_deployment(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_deploy_without_tool_is_not_succeeded(client) -> None:
     """배포 도구가 없으니 승인이 필요 없는 배포도 '배포됨'으로 두지 않는다."""
+
+    async def no_tool(target: str, req):
+        return AgentResult(
+            meta=req.meta,
+            status=TaskStatus.FAILED,
+            outcome="no_deploy_tool",
+            output={"message": "배포 도구가 연결되지 않았어요"},
+        )
+
+    set_deploy_store(DeployStore(infra=no_tool))
     dep = client.post(f"{BASE}/deployments", json={"pr_numbers": [28]}).json()["data"]
+    res = client.post(f"{BASE}/deployments/{dep['id']}/dispatch", json={"approved_by": "예진"})
+    dep = res.json()["data"]
     assert dep["status"] == "approved"
     assert dep["executed"] is False
-    assert "배포 도구 미연결" in dep["note"]
+    assert "배포 도구가 연결되지 않았어요" in dep["note"]
+    assert dep["run"]["state"] == "no_tool"
     # 실행되지 않은 배포는 배포 후 확인을 하지 않는다 (없는 배포의 '정상'을 지어내지 않는다)
     res = client.post(f"{BASE}/deployments/{dep['id']}/check")
     assert res.status_code == 409

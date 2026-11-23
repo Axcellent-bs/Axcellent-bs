@@ -380,6 +380,13 @@ from ax_contracts.schemas.hr import (
 )
 from ax_contracts.schemas.ids import ContextPrefix, IdPrefix
 from ax_contracts.schemas.infra import (
+    DeployRunStatusInput,
+    DeployRunStatusOutput,
+    DeployToolService,
+    DeployToolServicesInput,
+    DeployToolServicesOutput,
+    DeployVersionInput,
+    DeployVersionOutput,
     DiagnoseIncidentInput,
     DiagnoseIncidentOutput,
     ReleaseFaultOutput,
@@ -643,6 +650,13 @@ __all__ = [
     "DiagnoseIncidentOutput",
     "ReleaseFaultOutput",
     "ReleaseFaultParams",
+    "DeployRunStatusInput",
+    "DeployRunStatusOutput",
+    "DeployToolService",
+    "DeployToolServicesInput",
+    "DeployToolServicesOutput",
+    "DeployVersionInput",
+    "DeployVersionOutput",
     "RollbackDeploymentParams",
     "SuspectDeployment",
     "VerifyHandoverInput",
