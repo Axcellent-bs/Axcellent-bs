@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 대화방 의뢰 진행 카드: 번호 찾기(총괄 문장만) · 단계 칩·버튼 · 같은 의뢰 알림 줄 숨김 · 보고서·제안 잇기 · 토큰 없으면 카드 없음.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { noticeIdOf, placeRequestCards, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, requestIdOf, showRequestCard, stepRows } from "./requestCards.ts";
+import { madeVideo, noticeIdOf, perfStep, placeRequestCards, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, requestIdOf, resultStep, showRequestCard, stepRows } from "./requestCards.ts";
 import { progressKeepPolling } from "./chatCards.ts";
 import type { StepStatus, WorkRequestRow } from "./workRequests.ts";
 
@@ -114,4 +114,72 @@ test("버튼 실패 문구: 403 서버 차단 · 409 이미 처리(목록 다시
   assert.deepEqual(requestActionError(err(502)), { text: "처리하지 못했어요 (502)", reload: false });
   assert.deepEqual(requestActionError(new TypeError("Failed to fetch")), { text: "처리하지 못했어요", reload: false });
   assert.deepEqual(requestActionError(null), { text: "처리하지 못했어요", reload: false });
+});
+
+// ---- 의뢰 영상 성과 · 기획 결과 받기 (11/23)
+
+const PUB = "2026-11-16T03:00:00+00:00";
+const cp = (checkpoint: string, over: Record<string, unknown> = {}) => ({ checkpoint, status: "unknown" as const, ...over });
+const perf = (over: Record<string, unknown> = {}) => ({
+  status: "known" as const, video_id: "TGT1", platform: "instagram", published_at: PUB,
+  peer_basis: "@ourshop 최근 릴스 12개 조회 중앙값 (이 영상 빼고, 최대 20개)",
+  checkpoints: [
+    cp("1h", { status: "known", views: 420, likes: 31, peer_ratio: 0.42 }),
+    cp("1d", { status: "known", views: 2100, likes: 140, peer_ratio: 1.6 }),
+    cp("3d", { reason: "놓침: 그 시점에 재지 못함 (데이터 끊김)", due_at: "2026-11-19T03:00:00+00:00" }),
+    cp("7d", { reason: "측정 중 (100.0시간 뒤 잼)", due_at: "2026-11-23T03:00:00+00:00" }),
+  ],
+  ...over,
+});
+const NOW = Date.parse("2026-11-18T04:00:00Z");
+
+test("성과 측정: 영상 제작이 끝난 의뢰만 읽고, 등록 안 됐으면(영상 id 없음) 줄을 더하지 않는다", () => {
+  assert.equal(madeVideo({ ...row({ s5: step("completed") }), plan: [{ step_id: "s5", dept: "marketing", skill: "generate_media", label: "영상 제작", after: [] }] }), true);
+  assert.equal(madeVideo({ ...row({ s5: step("running") }), plan: [{ step_id: "s5", dept: "marketing", skill: "generate_media", label: "영상 제작", after: [] }] }), false);
+  assert.equal(perfStep(null, NOW), null);
+  assert.equal(perfStep({ status: "unknown", reason: "캠페인 wr_x에 등록된 영상이 없음", checkpoints: [] }, NOW), null);
+});
+
+test("성과 측정 칸: 시점 4칸 (조회·좋아요, 우리 릴스 배수 · 놓침 · 잴 날짜), 출처 한 줄", () => {
+  const v = perfStep(perf(), NOW)!;
+  assert.deepEqual(v.chip.label, "3일째");
+  assert.deepEqual(v.cells.map((c) => [c.name, c.main, c.sub]), [
+    ["1시간", "조회 420 · 좋아요 31", "우리 릴스 중앙값의 0.4배"],
+    ["1일", "조회 2,100 · 좋아요 140", "우리 릴스 중앙값의 1.6배"],
+    ["3일", "놓침", null],
+    ["7일", "11/23 잼", null],
+  ]);
+  assert.equal(v.source, "인스타 @ourshop 릴스 · 공식 API · 매출은 프로모션 링크가 없어 측정 불가");
+  assert.equal(v.note, null);
+  assert.equal(v.done, false);
+});
+
+test("성과 측정 칸: 표본 적음 · 7일 끝 · 게시 계정 없음 같은 서버 이유", () => {
+  const low = perfStep(perf({ peer_basis: "표본 적음(low_sample): @ourshop 최근 릴스 2개 (3개 미만이라 배수 없음)",
+    checkpoints: [cp("1h", { status: "known", views: 420, likes: 31 })] }), NOW)!;
+  assert.equal(low.cells[0].sub, "비교 표본 적음");
+  const done = perfStep(perf({ checkpoints: [cp("7d", { status: "known", views: 4500, likes: 300, peer_ratio: 1.5 })] }), NOW)!;
+  assert.equal(done.chip.label, "측정 끝");
+  assert.equal(done.done, true);
+  const missed = perfStep(perf({ checkpoints: [cp("7d", { reason: "놓침: 등록 전에 그 시점이 지남" })] }), NOW)!;
+  assert.equal(missed.done, true);
+  const why = "회사 설정에 게시 계정 아이디가 없음 ([instagram] publish_username)";
+  const none = perfStep(perf({ status: "unknown", reason: why, published_at: null, peer_basis: "우리 게시 계정 최근 릴스 조회 중앙값 (아직 재지 않음)",
+    checkpoints: ["1h", "1d", "3d", "7d"].map((k) => cp(k, { reason: why })) }), NOW)!;
+  assert.equal(none.chip.label, "확인 필요");
+  assert.equal(none.note, why);
+  assert.equal(none.source, "인스타 릴스 · 공식 API · 매출은 프로모션 링크가 없어 측정 불가");
+  assert.deepEqual(none.cells.map((c) => c.main), ["측정 중", "측정 중", "측정 중", "측정 중"]);
+});
+
+test("기획 결과 받기: 이 의뢰로 결과를 받은 제안이면 '제안 N · 늘었음', 아니면 7일 뒤 · 보내는 중", () => {
+  const measuring = perfStep(perf(), NOW)!;
+  const done = perfStep(perf({ checkpoints: [cp("7d", { status: "known", views: 4500 })] }), NOW)!;
+  const got = resultStep(RID, { id: "PROP-15", campaign: RID, result: { direction: "늘었음", summary: "의뢰 영상 7일 조회 4,500회 · 우리 릴스 중앙값의 1.50배" } }, done);
+  assert.equal(got.chip.label, "결과 받음");
+  assert.equal(got.line, "제안 15 · 늘었음 · 의뢰 영상 7일 조회 4,500회 · 우리 릴스 중앙값의 1.50배");
+  // 다른 캠페인의 결과는 이 의뢰 것이 아니다
+  assert.equal(resultStep(RID, { id: "PROP-15", campaign: "cmp_1", result: { direction: "줄었음" } }, measuring).chip.label, "7일 뒤");
+  assert.equal(resultStep(RID, { id: "PROP-15" }, done).chip.label, "보내는 중");
+  assert.equal(resultStep(RID, null, measuring).line, "7일을 재면 기획 제안에 결과를 보내요 · 다음 분석 의뢰의 \"지난번 결과\"에 들어가요");
 });

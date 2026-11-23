@@ -226,9 +226,17 @@ class Runtime:
         self.sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
         self.subscriber = "off"  # off | on | disabled_no_redis
         self.poller = "off"  # off | on
+        # 게시가 닫힌(published) 직후 한 번 부른다. None이면 의뢰 영상 성과 등록
+        # (`request_video_publish.on_published`). 테스트가 바꿔 끼운다
+        self.on_published: Callable[[PendingPost], Awaitable[None]] | None = None
 
 
 RT = Runtime()
+
+# 게시가 끝나면(published) 부르는 함수들: (게시 대기 행, media_id, 결과).
+# handlers가 `sns.post_published` 이벤트를 outbox에 쌓으려고 등록한다(2026-11-23).
+# 테스트 초기화(reset_runtime)로 지워지지 않는다
+PUBLISHED_HOOKS: list[Callable[[PendingPost, str | None, dict[str, Any]], None]] = []
 
 
 def reset_runtime() -> None:
@@ -603,6 +611,14 @@ async def publish_sns(
 # -- 승인 처리 (구독자·폴링·재전송 공통)
 def _close(row: PendingPost, old: str, new: str, code: str | None, **fields: Any) -> bool:
     won = store().transition(row.idempotency_key, old, new, failure_code=code, **fields)
+    if won and new == PUBLISHED:
+        for hook in PUBLISHED_HOOKS:
+            try:
+                hook(
+                    row, fields.get("media_id") or row.media_id, fields.get("result") or row.result
+                )
+            except Exception:  # noqa: BLE001 - 이벤트를 못 쌓아도 게시 기록은 그대로 둔다
+                _log.exception("sns_published_hook_failed")
     if won:
         _row_log(
             row,
@@ -1285,7 +1301,25 @@ async def _run_publish(row: PendingPost) -> None:
     if config_issue:  # 게시는 됐지만 캡션 부착 실패 등 → 사람이 확인(reconcile)
         result |= {"config_issue": config_issue, "reconcile_needed": True}
         _row_log(fresh, "sns_publish_attempt", {"op": "config_issue", "issue": config_issue})
-    _close(fresh, PUBLISHING, PUBLISHED, None, media_id=media_id, result=result)
+    if _close(fresh, PUBLISHING, PUBLISHED, None, media_id=media_id, result=result):
+        await after_published(key)
+
+
+async def after_published(key: str) -> None:
+    """게시가 닫힌 직후 한 곳 (자동 게시·복구·수동 게시 기록): 의뢰 영상이면 데이터 성과 등록.
+
+    실패해도 게시 결과는 그대로다 (경고만)."""
+    row = store().get(key)
+    if row is None or row.status != PUBLISHED:
+        return
+    hook = RT.on_published
+    if hook is None:
+        from marketing_agent.request_video_publish import on_published as hook
+    try:
+        await hook(row)
+    except Exception as error:  # noqa: BLE001 - 성과 등록 실패가 게시를 바꾸지 않는다
+        _row_log(row, "sns_publish_attempt", {"op": "performance_register_failed",
+                                              "error": type(error).__name__})  # fmt: skip
 
 
 # -- 재시작 복구
@@ -1298,7 +1332,8 @@ async def recover_interrupted() -> int:
     for row in store().with_status(PUBLISHING):
         if row.result.get("manual") and row.result.get("permalink"):
             # 수동 게시 기록 도중 멈췄다: 링크까지 적은 건이라 닫는다(다시 올릴 것이 없다)
-            _close(row, PUBLISHING, PUBLISHED, None, result=row.result)
+            if _close(row, PUBLISHING, PUBLISHED, None, result=row.result):
+                await after_published(row.idempotency_key)
             handled += 1
             continue
         if not (row.publish_sent and row.container_id):
@@ -1313,7 +1348,9 @@ async def recover_interrupted() -> int:
                 continue
             if status.status_code == "PUBLISHED":
                 result = await _verify(row, adapter, status.media_id)
-                _close(row, PUBLISHING, PUBLISHED, None, media_id=status.media_id, result=result)
+                if _close(row, PUBLISHING, PUBLISHED, None, media_id=status.media_id,
+                          result=result):  # fmt: skip
+                    await after_published(row.idempotency_key)
             else:
                 _close(row, PUBLISHING, FAILED, "publish_unconfirmed")
         handled += 1

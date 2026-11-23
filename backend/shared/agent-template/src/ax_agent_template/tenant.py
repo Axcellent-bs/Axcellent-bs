@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tomllib
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -181,6 +183,76 @@ def setting(env_name: str) -> str:
     return str(per_head) if ok else ""
 
 
+# ---------------------------------------------------------------- 영상 브랜드 (주인공·배경·화풍)
+# 회사 설정 `tenant.toml [brand]` (모두 선택). 기획 영상 제작안·마케팅 영상 프롬프트가 쓴다.
+# 칸마다 길이 상한(영문 120자·한글 60자)과 금칙(글자 요청·실존 인물·브랜드·숫자·광고·주입어,
+# 마케팅 scene_templates.toml과 같은 목록)을 보고, 걸리거나 없으면 그 칸만 기본값을 쓴다.
+BRAND_DEFAULTS: dict[str, str] = {
+    "character_en": "original illustrated characters, not real people",
+    "character_ko": "원본 일러스트 캐릭터",
+    "setting_en": "a setting that fits the company's products",
+    "setting_ko": "회사 상품에 어울리는 배경",
+    "style_en": "flat illustration style",
+}
+_BRAND_MAX = {"en": 120, "ko": 60}
+_BRAND_WORDS = (
+    # 글자 요청
+    "text", "word", "words", "letter", "letters", "caption", "title", "slogan", "headline",
+    "logo", "watermark", "sign", "signage", "writing", "written", "saying", "says", "typography",
+    "subtitle", "subtitles", "글자", "문구", "텍스트", "자막", "제목", "로고", "간판", "워터마크",
+    "슬로건",
+    # 실존 인물
+    "celebrity", "famous", "lookalike", "look-alike", "portrait of", "real person", "politician",
+    "actor", "actress", "idol", "influencer",
+    "닮은", "유명인", "연예인", "정치인", "실존", "아이돌",
+    # 실제 브랜드
+    "nike", "adidas", "apple", "google", "samsung", "disney", "pixar", "ghibli", "marvel",
+    "starbucks", "coca-cola", "netflix", "youtube", "instagram", "tiktok", "kakao", "naver",
+    "yes24", "kyobo", "aladin", "harry potter", "삼성", "애플", "디즈니", "지브리", "카카오",
+    "네이버", "교보", "알라딘", "스타벅스", "해리포터", "유튜브", "인스타그램", "틱톡",
+    # 광고(과장·단정)
+    "best", "no.1", "number one", "guaranteed", "guarantee", "cure", "free", "cheapest", "only",
+    "최고", "1위", "최저가", "무조건", "보장", "완치", "유일", "최초", "공짜", "특효",
+    # 주입
+    "ignore", "instruction", "instructions", "system", "prompt", "assistant", "override",
+    "jailbreak", "무시", "지시", "명령", "시스템", "프롬프트", "어시스턴트",
+)  # fmt: skip
+_BRAND_TEXT = re.compile(r"[A-Za-z가-힣 ,'-]+")
+
+
+def _brand_ok(key: str, value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = unicodedata.normalize("NFKC", value).strip()
+    if not text or len(text) > _BRAND_MAX[key.rsplit("_", 1)[1]]:
+        return False
+    if not _BRAND_TEXT.fullmatch(text):  # 숫자·주소·기호는 받지 않는다
+        return False
+    low = text.lower()
+    for w in _BRAND_WORDS:
+        if w.isascii():
+            if re.search(rf"(?<![a-z]){re.escape(w)}(?![a-z])", low):
+                return False
+        elif w in low:
+            return False
+    return True
+
+
+def brand() -> dict[str, str]:
+    """지금 회사의 영상 브랜드 5칸(character_en·character_ko·setting_en·setting_ko·style_en).
+
+    회사가 없거나 `[brand]`가 없거나 칸이 금칙·길이에 걸리면 그 칸은 `BRAND_DEFAULTS`."""
+    name = current()
+    raw = (_read(tenants_dir() / name) or {}) if name else {}
+    given = raw.get("brand")
+    given = given if isinstance(given, dict) else {}
+    out = {}
+    for key, default in BRAND_DEFAULTS.items():
+        value = given.get(key)
+        out[key] = " ".join(str(value).split()) if _brand_ok(key, value) else default
+    return out
+
+
 # ---------------------------------------------------------------- 인스타 레이더 계정
 # 회사 연결 › 인스타 레이더 계정에서 저장한 목록.
 # 있으면 회사 설정 trends.toml [instagram] radar_accounts보다 먼저다.
@@ -218,19 +290,33 @@ def ig_radar_accounts() -> list[str] | None:
 # ---------------------------------------------------------------- 인스타 레이더 자동 목록
 # data 경쟁사 찾기(company_accounts.find)가 business_discovery로 확인한 계정 + 사람 include
 # (exclude 뺌, 팔로워 큰 순). 화면 저장 목록도 회사 trends.toml 목록도 없을 때만 레이더가 쓴다.
-# 파일: `AX_IG_RADAR_AUTO_FILE` → 회사 연결 파일 옆 `instagram_radar_auto.json`
-# (ig_radar_file과 같은 자리 규칙). 회사 연결 파일이 없으면 None이고 쓰지 않는다.
+# 파일: `AX_IG_RADAR_AUTO_FILE` → 회사 폴더를 켰으면
+# `<회사 폴더>/<지금 회사>/instagram_radar_auto.json`
+# (여러 회사 1-5, 11/23: 회사 데이터라 회사 폴더. 옛 자리 = 회사 연결 파일 옆은 처음 읽을 때
+# company_files 이관 규칙으로 옮기고 `.moved`를 남긴다. `AX_COMPANY_FOLDERS=off`면 옛 자리로 되살림)
+# → 아니면 회사 연결 파일 옆. 회사 연결 파일이 없으면 None이고 쓰지 않는다.
 # data가 쓰고 data·dashboard-api가 읽는다
 IG_RADAR_AUTO_FILE_ENV = "AX_IG_RADAR_AUTO_FILE"
 IG_RADAR_AUTO_FILE = "instagram_radar_auto.json"
 
 
 def ig_radar_auto_file() -> Path | None:
+    from ax_agent_template import company_files
+    from ax_agent_template.companies import canonical_company_id
+    from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
+
+    cid = canonical_company_id(current()) or TENANT_ID_CATBOOKS
     raw = os.getenv(IG_RADAR_AUTO_FILE_ENV, "").strip()
     if raw:
+        company_files.restore_old(IG_RADAR_AUTO_FILE, target=Path(raw), company_id=cid)
         return Path(raw)
     conn = os.getenv("AX_COMPANY_CONNECTION_FILE", "").strip()
-    return Path(conn).with_name(IG_RADAR_AUTO_FILE) if conn else None
+    legacy = Path(conn).with_name(IG_RADAR_AUTO_FILE) if conn else None
+    if company_files.folders_on():
+        return company_files.company_file(IG_RADAR_AUTO_FILE, source=legacy, company_id=cid)
+    if legacy is not None:  # 되돌리기(off): 옛 자리가 비어 있으면 회사 폴더 값으로 되살린다
+        company_files.restore_old(IG_RADAR_AUTO_FILE, target=legacy, company_id=cid)
+    return legacy
 
 
 def ig_radar_auto_accounts() -> list[str] | None:

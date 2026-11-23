@@ -173,6 +173,7 @@ C 등급 보류는 Task 상태가 아니라 안전 레이어의 실행 결과(`s
 | `support.incident_compensation_decided` | support | incident\_context\_id(`ctx_inc_`), pending, approved, held, sent, rejected, remaining, coupons\_sent, sent\_value. 사람이 장애 보상 대기 고객을 승인·거절한 뒤 그 사건 보상 큐의 지금 상태를 사건 단위로 알린다. 고객별 목록·구매자 ID·결정한 사람 이름은 없다. 총괄은 타임라인·단계 표시만 하고 승인하지 않는다. 멱등 키는 사건 번호+상태 지문 | 총괄(준하) |
 | `metric.anomaly` | data | metric, window, observed, baseline, severity | orchestrator | 1차 |
 | `infra.anomaly_detected` | infra | component, metric\_code, value, threshold, detected\_at, source\_ref (원인 판단은 넣지 않고 `diagnose_incident`로) | orchestrator | 1차 |
+| `infra.recovered` | infra | `infra.anomaly_detected`와 같은 칸 + recovery(모르면 비움), recovered\_at(DejaFix 해소 시각). 보낸 장애가 조회 성공 회차에서 연속 두 번 빠지고 DejaFix 상세가 problem이 아닐 때 한 번 (2026-11-23) | orchestrator | 2차 |
 | `incident.opened`, `incident.resolved` | **orchestrator** | context\_id, component, 감지 신호 출처, 시각 | 전 부서 | 1차 |
 | `notice.published` | marketing | notice\_id, channel\_code, context\_id (본문·사실·약속은 `get_notice`로) | support, memory | 1차 |
 | `campaign.created` | marketing | campaign\_id, target\_codes, starts\_at, ends\_at, `promises[]` | support, finance | 2차 |

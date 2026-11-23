@@ -36,8 +36,6 @@
 화면이 판매 서버(shop-api)를 직접 부르지 않게 정해 둔 경로만 대신 읽어요(`shop_relay.py`). 주소는 `agent_url("shop-api")`(회사 연결 → `AX_SHOP_API_URL` → 기본), 토큰은 서버 쪽 `SHOP_VIEWER_TOKEN`이에요. 응답은 판매 서버의 `{data, meta}` 그대로예요.
 | 경로 (`/api/dashboard/shop` 아래) | 판매 서버 경로 |
 | --- | --- |
-| `/orchestrator/incidents` | `/api/shop/admin/orchestrator/incidents` |
-| `/orchestrator/departments` | `/api/shop/admin/orchestrator/departments` |
 | `/marketing/briefs?limit` | `/api/shop/admin/marketing/briefs` |
 | `/marketing/outage-sns-drafts?limit&include_merged` | `/api/shop/admin/marketing/outage-sns-drafts` |
 | `/banners` | `/api/shop/banners` |

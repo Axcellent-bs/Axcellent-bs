@@ -4,7 +4,7 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { apiBase, fromBackend, planningApi } from '@/lib/planning'
 import { incomingCount } from '@/components/planning/requests'
 import { taskRow } from '@/components/dev/board'
-import { adminRelay, relayEnabled } from '@/lib/adminRelay'
+import { orchestrator } from '@/lib/orchestrator'
 
 const POLL_MS = 30_000
 export const PLANNING_REQUESTS_HREF = '/planning/requests'
@@ -55,9 +55,8 @@ async function count(part: 'planning' | 'dev'): Promise<number | undefined> {
 
 /** 총괄 이슈들의 사람 승인 대기 건수. 읽지 못하면 숫자를 지운다 */
 async function heldCount(): Promise<number | undefined> {
-  if (!relayEnabled) return undefined
   try {
-    const { data } = await adminRelay.incidents()
+    const { data } = await orchestrator.incidents()
     return data.reduce((n, i) => n + i.pending_holds.length, 0)
   } catch {
     return undefined

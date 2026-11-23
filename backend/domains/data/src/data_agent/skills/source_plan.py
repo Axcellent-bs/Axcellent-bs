@@ -48,6 +48,7 @@ from ax_contracts.schemas.data import (
     SourcePlanOutput,
     SourcePlanRequest,
 )
+from data_agent import company_scope
 from data_agent.connectors import ConnectorUnavailable, data4library, naver_shopping
 from data_agent.llm_budget import no_llm
 from data_agent.skills.code_version import source_hash
@@ -253,15 +254,20 @@ def _n(text: str) -> str:
 
 
 class PlanStore:
-    def __init__(self, path: str | Path) -> None:
+    """수집 계획 저장소. 회사 칸(1-5): 그 회사 줄만 읽고 쓴다 (plan_id 해시에도 회사 ID)."""
+
+    def __init__(self, path: str | Path, company_id: str | None = None) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.company_id = company_scope.resolve(company_id)
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._lock = threading.Lock()
         with self._lock, self._conn:
             self._conn.execute(
                 "CREATE TABLE IF NOT EXISTS plans (plan_id TEXT PRIMARY KEY,"
-                " created_at TEXT NOT NULL, output TEXT NOT NULL)"
+                " created_at TEXT NOT NULL, output TEXT NOT NULL,"
+                " tenant_id TEXT NOT NULL DEFAULT 'catbooks')"
             )
+            company_scope.ensure_tenant_column(self._conn, "plans")
 
     def close(self) -> None:
         self._conn.close()
@@ -269,27 +275,35 @@ class PlanStore:
     def get(self, plan_id: str) -> SourcePlanOutput | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT output FROM plans WHERE plan_id = ?", (plan_id,)
+                "SELECT output FROM plans WHERE plan_id = ? AND tenant_id = ?",
+                (plan_id, self.company_id),
             ).fetchone()
         return SourcePlanOutput.model_validate_json(row[0]) if row else None
 
     def latest(self) -> SourcePlanOutput | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT output FROM plans ORDER BY created_at DESC LIMIT 1"
+                "SELECT output FROM plans WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1",
+                (self.company_id,),
             ).fetchone()
         return SourcePlanOutput.model_validate_json(row[0]) if row else None
 
     def put(self, out: SourcePlanOutput, at: datetime) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO plans VALUES (?,?,?)",
-                (out.plan_id, at.isoformat(), out.model_dump_json()),
+                "INSERT OR REPLACE INTO plans (plan_id, created_at, output, tenant_id)"
+                " VALUES (?,?,?,?)",
+                (out.plan_id, at.isoformat(), out.model_dump_json(), self.company_id),
             )
 
 
-def plan_id(profile: DomainProfileOutput, sources: Sequence[DataSource], config: PlanConfig) -> str:
+def plan_id(
+    profile: DomainProfileOutput, sources: Sequence[DataSource], config: PlanConfig,
+    company_id: str | None = None,
+) -> str:  # fmt: skip
+    """회사 ID를 넣어 만든다 (1-5: 같은 계획 재료라도 회사가 다르면 다른 id)."""
     parts = {
+        "company": company_scope.resolve(company_id),
         "profile": profile.catalog_hash,
         "seeds": [s.keyword for s in profile.seed_keywords],
         "industry": profile.industry,

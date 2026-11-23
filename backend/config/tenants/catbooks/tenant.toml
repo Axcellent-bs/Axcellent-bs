@@ -31,6 +31,20 @@ about = "캣북스는 책을 파는 온라인 쇼핑몰(이커머스)을 운영�
 # 새 출처는 사람이 승인해야 수집 계획·기회 카드가 부른다 (2026-11-05 쇼핑인사이트 이용 신청 후 승인)
 approved = ["naver_shopping"]
 
+# 홍보 영상 브랜드 (기획 영상 제작안·마케팅 영상 프롬프트). 모두 선택, 영문 120자·한글 60자 안.
+# 글자·실존 인물·실제 브랜드·숫자는 쓰지 않는다(걸리면 그 칸은 기본값)
+[brand]
+character_en = "a friendly original cartoon cat mascot"
+character_ko = "자체 제작 고양이 마스코트"
+setting_en = "a cozy independent bookstore"
+setting_ko = "아늑한 동네 책방"
+style_en = "flat illustration style, soft natural light"
+
 [finance]
 # 팀 예산 = 그달 1일 팀 인원 × 인당 월 단가(원). 재무 AI가 계산하고 재무 담당이 승인한다
 per_head_monthly = 100000
+
+# 인스타 게시 계정 (data 의뢰 영상 성과: business_discovery로 이 계정의 최근 50개에서 우리 게시물을 찾는다).
+# 값은 사람이 넣는다 (@ 없이 아이디). 없으면 의뢰 영상 성과는 "회사 설정에 게시 계정 아이디가 없음"
+# [instagram]
+# publish_username = ""

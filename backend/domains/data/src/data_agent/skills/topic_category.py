@@ -44,6 +44,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
 from ax_agent_template.tenant import setting as tenant_setting
+from data_agent import company_scope
 from data_agent.llm_budget import no_llm
 
 TOPIC_CATEGORIES: tuple[str, ...] = (
@@ -224,15 +225,29 @@ class CategoryCache:
                     self._conn.execute("ALTER TABLE topic_categories ADD COLUMN is_person INTEGER")
                 if "version" not in cols:  # 예전 파일: 분류 목록 판 칸 (예전 줄은 NULL = 판 1)
                     self._conn.execute("ALTER TABLE topic_categories ADD COLUMN version INTEGER")
+                if company_scope.TENANT_COLUMN not in cols:
+                    # 1-5 (11/23): 키에 회사 ID ("<회사>|<키>"). 예전 줄은 캣북스 키로 한 번 바꾼다
+                    company_scope.ensure_tenant_column(self._conn, "topic_categories")
+                    self._conn.execute(
+                        "UPDATE topic_categories SET key = ? || '|' || key",
+                        (company_scope.CATBOOKS,),
+                    )
                 cutoff = (self.now() - self.retention).isoformat()
                 self._conn.execute(
                     "DELETE FROM topic_categories WHERE classified_at < ?", (cutoff,)
                 )
 
+    @staticmethod
+    def _stored_key(key: str) -> tuple[str, str]:
+        """(회사, 저장 키). 회사는 `company_scope.active()` (요청의 회사, 아니면 지금 회사)."""
+        cid = company_scope.active()
+        return cid, f"{cid}|{key}"
+
     def get(self, keyword: str) -> CategoryResult | None:
         key = _key(keyword)
         if key in self.overrides:
             return self.overrides[key]
+        _cid, key = self._stored_key(key)
         cutoff = self.now() - self.retention
         hit = self._mem.get(key)
         if hit is not None and hit[0] >= cutoff and not _stale(hit[1].category, CATEGORY_VERSION):
@@ -264,15 +279,15 @@ class CategoryCache:
         if result.category == UNKNOWN:
             return
         at = self.now()
-        key = _key(keyword)
+        cid, key = self._stored_key(_key(keyword))
         self._mem[key] = (at, result)
         if self._conn is None:
             return
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO topic_categories (key, keyword, category, reason,"
-                " real_entity, entity_names, evidence, classified_at, is_person, version)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                " real_entity, entity_names, evidence, classified_at, is_person, version,"
+                " tenant_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     key,
                     keyword,
@@ -284,14 +299,17 @@ class CategoryCache:
                     at.isoformat(),
                     None if result.is_person is None else int(result.is_person),
                     CATEGORY_VERSION,
+                    cid,
                 ),
             )
 
     def clear(self) -> None:
-        self._mem = {}
+        """지금 회사(요청의 회사)의 분류만 지운다."""
+        cid = company_scope.active()
+        self._mem = {k: v for k, v in self._mem.items() if not k.startswith(f"{cid}|")}
         if self._conn is not None:
             with self._lock, self._conn:
-                self._conn.execute("DELETE FROM topic_categories")
+                self._conn.execute("DELETE FROM topic_categories WHERE tenant_id = ?", (cid,))
 
 
 def _stale(category: str, version: int) -> bool:

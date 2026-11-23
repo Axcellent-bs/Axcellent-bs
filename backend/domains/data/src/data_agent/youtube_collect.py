@@ -360,6 +360,7 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
                                         in_use=in_use_ids(env))  # fmt: skip
             print(result.line(), flush=True)
             await measure_videos(connector, env)  # 게시한 영상 성과: 지금 잴 시점만 (실패해도 계속)
+            await measure_instagram_videos(env)  # 인스타 게시 영상: 계정마다 한 번 (실패해도 계속)
             await track_fresh(env)  # 새 숏츠 추적: 같은 형식 비교 기준 표본 (실패해도 계속)
             # 숏츠 표본의 빠진 게시 시각 채우기 (하루 상한, 미리 계산 바로 앞. 실패해도 계속)
             await shorts_backfill.run(env)
@@ -408,6 +409,34 @@ async def measure_videos(
     if saved or problems:
         print(f"[video] 성과 시점 값 {saved}개" + (f", {'; '.join(problems)}" if problems else ""),
               flush=True)  # fmt: skip
+    return saved
+
+
+async def measure_instagram_videos(
+    env: Mapping[str, str], now: datetime | None = None, graph: object | None = None
+) -> int:
+    """video_performance 추적 목록의 인스타 영상 중 잴 시점이 된 것만, 우리 게시 계정을 한 번 읽어
+    잰다 (Instagram Graph 하루 상한·장부 그대로). 잰 값 수. 문제는 한 줄 남기고 계속."""
+    from data_agent.connectors.instagram_graph import InstagramGraph
+    from data_agent.skills import instagram_video
+    from data_agent.skills import video_performance as vp
+
+    path = env.get(vp.DB_ENV) or vp.DEFAULT_DB
+    if str(path) != ":memory:" and not Path(path).is_file():
+        return 0  # 등록된 영상이 없다
+    store = vp.VideoStore(path)
+    try:
+        saved, problems = await instagram_video.measure_due(
+            store, graph or InstagramGraph(env), env, now or datetime.now(UTC)
+        )
+    except Exception as error:  # 성과 측정이 실패해도 수집은 계속
+        print(f"[video] 인스타 성과 측정 실패 ({type(error).__name__})", flush=True)
+        return 0
+    finally:
+        store.close()
+    if saved or problems:
+        print(f"[video] 인스타 성과 시점 값 {saved}개" + (f", {'; '.join(problems)}" if problems
+                                                    else ""), flush=True)  # fmt: skip
     return saved
 
 
