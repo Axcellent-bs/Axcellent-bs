@@ -55,6 +55,8 @@ class EventType(StrEnum):
     NOTICE_PUBLISHED = "notice.published"
     CAMPAIGN_CREATED = "campaign.created"
     COUPON_ISSUED = "coupon.issued"
+    # SNS 게시가 끝남(자동 게시·사람이 올린 수동 게시 모두). 2026-11-23 추가
+    SNS_POST_PUBLISHED = "sns.post_published"
     # 안전 레이어
     SAFETY_ACTION_EXECUTED = "safety.action_executed"
     SAFETY_ACTION_HELD = "safety.action_held"
@@ -249,6 +251,17 @@ class NoticePublishedData(AxModel):
     notice_id: str
     channel_code: str
     context_id: str
+
+
+class SnsPostPublishedData(AxModel):
+    """`sns.post_published`. 게시물 본문·사진은 넣지 않는다(초안 번호와 게시 결과 사실만)."""
+
+    post_draft_id: str
+    platform: str = "instagram"
+    manual: bool = False  # 자동 게시가 꺼진 동안 사람이 올리고 기록한 게시
+    media_id: str | None = None
+    permalink: str | None = None
+    published_at: str | None = None  # ISO 8601
 
 
 class Promise(AxModel):
@@ -505,6 +518,7 @@ EVENT_DATA_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.NOTICE_PUBLISHED: NoticePublishedData,
     EventType.CAMPAIGN_CREATED: CampaignCreatedData,
     EventType.COUPON_ISSUED: CouponIssuedData,
+    EventType.SNS_POST_PUBLISHED: SnsPostPublishedData,
     EventType.SAFETY_ACTION_EXECUTED: SafetyActionExecutedData,
     EventType.SAFETY_ACTION_HELD: SafetyActionHeldData,
     EventType.SAFETY_REVIEW_DECIDED: SafetyReviewDecidedData,

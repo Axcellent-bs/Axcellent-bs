@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from marketing_agent import brief_auto_handoff, campaign_auto, handlers
+from marketing_agent import brief_auto_handoff, campaign_auto, handlers, state_db
 from marketing_agent.handlers import HANDLERS
 from marketing_agent.sns_publish import publisher
 
@@ -63,6 +63,29 @@ publisher.setup_subscriber()
 _base_lifespan = app.router.lifespan_context
 
 
+OUTBOX_FLUSH_ENV = "MARKETING_OUTBOX_FLUSH_S"
+
+
+def _outbox_interval() -> float:
+    try:
+        return float(os.getenv(OUTBOX_FLUSH_ENV, "30"))
+    except ValueError:
+        return 30.0
+
+
+async def _outbox_loop() -> None:
+    """outbox를 주기마다 다시 보낸다. 실패는 다음 주기에 다시(로그만)."""
+    while True:
+        await asyncio.sleep(_outbox_interval())
+        try:
+            sent = await state_db.flush(handlers.STATE.state_db)
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception("marketing_outbox_flush_failed")
+            continue
+        if sent:
+            logging.getLogger(__name__).info("marketing_outbox_sent count=%s", sent)
+
+
 @asynccontextmanager
 async def _lifespan(application: object) -> AsyncIterator[None]:
     async with _base_lifespan(application):  # type: ignore[arg-type]
@@ -94,9 +117,20 @@ async def _lifespan(application: object) -> AsyncIterator[None]:
                 ),
                 name="brief-auto-handoff",
             )
+        # 이벤트 버스에 못 보낸 이벤트(outbox)를 주기적으로 다시 보낸다
+        # (MARKETING_OUTBOX_FLUSH_S, 기본 30초)
+        outbox_task: asyncio.Task[None] | None = None
+        if _outbox_interval() > 0:
+            outbox_task = asyncio.get_running_loop().create_task(
+                _outbox_loop(), name="marketing-outbox"
+            )
         try:
             yield
         finally:
+            if outbox_task is not None:
+                outbox_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await outbox_task
             if handoff_task is not None:
                 handoff_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
