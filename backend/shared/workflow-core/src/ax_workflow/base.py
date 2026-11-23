@@ -10,17 +10,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
 from datetime import datetime
 from typing import Any, Literal
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_agent_template import config as template_config
+from ax_agent_template import routing
+from ax_agent_template.services import route_target
 from ax_contracts.schemas import TENANT_ID_DEFAULT, ExecuteDecision
 from ax_contracts.schemas.planning import (
+    HANDOFF_KNOWN_MAX_KEYS,
     ChangeResultInput,
     DevHandoffInput,
     DevResultInput,
@@ -40,9 +45,12 @@ from ax_workflow.core import (
 from ax_workflow.dev_handoff import (
     HANDED,
     PERMANENT,
+    RECEIVE_DEV_RESULT,
     SENT,
     START_DEV,
     DevSender,
+    KnownAsker,
+    ask_known,
     classify,
     fingerprint,
     permanent_hint,
@@ -208,9 +216,13 @@ class BlockParams(_Params):
 
 
 class ResendParams(_Params):
-    """받는 쪽이 거절해 멈춘 넘기기를 다시 보낸다. key를 안 주면 멈춘 것 모두."""
+    """받는 쪽이 거절해 멈춘 넘기기를 다시 보낸다. key를 안 주면 멈춘 것 모두.
+
+    `all`이면 받는 쪽이 받았다고 한 기록(acked)도 무시하고 넘긴 것을 모두 다시 보낸다
+    (받는 쪽이 상태를 잃었을 때. 같은 멱등 키라 받는 쪽이 가진 건 그대로)."""
 
     key: str | None = None
+    everything: bool = Field(False, alias="all")
 
 
 # snake_case 액션 이름 → (메서드, 입력 모델). 화면이 보내는 camelCase(`confirmSpec`)도 받는다.
@@ -305,6 +317,8 @@ class PlanningCore(StateService):
     ):
         super().__init__(clock, gate, tenant_id, self.ROLE, real_example)
         self._send_dev: DevSender = dev_sender or send_to_service
+        # 다시 켰을 때 맞추기가 받는 쪽에 받았는지 묻는 곳 (시험에서 바꿔 끼운다)
+        self._ask_known: KnownAsker = ask_known
         self._sending: set[asyncio.Task] = set()
         self._retrying = False  # 못 보낸 넘기기를 다시 보내는 중
         self._retry_task: asyncio.Task | None = None
@@ -412,6 +426,9 @@ class PlanningCore(StateService):
     def _init_state(self, fresh: bool = False) -> None:
         self._attempt_counts: dict[str, int] = {}
         self._handoff_failed: list[HandoffFailure] = []
+        # 받는 쪽이 받았다고 답한 넘기기 {멱등 키: 입력 지문}. 다시 켰을 때 맞추기가 같은 입력을
+        # 다시 보내지 않는다 (11/23, 켤 때마다 "start dev 부탁해요"가 몇 줄씩 쌓이던 문제)
+        self._acked: dict[str, str] = {}
         super()._init_state(fresh)
         if not fresh:
             self._load_handoff()
@@ -442,15 +459,25 @@ class PlanningCore(StateService):
                 self._handoff_failed.append(HandoffFailure.model_validate(row))
             except ValidationError:
                 continue
+        acked = data.get("acked")  # 예전 옆 파일에는 없다
+        if isinstance(acked, dict):
+            for k, v in acked.items():
+                if isinstance(v, str) and v:
+                    self._acked[str(k)] = v
 
     def _save(self) -> None:
         super()._save()
+        self._save_handoff()
+
+    def _save_handoff(self) -> None:
+        """옆 파일만 쓴다. 모르는 키는 읽을 때 건너뛰어 예전·다음 빌드가 서로 읽는다."""
         path = self._handoff_path()
         if not path:
             return
         data = {
             "attempts": {k: v for k, v in self._attempt_counts.items() if k in self._unsent},
             "failed": [f.model_dump(mode="json") for f in self._handoff_failed],
+            "acked": self._acked,
         }
         try:
             tmp = f"{path}.tmp"
@@ -515,11 +542,15 @@ class PlanningCore(StateService):
             was = key in self._unsent or any(f.key == key for f in self._handoff_failed)
             self._forget(key)
             self._handoff_failed = [f for f in self._handoff_failed if f.key != key]
+            self._ack(key, fingerprint(body))
             if was:
                 self._save()
                 self.version += 1
                 self._notify()
+            else:
+                self._save_handoff()
             return
+        self._acked.pop(key, None)  # 받았다는 기록은 이번 결과로 바꾼다
         if kind == PERMANENT:
             hint = permanent_hint(how)
             note = f" ({hint})" if hint else ""
@@ -607,32 +638,137 @@ class PlanningCore(StateService):
                 continue
             await self._send_one(skill, ctx, payload, key)
 
-    async def resync_peer(self) -> None:
-        """다시 켰을 때 상대 서비스와 맞춘다: 못 보낸 것을 다시 보내고, 넘긴 기획서를 모두
-        다시 보낸다 (같은 멱등 키라 상대가 이미 가진 건 그대로, 잃은 쪽만 다시 반영).
+    def _ack(self, key: str, fp: str) -> None:
+        """받는 쪽이 받았다고 답한 넘기기를 남긴다. 오래된 것부터 지워 크기를 묶는다."""
+        self._acked.pop(key, None)
+        self._acked[key] = fp
+        while len(self._acked) > ACKED_MAX:
+            self._acked.pop(next(iter(self._acked)))
 
-        받는 쪽이 같은 입력을 이미 거절한 넘기기(refused, 지문 같음)는 건너뛴다. 입력이 바뀌었으면
-        다시 보낸다. 사람 할 일함으로 넘어간 것(handed)은 다시 보낸다 (받는 쪽이 켜졌을 수 있다).
-        받는 쪽을 고친 뒤 거절된 건은 사람이 `resend_handoff`로 보낸다."""
+    def handoff_known(self, keys: list[str]) -> list[str]:
+        """`handoff_known` (read): keys 중 이 서비스가 반영한(중복 거르기 기록에 있는) 키."""
+        return [k for k in dict.fromkeys(keys) if k in self._idempotent]
+
+    def _peer_role(self) -> str:
+        return "dev" if self.role == "planning" else "planning"
+
+    async def _peer_missing(self, keys: list[str]) -> set[str]:
+        """받았다고 기록한 keys 중 받는 쪽이 갖고 있지 않은 키 (받는 쪽이 상태를 잃음).
+
+        한 번 묻는다 (키가 많으면 나눠서). 묻지 못하면 빈 집합: 받았다는 기록대로 건너뛴다."""
+        if not keys:
+            return set()
+        known: set[str] = set()
+        for i in range(0, len(keys), HANDOFF_KNOWN_MAX_KEYS):
+            part = keys[i : i + HANDOFF_KNOWN_MAX_KEYS]
+            try:
+                got = await self._ask_known(self._peer_role(), self.tenant_id, part)
+            except Exception:  # noqa: BLE001 - 묻지 못한 것으로 본다
+                got = None
+            if got is None:
+                _log.warning("%s: 받는 쪽에 넘기기를 묻지 못해 기록대로 건너뛴다", self.role)
+                return set()
+            known.update(got)
+        return set(keys) - known
+
+    def _peer_service(self) -> str:
+        """넘기기를 받는 서비스 id (`call_agent`와 같이 `route_target`으로 정한다)."""
+        if self.role == "planning":
+            return route_target("dev", START_DEV)
+        return route_target("planning", RECEIVE_DEV_RESULT)
+
+    async def _peer_up(self) -> bool:
+        """받는 서비스의 `/health`가 답하는지.
+
+        켜지 않은 서비스(할 일함으로 넘김)는 기다리지 않는다."""
+        service = self._peer_service()
+        if not routing.is_enabled(service):
+            return True
+        try:
+            url = f"{template_config.agent_url(service)}/health"
+        except KeyError:
+            return True
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=PEER_PROBE_TIMEOUT_SECONDS)
+        except httpx.HTTPError:
+            return False
+        return response.status_code == 200
+
+    async def wait_for_peer(self) -> bool:
+        """받는 서비스가 뜰 때까지 2초·4초·8초… 최대 30초 간격으로 묻는다. 모두 합쳐 5분까지.
+
+        떴으면 True, 끝내 안 뜨면 False (그래도 보내고 닿지 못한 건 간격을 늘려 다시 보낸다)."""
+        waited, gap = 0.0, PEER_WAIT_FIRST_SECONDS
+        while True:
+            try:
+                if await self._peer_up():
+                    return True
+            except Exception:  # noqa: BLE001 - 묻다 난 오류는 아직 안 뜬 것으로 본다
+                pass
+            if waited >= PEER_WAIT_MAX_SECONDS:
+                return False
+            step = min(gap, PEER_WAIT_MAX_SECONDS - waited)
+            await _sleep(step)
+            waited += step
+            gap = min(gap * 2, PEER_WAIT_STEP_MAX_SECONDS)
+
+    async def resync_peer(self, wait_peer: bool = False) -> None:
+        """다시 켰을 때 상대 서비스와 맞춘다: 못 보낸 것을 다시 보내고, 넘긴 기획서 중 받는 쪽이
+        아직 받았다고 하지 않은 것을 보낸다 (같은 멱등 키라 상대가 이미 가진 건 그대로).
+
+        - wait_peer면(켤 때) 받는 서비스가 뜰 때까지 기다린 뒤 보낸다 (`wait_for_peer`, 최대 5분).
+          끝내 안 뜨면 그대로 보내고 닿지 못한 건 간격을 늘려 다시 보낸다.
+        - 받는 쪽이 같은 입력을 받았다고 한 넘기기(acked, 지문 같음)는 건너뛰기 전에 받는 쪽에 한 번
+          묻는다(`handoff_known`, read). 받는 쪽이 갖고 있지 않은 키(상태를 잃음)는 다시 보낸다.
+          묻지 못하면 기록대로 건너뛴다. 입력이 바뀌었거나 받았다는 기록이 없으면 보낸다.
+        - 받는 쪽이 같은 입력을 이미 거절한 넘기기(refused, 지문 같음)는 건너뛴다. 입력이 바뀌었으면
+          다시 보낸다. 사람 할 일함으로 넘어간 것(handed)은 다시 보낸다 (받는 쪽이 켜졌을 수 있다).
+          받는 쪽을 고친 뒤 거절된 건은 사람이 `resend_handoff`로 보낸다.
+        - 받았다는 기록은 지금 넘길 것에 없는 키(지운 기획서·지난 지문)를 지워 크기를 묶는다."""
         if not self.role:
             return
+        if wait_peer and not await self.wait_for_peer():
+            _log.warning("%s: 받는 서비스가 뜨지 않아 그대로 맞춘다", self.role)
         await self.resend_unsent()
         refused = {f.key: f.fingerprint for f in self._handoff_failed if f.kind == "refused"}
-        for skill, ctx, payload, key in self._dev_outgoing(self.state, full=True):
-            if refused.get(key) == fingerprint(payload.model_dump(mode="json")):
+        handed = {f.key for f in self._handoff_failed if f.kind == "handed"}
+        outgoing = self._dev_outgoing(self.state, full=True)
+        live = {key for *_, key in outgoing}
+        self._acked = {k: v for k, v in self._acked.items() if k in live}
+        plan: list[tuple[str, str, BaseModel, str]] = []
+        skip: list[str] = []  # 받았다는 기록대로면 건너뛸 키 (받는 쪽에 한 번 묻는다)
+        for skill, ctx, payload, key in outgoing:
+            fp = fingerprint(payload.model_dump(mode="json"))
+            if refused.get(key) == fp:
+                continue
+            if key not in handed and key not in self._unsent and self._acked.get(key) == fp:
+                skip.append(key)
+            plan.append((skill, ctx, payload, key))
+        missing = await self._peer_missing(list(dict.fromkeys(skip)))
+        skipped = set(skip) - missing
+        for skill, ctx, payload, key in plan:
+            if key in skipped:
                 continue
             await self._send_one(skill, ctx, payload, key)
         self._save()
 
-    async def _resend_handoff(self, s: State, key: str | None = None) -> ActionResult | None:
+    async def _resend_handoff(
+        self, s: State, key: str | None = None, everything: bool = False
+    ) -> ActionResult | None:
         """사람 버튼: 자동으로 다시 보내지 않는 넘기기를 같은 멱등 키로 다시 보낸다 (잠금 밖에서).
 
         받는 쪽은 실패한 요청을 멱등 기록에 남기지 않아 같은 키로 다시 받는다. 기록은 보낸 결과로
-        지우거나 바꾼다 (또 거절하면 다시 남는다). 저장된 내용을 읽지 못하는 건 보낼 수 없다."""
+        지우거나 바꾼다 (또 거절하면 다시 남는다). 저장된 내용을 읽지 못하는 건 보낼 수 없다.
+
+        everything(`{"type": "resendHandoff", "all": true}`)이면 받았다는 기록(acked)을 무시하고
+        넘긴 것을 모두 다시 보낸다 (받는 쪽이 상태를 잃었을 때)."""
+        to = "dev" if self.role == "planning" else "planning"
+        if everything and key is None:
+            return self._resend_everything(s, to)
         picked = [f for f in self._handoff_failed if key is None or f.key == key]
         if not picked:
             raise ActionError("NOT_FOUND", "다시 보낼 넘기기가 없다")
-        to = "dev" if self.role == "planning" else "planning"
         sent: list[str] = []
         for f in picked:
             try:
@@ -647,6 +783,25 @@ class PlanningCore(StateService):
         if not sent:
             raise ActionError("INVALID_PAYLOAD", "저장된 내용을 읽지 못해 다시 보낼 수 없다")
         return ActionResult(output={"resent": sent})
+
+    def _resend_everything(self, s: State, to: str) -> ActionResult:
+        """넘긴 것을 모두 다시 보낸다 (받았다는 기록·거절 기록과 상관없이, 같은 멱등 키)."""
+        items = self._dev_outgoing(s, full=True)
+        keys = {k for *_, k in items}
+        for f in self._handoff_failed:  # 지금 넘길 것에 없는 멈춘 넘기기도 같이
+            if f.key in keys:
+                continue
+            try:
+                items.append((f.skill, f.context_id, self._payload(f.skill, f.payload), f.key))
+            except ValueError:
+                continue
+        if not items:
+            raise ActionError("NOT_FOUND", "다시 보낼 넘기기가 없다")
+        self._resend_pending.extend(items)
+        ctx = items[0][1]
+        text = f"넘긴 것 {len(items)}건을 사람이 모두 다시 보냄"
+        s.activity.append(self._act(self.clock(), ctx, "human", to, "resend_handoff", "사람", text))
+        return ActionResult(output={"resent": [k for *_, k in items]})
 
     async def wait_sent(self) -> None:
         """보내는 중인 넘기기가 끝날 때까지 기다린다 (테스트용)."""
@@ -841,7 +996,15 @@ class PlanningCore(StateService):
             )
 
 
+_log = logging.getLogger("ax.workflow")
+
 RETRY_SECONDS = 30  # 못 보낸 넘기기를 처음 다시 보내기까지 (그 뒤로 두 배씩)
+ACKED_MAX = 5000  # 받았다는 기록 상한 (다시 켰을 때 맞추기가 지금 없는 키도 지운다)
+# 켤 때 받는 서비스가 뜰 때까지 기다리기: 2초부터 두 배씩, 한 번에 최대 30초, 모두 합쳐 5분
+PEER_WAIT_FIRST_SECONDS = 2.0
+PEER_WAIT_STEP_MAX_SECONDS = 30.0
+PEER_WAIT_MAX_SECONDS = 300.0
+PEER_PROBE_TIMEOUT_SECONDS = 3.0
 RETRY_MAX_SECONDS = 15 * 60  # 다시 보내는 간격 상한
 
 
@@ -852,3 +1015,7 @@ def retry_delay(attempts: int) -> float:
 
 def _monotonic() -> float:
     return time.monotonic()
+
+
+async def _sleep(seconds: float) -> None:
+    await asyncio.sleep(seconds)

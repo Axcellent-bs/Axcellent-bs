@@ -328,3 +328,323 @@ def test_failed_action_drops_queued_resend() -> None:
     with pytest.raises(RuntimeError):
         asyncio.run(svc._apply(boom))
     assert svc._resend_pending == []
+
+
+# ---- 다시 켰을 때 맞추기를 조용하게 (11/23, 켤 때마다 "start dev 부탁해요 ×5"·"failed ×2~3")
+#
+# - 받는 쪽이 받았다고 답한 넘기기(acked, 지문)는 옆 파일에 남고 다시 켜도 다시 보내지 않는다.
+# - 켤 때는 받는 서비스가 뜰 때까지(최대 5분) 기다린 뒤 보낸다.
+# - 받았다고 한 넘기기는 받는 쪽에 한 번 묻고(`handoff_known`) 받는 쪽에 없는 것만 다시 보낸다.
+
+
+class Known:
+    """받는 쪽에 묻기(`handoff_known`) 대신. `missing`은 받는 쪽이 잃은 키, None이면 묻지 못함."""
+
+    def __init__(self, missing: set[str] | None = None, fail: bool = False):
+        self.missing = missing or set()
+        self.fail = fail
+        self.asked: list[list[str]] = []
+
+    async def __call__(self, peer: str, tenant: str, keys: list[str]) -> list[str] | None:
+        self.asked.append(list(keys))
+        return None if self.fail else [k for k in keys if k not in self.missing]
+
+
+@pytest.fixture(autouse=True)
+def _peer_keeps_state(monkeypatch) -> None:
+    """이 파일의 서비스는 받는 쪽이 상태를 가진 것으로 묻는다 (네트워크 없음)."""
+    monkeypatch.setattr(base, "ask_known", Known())
+
+
+def _start_dev_keys(svc: PlanningService) -> list[str]:
+    return [k for skill, _, _, k in svc._dev_outgoing(svc.state, full=True) if skill == START_DEV]
+
+
+def _handed(tmp_path, monkeypatch) -> tuple[Sender, str]:
+    """개발에 기획서 하나를 넘기고 받았다는 답을 받은 상태 파일을 만든다."""
+    monkeypatch.setenv("PLANNING_STATE_DIR", str(tmp_path))
+    send = Sender("보냄")
+
+    async def run() -> str:
+        svc = PlanningService(dev_sender=send)
+        await svc.inbound("support_ticket")
+        await svc.wait_sent()
+        [key] = send.sent
+        assert key in svc._acked
+        return key
+
+    return send, asyncio.run(run())
+
+
+def test_resync_after_restart_sends_nothing_already_acked(tmp_path, monkeypatch) -> None:
+    send, key = _handed(tmp_path, monkeypatch)
+    again = PlanningService(dev_sender=send)  # 다시 켬: 받았다는 기록은 옆 파일에 남는다
+    assert key in again._acked and key in _start_dev_keys(again)
+    send.sent.clear()
+    asyncio.run(again.resync_peer())
+    assert send.sent == []
+    assert again._acked.get(key)  # 지금 넘길 것이라 지우지 않는다
+
+
+def test_resync_resends_changed_payload(tmp_path, monkeypatch) -> None:
+    send, key = _handed(tmp_path, monkeypatch)
+    again = PlanningService(dev_sender=send)
+    spec = next(sp for sp in again.state.specs if sp.handed_to_dev)
+    spec.title = f"{spec.title} (고침)"  # 받았다고 한 뒤 입력이 바뀜
+    send.sent.clear()
+    asyncio.run(again.resync_peer())
+    assert send.sent == [key]
+    send.sent.clear()
+    asyncio.run(again.resync_peer())  # 바뀐 입력도 받았다고 했으니 또 보내지 않는다
+    assert send.sent == []
+
+
+def test_resync_resends_never_acked_key_and_old_sidecar_loads(tmp_path, monkeypatch) -> None:
+    send, key = _handed(tmp_path, monkeypatch)
+    side = os.path.join(tmp_path, "planning_state_planning.json.handoff.json")
+    with open(side, "w", encoding="utf-8") as f:
+        json.dump({"attempts": {}, "failed": []}, f)  # 예전 빌드가 남긴 옆 파일 (acked 없음)
+    old = PlanningService(dev_sender=send)
+    assert old._acked == {} and old._handoff_failed == []
+    send.sent.clear()
+    asyncio.run(old.resync_peer())
+    assert send.sent == [key]  # 받았다는 기록이 없으니 보낸다
+    with open(side, encoding="utf-8") as f:
+        saved = json.load(f)
+    assert set(saved) >= {"attempts", "failed", "acked"} and key in saved["acked"]
+
+
+def test_resync_prunes_acked_keys_no_longer_handed(tmp_path, monkeypatch) -> None:
+    send, key = _handed(tmp_path, monkeypatch)
+    again = PlanningService(dev_sender=send)
+    again._acked["ctx_gone:start_dev:SPEC-gone"] = "f" * 16  # 지운 기획서
+    asyncio.run(again.resync_peer())
+    assert set(again._acked) == {key}
+
+
+def test_ack_record_is_bounded(monkeypatch) -> None:
+    monkeypatch.setattr(base, "ACKED_MAX", 3)
+    svc = PlanningService(dev_sender=Sender("보냄"))
+    for n in range(5):
+        svc._ack(f"k{n}", "fp")
+    assert list(svc._acked) == ["k2", "k3", "k4"]
+
+
+def test_resend_handoff_all_ignores_acked(tmp_path, monkeypatch) -> None:
+    send, key = _handed(tmp_path, monkeypatch)
+    again = PlanningService(dev_sender=send)
+    send.sent.clear()
+
+    async def run() -> ActionResult:
+        out = await again.dispatch({"type": "resendHandoff", "all": True})
+        await again.wait_sent()
+        return out
+
+    out = asyncio.run(run())
+    assert send.sent == [key] and out.output == {"resent": [key]}
+    assert any("모두 다시 보냄" in a.text for a in again.state.activity)
+
+
+def test_resend_handoff_all_without_anything_is_not_found() -> None:
+    from ax_workflow.core import ActionError
+
+    svc = PlanningService(dev_sender=Sender("보냄"))
+    svc.state.specs = []
+    with pytest.raises(ActionError) as err:
+        asyncio.run(svc.dispatch({"type": "resendHandoff", "all": True}))
+    assert err.value.code == "NOT_FOUND"
+
+
+class Peer:
+    """받는 서비스: `downs`번 묻는 동안은 안 떠 있고 그 뒤로 뜬다. 안 떴을 때 보내면 닿지 못함."""
+
+    def __init__(self, downs: int):
+        self.downs = downs
+        self.probes = 0
+        self.sent: list[str] = []
+
+    @property
+    def up(self) -> bool:
+        return self.probes > self.downs
+
+    async def probe(self) -> bool:
+        self.probes += 1
+        return self.up
+
+    async def __call__(self, skill: str, ctx: str, tenant: str, p: BaseModel, key: str) -> str:
+        self.sent.append(key)
+        return "보냄" if self.up else DOWN
+
+
+def _unacked_planning(peer: Peer, monkeypatch) -> tuple[PlanningService, list[float]]:
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(base, "_sleep", fake_sleep)
+
+    async def build() -> PlanningService:
+        svc = PlanningService(dev_sender=Sender("보냄"))
+        await svc.inbound("support_ticket")
+        await svc.wait_sent()
+        svc._acked.clear()  # 받았다는 기록이 없는 넘긴 기획서 (예전 빌드에서 넘김)
+        svc._send_dev = peer
+        monkeypatch.setattr(svc, "_peer_up", peer.probe)
+        return svc
+
+    return asyncio.run(build()), sleeps
+
+
+def test_start_resync_waits_for_peer_then_sends_without_failures(monkeypatch) -> None:
+    peer = Peer(downs=2)
+    svc, sleeps = _unacked_planning(peer, monkeypatch)
+    before = len(_start_dev_logs(svc))
+    asyncio.run(svc.resync_peer(wait_peer=True))
+    assert peer.probes == 3 and sleeps == [2.0, 4.0]
+    assert peer.sent and svc._unsent == {}
+    assert len(_start_dev_logs(svc)) == before  # 실패 줄이 없다
+    assert set(peer.sent) <= set(svc._acked)
+
+
+def test_start_resync_gives_up_waiting_after_cap_and_still_sends(monkeypatch) -> None:
+    peer = Peer(downs=10**6)
+    svc, sleeps = _unacked_planning(peer, monkeypatch)
+    asyncio.run(svc.resync_peer(wait_peer=True))
+    assert sum(sleeps) == base.PEER_WAIT_MAX_SECONDS
+    assert max(sleeps) <= base.PEER_WAIT_STEP_MAX_SECONDS
+    assert peer.sent  # 그래도 보내고, 닿지 못한 건 간격을 늘려 다시 보낸다
+    assert set(peer.sent) <= set(svc._unsent)
+
+
+def test_resync_without_wait_does_not_probe(monkeypatch) -> None:
+    peer = Peer(downs=0)
+    svc, sleeps = _unacked_planning(peer, monkeypatch)
+    asyncio.run(svc.resync_peer())
+    assert peer.probes == 0 and sleeps == [] and peer.sent
+
+
+def test_peer_service_follows_call_agent_routing() -> None:
+    assert PlanningService(dev_sender=Sender("보냄"))._peer_service() == "dev"
+    assert DevService(dev_sender=Sender("보냄"))._peer_service() == "planning"
+
+
+def test_dev_result_direction_resync_is_quiet_once_acked() -> None:
+    send = Sender("보냄")
+
+    async def run() -> None:
+        dev = DevService(dev_sender=send, real_example=True)
+        await dev.resync_peer()
+        assert any(k for k in send.sent if ":dev_result:" in k)
+        send.sent.clear()
+        await dev.resync_peer()  # 기획이 모두 받았다고 했다
+        assert send.sent == []
+
+    asyncio.run(run())
+
+
+def test_dev_result_reack_keeps_start_dev_quiet() -> None:
+    """개발이 돌려준 결과로 start_dev 입력(작업·요청 상태)이 바뀌어도
+    다시 켰을 때 또 보내지 않는다."""
+
+    async def run() -> None:
+        from planning_agent.domain.models import dump
+
+        send = Sender("보냄")
+        svc = PlanningService(dev_sender=send)
+        await svc.inbound("support_ticket")
+        await svc.wait_sent()
+        [key] = send.sent
+        sp = next(x for x in svc.state.specs if x.handed_to_dev)
+        req = svc._request_of_spec(svc.state, sp)
+        tasks = [dump(t) for t in svc.state.tasks if t.spec == sp.id]
+        assert tasks
+        tasks[0]["title"] = f"{tasks[0]['title']} (개발이 고침)"
+        await svc.receive_dev_result(
+            context_id=req.context_id, requester="dev", spec_id=sp.id, request_id=req.id,
+            request_state=req.state, tasks=tasks, prs=[], idempotency_key="dev-result-1",
+        )  # fmt: skip
+        send.sent.clear()
+        await svc.resync_peer()
+        assert key not in send.sent
+
+    asyncio.run(run())
+
+
+def test_resync_resends_acked_key_the_peer_lost(tmp_path, monkeypatch) -> None:
+    send, key = _handed(tmp_path, monkeypatch)
+    again = PlanningService(dev_sender=send)
+    again._ask_known = known = Known(missing={key})  # 개발이 상태를 잃었다
+    send.sent.clear()
+    asyncio.run(again.resync_peer())
+    assert known.asked == [[key]]  # 한 번 묻는다
+    assert send.sent == [key]
+
+
+def test_resync_asks_nothing_when_nothing_is_acked(monkeypatch) -> None:
+    peer = Peer(downs=0)
+    svc, _ = _unacked_planning(peer, monkeypatch)
+    svc._ask_known = known = Known()
+    asyncio.run(svc.resync_peer())
+    assert known.asked == [] and peer.sent
+
+
+def test_resync_falls_back_to_acked_skip_when_asking_fails(tmp_path, monkeypatch) -> None:
+    send, key = _handed(tmp_path, monkeypatch)
+    again = PlanningService(dev_sender=send)
+    again._ask_known = known = Known(fail=True)
+    send.sent.clear()
+    asyncio.run(again.resync_peer())
+    assert known.asked == [[key]] and send.sent == []  # 모두 다시 보내지 않는다
+
+
+def test_handoff_known_answers_only_applied_keys() -> None:
+    from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
+    from ax_workflow.a2a import handoff_known_handler
+
+    svc = PlanningService(dev_sender=Sender("보냄"))
+    svc._idempotent["k-applied"] = ActionResult(output={})
+    handler = handoff_known_handler(lambda: svc)
+    from datetime import UTC, datetime, timedelta
+
+    meta = RequestMeta(
+        context_id="handoff_known:planning", tenant_id=svc.tenant_id, token="t", path=[],
+        deadline=datetime.now(UTC) + timedelta(seconds=10),
+    )  # fmt: skip
+    req = AgentRequest(meta=meta, skill="handoff_known", input={"keys": ["k-lost", "k-applied"]})
+    out = asyncio.run(handler(req))
+    assert out.status == TaskStatus.COMPLETED and out.output == {"known": ["k-applied"]}
+    bad = AgentRequest(meta=meta, skill="handoff_known", input={"keys": "x"})
+    assert asyncio.run(handler(bad)).outcome == "invalid_input"
+
+
+def test_ask_known_returns_none_when_the_call_fails(monkeypatch) -> None:
+    from ax_contracts.schemas import AgentResult, TaskStatus
+    from ax_workflow import dev_handoff
+
+    async def failed(target, req, **_):
+        return AgentResult(meta=req.meta, status=TaskStatus.FAILED, outcome="unreachable")
+
+    async def boom(target, req, **_):
+        raise RuntimeError("토큰 없음")
+
+    async def ok(target, req, **_):
+        assert (target, req.skill, req.meta.idempotency_key) == ("dev", "handoff_known", None)
+        return AgentResult(
+            meta=req.meta, status=TaskStatus.COMPLETED, output={"known": req.input["keys"][:1]}
+        )
+
+    for fake, want in ((failed, None), (boom, None), (ok, ["a"])):
+        monkeypatch.setattr(dev_handoff, "call_agent", fake)
+        assert asyncio.run(dev_handoff.ask_known("dev", "t", ["a", "b"])) == want
+
+
+def test_handoff_known_is_on_both_cards_and_skill_lists() -> None:
+    from ax_agent_template.services import BY_ID, route_target
+    from dev_agent.handlers import DEV_HANDLERS
+    from planning_agent.handlers import PLANNING_HANDLERS
+
+    assert "handoff_known" in PLANNING_HANDLERS and "handoff_known" in DEV_HANDLERS
+    assert "handoff_known" in BY_ID["planning"].skills and "handoff_known" in BY_ID["dev"].skills
+    assert route_target("dev", "handoff_known") == "dev"
+    assert route_target("planning", "handoff_known") == "planning"

@@ -39,7 +39,13 @@ from ax_contracts.schemas.planning import (
     VerifyRollbackTargetInput,
     VerifyRollbackTargetOutput,
 )
-from ax_workflow.a2a import _gate_rejected, _invalid, _missing_key, _requester
+from ax_workflow.a2a import (
+    _gate_rejected,
+    _invalid,
+    _missing_key,
+    _requester,
+    handoff_known_handler,
+)
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.handover import ROSTER_AREAS, Item, is_roster_area
 from ax_workflow.models import PR
@@ -792,6 +798,8 @@ DEV_HANDLERS = {
     "list_dev_outcomes": list_dev_outcomes,
     "verify_handover": verify_handover,
     "start_dev": start_dev,
+    # 다시 켰을 때 맞추기: 기획이 넘긴 것을 받았는지 (read, 기획과 같은 핸들러)
+    "handoff_known": handoff_known_handler(get_service),
     "receive_release_order": receive_release_order,
     "receive_request_pause": receive_request_pause,
     # 사람과 직접 대화 (dashboard-api /api/dashboard/dev-chat)
