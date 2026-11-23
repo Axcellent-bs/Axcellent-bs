@@ -151,23 +151,34 @@ class PublishSnsOutput(AxModel):
     manual: bool | None = None  # 사람이 직접 올린 게시(링크를 사람이 기록했다)
     posted_by: str | None = None  # 수동 게시를 기록한 사람
     published_at: str | None = None  # 사람이 올린 시각(입력 또는 기록 시각)
+    # 의뢰 영상 썸네일(표지): {media_id, applied, reason}. 어댑터가 못 받으면 applied=false
+    cover: dict[str, Any] | None = None
 
 
 # -- 내용 해시·멱등 키
 def content_sha(
-    caption: str, asset_sha256: str, media_kind: str, share_to_feed: bool, is_ai_generated: bool
+    caption: str,
+    asset_sha256: str,
+    media_kind: str,
+    share_to_feed: bool,
+    is_ai_generated: bool,
+    cover_token: str | None = None,
 ) -> str:
-    """sha256(caption ‖ asset_sha ‖ media_kind ‖ share_to_feed ‖ is_ai_generated).
+    """sha256(caption ‖ asset_sha ‖ media_kind ‖ share_to_feed ‖ is_ai_generated [‖ cover]).
 
     구분자는 U+001F다. 필드 경계가 모호해져 다른 내용이 같은 해시가 되는 일을 막는다.
+    `cover_token`(의뢰 영상 썸네일 `media_id:sha256:rev`)은 썸네일 후보가 있는 초안만 넣는다
+    (없으면 옛 해시 그대로).
     """
-    parts = (
+    parts = [
         caption,
         asset_sha256,
         media_kind,
         str(share_to_feed).lower(),
         str(is_ai_generated).lower(),
-    )
+    ]
+    if cover_token:
+        parts.append(f"cover:{cover_token}")
     return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
 
@@ -178,7 +189,45 @@ def params_sha(params: dict[str, Any]) -> str:
         params["media_kind"],
         params["share_to_feed"],
         params["is_ai_generated"],
+        params.get("cover_token"),
     )
+
+
+def _cover_now(post_draft_id: str) -> str:
+    """지금 초안의 썸네일 토큰(승인 뒤 바꿨는지 맞춰 보는 값). 읽을 수 없으면 `missing`."""
+    from marketing_agent.request_video_cover import cover_token
+    from marketing_agent.request_video_publish import _drafts
+
+    try:
+        drafts = _drafts()
+        return cover_token(drafts.get(post_draft_id) if drafts is not None else None)
+    except Exception:  # noqa: BLE001 - 모르면 승인값과 다르게 보고 올리지 않는다(fail-closed)
+        return "missing"
+
+
+def with_cover(params: dict[str, Any], sns_store: Any | None) -> str | None:
+    """의뢰 영상 릴스면 썸네일(고르지 않았으면 첫 후보)을 정해 `params`에 넣는다.
+
+    막히면 이유 코드."""
+    if params.get("media_kind") != "reel" or sns_store is None:
+        return None
+    from marketing_agent import request_video_cover as cover_mod
+
+    draft = sns_store.get(params["post_draft_id"])
+    if draft is None or not draft.cover_candidates:
+        return None
+    draft = cover_mod.ensure_cover(sns_store, draft)
+    cover = cover_mod.current_cover(draft)
+    if cover is None:
+        return None
+    if not cover["ok"]:
+        return "cover_missing"
+    params |= {
+        "cover_media_id": cover["media_id"],
+        "cover_ref": cover["asset_ref"],
+        "cover_token": cover["token"],
+    }
+    return None
 
 
 def idempotency_key(context_id: str, post_draft_id: str, sha: str, attempt: int = 0) -> str:
@@ -208,6 +257,8 @@ def default_resolver(row: PendingPost) -> dict[str, Any]:
     current = dict(row.params)
     if current.get("media_kind") == "carousel":
         return _carousel_resolver(current)
+    if current.get("cover_token"):  # 승인 뒤 썸네일을 바꿨거나 파일이 바뀌었으면 해시가 달라진다
+        current["cover_token"] = _cover_now(str(current.get("post_draft_id", "")))
     path = Path(str(current.get("asset_ref", "")))
     try:
         if path.is_file():
@@ -322,6 +373,8 @@ def _safety_params(params: dict[str, Any], counts: dict[str, int]) -> dict[str, 
         "is_ai_generated": params["is_ai_generated"],
         "summary": params.get("summary") or _summary(params),
         **carousel,
+        **({"cover_media_id": params["cover_media_id"], "cover_token": params["cover_token"]}
+           if params.get("cover_token") else {}),  # fmt: skip
         **counts,
     }
 
@@ -357,6 +410,7 @@ def _output(row: PendingPost) -> dict[str, Any]:
         manual=info.get("manual"),
         posted_by=info.get("posted_by"),
         published_at=info.get("published_at"),
+        cover=info.get("cover"),
     ).model_dump(exclude_none=True)
 
 
@@ -486,6 +540,15 @@ async def publish_sns(
     if data.media_kind == "carousel":  # 전체 해시가 내용 해시·멱등 키·안전 관문 값에 들어간다
         params["asset_sha256"] = sns_media.carousel_sha256(list(data.asset_sha256s or []))
         params["asset_ref"] = ""
+    # 의뢰 영상 썸네일: 서버가 초안에서 정한다(호출자 값이 아니다). 승인 해시에 들어간다
+    cover_problem = with_cover(params, sns_store)
+    if cover_problem is not None:
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.FAILED,
+            outcome=cover_problem,
+            output={"reason": "썸네일 후보 파일이 기록과 다르다. 게시 요청을 하지 않았다"},
+        )
     sha = params_sha(params)
     key = idempotency_key(request.meta.context_id, data.post_draft_id, sha, attempt)
 
@@ -918,6 +981,9 @@ async def _prepare_container(row: PendingPost, adapter: InstagramAdapter) -> str
         caption=p["caption"],
         is_ai_generated=True,
         share_to_feed=bool(p["share_to_feed"]),
+        # 릴스 표지: 어댑터가 받으면 쓴다(`supports_cover`).
+        # 못 받으면 결과에 그렇게 적는다(`_cover_result`)
+        cover_ref=p.get("cover_ref") if getattr(adapter, "supports_cover", False) else None,
     )
     new_container_budget = 1
     while True:
@@ -1271,6 +1337,10 @@ async def _run_publish(row: PendingPost) -> None:
             raise _Fail("publish_paused")
         if _halted():
             raise _Fail("publish_halted")
+        # 게시 직전: 승인받은 썸네일과 지금 썸네일을 다시 맞춘다. 다르면 올리지 않는다
+        approved_cover = row.params.get("cover_token")
+        if approved_cover and _cover_now(row.post_draft_id) != approved_cover:
+            raise _Fail("cover_changed")
         container_id = await _prepare_container(row, adapter)
         refused, flags = await _limit_check(adapter)  # media_publish 직전 다시 본다
         if refused:
@@ -1297,12 +1367,24 @@ async def _run_publish(row: PendingPost) -> None:
         _close(row, PUBLISHING, FAILED, "unexpected_error")
         return
     fresh = store().get(key) or row
-    result = await _verify(fresh, adapter, media_id) | flags
+    result = await _verify(fresh, adapter, media_id) | flags | _cover_result(row, adapter)
     if config_issue:  # 게시는 됐지만 캡션 부착 실패 등 → 사람이 확인(reconcile)
         result |= {"config_issue": config_issue, "reconcile_needed": True}
         _row_log(fresh, "sns_publish_attempt", {"op": "config_issue", "issue": config_issue})
     if _close(fresh, PUBLISHING, PUBLISHED, None, media_id=media_id, result=result):
         await after_published(key)
+
+
+def _cover_result(row: PendingPost, adapter: InstagramAdapter) -> dict[str, Any]:
+    """게시 결과의 표지 칸. 썸네일을 정한 의뢰 영상만.
+
+    어댑터가 표지를 못 받으면 쓰지 않았다고 적는다."""
+    media_id = row.params.get("cover_media_id")
+    if not media_id or row.params.get("media_kind") == "carousel":
+        return {}
+    if getattr(adapter, "supports_cover", False):
+        return {"cover": {"media_id": media_id, "applied": True, "reason": None}}
+    return {"cover": {"media_id": media_id, "applied": False, "reason": "adapter_no_cover"}}
 
 
 async def after_published(key: str) -> None:
