@@ -1,3 +1,4 @@
+import type { InstagramPostState } from "./instagramPost";
 import type { YoutubeState } from "./youtube";
 import type { ThumbnailsState } from "./creativeThumbnails";
 import { failureError } from "./apiError";
@@ -51,7 +52,7 @@ export interface CreativeRecord {
   storyboard?: StoryboardResult | null;
   storyboard_at?: string | null;
   /** Higgsfield 그림·영상 */
-  render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState; thumbnails?: ThumbnailsState };
+  render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState; thumbnails?: ThumbnailsState; instagram?: InstagramPostState };
 }
 
 const PATH = "/api/dashboard/marketing/creative-records";

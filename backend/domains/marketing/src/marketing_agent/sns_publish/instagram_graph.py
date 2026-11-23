@@ -6,6 +6,9 @@
   호스트에 따라 필요한 토큰·권한이 다르다(Instagram Login `instagram_business_*` / Facebook Login
   `instagram_basic`·`instagram_content_publish`·`pages_read_engagement`). 토큰 종류·계정 종류는
   서버에서 확인하지 못했다 [확인 필요]. 비교표와 근거 URL은 sns-design.md 6절.
+- 로그인 연결(11/23, `ax_agent_template.instagram_link`): 회사가 로그인으로 연결했으면 그 장기 토큰·
+  계정 ID와 연결할 때 판정한 API 주소(인스타 토큰은 graph.instagram.com, Facebook 사용자 토큰은
+  graph.facebook.com/<버전>)를 쓴다. 없으면 직접 넣은 토큰과 위 서버 설정 주소를 그대로 쓴다.
 - 흐름: 컨테이너 생성 → 상태 조회 → `media_publish`(1회) → 미디어 조회. 인터페이스는 목과 같다.
 - 토큰·계정 ID는 환경변수에서만 읽는다(이름은 `instagram.SECRET_ENV_NAMES`).
   값은 로그·예외·결과에 내지 않는다. HTTP 예외는 URL(쿼리에 토큰이 붙는다)을 담고 있어서
@@ -37,6 +40,7 @@ from typing import Any
 
 import httpx
 
+from ax_agent_template import instagram_link
 from marketing_agent import sns_media
 from marketing_agent.sns_publish.instagram import (
     TOKEN_ENV,
@@ -65,6 +69,7 @@ TIMEOUT_ENV = "MARKETING_IG_TIMEOUT_S"
 CAROUSEL_ENV = "MARKETING_IG_CAROUSEL_ENABLED"  # 필드 이름 확인 뒤 사람이 켠다
 
 DEFAULT_API_BASE = "https://graph.instagram.com"
+instagram_link.redact_http_logs()  # GET 쿼리의 access_token이 httpx 요청 로그에 남지 않게
 JPEG_MAX_BYTES = 8 * 1024 * 1024
 _STATES = ("IN_PROGRESS", "FINISHED", "ERROR", "EXPIRED", "PUBLISHED")
 
@@ -92,8 +97,24 @@ def _company_secret(name: str) -> str:
         return ""
 
 
+def _login_link() -> tuple[str, str, tuple[str, str]] | None:
+    """로그인으로 연결한 회사면 (장기 토큰, 인스타 계정 ID, (API 주소, 버전)). 없으면 None.
+
+    API 주소는 연결할 때 판정한 토큰 종류를 따른다(인스타 토큰은 graph.instagram.com,
+    Facebook 사용자 토큰은 graph.facebook.com). 서버의 `MARKETING_IG_API_BASE_URL`을 쓰지 않는다."""
+    from ax_agent_template import company_ai
+
+    token = _company_secret(instagram_link.TOKEN_NAME)
+    if not token:
+        return None
+    info = instagram_link.load(company_ai.company_id())
+    user_id = str(info.get("user_id") or "").strip()
+    return (token, user_id, instagram_link.api_of(info)) if user_id.isdigit() else None
+
+
 class GraphInstagramAdapter:
     name = "instagram"
+    via = "manual"  # login(인스타 로그인 연결) | manual(직접 넣은 토큰)
 
     def __init__(
         self,
@@ -122,8 +143,18 @@ class GraphInstagramAdapter:
     # ---- 설정 ----
     @classmethod
     def from_env(cls, client: httpx.AsyncClient | None = None) -> GraphInstagramAdapter:
-        token = _company_secret(TOKEN_ENV)
-        user_id = _company_secret(USER_ID_ENV)
+        """회사 계정 어댑터. 로그인 연결(`instagram_link`)이 있으면 그 토큰·계정으로
+        graph.instagram.com을 쓰고(서버의 `MARKETING_IG_API_BASE_URL`·버전과 상관없이, 페이지 토큰과
+        섞지 않는다), 없으면 사람이 직접 넣은 토큰·계정 ID와 서버 설정 주소를 그대로 쓴다."""
+        login = _login_link()
+        if login is not None:
+            token, user_id, (api_base, api_version) = login
+            via = "login"
+        else:
+            token = _company_secret(TOKEN_ENV)
+            user_id = _company_secret(USER_ID_ENV)
+            api_base = (os.getenv(API_BASE_ENV) or "").strip() or DEFAULT_API_BASE
+            api_version, via = (os.getenv(API_VERSION_ENV) or "").strip(), "manual"
         missing = [n for n, v in ((TOKEN_ENV, token), (USER_ID_ENV, user_id)) if not v]
         if missing:
             raise GraphConfigError(f"설정이 비어 있다: {', '.join(missing)}")
@@ -135,18 +166,20 @@ class GraphInstagramAdapter:
             media_host = S3MediaHost.from_env_optional()
         except MediaHostConfigError as error:
             raise GraphConfigError(str(error)) from None
-        return cls(
+        adapter = cls(
             media_host=media_host,
             access_token=token,
             user_id=user_id,
             media_base_url=(os.getenv(MEDIA_BASE_URL_ENV) or "").strip(),
-            api_base_url=(os.getenv(API_BASE_ENV) or "").strip() or DEFAULT_API_BASE,
-            api_version=(os.getenv(API_VERSION_ENV) or "").strip(),
+            api_base_url=api_base,
+            api_version=api_version,
             timeout_s=timeout if timeout > 0 else 30.0,
             client=client,
             carousel_enabled=(os.getenv(CAROUSEL_ENV) or "").strip().lower()
             in ("1", "true", "yes"),
         )
+        adapter.via = via
+        return adapter
 
     # ---- 미디어 주소·규격 ----
     def public_media_url(self, media_ref: str) -> str:

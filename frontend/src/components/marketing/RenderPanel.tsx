@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useAuthedMedia } from "@/lib/authedMedia";
+import { InstagramPanel } from "./InstagramPanel";
 import { HIGGSFIELD_URL, acceptFor, isVideoPart, pickDropped, storyboardVideoPrompt, uploadProblem } from "@/lib/higgsfieldWeb";
 import { ThumbnailPicker } from "./ThumbnailPicker";
 import { YoutubePanel } from "./YoutubePanel";
@@ -222,6 +223,8 @@ export function RenderPanel({ recordId }: { recordId: string }) {
       <ThumbnailPicker recordId={recordId} state={render.thumbnails} youtubeStatus={render.youtube?.status}
         hasVideo={render.video?.status === "done" || render.final_video?.status === "done"} onChanged={() => void load()} />
       <YoutubePanel recordId={recordId} youtube={render.youtube} hasVideo={render.video?.status === "done"}
+        hasFinal={render.final_video?.status === "done"} onChanged={() => void load()} />
+      <InstagramPanel recordId={recordId} instagram={render.instagram} hasVideo={render.video?.status === "done"}
         hasFinal={render.final_video?.status === "done"} onChanged={() => void load()} />
       {error && <p className="text-xs text-accent" role="alert">{error}</p>}
     </section>

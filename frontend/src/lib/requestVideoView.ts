@@ -3,6 +3,7 @@
 // 화면은 제작 기록(/marketing/records?view=videos)의 '의뢰로 만든 영상' 탭에 둔다(11/23, 제작 기록과 같이 본다).
 // 영상마다 회사 유튜브 올리기(사람 승인 C)를 할 수 있다. Instagram 게시 승인은 기획안 카드의 승인 패널 그대로다.
 import type { WorkRequestRow } from "./workRequests.ts";
+import type { InstagramPostState } from "./instagramPost.ts";
 import type { YoutubeState } from "./youtube.ts";
 
 /** 백엔드 계약: GET /api/dashboard/marketing/request-videos 의 items 한 건 */
@@ -23,6 +24,8 @@ export interface RequestVideo {
   status: string;
   /** 이 영상의 유튜브 올리기 상태(제작 기록 render.youtube와 같은 모양). 아직 없으면 null */
   youtube?: YoutubeState | null;
+  /** 이 영상의 인스타 릴스 올리기 상태(제작 기록 render.instagram과 같은 모양). 아직 없으면 null */
+  instagram?: InstagramPostState | null;
   /** 썸네일 후보 3장(라벨 입힌 영상에서 뽑은 AI 표시 포함 그림). 라벨 없는 영상은 빈 목록 */
   covers?: RequestVideoCover[];
   /** 고른 후보, 고르지 않았으면 첫 후보(기본값). 후보가 없으면 null */

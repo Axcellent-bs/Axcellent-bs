@@ -191,6 +191,13 @@ async def test_publish_youtube_always_needs_a_human(gate: Gate, act) -> None:
 
 
 @pytest.mark.asyncio
+async def test_publish_instagram_video_always_needs_a_human(gate: Gate, act) -> None:
+    """인스타 릴스 올리기도 공개되고 이 로그인 경로에 삭제 API가 없어 늘 사람 결정(C)이다."""
+    decision = await gate.execute(act("publish_instagram_video", "marketing", "ig-1"))
+    assert (decision.grade, decision.status) == ("C", "held")
+
+
+@pytest.mark.asyncio
 async def test_creative_thumbnails_always_need_a_human(gate: Gate, act) -> None:
     """영상 썸네일 후보 만들기는 저절로 요청돼도 크레딧이 나가기 전에 사람이 정한다(C, 마케팅만)."""
     held = await gate.execute(

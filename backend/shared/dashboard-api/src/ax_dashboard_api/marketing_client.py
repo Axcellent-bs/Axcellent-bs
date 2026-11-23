@@ -894,6 +894,10 @@ VIDEO_REFUSALS = {
     "draft_missing": (409, "DRAFT_MISSING"),
     "video_not_ready": (409, "VIDEO_NOT_READY"),
     "youtube_not_connected": (409, "YOUTUBE_NOT_CONNECTED"),
+    "instagram_not_connected": (409, "INSTAGRAM_NOT_CONNECTED"),
+    "label_failed": (409, "LABEL_FAILED"),
+    "media_dir_not_configured": (409, "MEDIA_DIR_NOT_CONFIGURED"),
+    "media_dir_mismatch": (409, "MEDIA_DIR_MISMATCH"),
     "already_requested": (409, "ALREADY_REQUESTED"),
     # 의뢰 영상 썸네일: 후보 밖 값 · 이미 올라간 영상 · 후보 파일이 기록과 다름
     "cover_not_candidate": (422, "COVER_NOT_CANDIDATE"),
@@ -1200,6 +1204,38 @@ async def request_video_youtube_request_call(post_draft_id: str, who: str | None
     if who:
         payload["who"] = who
     return await _request_video_youtube("request_video_youtube_request", payload)
+
+
+async def instagram_draft_call(record_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """인스타 릴스 캡션·해시태그 초안(마케팅 `creative_instagram_draft`). 올리지는 않는다."""
+    return await _creative_read("creative_instagram_draft", {"record_id": record_id, **body})
+
+
+async def instagram_request_call(record_id: str, who: str | None) -> dict[str, Any]:
+    """인스타 릴스 올리기를 사람 승인에 올린다(마케팅 `creative_instagram_request`)."""
+    payload: dict[str, Any] = {"record_id": record_id}
+    if who:
+        payload["who"] = who
+    return await _creative_read("creative_instagram_request", payload)
+
+
+async def request_video_instagram_draft_call(
+    post_draft_id: str, body: dict[str, Any]
+) -> dict[str, Any]:
+    """의뢰로 만든 영상의 인스타 캡션 초안(마케팅 `request_video_instagram_draft`)."""
+    return await _request_video_youtube(
+        "request_video_instagram_draft", {"post_draft_id": post_draft_id, **body}
+    )
+
+
+async def request_video_instagram_request_call(
+    post_draft_id: str, who: str | None
+) -> dict[str, Any]:
+    """의뢰로 만든 영상(AI 라벨 입힌 파일)의 인스타 릴스 올리기를 사람 승인에 올린다."""
+    payload: dict[str, Any] = {"post_draft_id": post_draft_id}
+    if who:
+        payload["who"] = who
+    return await _request_video_youtube("request_video_instagram_request", payload)
 
 
 async def campaigns_list_call(limit: int) -> dict[str, Any]:

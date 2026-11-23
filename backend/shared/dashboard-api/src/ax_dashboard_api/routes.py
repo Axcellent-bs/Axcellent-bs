@@ -1804,6 +1804,74 @@ async def marketing_request_video_youtube_request(
     return ok(await marketing_client.request_video_youtube_request_call(post_draft_id, who))
 
 
+class InstagramDraftBody(BaseModel):
+    """인스타 릴스 캡션 초안. 비운 칸은 그대로 둔다(AI 생성 문구는 서버가 늘 붙인다)."""
+
+    regenerate: bool = False
+    caption: str | None = Field(default=None, max_length=2200)
+    hashtags: list[str] | None = Field(default=None, max_length=5)
+    part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+
+
+class RequestVideoInstagramDraftBody(BaseModel):
+    """의뢰 영상의 인스타 캡션 초안(올릴 영상은 늘 AI 라벨 입힌 파일)."""
+
+    regenerate: bool = False
+    caption: str | None = Field(default=None, max_length=2200)
+    hashtags: list[str] | None = Field(default=None, max_length=5)
+
+
+@router.post("/marketing/creative-records/{record_id}/instagram/draft")
+async def marketing_instagram_draft(
+    body: InstagramDraftBody,
+    request: Request,
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """AI 인스타 캡션·해시태그 초안 또는 사람이 고친 값 저장(`creative_instagram_draft`). 사람
+    토큰."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "인스타 초안은 실제 모드에서만 된다")
+    human_from_authorization(request.headers.get("authorization"))
+    payload = body.model_dump(exclude_none=True)
+    return ok(await marketing_client.instagram_draft_call(record_id, payload))
+
+
+@router.post("/marketing/creative-records/{record_id}/instagram")
+async def marketing_instagram_request(
+    request: Request, record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$")
+) -> dict:
+    """초안대로 인스타 릴스 올리기를 사람 승인(C publish_instagram_video)에 올린다. 사람 토큰."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "인스타 올리기는 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.instagram_request_call(record_id, who))
+
+
+@router.post("/marketing/request-videos/{post_draft_id}/instagram/draft")
+async def marketing_request_video_instagram_draft(
+    body: RequestVideoInstagramDraftBody,
+    request: Request,
+    post_draft_id: str = Path(pattern=_DRAFT_ID),
+) -> dict:
+    """의뢰로 만든 영상의 AI 인스타 캡션 초안 또는 사람이 고친 값 저장. 사람 토큰."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "인스타 초안은 실제 모드에서만 된다")
+    human_from_authorization(request.headers.get("authorization"))
+    payload = body.model_dump(exclude_none=True)
+    return ok(await marketing_client.request_video_instagram_draft_call(post_draft_id, payload))
+
+
+@router.post("/marketing/request-videos/{post_draft_id}/instagram")
+async def marketing_request_video_instagram_request(
+    request: Request, post_draft_id: str = Path(pattern=_DRAFT_ID)
+) -> dict:
+    """의뢰로 만든 영상(AI 라벨 입힌 파일)의 인스타 릴스 올리기를 사람 승인(C)에 올린다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "인스타 올리기는 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.request_video_instagram_request_call(post_draft_id, who))
+
+
 class RequestVideoCoverBody(BaseModel):
     """썸네일 후보 중 하나(`covers[].media_id`). 후보 밖 값은 마케팅이 거절한다(422)."""
 
