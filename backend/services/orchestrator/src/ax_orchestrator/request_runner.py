@@ -60,6 +60,7 @@ HIDE_NOTE = "사람이 의뢰를 삭제함"  # 의뢰 삭제(멈추고 숨김)�
 # 의뢰문 수정에서 "실제로 새 의뢰가 생긴" 접수 결과(허용 목록). 이때만 옛 의뢰를 숨기고 잇는다.
 # 일 접수·되묻기(입력 되묻기 포함)·두 번째 되묻기에서 사람에게·담당 불명·구매자 연결 없음 안내
 NEW_REQUEST_OUTCOMES = frozenset({"task", "clarify", "unclear", "unknown", "no_link"})
+EDIT_TOLD = "의뢰문을 고쳐 새 의뢰로 다시 접수했어요. 이전 의뢰({old})는 멈추고 숨겼어요."
 NEEDS_APPROVAL = "needs_approval"
 HUMAN_CHECK = "human_check"
 NO_AGENT = "no_agent"
@@ -982,6 +983,11 @@ class RequestRunner:
             return "not_request", None
         self.hide(request_id, by)
         self._requests.link_replacement(request_id, new_id)
+        # 새 의뢰 번호를 옛 의뢰의 대화에 남긴다("[의뢰 wr_새번호] …"). 화면은 그 줄 아래에
+        # 진행 카드를 붙인다. 알리지 못해도 수정은 성공이다(_tell 규칙)
+        new_row = self._requests.get(new_id)
+        if new_row is not None:
+            self._tell(new_row, EDIT_TOLD.format(old=request_id))
         return "ok", new_id
 
     def _skip_blocked(self, row: dict[str, Any]) -> None:

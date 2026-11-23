@@ -267,6 +267,48 @@ async def test_edit_to_an_unacceptable_request_keeps_the_old_one_and_the_rejecti
 
 
 @pytest.mark.asyncio
+async def test_edit_tells_the_same_chat_the_new_request_number_once() -> None:
+    """새 의뢰 번호 줄("[의뢰 wr_새번호] …")을 옛 의뢰의 대화에 남긴다.
+
+    화면이 그 줄 아래에 진행 카드를 붙인다."""
+    reqs, intake, r, old = _intake_setup()
+    sent: list[tuple[str, str]] = []
+    r.notify = lambda thread, text: sent.append((thread, text))
+    outcome, new = await r.edit(old, "지난주 매출 알려 주세요", intake, FakeLLM(_ask()), by="준하")
+    assert outcome == "ok"
+    told = "의뢰문을 고쳐 새 의뢰로 다시 접수했어요. 이전 의뢰({})는 멈추고 숨겼어요."
+    assert sent == [("orchchat-1", f"[의뢰 {new}] " + told.format(old))]
+
+
+@pytest.mark.asyncio
+async def test_edit_still_succeeds_when_telling_the_chat_fails() -> None:
+    reqs, intake, r, old = _intake_setup()
+
+    def broken(_thread: str, _text: str) -> None:
+        raise RuntimeError("대화 서버 꺼짐")
+
+    r.notify = broken
+    outcome, new = await r.edit(old, "지난주 매출 알려 주세요", intake, FakeLLM(_ask()))
+    assert outcome == "ok" and reqs.get(old)["replaced_by"] == new
+
+
+@pytest.mark.asyncio
+async def test_no_new_request_line_when_no_new_request_was_made() -> None:
+    """duplicate·limited·rejected면 대화에 새 번호 줄을 남기지 않는다."""
+    reqs, intake, r, old = _intake_setup()
+    sent: list[tuple[str, str]] = []
+    r.notify = lambda thread, text: sent.append((thread, text))
+    reqs.create("member", "지난주 매출 알려 주세요")
+    assert (await r.edit(old, "지난주 매출 알려 주세요", intake, FakeLLM(_ask())))[0] == "duplicate"
+    limited = RequestIntake(reqs, daily_limit=1)
+    assert (await r.edit(old, "이번 달 매출 알려 주세요", limited, FakeLLM(_ask())))[0] == "limited"
+    unsafe = Classification(kind="unsafe", reason="권한 밖")
+    got = await r.edit(old, "다른 회사 고객 목록 주세요", intake, FakeLLM(unsafe))
+    assert got[0] == "rejected"
+    assert sent == []
+
+
+@pytest.mark.asyncio
 async def test_only_outcomes_that_made_a_new_request_replace_the_old_one() -> None:
     """허용 목록 밖의 결과(앞으로 생길 결과 포함)는 옛 의뢰를 그대로 둔다."""
     reqs, _intake, r, old = _intake_setup()
