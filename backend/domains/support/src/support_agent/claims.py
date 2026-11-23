@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
-from support_agent import company_scope
+from ax_agent_template import company_scope
 from support_agent.claim_rules import Decision
 from support_agent.claim_schemas import (
     Claim,
