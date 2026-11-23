@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import tomllib
 import unicodedata
@@ -28,6 +29,8 @@ from ax_agent_template import tenant
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas.planning import VideoMediaHints, VideoPlan, VideoScene
 from ax_workflow.models import Proposal
+
+log = logging.getLogger("ax.planning")
 
 DEFAULT_SECONDS = 30
 MIN_SECONDS, MAX_SECONDS = 10, 60
@@ -222,8 +225,8 @@ def rule_plan(p: Proposal) -> VideoPlan:
         (
             f"'{theme}' 장면으로 시선을 끈다 (주인공: {who_ko})",
             _short(p.title, 60),
-            f"Opening hook in {where}: {who} notice something surprising and turn toward the "
-            f"camera with curious expressions, {tone} mood, themed around {theme}",
+            f"Opening hook in {where}: {who} noticing something surprising and turning toward "
+            f"the camera with curious expressions, {tone} mood, themed around {theme}",
         ),
         (
             "공감 가는 일상 장면으로 기획의 핵심을 보여 준다",
@@ -243,12 +246,12 @@ def rule_plan(p: Proposal) -> VideoPlan:
         (
             f"마무리: 인사하며 끝낸다 (주인공: {who_ko})",
             "지금 만나 보세요",
-            f"Closing shot: {who} wave at the camera in {where}, warm inviting ending",
+            f"Closing shot: {who} waving at the camera in {where}, warm inviting ending",
         ),
     ]
     scenes = [
-        VideoScene(n=i, start_s=a, end_s=b, visual=v, caption=c, prompt=pr)
-        for i, ((a, b), (v, c, pr)) in enumerate(
+        VideoScene(n=i, start_s=start, end_s=end, visual=v, caption=c, prompt=pr)
+        for i, ((start, end), (v, c, pr)) in enumerate(
             zip(timings(d, RULE_SCENES), beats, strict=True), start=1
         )
     ]
@@ -306,24 +309,72 @@ ANGLE_TEXT = {
 }
 
 
-def _from_llm(p: Proposal, got: _PlanOut, d: int, b: dict[str, str]) -> VideoPlan | None:
-    """LLM 답을 계약 모양으로. 장면 수가 범위 밖이거나 프롬프트 규칙에 걸리면 None."""
-    n = len(got.scenes)
-    if not MIN_SCENES <= n <= MAX_SCENES:
-        return None
+# 실존 이름 막기 (11/23 예진 님 리뷰): 의뢰 주제 후보 이름(topic_candidates,
+# 실존 그룹·인물일 수 있다)이 장면 prompt·visual·concept에 들어 있으면
+# 그 LLM 제작안을 버리고 규칙 제작안을 쓴다.
+# 후보 목록에 없는 다른 실존 이름은 이 검사로 못 잡는다(영상 쪽 금칙 NEGATIVE가 마지막 방어)
+_NAME_SPLIT = re.compile(r"[()\[\]/,·|]+")
+MIN_NAME_LEN = 2  # 정규화 뒤 한 글자 이름은 아무 데나 걸려서 보지 않는다
+
+
+def _fold(text: str) -> str:
+    """이름 비교용: NFKC 정규화 · 대소문자 무시 · 공백 없앰."""
+    return "".join(unicodedata.normalize("NFKC", text).casefold().split())
+
+
+def _names(p: Proposal) -> list[str]:
+    """비교할 후보 이름 (통째로 + 괄호·빗금으로 나눈 한글·영문 조각)."""
+    out: set[str] = set()
+    given = topic_of(p)["topic_candidates"]
+    for raw in given if isinstance(given, list) else []:
+        for part in [str(raw), *_NAME_SPLIT.split(str(raw))]:
+            folded = _fold(part)
+            if len(folded) >= MIN_NAME_LEN:
+                out.add(folded)
+    return sorted(out)
+
+
+def has_real_name(p: Proposal, got: _PlanOut) -> bool:
+    """LLM 제작안의 concept·장면 prompt·visual에 의뢰 주제 후보 이름이 들어 있나."""
+    names = _names(p)
+    if not names:
+        return False
+    texts = [got.concept, *(s.prompt for s in got.scenes), *(s.visual for s in got.scenes)]
+    folded = [_fold(t) for t in texts]
+    return any(name in t for name in names for t in folded)
+
+
+def reject_reason(p: Proposal, got: _PlanOut) -> str | None:
+    """LLM 제작안을 버리는 이유 코드 (쓸 수 있으면 None). 이름 같은 값은 담지 않는다."""
+    if not MIN_SCENES <= len(got.scenes) <= MAX_SCENES:
+        return "scene_count"
     if any(prompt_problems(s.prompt) for s in got.scenes):
+        return "prompt_rule"
+    if has_real_name(p, got):
+        return "real_name_in_scene"
+    return None
+
+
+def _from_llm(p: Proposal, got: _PlanOut, d: int, b: dict[str, str]) -> VideoPlan | None:
+    """LLM 답을 계약 모양으로. 장면 수·프롬프트 규칙·실존 이름에 걸리면 None (이유 코드만 로그)."""
+    reason = reject_reason(p, got)
+    if reason:
+        log.info("LLM 영상 제작안 대신 규칙 제작안: %s", reason)
         return None
+    n = len(got.scenes)
     try:
         scenes = [
             VideoScene(
                 n=i,
-                start_s=a,
-                end_s=b,
+                start_s=start,
+                end_s=end,
                 visual=_short(s.visual, 200),
                 caption=_short(s.caption, 60),
                 prompt=_short(s.prompt, 800),
             )  # fmt: skip
-            for i, ((a, b), s) in enumerate(zip(timings(d, n), got.scenes, strict=True), start=1)
+            for i, ((start, end), s) in enumerate(
+                zip(timings(d, n), got.scenes, strict=True), start=1
+            )
         ]
         return VideoPlan(
             concept=_short(got.concept, 200), duration_s=d, script=_short(got.script, 800),

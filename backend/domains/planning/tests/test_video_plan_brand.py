@@ -133,3 +133,81 @@ def test_brand_values_breaking_rules_fall_back(
     assert "original illustrated characters, not real people" in style
     assert "a setting that fits the company's products" in style
     assert "watercolor style" in style  # 통과한 칸은 그대로
+
+
+# ------------------------------------------------------ 실존 이름 막기 (11/23 예진 님 리뷰)
+# 후보 "NewJeans"는 실존 그룹 이름 검사용 값. 영상에는 쓰지 않는다
+NAME_FACTS = [
+    {"label": "주제 '아이돌' 후보 NewJeans (10대 여성) 네이버 검색 관심", "value": "90/100",
+     "source": "trend_report"},
+    IDOL_FACTS[0],  # 별빛소년단
+]  # fmt: skip
+
+
+def _plan_with(monkeypatch: pytest.MonkeyPatch, got: vp._PlanOut):
+    monkeypatch.setenv("AX_TENANT", "catbooks")
+    llm = MockLLMClient(responses={vp._PlanOut: got})
+    return asyncio.run(vp.write(llm, _idol(facts=NAME_FACTS), "ctx_wr_test"))
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Close-up of NewJeans dancing with light sticks",
+        "Close-up of  newjeans dancing with light sticks",  # 대소문자·공백
+        "Close-up of ＮｅｗＪｅａｎｓ dancing with light sticks",  # 전각(NFKC)
+        "별빛소년단 members holding a book",
+        "별빛 소년단 members holding a book",
+    ],
+)
+def test_candidate_name_in_scene_prompt_falls_back_to_rule_plan(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, prompt: str
+) -> None:
+    assert vp.topic_of(_idol(facts=NAME_FACTS))["topic_candidates"] == ["NewJeans", "별빛소년단"]
+    with caplog.at_level("INFO", logger="ax.planning"):
+        plan = _plan_with(monkeypatch, _out(prompt))
+    assert plan.written_by == "rule"
+    assert "real_name_in_scene" in caplog.text
+    # 이유 코드만 남기고 이름(값)은 로그·제작안에 남기지 않는다
+    assert "NewJeans" not in caplog.text and "별빛소년단" not in caplog.text
+    texts = [plan.concept, plan.script, *(s.prompt for s in plan.scenes)]
+    assert not any("newjeans" in t.lower() for t in texts)
+
+
+def test_candidate_name_in_visual_or_concept_also_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    visual = _out()
+    visual.scenes[1].visual = "별빛소년단 응원봉을 든 팬이 책을 편다"
+    assert _plan_with(monkeypatch, visual).written_by == "rule"
+    concept = _out()
+    concept.concept = "NewJeans 팬을 위한 책 소개"
+    assert _plan_with(monkeypatch, concept).written_by == "rule"
+
+
+def test_fan_culture_scene_without_names_keeps_llm_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    got = _out("Fans waving glowing light sticks under warm stage lights around a reading nook")
+    plan = _plan_with(monkeypatch, got)
+    assert plan.written_by == "llm"
+    assert vp.reject_reason(_idol(facts=NAME_FACTS), got) is None
+    assert plan.scenes[0].prompt == got.scenes[0].prompt
+
+
+@pytest.mark.parametrize(
+    ("tenant_id", "who"),
+    [
+        ("catbooks", "a friendly original cartoon cat mascot"),  # 단수
+        ("nubi", "original illustrated travelers, not real people"),  # 복수
+    ],
+)
+def test_rule_plan_sentences_fit_singular_and_plural(
+    monkeypatch: pytest.MonkeyPatch, tenant_id: str, who: str
+) -> None:
+    monkeypatch.setenv("AX_TENANT", tenant_id)
+    plan = vp.rule_plan(_idol())
+    first, last = plan.scenes[0].prompt, plan.scenes[-1].prompt
+    assert f"{who} noticing something surprising and turning toward the camera" in first
+    assert f"Closing shot: {who} waving at the camera" in last
+    # 수에 따라 틀리는 꼴(notice/notices, wave/waves)이 없다
+    for wrong in (f"{who} notice ", f"{who} notices ", f"{who} wave ", f"{who} waves "):
+        assert all(wrong not in s.prompt for s in plan.scenes)
