@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from ax_contracts.schemas.common import TENANT_ID_DEFAULT
+from ax_contracts.schemas.common import TENANT_ID_ALIASES, TENANT_ID_CATBOOKS, TENANT_ID_DEFAULT
 
 
 class ApiError(Exception):
@@ -60,8 +60,60 @@ async def or_unavailable[T](call: Awaitable[T], empty: T) -> T:
         return empty
 
 
+# 이 요청의 로그인 세션 회사 (요청 하나 = 작업 하나라 다른 요청에 새지 않는다). 세션이 아니면 None
+_SESSION_COMPANY: ContextVar[str | None] = ContextVar("dashboard_session_company", default=None)
+
+
+def session_company() -> str | None:
+    return _SESSION_COMPANY.get()
+
+
+def _company_from_authorization(authorization: str | None) -> str | None:
+    """로그인 세션 토큰이면 그 회사. 그 밖이거나 검증이 안 되면 None(거절은 각 라우트 몫)."""
+    from ax_agent_template import human_auth
+
+    token = human_auth.bearer(authorization)
+    if not token or not human_auth.is_session_token(token):
+        return None
+    try:
+        return human_auth.verify_session(token).company_id
+    except Exception:  # noqa: BLE001 - 여기서는 회사만 읽는다. 오류 응답은 인증 의존성이 낸다
+        return None
+
+
+class SessionCompanyMiddleware:
+    """요청의 세션 회사를 contextvar에 담는다 (응답 `meta.tenant_id`가 읽는다)."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        authorization = None
+        for key, value in scope.get("headers", ()):
+            if key == b"authorization":
+                authorization = value.decode("latin-1")
+                break
+        token = _SESSION_COMPANY.set(_company_from_authorization(authorization))
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _SESSION_COMPANY.reset(token)
+
+
+def meta_tenant_id() -> str:
+    """응답 meta의 회사. 세션이 캣북스거나 없으면 지금 값(`TENANT_ID`, 기본 shop-demo)을 둔다
+    (공통 로그 조회가 그 값을 본다). 다른 회사 세션이면 그 회사 id."""
+    company = _SESSION_COMPANY.get()
+    if company and TENANT_ID_ALIASES.get(company, company) != TENANT_ID_CATBOOKS:
+        return company
+    return os.getenv("TENANT_ID", TENANT_ID_DEFAULT)
+
+
 def ok(data: Any, total: int | None = None) -> dict[str, Any]:
-    meta: dict[str, Any] = {"tenant_id": os.getenv("TENANT_ID", TENANT_ID_DEFAULT)}
+    meta: dict[str, Any] = {"tenant_id": meta_tenant_id()}
     if total is not None:
         meta["total"] = total
     unavailable = _UNAVAILABLE.get()
