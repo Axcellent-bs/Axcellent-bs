@@ -71,6 +71,32 @@ def _detected_by(env: EventEnvelope) -> dict[str, str]:
     return {"source": env.source, "event": env.type.value, "at": iso(at) or ""}
 
 
+def _recovered_time(env: EventEnvelope) -> datetime:
+    """복구 시각. 인프라 복구 신호는 DejaFix가 알려 준 해소 시각(`data.recovered_at`)을 쓴다.
+
+    감시가 알아챈 시각(30초 주기)이 아니라 장애가 실제로 풀린 시각이라서다(에이전트 평가의 MTTR에
+    들어간다). 모르거나 읽지 못하면 신호를 보낸 시각(`occurred_at`)이다. 신호를 보낸 시각보다
+    늦은 값은 믿지 않는다.
+    """
+    at = env.occurred_at
+    if env.type != EventType.INFRA_RECOVERED:
+        return at
+    raw = env.data.get("recovered_at")
+    if not raw:
+        return at
+    try:
+        found = (
+            raw
+            if isinstance(raw, datetime)
+            else datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        )
+    except ValueError:
+        return at
+    if found.tzinfo is None:
+        found = found.replace(tzinfo=at.tzinfo)
+    return min(found, at)
+
+
 def _keep_recovery(inc: Incident, data: dict[str, Any]) -> None:
     """복구 신호가 알려 준 풀린 방법(`recovery`·`released_by`)을 해결 기록에 쓰려고 남긴다."""
     recovery = data.get("recovery")
@@ -82,6 +108,8 @@ def _keep_recovery(inc: Incident, data: dict[str, Any]) -> None:
         }
 
 
+# 복구 신호: 쇼핑몰이 알린 것과 인프라(DejaFix)가 알린 것. 같은 길로 받는다
+RECOVERY_EVENTS = {EventType.SHOP_RECOVERED, EventType.INFRA_RECOVERED}
 LOOKBACK = timedelta(minutes=15)  # 이벤트가 열리기 직전 실패 주문·문의도 같은 이벤트로 본다
 INCIDENT_EVENTS = {
     EventType.SHOP_DEGRADED,
@@ -100,6 +128,8 @@ SUBSCRIBED = [
     EventType.SHOP_DEGRADED,
     EventType.SHOP_RECOVERED,
     EventType.INFRA_ANOMALY_DETECTED,
+    # DejaFix 장애가 풀렸다는 복구 신호 (인프라 `dejafix_watch`, 2026-11-23)
+    EventType.INFRA_RECOVERED,
     EventType.METRIC_ANOMALY,
     EventType.SUPPORT_INQUIRY_RECEIVED,
     EventType.SUPPORT_INQUIRY_SURGE,
@@ -198,11 +228,13 @@ class IncidentManager:
         if env.type == EventType.METRIC_ANOMALY:
             severity = str(env.data.get("severity", "")).lower()
             return "open" if severity in SEVERITY_OPENS else "note"
-        if env.type in SUPPORT_EVENTS or env.type == EventType.SHOP_RECOVERED:
+        if env.type in SUPPORT_EVENTS or env.type in RECOVERY_EVENTS:
             return "note"
         return "ignore"
 
-    def _latest_unrecovered(self, component: str, occurred_at: datetime | None) -> Incident | None:
+    def _latest_unrecovered(
+        self, component: str, occurred_at: datetime | None, source_ref: str | None = None
+    ) -> Incident | None:
         """정상 복귀를 붙일 이벤트: 같은 구성요소에서 복귀 시각이 없는 가장 최근 장애.
 
         이벤트는 자동 처리가 끝나면 닫히지만 사람이 고치는 동안 장애는 계속되므로 닫힌 것도 본다.
@@ -215,6 +247,12 @@ class IncidentManager:
             and inc.event_type is not None
             and (occurred_at is None or inc.opened_at <= occurred_at)
         ]
+        if source_ref:
+            # 같은 부위에 장애가 둘일 때 다른 장애의 복구가 이 장애를 풀지 않게,
+            # 근거 참조가 같은 것을 먼저 본다. 근거 참조를 모르는 옛 이벤트(쇼핑몰 신호 등)만
+            # 부위로 잇는다.
+            exact = [inc for inc in found if inc.signal.get("source_ref") == source_ref]
+            found = exact or [inc for inc in found if not inc.signal.get("source_ref")]
         return max(found, key=lambda inc: inc.opened_at, default=None)
 
     def open_for(self, component: str) -> Incident | None:
@@ -290,10 +328,14 @@ class IncidentManager:
             return await self._resume_review(env)
         if env.type in (EventType.TASK_PROGRESS, EventType.TASK_COMPLETED):
             return await self._resume_async(env)
-        if env.type == EventType.SHOP_RECOVERED:
-            target = self._latest_unrecovered(self._component(env), env.occurred_at)
+        if env.type in RECOVERY_EVENTS:
+            ref = env.data.get("source_ref") if env.type == EventType.INFRA_RECOVERED else None
+            target = self._latest_unrecovered(
+                self._component(env), env.occurred_at, ref if isinstance(ref, str) else None
+            )
             if target is not None:
-                target.recovered_at = env.occurred_at
+                # 복구 시각이 열린 시각보다 앞서면(DejaFix가 먼저 풀림) 열린 시각으로 둔다
+                target.recovered_at = max(_recovered_time(env), target.opened_at)
                 _keep_recovery(target, env.data)
                 # 사람이 해제하길 기다리던 복구 검증이 있으면 이어서 돈다 (#909)
                 self.engine.notify_recovered(target)
