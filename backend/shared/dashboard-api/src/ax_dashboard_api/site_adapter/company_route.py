@@ -11,7 +11,10 @@
   (5단계 "거절 없이 경고만" 동안 회사 ID 없는 요청은 캣북스로 본다는 `company_scope` 규칙)
 - 화면 `/api/dashboard/company-connection`·`/api/dashboard/site-adapter`: 로그인 세션의 회사.
   세션이 아닌 사람 토큰(공용 토큰)은 캣북스(예전 그대로)
-- 그 밖의 경로는 건드리지 않는다
+- 판매 서버를 읽는 화면(회원·주문·집계 `live_views`, 판매 서버 중계 `shop_relay`): 같은 규칙.
+  `agent_url("shop-api")`가 세션 회사의 연결을 따른다(다른 회사 관리자가 캣북스 주문을 보지 않게)
+- 그 밖의 경로는 건드리지 않는다(회사 AI 키 등은 여러 회사 4단계에서 따로 고친다.
+  격리 시험의 xfail이 그 자리를 지킨다)
 
 `SessionCompanyMiddleware` 안쪽에서 돌아야 세션 회사를 읽는다(`main.py`에서 그보다 먼저 더한다.
 Starlette는 나중에 더한 미들웨어가 바깥이다).
@@ -26,7 +29,15 @@ from ax_agent_template.companies import canonical_company_id
 from ax_dashboard_api.envelope import session_company
 
 ADAPTER_PREFIX = "/site-adapter"
-SCREEN_PREFIXES = ("/api/dashboard/company-connection", "/api/dashboard/site-adapter")
+SCREEN_PREFIXES = (
+    "/api/dashboard/company-connection",
+    "/api/dashboard/site-adapter",
+    # 판매 서버 읽기 화면 (`routes.py`의 live_views 경로, `shop_relay`)
+    "/api/dashboard/users",
+    "/api/dashboard/orders",
+    "/api/dashboard/metrics",
+    "/api/dashboard/shop",
+)
 
 
 def adapter_company(path: str) -> tuple[str, str] | None:

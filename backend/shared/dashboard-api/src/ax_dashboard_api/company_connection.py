@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from ax_agent_template import company_connection as store
-from ax_agent_template import pinned_http
+from ax_agent_template import company_scope, pinned_http
 from ax_agent_template import tenant as tenants
 from ax_agent_template.config import agent_url
 from ax_dashboard_api.accounts import require_session_role
@@ -189,9 +189,20 @@ async def run_checks(url: str) -> list[Check]:
     return checks
 
 
+def _install_env() -> str:
+    """운영자가 준 `AX_SHOP_API_URL`. 설치 하나에 하나라 캣북스 화면에서만 쓴다.
+
+    다른 회사(세션 회사)는 자기 회사 연결만 본다. 캣북스 주소를 보이거나 "연결됨"으로 세지 않는다
+    (`config.agent_url`도 다른 회사는 이 값으로 빠지지 않는다).
+    """
+    if store.company_of() != company_scope.CATBOOKS:
+        return ""
+    return os.getenv("AX_SHOP_API_URL") or ""
+
+
 def _internal_url() -> str:
     """내부 데이터 모드의 주소: 운영자가 준 `AX_SHOP_API_URL`. 없으면 ""(연결 안 됨)."""
-    env = os.getenv("AX_SHOP_API_URL")
+    env = _install_env()
     return env.rstrip("/") if env else ""  # 캣북스 기본 주소 없음: 운영자가 준 주소가 없으면 빈 값
 
 
@@ -199,7 +210,7 @@ def _state() -> dict[str, Any]:
     found = store.read_connection()
     if found and found.enabled:
         source = "connection"
-    elif os.getenv("AX_SHOP_API_URL"):
+    elif _install_env():
         source = "env"
     else:
         source = "default"

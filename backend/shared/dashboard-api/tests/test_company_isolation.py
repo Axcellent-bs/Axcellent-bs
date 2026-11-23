@@ -9,6 +9,8 @@
 계정은 a(A 관리자)·b(B 관리자)·m(A 일반회원)이고,
 세션 토큰에 회사(`cid`)·회사 역할(`crole`)을 담는다.
 기대는 모두 "없는 것처럼 404"(B 것이 있는지 알리지 않는다)다.
+예외는 4번(회사 연결): 화면 주소에 회사가 없고 회사마다 자기 줄을 보여 주므로 "A 자기 연결만 보이고
+B 것은 안 보이며 안 바뀐다"를 본다(4번 위 설명).
 
 읽는 법
 - 그냥 통과하는 시험: 격리가 이미 되는 곳. 그대로 고정한다
@@ -361,26 +363,38 @@ def test_3_a_cannot_see_or_change_b_company_ai_key(client: TestClient, people: A
     assert res.status_code == 404
 
 
-# ---- 4. a 토큰으로 B 회사 연결·변환기 매핑 읽기·쓰기 → 404 ----
+# ---- 4. a 토큰으로 B 회사 연결·변환기 매핑 읽기·쓰기 → B 것은 안 보이고 안 바뀐다 ----
+# 회사 연결이 회사마다 한 줄이 된 뒤(여러 회사 설계 6.2·6.3, PR #1634)의 기대값.
+# 화면 주소(`/company-connection`·`/site-adapter`)에 회사가 없고 세션 회사의 줄을 보여 주므로,
+# A 관리자가 받는 것은 404가 아니라 "A 자기 연결(아직 없음)"이다.
+# B 연결의 주소·짝·키·이력·회사 설정은 A 응답에 하나도 없고,
+# A의 모드 바꾸기·해제는 A 줄에만 닿는다(B 연결은 켜진 그대로).
+# 예전 xfail(404 기대)보다 약하지 않다: 읽기 격리(B 값 없음)·쓰기 격리(B 그대로)를 둘 다 보고,
+# B 관리자가 자기 연결을 보는 대조로 헛통과를 막는다. (기대값 변경은 태윤 님 판단 필요)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "격리 미완: /api/dashboard/company-connection·/api/dashboard/site-adapter — 연결이 설치에 "
-        f"하나뿐이라 어느 회사 관리자든 B 연결·변환기 상태를 읽고 바꾼다 — {STAGE4}"
-    ),
-)
-def test_4_a_cannot_read_or_change_b_connection(client: TestClient, people: Any) -> None:
-    cc.save_connection(SHOP, verified_at=None, updated_by="비", tenant=B)
-    assert client.get(f"{API}/company-connection", headers=people["a"]).status_code == 404
-    assert client.get(f"{API}/site-adapter", headers=people["a"]).status_code == 404
+def test_4_a_sees_only_its_own_connection_and_cannot_change_b(
+    client: TestClient, people: Any
+) -> None:
+    cc.save_connection(SHOP, verified_at=None, updated_by="비", tenant=B, company_id=B)
+    # 대조: B 관리자는 B 연결을 본다
+    mine = client.get(f"{API}/company-connection", headers=people["b"]).json()["data"]
+    assert mine["connection"]["shop_api_url"] == SHOP and mine["tenant"]["id"] == B
+    for path in ("company-connection", "site-adapter"):
+        res = client.get(f"{API}/{path}", headers=people["a"])
+        assert res.status_code == 200, res.text
+        assert "10.20.30.40" not in res.text  # B 연결 주소가 없다
+        assert res.json()["data"]["connection"] is None  # A 자기 연결(아직 없음)
+    state = client.get(f"{API}/company-connection", headers=people["a"]).json()["data"]
+    assert state["tenant"] is None and state["history"] == []  # B 회사 설정·B 이력도 없다
+    assert state["connected"] is False
     res = client.post(
         f"{API}/company-connection/mode", json={"mode": "internal"}, headers=people["a"]
     )
-    assert res.status_code == 404
-    found = cc.read_connection()
-    assert found is not None and found.enabled
+    assert res.status_code == 409 and res.json()["error"]["code"] == "NO_CONNECTION"
+    assert client.post(f"{API}/company-connection/clear", headers=people["a"]).status_code == 200
+    found = cc.read_connection(B)
+    assert found is not None and found.enabled and found.shop_api_url == SHOP
 
 
 # ---- 5. a 토큰으로 B 할 일함·승인 대기·AI 오피스 대화 → 목록 0건, 단건 404 ----

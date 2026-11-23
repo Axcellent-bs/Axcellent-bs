@@ -19,11 +19,11 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from ax_agent_template import companies, company_files, company_scope, human_auth
+from ax_agent_template import companies, company_files, company_scope, config, human_auth
 from ax_agent_template import company_connection as cc
 from ax_agent_template import tenant as tenants
 from ax_contracts.schemas import TENANT_ID_DEFAULT
-from ax_dashboard_api import accounts, handoffs
+from ax_dashboard_api import accounts, handoffs, live_views
 from ax_dashboard_api.envelope import ApiError
 from ax_dashboard_api.main import app
 from ax_dashboard_api.site_adapter import company_route, gate_check
@@ -267,6 +267,110 @@ def test_screen_saves_and_reads_the_session_company(
     # 공용 토큰(세션 아님)은 캣북스 (예전 그대로)
     shared = client.get(CONN).json()["data"]
     assert shared["connection"]["adapter"] == {"base_url": CAT_SITE}
+
+
+def test_screen_flow_then_that_company_ai_goes_to_its_own_adapter(
+    client: TestClient,
+    people: dict[str, dict[str, str]],
+    sites: Sites,
+    nubi: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """7단계 화면 흐름 끝까지: 누비 관리자가 다른 형식 API로 둘러보기 → 저장 →
+    누비 AI 요청(meta.tenant_id=nubi)이 누비 변환기 경로·누비 키·누비 짝으로 간다. 캣북스는 그대로.
+    설치값 `AX_TENANT`(캣북스)는 누비 요청의 회사 설정이 되지 않는다."""
+    monkeypatch.setenv(tenants.TENANT_ENV, "catbooks")
+    _connect("catbooks", CAT_SITE, CAT_KEY)
+    sites.seen.clear()
+    found = client.post(
+        SCREEN + "/propose",
+        json={
+            "base_url": NUBI_SITE,
+            "token": NUBI_KEY,
+            "orders_path": "/api/v1/bookings",
+            "products_path": "/api/v1/tours",
+        },
+        headers=people["nubi"],
+    )
+    assert found.status_code == 200, found.text
+    assert set(found.json()["data"]["mapping"]["resources"]) == {"orders", "products"}
+    body = {"base_url": NUBI_SITE, "token": NUBI_KEY, "mapping": _mapping(nubi), "tenant": "nubi"}
+    saved = client.post(SCREEN + "/save", json=body, headers=people["nubi"])
+    assert saved.status_code == 200, saved.text
+    assert sites.keys() == {"10.0.0.9": f"Bearer {NUBI_KEY}"}  # 둘러보기·저장 모두 누비 사이트만
+
+    # 저장 뒤 누비 AI 요청: 서버가 meta.tenant_id로 거는 회사(company_scope)를 흉내 낸다
+    with company_scope.using("nubi"):
+        url = config.agent_url("shop-api")
+        assert url == "http://dash:8020/site-adapter/nubi"
+        assert tenants.current() == "nubi"  # AX_TENANT(캣북스)가 아니라 누비 연결의 회사 설정
+    sites.seen.clear()
+    res = client.get(url.removeprefix("http://dash:8020") + "/api/shop/products")
+    assert res.status_code == 200, res.text
+    assert sites.keys() == {"10.0.0.9": f"Bearer {NUBI_KEY}"}
+    # 캣북스는 예전 주소·캣북스 회사 설정 그대로
+    assert config.agent_url("shop-api") == "http://dash:8020/site-adapter"
+    assert tenants.current() == "catbooks"
+    sites.seen.clear()
+    assert client.get("/site-adapter/api/shop/products").status_code == 200
+    assert sites.keys() == {"10.0.0.8": f"Bearer {CAT_KEY}"}
+
+
+def test_connection_screen_does_not_show_catbooks_install_address(
+    client: TestClient, people: dict[str, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`AX_SHOP_API_URL`은 설치(캣북스) 값이다.
+
+    연결 전 누비 화면은 "연결 안 됨"이고 그 주소를 보이지 않는다."""
+    monkeypatch.setenv("AX_SHOP_API_URL", "http://10.0.0.7:8000")
+    nubi_state = client.get(CONN, headers=people["nubi"]).json()["data"]
+    assert nubi_state["connected"] is False and nubi_state["source"] == "default"
+    assert "10.0.0.7" not in json.dumps(nubi_state)
+    cat_state = client.get(CONN, headers=people["cat"]).json()["data"]
+    assert cat_state["source"] == "env" and cat_state["internal_url"] == "http://10.0.0.7:8000"
+
+
+def test_shop_screens_follow_the_session_company(
+    client: TestClient, people: dict[str, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """회원·주문 화면(`live_views`)은 세션 회사의 판매 서버 주소로 읽는다. 공용 토큰은 캣북스."""
+    monkeypatch.delenv("DASHBOARD_MOCK", raising=False)
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    _connect("catbooks", CAT_SITE, CAT_KEY)
+    _connect("nubi", NUBI_SITE, NUBI_KEY)
+    asked: list[str] = []
+
+    async def shop_get(path: str, params: Any = None, **_: Any) -> list[Any]:
+        asked.append(live_views._shop_url() + path)
+        return []
+
+    monkeypatch.setattr(live_views, "_shop_get", shop_get)
+    for headers in (people["nubi"], people["cat"], {}):
+        assert client.get("/api/dashboard/users", headers=headers).status_code == 200
+    assert asked == [
+        "http://dash:8020/site-adapter/nubi/api/shop/users",
+        "http://dash:8020/site-adapter/api/shop/users",
+        "http://dash:8020/site-adapter/api/shop/users",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_orders_cache_is_per_company(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """주문 목록 기억(20초)은 판매 서버 주소마다 따로다. 다른 회사 목록을 꺼내 주지 않는다."""
+    _connect("catbooks", CAT_SITE, CAT_KEY)
+    _connect("nubi", NUBI_SITE, NUBI_KEY)
+    live_views.clear_orders_cache()
+
+    async def shop_orders(params: dict[str, Any], max_rows: int) -> list[dict[str, Any]]:
+        return [{"from": live_views._shop_url()}]
+
+    monkeypatch.setattr(live_views, "_shop_orders", shop_orders)
+    cat = await live_views._shop_orders_cached({}, 10)
+    with company_scope.using("nubi"):
+        mine = await live_views._shop_orders_cached({}, 10)
+    assert cat == [{"from": "http://dash:8020/site-adapter"}]
+    assert mine == [{"from": "http://dash:8020/site-adapter/nubi"}]
+    live_views.clear_orders_cache()
 
 
 def test_screen_clear_only_touches_the_session_company(
