@@ -20,7 +20,13 @@ from ax_workflow.api import (
     _ok,
     add_common_routes,
 )
-from ax_workflow.auth import AuthError, check_human, scoped_account, session_admin
+from ax_workflow.auth import (
+    AuthError,
+    check_human,
+    scoped_account,
+    session_admin,
+    session_decider,
+)
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import dump
 from dev_agent import coder, dev_chat, llm_key, vcs, vcs_bridge
@@ -46,6 +52,9 @@ CODING_CONFLICT = {
     "NOT_MOVABLE",  # 서버 AI·내 Claude로 넘기기: 넘길 수 없는 상태
     "NOT_WAITING",  # 지금 진행: 순서를 기다리는 작업이 아님
 }
+# 승인 같은 사람 결정 (`POST /actions`). 세션 모드면 로그인 세션만 받고 그 계정을 결정한 사람으로
+# 남긴다. 공용 사람 토큰은 누가 승인했는지 몰라 403 SESSION_REQUIRED (auth.session_decider)
+DECISION_ACTIONS = frozenset({"merge_pr", "approve_repo", "reject_repo"})
 MAX_CHATS_LISTED = 20
 APPROVER_MAX = 40  # 화면 승인자 이름 칸(ApproverName.tsx)과 같은 길이
 
@@ -287,12 +296,15 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
     async def post_approve_deployment(dep_id: str, request: Request) -> dict | JSONResponse:
         """사람 승인 버튼. 본문 `{approved_by}`(승인자 이름)가 꼭 있어야 한다.
 
-        이름이 없으면 400. 기본 승인자를 채우지 않는다 (누가 승인했는지 지어내지 않는다)."""
+        이름이 없으면 400. 기본 승인자를 채우지 않는다 (누가 승인했는지 지어내지 않는다).
+        세션 모드면 로그인 세션만 받고(공용 토큰은 403 SESSION_REQUIRED) 승인자는 그 계정이다
+        (본문 이름은 쓰지 않는다)."""
+        session_who = session_decider(request.headers.get("authorization"))
         svc = get_service()
         if get_deploy_store().get(dep_id) is None:
             return _err(404, "NOT_FOUND", f"배포 {dep_id}가 없다")
         body = await _body(request) or {}
-        who = body.get("approved_by")
+        who = session_who or body.get("approved_by")
         who = who.strip()[:APPROVER_MAX] if isinstance(who, str) else ""
         if not who:
             return _err(400, "APPROVER_REQUIRED", "approved_by(승인자 이름)가 필요하다")
@@ -867,7 +879,7 @@ def _person(request: Request) -> str | None:
 def create_dev_router(get_service: Callable[[], Any]) -> APIRouter:
     """개발 서비스 화면 REST (공용 + 개발)."""
     router = APIRouter(prefix="/api/planning", tags=["dev"])
-    add_common_routes(router, get_service)
+    add_common_routes(router, get_service, session_actions=DECISION_ACTIONS)
     add_dev_routes(router, get_service)
     add_settings_routes(router, get_service)
     return router

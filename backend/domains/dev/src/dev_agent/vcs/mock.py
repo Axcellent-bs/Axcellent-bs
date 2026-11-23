@@ -21,6 +21,7 @@ from dev_agent.vcs.base import (
     COMMIT_LIMIT,
     GRAPH_LIMIT,
     GRAPH_MAX,
+    HEAD_MOVED,
     ISSUE_LIST_LIMIT,
     ISSUE_STATES,
     LIST_LIMIT,
@@ -202,7 +203,8 @@ class MockVcsAdapter:
         return sorted(found, key=lambda c: (c.merged_at, c.number), reverse=True)
 
     async def get_change(self, number: int) -> Change:
-        return self._entry(number).change
+        e = self._entry(number)
+        return replace(e.change, head_sha=e.commits[-1].sha if e.commits else "")
 
     async def find_change_by_branch(self, branch: str) -> Change | None:
         found = [e.change for e in self._entries.values() if e.change.branch == branch]
@@ -279,13 +281,17 @@ class MockVcsAdapter:
         entry.closed_at = entry.updated_at = self._clock()
         self.writes.append(("close_change", number))
 
-    async def merge_change(self, number: int, method: str = "squash") -> Change:
+    async def merge_change(
+        self, number: int, method: str = "squash", sha: str | None = None
+    ) -> Change:
         self._writable()
         if method not in MERGE_METHODS:
             raise VcsError("invalid", f"모르는 병합 방식: {method}")
         entry = self._entry(number)
         if entry.change.merged:
             raise VcsError("conflict", f"이미 병합된 변경: {number}")
+        if sha and (entry.commits[-1].sha if entry.commits else "") != sha:
+            raise VcsError(HEAD_MOVED, f"새 커밋이 올라와 머지하지 않음: {number}")
         entry.change = replace(
             entry.change, merged=True, merged_at=self._clock(), merge_sha=f"merge{number:04d}"
         )

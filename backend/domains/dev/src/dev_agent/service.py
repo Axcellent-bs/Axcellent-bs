@@ -31,6 +31,7 @@ from ax_contracts.schemas.planning import (
 )
 from ax_contracts.schemas.record import RecordCase, RecordKind
 from ax_workflow import cause_inbox, hr_link, related
+from ax_workflow.auth import current_actor
 from ax_workflow.autocheck import (
     WAIT_CROSS_CHECK,
     WAIT_HUMAN,
@@ -1740,6 +1741,7 @@ class DevService(PlanningCore):
         t = self.clock()
         propose = (
             pol.proposal is None
+            and pol.shrink_pending is None  # 줄이기가 아직 안 끝났으면 넓히기를 제안하지 않는다
             and pol.streak + 1 >= PROMOTE_AFTER
             and pol.level < len(AUTO_LEVELS) - 1
         )
@@ -1825,11 +1827,27 @@ class DevService(PlanningCore):
 
         merge_text = f"{pr_id} 간단 요청 규칙·검수·CI 통과 → 자동 머지 허용"
         merge_rules, ev = await self._cross_check(s, pr, pr_check(s, pr), ctx)
+        head_err = ""
         try:
-            with hold_resume.recipe("merge_pr", pr=pr_id):
+            head: str | None = await vcs_bridge.head_of(pr)
+        except VcsError as exc:
+            head, head_err = None, exc.code
+        if head is None:  # 머리 커밋을 모르면 머지하지 않고 머지 대기 (사람 머지 버튼)
+            step("planning", "planning", "vcs.merge_failed", "API",
+                 f"{pr_id} 머리 커밋을 못 읽어 자동 머지하지 않음 ({head_err})")  # fmt: skip
+            task.state = "머지 대기"
+            for r in s.requests:
+                if r.id == req.id:
+                    r.spec = spec_id
+                    r.state = "작업 중"
+            return
+        try:
+            # 사람 머지·보류 승인 뒤 이어서 하기와 같은 키 (`_do_merge`, PR·머리 커밋마다 하나)
+            with hold_resume.recipe("merge_pr", pr=pr_id, head=head):
                 await self._execute(
-                    "merge_pr", ctx, pr_id, merge_text, {**merge_rules.params, "auto": True}
-                )
+                    "merge_pr", ctx, vcs_bridge.merge_target(pr_id, head), merge_text,
+                    {**merge_rules.params, "auto": True}, refs=[pr_id],
+                )  # fmt: skip
         except GateRefused as exc:
             # safety가 보류·거절하면 PR은 열어 두고 교차검증 대기로 둔다 (판단은 사람 머지 버튼).
             # 근거를 이미 모았으면 사람 확인
@@ -1853,7 +1871,7 @@ class DevService(PlanningCore):
             return
         step("planning", "safety", "execute(merge_pr)", "execute", merge_text, "B")
         # merge_pr 관문을 지난 뒤 형상관리에서 실제로 병합한다. 실패하면 머지 대기로 둔다
-        merged_note = await vcs_bridge.merge_pr(pr)
+        merged_note = await vcs_bridge.merge_pr(pr, sha=head or None)
         if merged_note:
             step("planning", "planning", merged_note.point, "API", merged_note.text)
             if not merged_note.ok:
@@ -2048,8 +2066,21 @@ class DevService(PlanningCore):
                             "auto_policy_update", ctx, f"L{lv}->L{lv - 1}", text, {"to": lv - 1}
                         )
             except GateRefused as exc:
-                # 범위 축소가 관문에서 막혀도 사건 연결(장애 표시)은 한다.
-                # 축소만 사람에게 남긴다
+                # 범위 축소가 관문에서 막혀도 사건 연결(장애 표시)은 한다. 기록된 단계는 관문이
+                # 실행해야 바뀐다. 사람 확인으로 보류됐으면(보류 기록이 있어 승인·거절로 끝난다)
+                # 그동안 자동 처리는 줄인 단계로 본다: 줄이기는 승인 없이 즉시다 (FR-ATL-005·008,
+                # `shrink_pending`, rules.effective_level). 관문이 바로 거절했거나 부를 수 없으면
+                # 끝낼 보류 건이 없어 표시를 두지 않고 거절만 남긴다 (사람이 범위를 확인)
+                rid = exc.decision.review_id
+                held = exc.decision.status == "held" and rid and self.holds.get(rid) is not None
+                if held:
+                    pending = lv - 1
+                    if pol.shrink_pending is not None:
+                        pending = min(pol.shrink_pending, pending)
+                    pol.shrink_pending = pending
+                    why = f"보류 {rid} → 사람이 확인 (그동안 자동 처리는 L{pending} 기준)"
+                else:
+                    why = f"→ 범위는 그대로 L{lv}, 사람이 범위를 확인"
                 lv = 0
                 demote_acts.append(
                     self._act(
@@ -2059,13 +2090,15 @@ class DevService(PlanningCore):
                         "safety",
                         "auto_policy.update_held",
                         "execute",
-                        f"자동 처리 범위 축소 보류 ({exc.decision.status}) → 사람이 범위를 확인",
+                        f"자동 처리 범위 축소 {exc.decision.status} {why}",
                         "B",
                         seq,
                     )
                 )
             if lv > 0:
                 pol.level = lv - 1
+                if pol.shrink_pending is not None and pol.shrink_pending >= pol.level:
+                    pol.shrink_pending = None  # 막혔던 축소만큼 이미 줄었다
                 pol.log.append(
                     AutoLog(
                         at=at,
@@ -4091,7 +4124,9 @@ class DevService(PlanningCore):
             raise ActionError("UNKNOWN_CONNECTION", f"모르는 연결: {cid}")
         repo = conn.repo or conn.id
         ctx = self._ctx_of_pr(s, p)
-        text = f"팀장 {TEAM_LEAD}이 {p.id} → {repo} 레포 승인"
+        # 세션 모드면 로그인한 계정 (api `session_actions`), 아니면 예전처럼 팀장(목)
+        who = current_actor() or TEAM_LEAD
+        text = f"팀장 {who}이 {p.id} → {repo} 레포 승인"
         await self._execute("approve_repo", ctx, f"{p.id}:{conn.id}", text, {"connection": conn.id})
         old = p.target
         same = old is not None and old.connection_id == conn.id
@@ -4108,7 +4143,7 @@ class DevService(PlanningCore):
             confidence=old.confidence if old is not None and same else "low",
             reasons=reasons,
             candidates=list(old.candidates) if old is not None else [],
-            decided_by=TEAM_LEAD,
+            decided_by=who,
             decided_at=self.clock(),
         )
         s.activity.append(
@@ -4135,10 +4170,11 @@ class DevService(PlanningCore):
         if p.target is None:
             raise ActionError("INVALID_ACTION", f"{p.id}에 제안된 레포가 없다")
         ctx = self._ctx_of_pr(s, p)
-        text = f"팀장 {TEAM_LEAD}이 {p.id} → {p.target.repo} 레포 제안 기각"
+        who = current_actor() or TEAM_LEAD
+        text = f"팀장 {who}이 {p.id} → {p.target.repo} 레포 제안 기각"
         await self._execute("reject_repo", ctx, f"{p.id}:reject", text)
         p.target.status = "rejected"
-        p.target.decided_by = TEAM_LEAD
+        p.target.decided_by = who
         p.target.decided_at = self.clock()
         s.activity.append(
             self._act(
@@ -4165,15 +4201,35 @@ class DevService(PlanningCore):
             f"{c['review_mismatch_count']}·장애 연결 {c['linked_incident_count']}"
             f"·되돌릴 수 없음 {c['irreversible_count']}"
         )
+        who = None if auto else current_actor()
         if auto:
             merge_text = f"{p.id} 자동 머지 ({rule_text} → merge_pr 규칙 통과, 사후 감사)"
         else:
-            merge_text = f"사람이 {p.id} 머지"
-        with hold_resume.recipe("merge_pr", pr=p.id):
-            await self._execute("merge_pr", ctx, p.id, merge_text, {**check.params, "auto": auto})
-        # merge_pr 관문을 지난 뒤 형상관리에서 실제로 병합한다.
+            merge_text = f"사람이 {p.id} 머지" + (f" ({who})" if who else "")
+        # 관문 키를 (PR, 머리 커밋)마다 하나로: 두 번 클릭·다시 보내기·둘이 같이 누르기는 같은 키라
+        # 이전 판정을 재생하고(보류 건도 하나), 새 커밋이 올라오면 새 키로 새로 판정받는다.
+        # 자동 머지·사람 머지·보류 승인 뒤 이어서 하기가 같은 키를 쓴다 (hold_resume._merge_pr)
+        try:
+            head = await vcs_bridge.head_of(p)
+        except VcsError as exc:
+            why = vcs_bridge.merge_fail_reason(exc.code, exc.message)
+            text = f"{p.id} 머리 커밋을 못 읽어 머지하지 않음 ({why})"
+            s.activity.append(
+                self._act(
+                    self.clock(), ctx, "planning", "planning", "vcs.merge_failed", "API", text
+                )
+            )
+            return text
+        target = vcs_bridge.merge_target(p.id, head)
+        if not auto:  # 사람이 거절·만료된 뒤 다시 누르면 새 키 (새 승인을 받을 수 있게)
+            target = hold_resume.fresh_target(self.holds, ctx, "merge_pr", target)
+        with hold_resume.recipe("merge_pr", pr=p.id, head=head):
+            await self._execute(
+                "merge_pr", ctx, target, merge_text, {**check.params, "auto": auto}, refs=[p.id]
+            )
+        # merge_pr 관문을 지난 뒤 형상관리에서 실제로 병합한다 (관문이 본 머리 커밋일 때만).
         # 실패하면 한 줄 남기고 병합하지 않는다
-        note = await vcs_bridge.merge_pr(p)
+        note = await vcs_bridge.merge_pr(p, sha=head or None)
         if note:
             s.activity.append(
                 self._act(self.clock(), ctx, "planning", "planning", note.point, "API", note.text)
@@ -4243,7 +4299,7 @@ class DevService(PlanningCore):
                     "planning",
                     "PR 머지",
                     "사람",
-                    f"사람이 {p.id} 머지 (사람 클릭)",
+                    f"사람이 {p.id} 머지 (사람 클릭)" + (f" · {who}" if who else ""),
                 )
             )
         s.activity.append(self._hr_act(ctx, case, merged_hr))
@@ -4325,11 +4381,35 @@ class DevService(PlanningCore):
             await self._execute("auto_policy_update", ctx, f"L{frm}->L{to}", text, {"to": to})
             t = self.clock()
             pol.level = to
+            if pol.shrink_pending is not None and pol.shrink_pending >= to:
+                pol.shrink_pending = None
             pol.log.append(
                 AutoLog(at=t, text=f"L{frm} → L{to} 축소 (보류 뒤 사람 승인)", by="사람")
             )
             s.activity.append(
                 self._act(t, ctx, "planning", "safety", "auto_policy.updated", "execute", text, "B")
+            )
+
+        await self._apply(run)
+
+    async def drop_shrink_pending(self, frm: int, to: int, why: str) -> None:
+        """사람이 막힌 축소(보류 건)를 거절·만료로 닫았다: 줄인 단계로 보던 것을 푼다 (기록만).
+
+        다른 장애 연결로 아직 열려 있는 축소 보류가 있으면 그 단계로 계속 본다."""
+        others = [
+            int(r.args["to"])
+            for r in self.holds.pending()
+            if r.kind == "policy_demote" and int(r.args["frm"]) == frm
+        ]
+
+        async def run(s: State) -> None:
+            pol = s.auto_policy
+            if pol.shrink_pending is None or pol.level != frm:
+                return
+            pol.shrink_pending = min(others) if others else None
+            tail = f" (다른 축소 보류가 남아 L{pol.shrink_pending} 기준)" if others else ""
+            pol.log.append(
+                AutoLog(at=self.clock(), text=f"L{frm} → L{to} 축소 {why}{tail}", by="사람")
             )
 
         await self._apply(run)

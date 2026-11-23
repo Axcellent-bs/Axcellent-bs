@@ -48,6 +48,7 @@ from ax_workflow.models import (
     State,
 )
 from ax_workflow.result_notify import ResultSender, send_change_result
+from ax_workflow.rules import effective_level
 from ax_workflow.seed import initial_state, real_state
 
 AGENT_NAME = "planning"
@@ -545,7 +546,7 @@ class PlanningCore(StateService):
 
         멈추는 곳: 자동 확정·머지 규칙에 걸린 건(`auto_review` 대기열), 검수 불일치 2회,
         safety 보류·거절. 관문이 거부하면 그 단계에서 멈추고 앞선 단계는 그대로 둔다."""
-        if s.auto_policy.level == 0:  # L0 = 자동 처리 중지: 접수에서 멈춘다
+        if effective_level(s.auto_policy) == 0:  # L0 = 자동 처리 중지: 접수에서 멈춘다
             return
         for _ in range(ADVANCE_LIMIT):
             try:

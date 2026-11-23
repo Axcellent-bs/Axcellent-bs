@@ -519,8 +519,11 @@ def test_merge_ai_pr_uses_internal_flow(client, repo) -> None:
     body = res.json()["data"]
     assert body["via"] == "internal" and body["internal"]["merged"] is True
     assert next(p for p in svc.state.prs if p.id == "PR #40").merged
+    # 관문 키는 (PR, 머리 커밋)마다 하나 (사람 머지 다시 누르기·다시 보내기는 같은 키)
+    head = repo._entries[n].commits[-1].sha[:12]
     assert any(
-        g.action == "merge_pr" and g.idempotency_key.endswith("PR #40") for g in svc.gate_calls
+        g.action == "merge_pr" and g.idempotency_key.endswith(f"PR #40:{head}")
+        for g in svc.gate_calls
     )
 
 

@@ -28,7 +28,10 @@ export function Autonomy({ s, d }: P & { item?: string }) {
   }, [pol.level, pol.proposal?.to])
   const [busy, setBusy] = useState(false)
   const linked = pol.history.filter((h) => h.result === '장애 연결').length
-  const cur = info?.levels.find((l) => l.level === pol.level)
+  // 줄이기가 관문에서 보류 중이면 자동 처리는 줄인 단계로 한다 (서버 rules.effective_level). 화면도 그 단계를 보인다
+  const pending = pol.shrinkPending != null && pol.level != null && pol.shrinkPending < pol.level ? pol.shrinkPending : null
+  const eff = pending ?? pol.level
+  const cur = info?.levels.find((l) => l.level === eff)
   const next = pol.proposal ? info?.levels.find((l) => l.level === pol.proposal?.to) : undefined
   const decide = async (ok: boolean) => {
     setBusy(true)
@@ -43,7 +46,7 @@ export function Autonomy({ s, d }: P & { item?: string }) {
         자동 머지가 장애에 연결되면 한 단계 바로 줄어요.
       </Lead>
       <Stats items={[
-        { label: '지금 단계', value: pol.level == null ? '-' : `L${pol.level}`, hint: cur?.name },
+        { label: '지금 단계', value: eff == null ? '-' : `L${eff}`, hint: pending != null ? `L${pol.level} → L${pending} 줄이기 보류 중 · 자동 처리는 L${pending} 기준` : cur?.name, tone: pending != null ? 'alert' : undefined },
         { label: '자동 머지 한도', value: cur ? `${cur.lines}줄·${cur.files}파일` : '-', hint: pol.paths ? `허용 경로 ${pol.paths}` : undefined },
         { label: '연속 정상', value: `${pol.streak ?? 0}${info ? ` / ${info.promote_after}` : ''}`, hint: '다 차면 승급 제안' },
         { label: '승급 제안', value: pol.proposal ? `L${pol.proposal.to}` : '없음', tone: pol.proposal ? 'alert' : 'quiet' },
@@ -64,7 +67,7 @@ export function Autonomy({ s, d }: P & { item?: string }) {
         <Card as="section" title="자동 처리 단계" sub="개발 서버 기준표">
           {info ? (
             <ul className="levels">
-              {info.levels.map((l) => <li key={l.level} className={l.level === pol.level ? 'on' : undefined}><b>L{l.level} {l.name}</b> <span className="muted small">{l.lines}줄·{l.files}파일 이하</span></li>)}
+              {info.levels.map((l) => <li key={l.level} className={l.level === eff ? 'on' : undefined}><b>L{l.level} {l.name}</b> <span className="muted small">{l.lines}줄·{l.files}파일 이하</span></li>)}
             </ul>
           ) : <p className="muted small">단계표를 읽지 못했어요 (개발·배포 서버 꺼짐)</p>}
         </Card>

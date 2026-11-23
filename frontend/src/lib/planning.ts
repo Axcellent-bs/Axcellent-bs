@@ -125,6 +125,7 @@ export function fromBackend(raw: Json, queue: QueueItem[]): State {
     paths: typeof policy.paths === 'string' ? policy.paths : undefined,
     streak: typeof policy.streak === 'number' ? policy.streak : undefined,
     proposal: proposal ? { to: Number(proposal.to), t: kst(proposal.at), why: String(proposal.why ?? '') } : null,
+    shrinkPending: typeof policy.shrinkPending === 'number' ? policy.shrinkPending : null,
   }
   return {
     ...EMPTY_STATE,
@@ -255,7 +256,7 @@ export const planningApi = (base: string) => ({
 
 // ---- 자동 처리 범위 (`GET /api/planning/auto-policy`): 단계표·지금 한도·승급 기준. 상태(SSE)의 autoPolicy에 없는 단계표를 읽는다
 export interface AutoLevel { level: number; name: string; lines: number; files: number }
-export interface AutoPolicyInfo { level: number; paths: string; streak: number; limit: { level: number; lines: number; files: number; paths: string }; levels: AutoLevel[]; promote_after: number; linked_incidents: number }
+export interface AutoPolicyInfo { level: number; effective_level: number; shrink_pending: number | null; paths: string; streak: number; limit: { level: number; lines: number; files: number; paths: string }; levels: AutoLevel[]; promote_after: number; linked_incidents: number }
 export const autoPolicyApi = (base: string) => ({
   get: () => call<AutoPolicyInfo>(base, '/auto-policy').then((d) => (d && Array.isArray(d.levels) ? d : Promise.reject(new PlanningApiError('NO_POLICY', '자동 처리 범위를 읽지 못했어요')))),
 })

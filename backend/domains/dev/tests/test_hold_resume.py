@@ -112,6 +112,12 @@ def _task(svc: DevService):
     return next(t for t in svc.state.tasks if t.id == "T-D1")
 
 
+def _vcs_number(service: DevService, pr: str) -> int:
+    n = next(p for p in service.state.prs if p.id == pr).vcs_number
+    assert n is not None
+    return n
+
+
 def _held_pr(service: DevService, gate: KeyGate) -> tuple[str, str]:
     """보호 경로 PR(사람 확인) → 사람 머지 버튼 → 관문이 merge_pr 보류. (PR id, review_id)."""
     coder.set_llm(FakeLLM(CHECKOUT))
@@ -264,7 +270,9 @@ def test_approved_merge_resumes_once(service: DevService, adapter) -> None:
     service._gate = gate
     pr, rid = _held_pr(service, gate)
     row = service.holds.get(rid)
-    assert row is not None and (row.kind, row.args) == ("merge_pr", {"pr": pr})
+    head = adapter._entries[_vcs_number(service, pr)].commits[-1].sha
+    assert row is not None and (row.kind, row.args) == ("merge_pr", {"pr": pr, "head": head})
+    assert row.key.endswith(f":merge_pr:{pr}:{head[:12]}")  # (PR, 머리 커밋)마다 키 하나
     assert not next(p for p in service.state.prs if p.id == pr).merged
 
     gate.approve(rid)
@@ -295,7 +303,7 @@ def test_resumed_merge_failure_is_recorded(
     service._gate = gate
     pr, rid = _held_pr(service, gate)
 
-    async def broken(number: int, method: str = "merge") -> Any:
+    async def broken(number: int, method: str = "merge", sha: str | None = None) -> Any:
         raise VcsError("unavailable", "형상관리 서버가 응답하지 않음")
 
     monkeypatch.setattr(adapter, "merge_change", broken)
@@ -447,19 +455,24 @@ def test_repo_revert_two_holds_approved_open_one_revert_pr(service: DevService, 
     assert len([w for w in adapter.writes if w[0] == "revert_change"]) == 1
 
 
-def test_repo_merge_two_holds_second_is_skipped(service: DevService, adapter) -> None:
+def test_repo_merge_pressed_twice_makes_one_hold(service: DevService, adapter) -> None:
+    """같은 머리 커밋에서 두 번 누르면(두 번 클릭·다시 보내기·둘이 같이) 같은 키 → 보류 건 하나.
+    전에는 누를 때마다 새 키라 보류 건이 둘 생겼다. 승인 뒤 머지는 한 번."""
     gate = KeyGate("merge_pr")
     service._gate = gate
     n = adapter.seed(title="사람 PR", branch="fix/a", files={BANNER: (3, 1)})
     client = TestClient(app)
     _repo_press(client, f"{n}/merge", {})
     _repo_press(client, f"{n}/merge", {})
-    first, second = gate.reviews.values()
-    gate.approve(first)
-    gate.approve(second)
-    assert run(_decide(service, first)).status == "done"
-    b = run(_decide(service, second))
-    assert b.status == "skipped" and "이미 머지됨" in (b.reason or "")
+    (rid,) = gate.reviews.values()
+    assert len(service.holds.pending()) == 1
+    gate.approve(rid)
+    assert run(_decide(service, rid)).status == "done"
+    assert run(_decide(service, rid)).status == "done"  # 같은 승인이 또 와도 다시 하지 않음
+    assert len([w for w in adapter.writes if w[0] == "merge_change"]) == 1
+    # 머지된 뒤 또 누르면 머지하지 않는다 (409)
+    res = client.post(f"/api/planning/repo/prs/{n}/merge", json={})
+    assert res.status_code == 409
     assert len([w for w in adapter.writes if w[0] == "merge_change"]) == 1
 
 
