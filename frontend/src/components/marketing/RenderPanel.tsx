@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useAuthedMedia } from "@/lib/authedMedia";
+import { InstagramPanel } from "./InstagramPanel";
 import { YoutubePanel } from "./YoutubePanel";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
@@ -146,6 +147,8 @@ export function RenderPanel({ recordId }: { recordId: string }) {
         <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError} />
       </div>
       <YoutubePanel recordId={recordId} youtube={render.youtube} hasVideo={render.video?.status === "done"}
+        hasFinal={render.final_video?.status === "done"} onChanged={() => void load()} />
+      <InstagramPanel recordId={recordId} instagram={render.instagram} hasVideo={render.video?.status === "done"}
         hasFinal={render.final_video?.status === "done"} onChanged={() => void load()} />
       {error && <p className="text-xs text-accent" role="alert">{error}</p>}
     </section>

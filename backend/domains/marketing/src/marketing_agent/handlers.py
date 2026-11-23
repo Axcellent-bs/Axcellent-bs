@@ -46,6 +46,9 @@ from ax_contracts.schemas.marketing_campaigns import (
     MarketingCampaignItem,
 )
 from ax_contracts.schemas.marketing_creative import (
+    CreativeInstagramDraftInput,
+    CreativeInstagramOutput,
+    CreativeInstagramRequestInput,
     CreativeRecordAttachInput,
     CreativeRecordAttachOutput,
     CreativeRecordGetInput,
@@ -58,6 +61,9 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeYoutubeOutput,
     CreativeYoutubeRequestInput,
     InstagramStatusOutput,
+    RequestVideoInstagramDraftInput,
+    RequestVideoInstagramOutput,
+    RequestVideoInstagramRequestInput,
     RequestVideoYoutubeDraftInput,
     RequestVideoYoutubeOutput,
     RequestVideoYoutubeRequestInput,
@@ -89,6 +95,7 @@ from marketing_agent import character_sheet as _character_sheet
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import higgsfield_status as _higgsfield_status
+from marketing_agent import instagram_post as _instagram
 from marketing_agent import request_video_youtube as _request_youtube
 from marketing_agent import storyboard as _storyboard
 from marketing_agent import youtube as _youtube
@@ -820,6 +827,7 @@ async def creative_record_get(request: AgentRequest) -> AgentResult:
             await _render.check_video(STATE.media_ledger, request.meta, data.record_id)
             _youtube.expire_stale(data.record_id)
             await _youtube.check_upload(request.meta, data.record_id)
+            await _instagram.check_record(request.meta, data.record_id)
         except Exception:  # noqa: BLE001 - 진행 확인 실패는 읽기를 막지 않는다
             _render.logger.exception("제작 기록: 영상 승인 확인 실패")
     row = _creative.store().get(data.record_id)
@@ -998,6 +1006,63 @@ async def creative_youtube_request(request: AgentRequest) -> AgentResult:
         evidence=_evidence(
             ["creative_youtube_request"],
             f"유튜브 올리기 요청 {data.record_id}: {youtube.get('status')}",
+            [],
+        ),
+    )
+
+
+# 인스타 캡션 초안 LLM. 테스트는 이 값을 가짜 LLM 함수로 바꾼다
+INSTAGRAM_LLM: Any = None
+
+
+async def creative_instagram_draft(request: AgentRequest) -> AgentResult:
+    """AI가 인스타 릴스 캡션·해시태그 초안을 쓰거나 사람이 고친 값을 저장한다(올리지 않는다)."""
+    from marketing_agent.chat import default_llm
+
+    data = _parse(request, CreativeInstagramDraftInput)
+    if isinstance(data, AgentResult):
+        return data
+    edits = data.model_dump(include={"caption", "hashtags", "part"})
+    try:
+        instagram = await _instagram.write_record_draft(
+            data.record_id,
+            INSTAGRAM_LLM or default_llm,
+            request.meta.context_id,
+            edits=edits,
+            regenerate=data.regenerate,
+        )
+    except _instagram.InstagramError as error:
+        return _youtube_failed(request, error)
+    out = CreativeInstagramOutput(record_id=data.record_id, instagram=instagram)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["creative_instagram_draft"],
+            f"인스타 캡션 초안 {data.record_id} ({instagram.get('source')})",
+            [],
+        ),
+    )
+
+
+async def creative_instagram_request(request: AgentRequest) -> AgentResult:
+    """초안대로 인스타 릴스 올리기를 사람 승인(C publish_instagram_video)에 올린다."""
+    data = _parse(request, CreativeInstagramRequestInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        instagram = await _instagram.request_record(request.meta, data.record_id, data.who)
+    except _instagram.InstagramError as error:
+        return _youtube_failed(request, error)
+    out = CreativeInstagramOutput(record_id=data.record_id, instagram=instagram)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["creative_instagram_request"],
+            f"인스타 올리기 요청 {data.record_id}: {instagram.get('status')}",
             [],
         ),
     )
@@ -1717,10 +1782,12 @@ async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentRes
 async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
     """의뢰 영상 목록. 유튜브 승인 대기는 관문을 다시 묻고, 항목마다 유튜브 상태를 붙인다."""
     await _request_youtube.refresh(request.meta, STATE.sns)
+    await _instagram.refresh_requests(request.meta)
     result = await request_video.list_request_videos(request, STATE.sns)
     if result.status != TaskStatus.COMPLETED or not result.output:
         return result
     items = _request_youtube.attach_states(list(result.output.get("items") or []))
+    items = _instagram.attach_states(items)
     return result.model_copy(update={"output": result.output | {"items": items}})
 
 
@@ -1763,6 +1830,59 @@ async def request_video_youtube_request(request: AgentRequest) -> AgentResult:
     except _request_youtube.YoutubeError as error:
         return _youtube_failed(request, error)
     return _request_youtube_done(request, data.post_draft_id, youtube, "올리기 요청")
+
+
+async def request_video_instagram_draft(request: AgentRequest) -> AgentResult:
+    """의뢰로 만든 영상의 인스타 캡션·해시태그 초안(AI) 또는 사람이 고친 값 저장. 올리지 않는다."""
+    from marketing_agent.chat import default_llm
+
+    data = _parse(request, RequestVideoInstagramDraftInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        instagram = await _instagram.write_request_draft(
+            STATE.sns,
+            data.post_draft_id,
+            INSTAGRAM_LLM or default_llm,
+            request.meta.context_id,
+            edits=data.model_dump(include={"caption", "hashtags"}),
+            regenerate=data.regenerate,
+        )
+    except _instagram.InstagramError as error:
+        return _youtube_failed(request, error)
+    return _request_instagram_done(request, data.post_draft_id, instagram, "초안")
+
+
+async def request_video_instagram_request(request: AgentRequest) -> AgentResult:
+    """의뢰 영상(AI 라벨 파일)의 인스타 릴스 올리기를 사람 승인(C publish_instagram_video)에."""
+    data = _parse(request, RequestVideoInstagramRequestInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        instagram = await _instagram.request_request(
+            request.meta, STATE.sns, data.post_draft_id, data.who
+        )
+    except _instagram.InstagramError as error:
+        return _youtube_failed(request, error)
+    return _request_instagram_done(request, data.post_draft_id, instagram, "올리기 요청")
+
+
+def _request_instagram_done(
+    request: AgentRequest, post_draft_id: str, instagram: dict[str, Any], what: str
+) -> AgentResult:
+    out = RequestVideoInstagramOutput(
+        post_draft_id=post_draft_id, request_id=instagram.get("request_id"), instagram=instagram
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill],
+            f"의뢰 영상 인스타 {what} {post_draft_id}: {instagram.get('status')}",
+            [],
+        ),
+    )
 
 
 def _request_youtube_done(
@@ -2167,6 +2287,8 @@ HANDLERS = {
     "creative_video_request": creative_video_request,
     "creative_youtube_draft": creative_youtube_draft,
     "creative_youtube_request": creative_youtube_request,
+    "creative_instagram_draft": creative_instagram_draft,
+    "creative_instagram_request": creative_instagram_request,
     "youtube_status": youtube_status,
     "instagram_status": instagram_status,
     "youtube_video_stats": youtube_video_stats,
@@ -2190,6 +2312,8 @@ HANDLERS = {
     "list_request_videos": list_request_videos_skill,
     "request_video_youtube_draft": request_video_youtube_draft,
     "request_video_youtube_request": request_video_youtube_request,
+    "request_video_instagram_draft": request_video_instagram_draft,
+    "request_video_instagram_request": request_video_instagram_request,
     "merge_outage_sns_drafts": merge_outage_sns_drafts_skill,
     "check_sns_post": check_sns_post_skill,
     "publish_sns": publish_sns_skill,

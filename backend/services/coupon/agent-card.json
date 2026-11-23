@@ -859,6 +859,54 @@
       ],
       "verifier": null,
       "priority": "optional"
+    },
+    {
+      "id": "creative_instagram_draft",
+      "description": "제작 기록(input.record_id: CR-…)의 영상으로 회사 인스타그램에 올릴 릴스 캡션·해시태그 초안을 AI가 쓴다(LLM이 없으면 고정 문구). regenerate=true면 다시 쓰고, caption·hashtags(최대 5개)·part(video·final_video)를 주면 사람이 고친 값으로 저장한다. 캡션 끝 AI 생성 문구는 지우지 않고 해시태그 줄(#AXcellent 포함 3~5개)을 붙인다. 기록 render.instagram(status=draft)에 남기고 올리지는 않는다. 거절 outcome: not_found·already_requested.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeInstagramDraftInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeInstagramOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "creative_instagram_request",
+      "description": "초안대로 제작 기록 영상의 인스타 릴스 올리기를 사람 승인(C publish_instagram_video)에 올린다. 고른 영상에 AI 라벨을 입힌 파일(labeled.mp4)의 sha256에 승인이 묶인다. 보류되면 render.instagram.status=awaiting_approval·review_id, 승인 뒤 기록을 읽을 때(creative_record_get) 같은 키로 다시 물어 executed면 회사 연결 계정(로그인 연결 우선)으로 릴스를 게시하고(is_ai_generated=true, media_publish 1회) media_id·permalink를 남기며 sns.post_published를 쌓는다. 거절 outcome: not_found·draft_missing·video_not_ready·label_failed·instagram_not_connected.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeInstagramRequestInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeInstagramOutput",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "request_video_instagram_draft",
+      "description": "의뢰로 만든 영상(input.post_draft_id, AI 라벨 입힌 릴스 초안)의 인스타 캡션·해시태그 초안을 AI가 쓰거나(regenerate) 사람이 고친 caption·hashtags를 저장한다. 라벨 영상이 없으면 video_not_ready. 캡션 끝 AI 생성 문구는 지우지 않는다. 상태는 의뢰 영상 인스타 표(status=draft)에 남기고 올리지 않는다. 거절 outcome: not_found·video_not_ready·already_requested.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoInstagramDraftInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoInstagramOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "request_video_instagram_request",
+      "description": "초안대로 의뢰로 만든 영상(AI 라벨 입힌 파일)의 인스타 릴스 올리기를 사람 승인(C publish_instagram_video)에 올린다. 승인 뒤 목록을 읽을 때(list_request_videos) 같은 키로 다시 물어 executed면 승인받은 해시와 같은 라벨 영상만 회사 연결 계정으로 릴스 게시하고 permalink를 남기며, sns.post_published를 쌓고 데이터 video_performance에 게시물을 등록한다. 거절 outcome: not_found·draft_missing·video_not_ready·instagram_not_connected.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoInstagramRequestInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoInstagramOutput",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
     }
   ]
 }

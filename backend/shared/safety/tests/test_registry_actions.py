@@ -191,6 +191,13 @@ async def test_publish_youtube_always_needs_a_human(gate: Gate, act) -> None:
 
 
 @pytest.mark.asyncio
+async def test_publish_instagram_video_always_needs_a_human(gate: Gate, act) -> None:
+    """인스타 릴스 올리기도 공개되고 이 로그인 경로에 삭제 API가 없어 늘 사람 결정(C)이다."""
+    decision = await gate.execute(act("publish_instagram_video", "marketing", "ig-1"))
+    assert (decision.grade, decision.status) == ("C", "held")
+
+
+@pytest.mark.asyncio
 async def test_confirm_spec_rules(gate: Gate, act) -> None:
     clean = dict(open_questions=0, warnings=0, basis_count=2, irreversible_count=0)
     ok = await gate.execute(act("confirm_spec", "planning", "spec-ok", **clean))

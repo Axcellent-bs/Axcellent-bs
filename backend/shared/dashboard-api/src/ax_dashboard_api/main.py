@@ -31,6 +31,9 @@ from ax_dashboard_api.connection_keys import router as connection_keys_router
 from ax_dashboard_api.cost_limit_routes import router as cost_limit_router
 from ax_dashboard_api.envelope import SessionCompanyMiddleware, install_error_handlers, is_mock
 from ax_dashboard_api.higgsfield_mcp_oauth import router as higgsfield_mcp_router
+from ax_dashboard_api.instagram_oauth import refresh_interval as ig_refresh_interval
+from ax_dashboard_api.instagram_oauth import refresh_loop as ig_refresh_loop
+from ax_dashboard_api.instagram_oauth import router as instagram_oauth_router
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
 from ax_dashboard_api.routes import router
 from ax_dashboard_api.secret_routes import router as secret_router
@@ -103,10 +106,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     detector = None
     if not is_mock() and change_detector.interval_seconds() > 0:
         detector = asyncio.create_task(change_detector.loop())
+    # 인스타 로그인 연결 토큰(60일) 자동 연장. MARKETING_IG_REFRESH_INTERVAL_SECONDS<=0이면 끈다
+    ig_refresh = None
+    if not is_mock() and ig_refresh_interval() > 0:
+        ig_refresh = asyncio.create_task(ig_refresh_loop())
     try:
         yield
     finally:
-        for running in (task, detector):
+        for running in (task, detector, ig_refresh):
             if running is not None:
                 running.cancel()
 
@@ -153,6 +160,7 @@ app.include_router(instagram_radar_router)
 app.include_router(youtube_oauth_router)
 # 회사 Higgsfield 계정 연결(원격 MCP + OAuth, 구독 크레딧). 콜백만 토큰 없이(auth.PUBLIC_ROUTES)
 app.include_router(higgsfield_mcp_router)
+app.include_router(instagram_oauth_router)
 app.include_router(tool_connections.router)
 # 알림 받는 주소: 고객사 판매 서버가 회사 키로 이벤트를 보낸다 (사람 토큰 대신 회사 키)
 app.include_router(shop_events.router)

@@ -56,6 +56,7 @@ ACTION_KO = {
     "generate_media": "이미지·영상 만들기",
     "generate_creative_video": "스토리보드 영상 만들기",
     "publish_youtube": "유튜브에 영상 올리기",
+    "publish_instagram_video": "인스타그램에 릴스 올리기",
     "attach_creative_file": "제작 기록에 파일 올리기",
     "start_campaign": "캠페인 집행",
     "rollback_deployment": "배포 되돌리기",

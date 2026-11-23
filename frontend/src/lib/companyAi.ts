@@ -11,12 +11,15 @@ export type KeyName =
   | "LLM_API_KEY" | "DEV_CODER_LLM_API_KEY" | "MARKETING_VIDEO_API_KEY"
   // SNS 계정 연결(회사마다 다름, 11/23)
   | "MARKETING_IG_ACCESS_TOKEN" | "MARKETING_IG_USER_ID" | "MARKETING_YOUTUBE_REFRESH_TOKEN" | "MARKETING_HIGGSFIELD_API_KEY"
+  // 인스타 로그인 연결(Meta 통합 로그인, 60일 장기 토큰, 서버가 연장한다 11/23)
+  | "MARKETING_IG_OAUTH_REFRESH_TOKEN"
   // Higgsfield 계정 연결(원격 MCP OAuth, 회사 구독 크레딧, 11/23)
   | "MARKETING_HIGGSFIELD_MCP_REFRESH_TOKEN";
 export const KEY_NAMES: readonly KeyName[] = [
   "LLM_API_KEY", "DEV_CODER_LLM_API_KEY", "MARKETING_VIDEO_API_KEY",
   "MARKETING_IG_ACCESS_TOKEN", "MARKETING_IG_USER_ID", "MARKETING_YOUTUBE_REFRESH_TOKEN", "MARKETING_HIGGSFIELD_API_KEY",
   "MARKETING_HIGGSFIELD_MCP_REFRESH_TOKEN",
+  "MARKETING_IG_OAUTH_REFRESH_TOKEN",
 ];
 
 export type CoderMode = "company" | "separate";
@@ -282,7 +285,7 @@ export function videoView(hasKey: boolean, enabled: boolean): { tone: Tone; labe
 }
 
 /** 동의 화면에서 돌아온 주소의 `#` 뒤(`<prefix>_code`·`<prefix>_state`). 둘 다 있어야 마치기를 부른다 */
-function readOauthReturn(hash: string, prefix: "youtube" | "higgsfield"): { code: string; state: string } | null {
+function readOauthReturn(hash: string, prefix: "youtube" | "higgsfield" | "instagram"): { code: string; state: string } | null {
   const p = new URLSearchParams(hash.replace(/^#/, ""));
   const code = p.get(`${prefix}_code`) ?? "";
   const state = p.get(`${prefix}_state`) ?? "";
@@ -290,6 +293,38 @@ function readOauthReturn(hash: string, prefix: "youtube" | "higgsfield"): { code
 }
 export const readYoutubeReturn = (hash: string) => readOauthReturn(hash, "youtube");
 export const readHiggsfieldReturn = (hash: string) => readOauthReturn(hash, "higgsfield");
+export const readInstagramReturn = (hash: string) => readOauthReturn(hash, "instagram");
+
+/** 회사 인스타 로그인 연결(GET /marketing/instagram/connection). 토큰 값은 오지 않는다 */
+export interface InstagramAccount {
+  app_configured: boolean;
+  connected: boolean;
+  /** 받은 토큰 종류: ig(graph.instagram.com) · fb(graph.facebook.com) */
+  kind: "ig" | "fb" | null;
+  username: string | null;
+  profile_url: string | null;
+  expires_at: string | null;
+  refresh_error: string | null;
+  needs_reconnect: boolean;
+  user_id_mismatch: boolean;
+  connected_by: string | null;
+}
+export function readInstagramAccount(v: unknown): InstagramAccount | null {
+  if (!isObj(v) || typeof v.connected !== "boolean") return null;
+  const profile = strOrNull(v.profile_url);
+  return {
+    app_configured: v.app_configured === true,
+    connected: v.connected,
+    kind: v.kind === "ig" || v.kind === "fb" ? v.kind : null,
+    username: strOrNull(v.username),
+    profile_url: profile && /^https:\/\/www\.instagram\.com\//.test(profile) ? profile : null,
+    expires_at: strOrNull(v.expires_at),
+    refresh_error: strOrNull(v.refresh_error),
+    needs_reconnect: v.needs_reconnect === true,
+    user_id_mismatch: v.user_id_mismatch === true,
+    connected_by: strOrNull(v.connected_by),
+  };
+}
 
 /** 회사 Higgsfield 계정 연결(GET /marketing/higgsfield/connection). 토큰 값은 오지 않는다 */
 export interface HiggsfieldAccount {
@@ -315,6 +350,7 @@ export const KEY_LABEL: Record<KeyName, string> = {
   LLM_API_KEY: "회사 AI 키", DEV_CODER_LLM_API_KEY: "코딩 에이전트 키", MARKETING_VIDEO_API_KEY: "영상 생성 키",
   MARKETING_IG_ACCESS_TOKEN: "인스타 토큰", MARKETING_IG_USER_ID: "인스타 계정 ID", MARKETING_YOUTUBE_REFRESH_TOKEN: "유튜브 채널 연결", MARKETING_HIGGSFIELD_API_KEY: "Higgsfield 키",
   MARKETING_HIGGSFIELD_MCP_REFRESH_TOKEN: "Higgsfield 계정 연결",
+  MARKETING_IG_OAUTH_REFRESH_TOKEN: "인스타 로그인 연결",
 };
 const keyLabel = (name?: string) => (name && KEY_LABEL[name as KeyName]) || name || "키";
 const OP_LABEL: Record<string, string> = { add: "등록", replace: "교체", delete: "삭제" };

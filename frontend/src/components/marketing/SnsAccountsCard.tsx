@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { KEY_LABEL, keyHintKo, keyResultKo, readHiggsfieldReturn, readYoutubeReturn, type CompanyAiAdmin, type HiggsfieldAccount, type KeyName } from "@/lib/companyAi";
+import { KEY_LABEL, keyHintKo, keyResultKo, readHiggsfieldReturn, readInstagramReturn, readYoutubeReturn, type CompanyAiAdmin, type HiggsfieldAccount, type InstagramAccount, type KeyName } from "@/lib/companyAi";
 import {
-  deleteCompanyAiKey, errText, getCompanyAi, getHiggsfieldAccount, higgsfieldComplete, higgsfieldConnectUrl, higgsfieldDisconnect,
-  putCompanyAiKey, youtubeComplete, youtubeConnectUrl, youtubeDisconnect,
+  errText, getCompanyAi, getHiggsfieldAccount, getInstagramAccount, higgsfieldComplete, higgsfieldConnectUrl, higgsfieldDisconnect,
+  instagramComplete, instagramConnectUrl, instagramDisconnect, putCompanyAiKey, youtubeComplete, youtubeConnectUrl, youtubeDisconnect,
 } from "@/lib/companyAiApi";
 import { fetchHiggsfieldStatus, type HiggsfieldStatus } from "@/lib/higgsfield";
 import { fetchInstagramStatus, fetchYoutubeStatus, type InstagramStatus, type YoutubeStatus } from "@/lib/youtube";
@@ -16,7 +16,9 @@ import { useVisibleInterval } from "@/lib/visibleInterval";
 //   연결이 없으면 예전처럼 회사 키(`<ID>:<SECRET>`, API 크레딧), 그것도 없으면 설치 기본 키를 쓴다
 // - 유튜브: [유튜브 채널 연결] → 구글 동의 화면(채널 주인 계정) → 돌아오면 ?youtube=finish#코드 →
 //   이 화면이 로그인한 계정으로 complete를 부른다(연결을 시작한 계정·회사일 때만 서버가 넣는다)
-// - 인스타: Meta에서 받은 토큰·계정 ID. 게시는 늘 사람 승인을 거친다(자동 게시 없음)
+// - 인스타: [인스타그램 연결] → Meta 동의 화면(통합 로그인) → 돌아오면 ?instagram=finish#코드 → 유튜브와 같이 complete.
+//   서버가 60일 토큰을 받아 만료 전에 저절로 연장한다(실패하면 "다시 연결 필요"). 토큰·계정 ID 직접 입력칸은 없앴다
+//   (태윤 결정 11/23). 서버에 예전에 넣은 토큰은 로그인 연결이 없을 때만 게시에 쓰인다. 게시는 늘 사람 승인을 거친다
 // - 바꾸기는 고객사 관리자만. compact면 상태 한 줄 + [계정·연결에서 바꾸기]만 보인다
 
 const IG_TOKEN: KeyName = "MARKETING_IG_ACCESS_TOKEN";
@@ -38,6 +40,11 @@ const BACK_KO: Record<string, string> = {
   no_refresh_token: "구글이 연결 값을 주지 않았어요. 구글 계정의 앱 권한에서 AXcellent를 지우고 다시 연결해 주세요",
   store_failed: "키 저장소에 넣지 못했어요(키 저장소가 꺼져 있을 수 있어요)",
 };
+const IG_BACK_KO: Record<string, string> = {
+  connected: "인스타그램 계정을 연결했어요. 60일마다 저절로 연장해요",
+  denied: "Meta 동의를 취소해서 연결하지 않았어요",
+  bad_state: "연결 시간이 지났거나 주소가 맞지 않아요. 다시 눌러 주세요",
+};
 type Tone = "ok" | "bad" | "wait" | "off";
 const DOT: Record<Tone, string> = { ok: "bg-emerald-500", bad: "bg-red-500", wait: "bg-amber-500", off: "bg-ink-300" };
 
@@ -57,10 +64,11 @@ function ytView(s: YoutubeStatus | null): { tone: Tone; label: string } {
   return { tone: "off", label: "연결 전" };
 }
 
-function igView(s: InstagramStatus | null, hasKeys: boolean | null): { tone: Tone; label: string } {
+function igView(s: InstagramStatus | null, hasKeys: boolean | null, login: InstagramAccount | null): { tone: Tone; label: string } {
+  if (login?.connected && login.needs_reconnect) return { tone: "bad", label: "다시 연결 필요" };
   if (!s) return hasKeys === null ? { tone: "off", label: "확인 중" } : { tone: hasKeys ? "ok" : "off", label: hasKeys ? "연결됨" : "연결 전" };
   if (s.connection === "ok") return { tone: "ok", label: s.username ? `연결됨 · @${s.username}` : "연결됨" };
-  if (s.connection === "invalid_credentials") return { tone: "bad", label: "토큰 다시 넣기 필요" };
+  if (s.connection === "invalid_credentials") return { tone: "bad", label: "다시 연결 필요" };
   if (s.connection === "error") return { tone: "wait", label: "닿지 않음" };
   return { tone: "off", label: "연결 전" };
 }
@@ -89,8 +97,7 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
   const [busy, setBusy] = useState(false);
   const [hfKey, setHfKey] = useState("");
   const [hfAcct, setHfAcct] = useState<HiggsfieldAccount | null>(null);
-  const [token, setToken] = useState("");
-  const [userId, setUserId] = useState("");
+  const [igAcct, setIgAcct] = useState<InstagramAccount | null>(null);
 
   const loadStatus = useCallback(async () => {
     const [h, y, i] = await Promise.allSettled([fetchHiggsfieldStatus(), fetchYoutubeStatus(), fetchInstagramStatus()]);
@@ -106,7 +113,9 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
       setDenied(errText(e));
       return;
     }
-    setHfAcct(await getHiggsfieldAccount().catch(() => null));
+    const [h, i] = await Promise.all([getHiggsfieldAccount().catch(() => null), getInstagramAccount().catch(() => null)]);
+    setHfAcct(h);
+    setIgAcct(i);
   }, []);
 
   useVisibleInterval(loadStatus, REFRESH_MS);
@@ -116,6 +125,8 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
     const search = new URLSearchParams(window.location.search);
     const flow = search.has("higgsfield")
       ? { param: "higgsfield", ko: HF_BACK_KO, fail: "Higgsfield 연결을 마치지 못했어요", read: readHiggsfieldReturn, complete: higgsfieldComplete }
+      : search.has("instagram")
+      ? { param: "instagram", ko: IG_BACK_KO, fail: "인스타그램 연결을 마치지 못했어요", read: readInstagramReturn, complete: instagramComplete }
       : { param: "youtube", ko: BACK_KO, fail: "유튜브 연결을 마치지 못했어요", read: readYoutubeReturn, complete: youtubeComplete };
     const back = search.get(flow.param);
     if (back !== "finish") {
@@ -149,7 +160,7 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
   const blocked = !admin?.secret_store.enabled;
   const hfLook = hfView(hf);
   const ytLook = ytView(yt);
-  const igLook = igView(ig, admin ? igOn : null);
+  const igLook = igView(ig, admin ? igOn : null, igAcct);
   const ytLink = yt?.connection === "ok" ? safeLink(yt.channel_url) : null;
   const igLink = ig?.connection === "ok" ? safeLink(ig.profile_url) : null;
 
@@ -182,19 +193,6 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
     const out = keyResultKo(await putCompanyAiKey(HF, hfKey.trim()), admins);
     setHfKey("");
     return `${KEY_LABEL[HF]}: ${out}`;
-  };
-  const saveIg = async () => {
-    const parts: string[] = [];
-    if (token.trim()) parts.push(`${KEY_LABEL[IG_TOKEN]}: ${keyResultKo(await putCompanyAiKey(IG_TOKEN, token.trim()), admins)}`);
-    if (userId.trim()) parts.push(`${KEY_LABEL[IG_USER]}: ${keyResultKo(await putCompanyAiKey(IG_USER, userId.trim()), admins)}`);
-    setToken("");
-    setUserId("");
-    return parts.join(" ");
-  };
-  const dropIg = async () => {
-    await deleteCompanyAiKey(IG_TOKEN, "인스타 연결 끊기");
-    await deleteCompanyAiKey(IG_USER, "인스타 연결 끊기");
-    return "인스타 연결 끊기를 요청했어요";
   };
   const canEdit = !denied && !!admin;
 
@@ -254,16 +252,27 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
         </div>
         <div className="space-y-2 rounded-xl border border-ink-100 p-4">
           <Status name="인스타그램" {...igLook} href={igLink} />
-          <p className="text-xs text-ink-500">Meta에서 받은 Instagram 토큰과 계정 ID를 넣어요</p>
+          <p className="text-xs text-ink-500">인스타 비즈니스 계정 주인으로 로그인해 동의하면 이 회사 계정에 릴스를 올릴 수 있어요</p>
           {canEdit && (
             <>
-              <p className="text-xs text-ink-500">{KEY_LABEL[IG_TOKEN]} {keyHintKo(row(IG_TOKEN)?.hint ?? "")} · {KEY_LABEL[IG_USER]} {keyHintKo(row(IG_USER)?.hint ?? "")}</p>
-              <input className="field text-sm" type="password" autoComplete="off" aria-label="인스타 토큰" placeholder="인스타 토큰" value={token} onChange={(e) => setToken(e.target.value)} />
-              <input className="field text-sm" autoComplete="off" aria-label="인스타 계정 ID" placeholder="인스타 계정 ID(숫자)" value={userId} onChange={(e) => setUserId(e.target.value)} />
+              <p className="text-xs text-ink-500">
+                로그인 연결 {igAcct?.connected ? `연결됨${igAcct.username ? ` · @${igAcct.username}` : ""}` : "연결 전"}
+                {igAcct?.connected && igAcct.expires_at ? ` · ${igAcct.expires_at.slice(0, 10)}까지(저절로 연장)` : ""}
+                {igAcct?.connected && igAcct.profile_url && <> · <a href={igAcct.profile_url} target="_blank" rel="noreferrer" className="text-brand-700 underline">프로필</a></>}
+              </p>
+              {igAcct?.needs_reconnect && <p className="text-xs text-accent">토큰 연장에 실패했어요{igAcct.refresh_error ? ` (${igAcct.refresh_error})` : ""}. 다시 연결해 주세요</p>}
+              {igAcct?.user_id_mismatch && <p className="text-xs text-accent">예전에 넣어 둔 인스타 계정 ID와 로그인한 계정이 달라요. 게시는 로그인한 계정으로 해요</p>}
               <div className="flex flex-wrap gap-2">
-                <button type="button" className="btn-primary text-xs" disabled={busy || blocked || (!token.trim() && !userId.trim())} onClick={() => void run(saveIg)}>저장</button>
-                {igOn && <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => void run(dropIg)}>연결 끊기</button>}
+                <button type="button" className="btn-primary text-xs" disabled={busy || blocked || igAcct?.app_configured === false}
+                  onClick={() => void run(async () => { window.location.assign(await instagramConnectUrl(!!igAcct?.connected)); })}>
+                  {igAcct?.connected ? "다른 계정으로 다시 연결" : "인스타그램 연결"}
+                </button>
+                {igAcct?.connected && (
+                  <button type="button" className="btn-ghost text-xs" disabled={busy}
+                    onClick={() => void run(async () => { await instagramDisconnect(); return "인스타그램 로그인 연결을 끊었어요"; })}>연결 끊기</button>
+                )}
               </div>
+              {igAcct?.app_configured === false && <p className="text-xs text-accent">앱 설정 없음: 서버에 AXcellent 인스타그램 앱 설정(MARKETING_IG_APP_ID 등)이 없어요</p>}
             </>
           )}
         </div>
