@@ -106,7 +106,7 @@ def test_plan_of_has_what_work_requests_needs() -> None:
         "ref_key": None,
         "takes_ref": None,
         "fixed_input": {},
-        "text_key": None,
+        "text_key": "request_text",
         "carries": None,
         "takes_carry": True,
         "fill": None,

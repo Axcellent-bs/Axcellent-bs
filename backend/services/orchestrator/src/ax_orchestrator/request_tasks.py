@@ -159,6 +159,8 @@ PROMO_VIDEO = TaskDef(
             after=("insight",),
             takes_carry=True,
             carry_keys=("proposal_id", "video_plan"),
+            # 11/23: 고객 문장의 길이("30초 이내")를 기획이 제작안 길이로 쓴다 (문장은 데이터로만)
+            text_key="request_text",
         ),
         TaskStep("confirm", None, "human_check", "사람 확인", None, after=("plan",), kind="human"),
         # 사람이 제작안을 확인한 뒤: 마케팅이 제작안으로 SNS 초안·장면 템플릿을 정하고(읽기),

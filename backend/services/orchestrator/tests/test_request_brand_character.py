@@ -75,6 +75,7 @@ class Fake:
             "prepare_video_draft_from_plan": ("marketing", READ),
             "generate_media": ("marketing", "B"),
         }
+
         def find(skill: str) -> SkillEntry | None:
             if skill not in entries:
                 return None
@@ -385,3 +386,18 @@ def test_api_other_company_request_is_404(client: Any) -> None:
     assert res.status_code == 404
     none = client.post(_path("wr_none"), json={"record_id": BRAND}, headers=HUMAN)
     assert none.status_code == 404
+
+
+# ---------------------------------------------------------------- 기획에 고객 문장 (11/23)
+
+
+@pytest.mark.asyncio
+async def test_plan_step_gets_the_request_text_with_the_insight() -> None:
+    """의뢰 길이("30초 이내")를 기획이 읽게, 넘겨받은 인사이트에 고객 문장 칸을 더한다."""
+    fake = Fake()
+    await until_confirm(fake)
+    plan = next(c[1] for c in fake.calls if c[1].skill == "receive_insight")
+    assert plan.input["request_text"] == "신간 소개 영상 만들어 주세요"
+    assert plan.input["insight_id"] == INSIGHT["insight_id"]  # 인사이트는 그대로
+    insight = next(c[1] for c in fake.calls if c[1].skill == "trend_report_insight")
+    assert "request_text" not in insight.input  # 문장 칸이 없는 단계에는 안 붙는다

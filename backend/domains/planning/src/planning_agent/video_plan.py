@@ -162,6 +162,29 @@ def prompt_problems(prompt: str) -> list[str]:
     return out
 
 
+_REQ_SECONDS = re.compile(r"(\d{1,3})\s*(?:초|sec\b|s\b)")
+_REQ_MINUTES = re.compile(r"(\d)\s*분")
+
+
+def requested_format(text: str | None) -> str | None:
+    """고객 의뢰 문장의 영상 길이 → 기획안 형식 "숏폼 N초".
+
+    11/23 재현 님: 의뢰가 "30초 이내 쇼츠"였는데 제작안이 15초로 나왔다.
+
+    LLM 없이 숫자만 읽는다. "30초 이내"·"30초 정도"·"30초"는 모두 30초(의뢰자가 준 길이를 다 쓴다),
+    "1분"은 60초. 처음 나온 길이만 보고, 10~60초 밖이거나 없으면 None(기획이 고른 형식 그대로)."""
+    if not text:
+        return None
+    sec = _REQ_SECONDS.search(text)
+    got = int(sec.group(1)) if sec else None
+    if got is None:
+        mins = _REQ_MINUTES.search(text)
+        got = int(mins.group(1)) * 60 if mins else None
+    if got is None or not MIN_SECONDS <= got <= MAX_SECONDS:
+        return None
+    return f"숏폼 {got}초"
+
+
 def duration_of(p: Proposal) -> int:
     """기획안 형식 문구의 초(10~60초 안), 없으면 30초."""
     m = _SECONDS.search(p.format or "")

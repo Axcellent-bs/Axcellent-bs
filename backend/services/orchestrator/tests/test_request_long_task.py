@@ -245,7 +245,8 @@ async def test_insight_goes_whole_to_the_plan_without_asking_a_person_and_is_the
     assert row["steps"]["plan"]["status"] == "completed"
     assert row["steps"]["confirm"]["status"] == "waiting_human"  # 사람 확인 단계에서 멈춘다
     plan_call = next(c[1] for c in fake.calls if c[1].skill == "receive_insight")
-    assert plan_call.input == INSIGHT  # 기획 입력을 그대로
+    # 기획 입력은 인사이트 그대로 + 고객 문장 칸 (11/23: 의뢰 길이를 기획이 읽는다)
+    assert plan_call.input == {**INSIGHT, "request_text": "신간 소개 영상 만들어 주세요"}
     assert plan_call.meta.idempotency_key == f"{rid}:receive_insight:plan"  # A 등급이라 필수
     assert reqs.get_carry(rid, "insight") is None  # 쓰고 나면 지운다
 
