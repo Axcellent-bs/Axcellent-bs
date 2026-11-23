@@ -7,6 +7,7 @@
 
 - `state=new&limit=` → 읽을 차례가 된 신청. 줄마다 `seq`(정수)·`key`·`context_id`·`buyer_id`·
   `customer_name`·`order_id`·`type`·`reason`·`items`·`unsealed`·`evidence_count`·`description`,
+  `site_refund_amount`·`site_fee`·`site_fee_rate`(사이트 규칙 예상 환불, 없으면 None),
   `meta.total`(기다리는 수)·`meta.failed`(실패로 뺀 수)
 - `state=open&after=&limit=` → 읽어 갔지만 끝나지 않은 신청. 줄마다 `seq`·`support_claim_id`·
   `status`·`result_digest`, 다음 쪽은 `meta.next_after`
@@ -17,6 +18,10 @@
   아직 결정 전)·`type`·`reason`(shop-api 값, 보통 `const:`)·`description`(고객이 쓴 글, untrusted)·
   `created_at`. 짝 식 안에서 `order.<칸>`은 그 신청의 주문 원본 행이다(`buyer_id`·`customer_name`을
   주문에서 꺼낸다)
+- 선택 칸 `site_refund_amount`·`site_fee`·`site_fee_rate`: 사이트가 자기 규칙(예: 여행 취소
+  수수료)으로 계산한 예상 환불액·수수료·수수료율(0.1 = 10%). 받은함 줄에 같은 이름으로 옮기고,
+  고객지원은 환불액이 있으면 그 금액으로 판정·환불 승인한다(관문 금액·사이트 결정 본문이 같다).
+  짝이 없으면 None(책 쇼핑몰 규칙). 값은 고치지 않고 옮기며 모양은 고객지원이 검사한다
 - 회원이 아닌 주문(구매자 칸이 빔)은 `guest-<주문 번호>`로 짝짓는다(판매 기록 내보내기와 같은
   이름표). 주문 하나 읽기도 같은 값을 준다(`resources.order_detail`)
 
@@ -58,6 +63,8 @@ REQUESTED = "requested"
 FINISHED = frozenset({"completed", "rejected", "not_accepted"})
 DEFAULT_TYPE = "cancel"
 DEFAULT_REASON = "other"
+# 사이트가 자기 규칙으로 계산한 예상 환불 칸 (짝 `fields`에서 고른다, 없으면 None)
+SITE_REFUND_FIELDS = ("site_refund_amount", "site_fee", "site_fee_rate")
 
 _lock = threading.Lock()
 
@@ -107,6 +114,8 @@ def to_claim(
         "reason": _get(row, m, "reason", required=False) or DEFAULT_REASON,
         "description": description if isinstance(description, str) else "",
         "created_at": _get(row, m, "created_at", required=False),
+        # 사이트 규칙 예상 환불 (짝이 없으면 None = 고객지원이 책 쇼핑몰 규칙으로 판정)
+        **{name: _get(row, m, name, required=False) for name in SITE_REFUND_FIELDS},
     }
 
 
@@ -142,6 +151,7 @@ def inbox_row(claim: dict[str, Any]) -> dict[str, Any]:
         "evidence_count": 0,
         "description": claim["description"],
         "created_at": claim["created_at"],
+        **{name: claim.get(name) for name in SITE_REFUND_FIELDS},
     }
 
 

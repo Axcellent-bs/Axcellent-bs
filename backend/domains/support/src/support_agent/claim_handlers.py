@@ -1,6 +1,7 @@
 """클레임(취소·반품·교환) skill 핸들러.
 
 - 판정은 `claim_rules.decide`가 주문 사실에서 코드로 한다. 입력에는 금액이 없고 LLM도 쓰지 않는다.
+  예외: 사이트 변환기 신청의 사이트 규칙 예상 환불(`site_refund`)은 판정·환불 승인 금액이 된다.
 - 읽기 skill은 상태를 바꾸지 않는다. 쓰기 skill은 `handlers._write`(멱등 확인 → `execute()` →
   저장소 반영)를 거친다. 실행되지 않으면(보류·검증 중·거부) 저장소를 바꾸지 않는다.
 - 환불 지급(`process_claim_queue`)은 safety 레지스트리의 `refund_request`(A, 안전 관문의 한도
@@ -27,6 +28,7 @@ from support_agent.claim_schemas import (
     BuyerOrder,
     BuyerOrderItem,
     BuyerOrders,
+    Claim,
     ClaimReasonHit,
     CreateClaimInput,
     DecideClaimInput,
@@ -38,6 +40,7 @@ from support_agent.claim_schemas import (
     QueueRun,
     QueueRunResult,
     ReceiveReturnInput,
+    SiteRefund,
 )
 from support_agent.claims import now_iso, refund_rejection_hit
 from support_agent.schemas import RecordClaimActivityInput
@@ -345,6 +348,25 @@ async def claim_queue(request: AgentRequest) -> AgentResult:
     return h._done(request, CLAIMS.queue().model_dump(mode="json"))
 
 
+def _site_refund(site: SiteRefund | None) -> claim_rules.SiteRefund | None:
+    """사이트 규칙 예상 환불을 판정 규칙 모양으로 (없으면 책 쇼핑몰 규칙)."""
+    if site is None:
+        return None
+    return claim_rules.SiteRefund(refund=site.refund_amount, fee=site.fee, fee_rate=site.fee_rate)
+
+
+def _refund_summary(claim: Claim) -> str:
+    """보류되면 담당자가 보는 요약. 코드가 아는 사실(금액·ID·유형·사유 코드·사이트 규칙)만 쓴다."""
+    summary = (
+        f"환불 {claim.expected_refund:,}원 · 클레임 {claim.id} · 주문 {claim.order_id}"
+        f" · {claim.type}/{claim.reason}"
+    )
+    site = _site_refund(claim.site_refund)
+    if site is not None:
+        summary += f" · {claim_rules.site_rule_text(site)}"
+    return summary
+
+
 # ---------------------------------------------------------------- 쓰기 (execute 경유)
 async def create_claim(request: AgentRequest) -> AgentResult:
     parsed = h._parse(request, CreateClaimInput)
@@ -382,6 +404,7 @@ async def create_claim(request: AgentRequest) -> AgentResult:
         unsealed=parsed.unsealed,
         prior_claims=CLAIMS.count_for_buyer(parsed.buyer_id),
         now=datetime.now(UTC),
+        site_refund=_site_refund(parsed.site_refund),
     )
 
     async def apply() -> tuple[dict[str, Any], bool]:
@@ -396,6 +419,7 @@ async def create_claim(request: AgentRequest) -> AgentResult:
             evidence_count=parsed.evidence_count,
             unsealed=parsed.unsealed,
             conversation_id=parsed.conversation_id,
+            site_refund=parsed.site_refund,
         )
         await _record_activity(request, claim, "claim_created")
         return claim.model_dump(mode="json"), False
@@ -590,11 +614,9 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
             }
         )
         # 보류되면 담당자가 이 요약을 본다 (safety가 앞 200자를 보류 기록에 담는다). 고객 이름·메모
-        # 같은 외부 입력은 넣지 않고 코드가 아는 사실(금액·ID·유형·사유 코드)만 쓴다.
-        summary = (
-            f"환불 {claim.expected_refund:,}원 · 클레임 {claim.id} · 주문 {claim.order_id}"
-            f" · {claim.type}/{claim.reason}"
-        )
+        # 같은 외부 입력은 넣지 않고 코드가 아는 사실(금액·ID·유형·사유 코드·사이트 규칙)만 쓴다.
+        # 사이트 규칙 신청이면 `expected_refund`가 사이트 예상 환불액이라 관문 금액도 같다.
+        summary = _refund_summary(claim)
         decision = await execute(
             "refund_request",
             {

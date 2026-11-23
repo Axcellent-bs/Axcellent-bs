@@ -21,6 +21,7 @@ from support_agent.claim_schemas import (
     ClaimStats,
     QueueEntry,
     QueueItemLine,
+    SiteRefund,
 )
 from support_agent.orders import Order
 
@@ -147,6 +148,7 @@ class ClaimStore:
         evidence_count: int,
         unsealed: bool,
         conversation_id: int | None,
+        site_refund: SiteRefund | None = None,
     ) -> Claim:
         stamp = now_iso()
         claim = Claim(
@@ -179,6 +181,7 @@ class ClaimStore:
             points_back=decision.points_back,
             abuse_score=decision.abuse_score,
             receipt=_receipt(order),
+            site_refund=site_refund,
         )
         self._audit(claim, "decide", outcome=decision.outcome, abuse_score=decision.abuse_score)
         self._claims[claim.id] = claim
