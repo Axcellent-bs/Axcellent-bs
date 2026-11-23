@@ -175,6 +175,15 @@ async def test_receive_campaign_brief_refuses_other_requesters(
 
 
 @pytest.mark.asyncio
+async def test_record_campaign_ad_metrics_is_a_for_marketing(gate: Gate, act) -> None:
+    """광고 숫자 기록은 돈이 나가지 않는 마케팅 저장소 기록이라 A. 다른 요청자는 등록 안 된 일."""
+    decision = await gate.execute(act("record_campaign_ad_metrics", "marketing", "ad-1"))
+    assert (decision.grade, decision.status) == ("A", "executed")
+    other = await gate.execute(act("record_campaign_ad_metrics", "data", "ad-2"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
 async def test_publish_youtube_always_needs_a_human(gate: Gate, act) -> None:
     """유튜브 올리기는 공개되고 되돌리기 어려워 늘 사람 결정(C)이다."""
     decision = await gate.execute(act("publish_youtube", "marketing", "yt-1"))

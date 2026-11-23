@@ -231,6 +231,8 @@ export MARKETING_SNS_DRAFT_DB="$PWD/$DATA/marketing_sns_drafts.db"
 export MARKETING_CHAT_DB="$PWD/$DATA/marketing_chat.db"
 # 이미지 시트·스토리보드 제작 기록(마케팅 › 제작 기록)
 export MARKETING_CREATIVE_DB="$PWD/$DATA/marketing_creative.db"
+# marketing: 캠페인별 광고 숫자(사람이 적은 노출·클릭·광고비). 다시 켜도 남게 (11/23)
+export MARKETING_AD_METRICS_DB="$PWD/$DATA/marketing_ad_metrics.db"
 # marketing: 공지 게시 목록·쿠폰 중복 방지 기록과 못 보낸 이벤트(outbox). 다시 켜도 남게 (11/23)
 export MARKETING_STATE_DB="$PWD/$DATA/marketing_state.db"
 # 인프라 AI 직접 대화 저장 (incident)

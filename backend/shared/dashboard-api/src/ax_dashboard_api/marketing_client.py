@@ -976,6 +976,63 @@ async def creative_upload(
     return await _creative_read("creative_record_attach", payload)
 
 
+# ---- 캠페인별 광고 숫자·추적 링크 (docs/marketing-ad-metrics-design.md C, 2026-11-23)
+AD_FAILURES = {
+    "invalid_input": (400, "INVALID_INPUT"),
+    "storage_error": (503, "STORAGE_ERROR"),
+    "held": (409, "HELD"),
+    "execute_rejected": (409, "GATE_REJECTED"),
+    "execute_failed": (502, "GATE_FAILED"),
+    "TIMEOUT": (504, "UPSTREAM_TIMEOUT"),
+    "rejected_by_review": (409, "GATE_REJECTED"),
+}
+
+
+def _ad_result(result: dict[str, Any]) -> dict[str, Any]:
+    """판단 결과(recorded·rejected 등)는 그대로 돌려주고, 실패만 오류로 바꾼다."""
+    if result["status"] == TaskStatus.COMPLETED.value:
+        return result["output"] or {}
+    status, code = AD_FAILURES.get(result["outcome"] or "", (502, "UPSTREAM_FAILED"))
+    detail = result["output"] or {}
+    errors = detail.get("errors") if isinstance(detail, dict) else None
+    message = (
+        "; ".join(map(str, errors)) if errors else f"마케팅이 처리하지 못했다 ({result['outcome']})"
+    )
+    raise ApiError(status, code, message)
+
+
+async def ad_metrics_call(
+    campaign_id: str, payload: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """`payload`가 없으면 조회(get_campaign_ad_metrics), 있으면 한 줄 적기(record_…)."""
+    if payload is None:
+        key = f"ui:ad-metrics:get:{campaign_id}:{uuid.uuid4().hex[:8]}"
+        result = await call(
+            "get_campaign_ad_metrics",
+            {"campaign_id": campaign_id},
+            campaign_id=campaign_id,
+            key=key,
+        )
+        return _ad_result(result)
+    body = {"campaign_id": campaign_id, **payload}
+    raw = json.dumps(body, sort_keys=True, ensure_ascii=False)
+    key = f"ui:ad-metrics:put:{hashlib.sha256(raw.encode()).hexdigest()[:24]}"
+    result = await call("record_campaign_ad_metrics", body, campaign_id=campaign_id, key=key)
+    return _ad_result(result)
+
+
+async def campaign_link_call(campaign_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """꼬리표 붙인 추적 링크(build_campaign_link, read). 어긋난 입력은 이유를 그대로 돌려준다."""
+    key = f"ui:campaign-link:{campaign_id}:{uuid.uuid4().hex[:8]}"
+    result = await call(
+        "build_campaign_link",
+        {"campaign_id": campaign_id, **payload},
+        campaign_id=campaign_id,
+        key=key,
+    )
+    return _ad_result(result)
+
+
 async def youtube_draft_call(record_id: str, body: dict[str, Any]) -> dict[str, Any]:
     """유튜브 제목·설명 초안(마케팅 `creative_youtube_draft`). 올리지는 않는다."""
     return await _creative_read("creative_youtube_draft", {"record_id": record_id, **body})

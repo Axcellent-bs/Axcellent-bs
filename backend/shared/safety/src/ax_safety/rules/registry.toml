@@ -33,6 +33,13 @@ action = "receive_campaign_brief"
 owner = "marketing"
 base_grade = "A"
 
+# 캠페인별 광고 숫자 기록(사람이 광고 보고서를 보고 적은 값, docs/marketing-ad-metrics-design.md).
+# 돈이 나가지 않고 마케팅 자기 저장소에 쓰는 일이라 A. 데이터분석이 읽어 비율을 계산한다(2026-11-23)
+[[actions]]
+action = "record_campaign_ad_metrics"
+owner = "marketing"
+base_grade = "A"
+
 # 인스타그램 게시 (#487). 외부 고객에게 공개되고 되돌리기 어려워 늘 사람이 정한다.
 # B로 내리는 것은 게시 규칙이 검증된 뒤 사람이 정한다
 [[actions]]

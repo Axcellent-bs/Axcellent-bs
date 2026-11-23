@@ -1542,6 +1542,60 @@ async def marketing_creative_upload(
     return ok(await marketing_client.creative_upload(record_id, part, request.stream(), who, name))
 
 
+_CAMPAIGN_ID = r"^cmp_[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+
+
+class AdMetricsBody(BaseModel):
+    """광고 숫자 한 줄. 비우면(None) 모름, 0이면 0.
+
+    적은 사람은 토큰에서 채운다(본문에서 받지 않는다).
+    """
+
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    source: str = Field(min_length=1, max_length=20)
+    medium: str = Field(min_length=1, max_length=20)
+    impressions: int | None = Field(default=None, ge=0, le=10**12, strict=True)
+    clicks: int | None = Field(default=None, ge=0, le=10**12, strict=True)
+    spend_krw: int | None = Field(default=None, ge=0, le=10**13, strict=True)
+    report_ref: str | None = Field(default=None, max_length=120)
+
+
+class CampaignLinkBody(BaseModel):
+    base_url: str = Field(min_length=1, max_length=2048)
+    source: str = Field(min_length=1, max_length=20)
+    medium: str = Field(min_length=1, max_length=20)
+
+
+@router.get("/marketing/campaigns/{campaign_id}/ad-metrics")
+async def marketing_ad_metrics(campaign_id: str = Path(pattern=_CAMPAIGN_ID)) -> dict:
+    """캠페인 광고 숫자 원본 줄·칸별 합계·조합표(`get_campaign_ad_metrics`, read). 비율은 없다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "광고 숫자는 실제 모드에서만 된다")
+    return ok(await marketing_client.ad_metrics_call(campaign_id))
+
+
+@router.post("/marketing/campaigns/{campaign_id}/ad-metrics")
+async def marketing_record_ad_metrics(
+    body: AdMetricsBody, request: Request, campaign_id: str = Path(pattern=_CAMPAIGN_ID)
+) -> dict:
+    """광고 숫자 한 줄 적기·고쳐 쓰기(`record_campaign_ad_metrics`, A). 사람 토큰만."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "광고 숫자는 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    payload = body.model_dump() | {"entered_by": who}
+    return ok(await marketing_client.ad_metrics_call(campaign_id, payload))
+
+
+@router.post("/marketing/campaigns/{campaign_id}/link")
+async def marketing_campaign_link(
+    body: CampaignLinkBody, campaign_id: str = Path(pattern=_CAMPAIGN_ID)
+) -> dict:
+    """꼬리표 붙인 추적 링크(`build_campaign_link`, read). 어긋난 입력은 이유를 돌려준다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "추적 링크는 실제 모드에서만 된다")
+    return ok(await marketing_client.campaign_link_call(campaign_id, body.model_dump()))
+
+
 class YoutubeDraftBody(BaseModel):
     """비운 칸은 그대로 둔다. regenerate=true면 AI가 다시 쓴다."""
 
