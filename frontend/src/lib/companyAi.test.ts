@@ -238,3 +238,11 @@ test("상한선 문구: 예산이 있을 때만, 서버가 준 상한으로", ()
   assert.equal(limitLineKo({ used_tokens: 10, budget_tokens: null, percent: null, limit_percent: 100, limit_tokens: null }), null);
   assert.equal(limitLineKo(null), null);
 });
+
+test("유튜브 동의에서 돌아온 # 뒤 값: 코드·state가 둘 다 있을 때만 마치기를 부른다", async () => {
+  const { readYoutubeReturn } = await import("./companyAi.ts");
+  assert.deepEqual(readYoutubeReturn("#youtube_code=c1&youtube_state=s.1"), { code: "c1", state: "s.1" });
+  assert.equal(readYoutubeReturn("#youtube_code=c1"), null);
+  assert.equal(readYoutubeReturn(""), null);
+  assert.equal(readYoutubeReturn(`#youtube_code=${"x".repeat(2001)}&youtube_state=s`), null);
+});

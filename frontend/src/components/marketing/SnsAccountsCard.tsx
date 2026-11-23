@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { KEY_LABEL, keyHintKo, keyResultKo, type CompanyAiAdmin, type KeyName } from "@/lib/companyAi";
-import { deleteCompanyAiKey, errText, getCompanyAi, putCompanyAiKey, youtubeConnectUrl, youtubeDisconnect } from "@/lib/companyAiApi";
+import { KEY_LABEL, keyHintKo, keyResultKo, readYoutubeReturn, type CompanyAiAdmin, type KeyName } from "@/lib/companyAi";
+import { deleteCompanyAiKey, errText, getCompanyAi, putCompanyAiKey, youtubeComplete, youtubeConnectUrl, youtubeDisconnect } from "@/lib/companyAiApi";
 import { fetchHiggsfieldStatus, type HiggsfieldStatus } from "@/lib/higgsfield";
 import { fetchYoutubeStatus, type YoutubeStatus } from "@/lib/youtube";
 import { useVisibleInterval } from "@/lib/visibleInterval";
@@ -9,7 +9,8 @@ import { useVisibleInterval } from "@/lib/visibleInterval";
 // - 연결 상태는 서버가 실제로 확인한 값(Higgsfield: 키를 한 번 보여 봄, 유튜브: 채널 이름을 읽어 봄). 1분마다 다시 본다
 // - 값은 그 회사의 키 저장소에만 들어간다(tenant=회사 ID). 화면에는 끝 4자리만 보인다
 // - Higgsfield: 회사 키(`<ID>:<SECRET>`)를 넣는다. 없으면 설치 기본 키를 쓴다
-// - 유튜브: [유튜브 채널 연결] → 구글 동의 화면(채널 주인 계정) → 돌아오면 ?youtube=connected
+// - 유튜브: [유튜브 채널 연결] → 구글 동의 화면(채널 주인 계정) → 돌아오면 ?youtube=finish#코드 →
+//   이 화면이 로그인한 계정으로 complete를 부른다(연결을 시작한 계정·회사일 때만 서버가 넣는다)
 // - 인스타: Meta에서 받은 토큰·계정 ID. 게시는 늘 사람 승인을 거친다(자동 게시 없음)
 // - 바꾸기는 고객사 관리자만. compact면 상태 한 줄 + [계정·연결에서 바꾸기]만 보인다
 
@@ -85,8 +86,30 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
     if (compact) return;
     void loadAdmin();
     const back = new URLSearchParams(window.location.search).get("youtube");
-    if (back) setMsg(BACK_KO[back] ?? "유튜브 연결을 마치지 못했어요");
-  }, [compact, loadAdmin]);
+    if (back !== "finish") {
+      if (back) setMsg(BACK_KO[back] ?? "유튜브 연결을 마치지 못했어요");
+      return;
+    }
+    // 구글에서 돌아왔다: 코드는 주소의 # 뒤에만 있다. 주소에서 바로 지우고, 로그인한 이 계정으로 마친다
+    const got = readYoutubeReturn(window.location.hash);
+    const url = new URL(window.location.href);
+    url.hash = "";
+    url.searchParams.delete("youtube");
+    window.history.replaceState(null, "", url.toString());
+    if (!got) {
+      setMsg(BACK_KO.bad_state);
+      return;
+    }
+    setBusy(true);
+    youtubeComplete(got.code, got.state)
+      .then(() => setMsg(BACK_KO.connected))
+      .catch((e: unknown) => setMsg(errText(e)))
+      .finally(() => {
+        setBusy(false);
+        void loadAdmin();
+        void loadStatus();
+      });
+  }, [compact, loadAdmin, loadStatus]);
 
   const row = (name: KeyName) => admin?.keys[name];
   const igOn = !!row(IG_TOKEN)?.has_key && !!row(IG_USER)?.has_key;
