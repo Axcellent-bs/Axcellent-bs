@@ -566,6 +566,13 @@ async def edit_request(request_id: str, body: EditBody, who: str = Depends(requi
         raise HTTPException(404, "없는 의뢰")
     if outcome == "same":
         raise HTTPException(422, "바뀐 내용이 없어요")
+    # 새 의뢰가 생기지 않은 접수 결과: 옛 의뢰(와 기존 의뢰)는 그대로다
+    if outcome == "duplicate":
+        raise HTTPException(422, f"같은 의뢰가 이미 접수돼 있어요 (번호 {new_id})")
+    if outcome == "limited":
+        raise HTTPException(429, "오늘 접수할 수 있는 의뢰 수를 넘었어요. 내일 다시 고쳐 주세요")
+    if outcome == "rejected":
+        raise HTTPException(422, "고친 글은 접수할 수 없는 의뢰예요. 지금 의뢰는 그대로예요")
     if outcome == "not_request":
         raise HTTPException(422, "고친 글이 의뢰로 접수되지 않았어요. 지금 의뢰는 그대로예요")
     return {"data": {"ok": True, "request_id": new_id, "replaces": request_id}, "meta": {}}

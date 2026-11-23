@@ -281,7 +281,9 @@ export function requestActionError(e: unknown): { text: string; reload: boolean 
 export function requestEditError(e: unknown): { text: string; reload: boolean } {
   const status = typeof (e as { status?: unknown } | null)?.status === "number" ? (e as { status: number }).status : null;
   const message = e instanceof Error ? e.message : "";
-  if (status !== null && [422, 502, 503].includes(status) && message) return { text: message, reload: false };
+  // 422(같은 글·같은 의뢰가 이미 있음·접수할 수 없는 의뢰)·429(하루 접수 한도)·502·503: 서버 문장 그대로, 수정 칸은 열어 둔다.
+  // 409는 결정 실패 문구(이미 처리됨, 목록 다시 읽기) 그대로다
+  if (status !== null && [422, 429, 502, 503].includes(status) && message) return { text: message, reload: false };
   return requestActionError(e);
 }
 
