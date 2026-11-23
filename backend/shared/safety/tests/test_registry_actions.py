@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from ax_contracts.schemas import HoldReason
+from ax_contracts.schemas import ExecuteRequest, HoldReason
 from ax_safety.gate import Gate
 from ax_safety.rules import load_registry
 
@@ -927,3 +927,95 @@ async def test_end_incident_notice_refuses_other_requesters(
     """총괄은 마케팅 skill을 A2A로 부를 뿐 관문에 직접 요청하지 않는다."""
     decision = await gate.execute(act("end_incident_notice", requester, f"end-{requester}"))
     assert (decision.status, decision.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+# ---- 배포 실행 deploy_version (#1617 사후 리뷰): B + dev 교차검증
+
+_DEPLOY = {
+    "service": "shop-api",
+    "version": "v2.5.0",
+    "request_id": "DEP-3.1a2b3c4d",
+    "env": "prod",
+    "requester": "dev",
+    "approved_by": "예진",
+    "tool": "github_actions",
+}
+_DEPLOY_KEY = "deploy:DEP-3.1a2b3c4d:deploy_version:shop-api:v2.5.0"
+
+
+def _deploy(requester: str, key: str = _DEPLOY_KEY) -> ExecuteRequest:
+    """infra가 보내는 execute(deploy_version). params에 `requester` 키가 있어 `act`를 못 쓴다."""
+    return ExecuteRequest(
+        action="deploy_version",
+        requester=requester,
+        context_id="ctx_dep_0003",
+        idempotency_key=key,
+        params=dict(_DEPLOY),
+    )
+
+
+def test_deploy_version_is_b_verified_by_dev_like_rollback() -> None:
+    """approved_by 이름만으로 운영 배포가 나가지 않게 rollback_deployment처럼 dev가 교차검증한다."""
+    registry = load_registry()
+    deploy = registry.get("deploy_version")
+    rollback = registry.get("rollback_deployment")
+    assert deploy is not None and rollback is not None
+    assert (deploy.owner, deploy.base_grade, deploy.verifier, deploy.verify_skill) == (
+        "infra",
+        "B",
+        "dev",
+        "verify_deploy_request",
+    )
+    assert (deploy.owner, deploy.base_grade, deploy.verifier) == (
+        rollback.owner,
+        rollback.base_grade,
+        rollback.verifier,
+    )
+    # 관문 요청자는 execute()를 부르는 infra다. 검증자 dev는 요청자가 아니다(자기 검증 금지)
+    assert deploy.allowed_requesters == ["infra"]
+    assert deploy.on_verify_reject == "reject"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["infra", "incident"])
+async def test_deploy_version_runs_only_after_dev_verification(
+    gate: Gate, verifier: Any, requester: str
+) -> None:
+    decision = await gate.execute(_deploy(requester))
+    assert (decision.grade, decision.status, decision.verifier) == ("B", "executed", "dev")
+    [task] = verifier.tasks
+    assert (task.verifier, task.skill) == ("dev", "verify_deploy_request")
+    assert task.input["action"] == "deploy_version"
+    assert task.input["params"]["request_id"] == "DEP-3.1a2b3c4d"
+    assert task.input["params"]["approved_by"] == "예진"
+
+
+@pytest.mark.asyncio
+async def test_deploy_version_dev_rejection_is_rejected(gate: Gate, verifier: Any) -> None:
+    verifier.result = "rejected"
+    decision = await gate.execute(_deploy("infra"))
+    assert (decision.grade, decision.status) == ("C", "rejected")
+    assert decision.hold_reason == HoldReason.VERIFY_REJECTED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result", ["raise", "unavailable"])
+async def test_deploy_version_dev_verifier_error_blocks(
+    gate: Gate, verifier: Any, result: str
+) -> None:
+    """dev 검증 skill 오류·무응답은 승인으로 보지 않는다 (fail-closed: 사람 보류, 실행 안 함)."""
+    verifier.result = result
+    decision = await gate.execute(_deploy("infra"))
+    assert (decision.status, decision.hold_reason) == ("held", HoldReason.VERIFY_TIMEOUT)
+    assert decision.status != "executed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["dev", "planning", "orchestrator"])
+async def test_deploy_version_refuses_other_requesters(
+    gate: Gate, verifier: Any, requester: str
+) -> None:
+    """dev는 infra skill을 A2A로 부를 뿐 관문에 직접 배포를 요청하지 못한다."""
+    decision = await gate.execute(_deploy(requester, f"dep-{requester}"))
+    assert (decision.status, decision.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+    assert verifier.tasks == []

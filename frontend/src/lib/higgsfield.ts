@@ -4,6 +4,8 @@ import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 // 마케팅 › SNS·미디어 › Higgsfield 연결 상태. dashboard-api GET /marketing/higgsfield/status →
 // 마케팅 `higgsfield_status`(read). 서버가 Higgsfield에 가벼운 읽기 요청을 보내 키가 받아들여지는지 본다.
 // 키 값은 오지 않는다. 서버는 결과를 20초 동안 기억한다.
+// 회사가 Higgsfield 계정을 연결했으면(원격 MCP OAuth) source=mcp이고 connection은 그 연결 상태,
+// credits·plan은 그 계정의 남은 크레딧·구독 요금제다(모르면 null).
 
 export type HiggsfieldConnection = "ok" | "invalid_key" | "unreachable" | "not_configured";
 
@@ -14,6 +16,9 @@ export interface HiggsfieldStatus {
   image_model?: string | null;
   checked_at: string;
   message_ko: string;
+  source?: "mcp" | "api_key" | null;
+  credits?: number | null;
+  plan?: string | null;
 }
 
 const PATH = "/api/dashboard/marketing/higgsfield/status";

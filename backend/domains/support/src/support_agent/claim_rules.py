@@ -1,6 +1,8 @@
 """클레임 판정 규칙 (취소·반품·교환). 프레임워크에 의존하지 않는다.
 
 - 금액·기간·횟수는 모두 코드가 주문 사실에서 계산한다. LLM과 요청 값을 쓰지 않는다.
+  예외: 고객사 사이트가 자기 규칙으로 계산한 예상 환불(`SiteRefund`, 사이트 변환기 신청 받은함)은
+  환불 금액으로 쓴다. 받은 금액 기준 환불 가능액을 넘지 않게 막는다.
 - 규칙 값은 정책 문서(refund-1 수령 후 7일 단순 변심 / refund-2 불량·오배송 판매자 부담)의 시드다.
   memory 정책 문서 API가 생기면 거기서 읽도록 바꾼다.
 - 결과 `outcome`: auto_rejected, needs_info, needs_review, approved_pending_return, auto_approved
@@ -43,6 +45,29 @@ class Line:
     product_id: str | None = None  # 상품 ID. 옛 기록·시드 주문은 None
 
 
+@dataclass(frozen=True)
+class SiteRefund:
+    """고객사 사이트가 자기 규칙(예: 여행 취소 수수료)으로 계산한 예상 환불.
+
+    사이트 변환기 신청 받은함이 사이트 값을 그대로 옮긴 것이다. LLM·고객 글에서 오지 않는다.
+    """
+
+    refund: int  # 사이트 예상 환불액 (원)
+    fee: int | None = None  # 사이트 수수료 (원)
+    fee_rate: float | None = None  # 사이트 수수료율 (0.1 = 10%)
+
+
+def site_rule_text(site: SiteRefund) -> str:
+    """사람이 보는 사이트 규칙 근거. 숫자는 사이트 값 그대로 코드가 채운다."""
+    parts = []
+    if site.fee_rate is not None:
+        parts.append(f"수수료율 {site.fee_rate * 100:g}%")
+    if site.fee is not None:
+        parts.append(f"수수료 {site.fee:,}원")
+    parts.append(f"환불 {site.refund:,}원")
+    return "사이트 규칙: " + ", ".join(parts)
+
+
 @dataclass
 class Decision:
     outcome: str
@@ -73,6 +98,38 @@ def _lines(order: Order, wanted: dict[int, int] | None) -> list[Line]:
     return lines
 
 
+def _apply_site_refund(decision: Decision, site: SiteRefund) -> int:
+    """사이트 예상 환불액을 판정 금액으로 쓴다. 근거는 사실 값으로 남긴다.
+
+    `decision.expected_refund`는 책 쇼핑몰 규칙 금액(받은 금액 기준 환불 가능액)이다. 사이트 값이
+    그보다 크면 그 금액으로 막고 review로 사람에게 넘긴다(받은 것보다 많이 내보내지 않는다).
+    """
+    limit = decision.expected_refund
+    decision.reasons.append(
+        ReasonHit("SITE_REFUND_RULE", "info", site_rule_text(site), "site_rule")
+    )
+    if site.refund > limit:
+        decision.reasons.append(
+            ReasonHit(
+                "SITE_REFUND_OVER_PAID",
+                "review",
+                f"사이트 환불액 {site.refund:,}원이 받은 금액 기준 환불 가능액 {limit:,}원보다 많아"
+                f" {limit:,}원으로 막았다",
+                "site_rule",
+            )
+        )
+        return limit
+    if site.refund < limit:
+        decision.deductions.append(
+            (
+                "SITE_CANCEL_FEE",
+                limit - site.refund,
+                "사이트 규칙 수수료 (" + site_rule_text(site) + ")",
+            )
+        )
+    return site.refund
+
+
 def decide(
     order: Order,
     claim_type: str,
@@ -83,8 +140,14 @@ def decide(
     unsealed: bool,
     prior_claims: int,
     now: datetime,
+    site_refund: SiteRefund | None = None,
 ) -> Decision:
-    """주문 사실과 요청(유형·사유·품목)으로 판정한다."""
+    """주문 사실과 요청(유형·사유·품목)으로 판정한다.
+
+    `site_refund`가 있으면(고객사 사이트가 자기 규칙으로 계산한 예상 환불) 환불 금액은 그 값이다.
+    책 쇼핑몰 규칙으로 계산한 금액(받은 금액 기준 환불 가능액)을 넘으면 그 금액으로 막고 사람이
+    보게 한다(`SITE_REFUND_OVER_PAID`, review). 없으면 책 쇼핑몰 규칙 그대로다.
+    """
     requires_return = claim_type in ("return", "exchange")
     lines = _lines(order, items)
     decision = Decision(
@@ -154,6 +217,8 @@ def decide(
         decision.expected_refund = max(
             sum(line.refund_cash for line in lines) + decision.shipping_refund - deducted, 0
         )
+        if site_refund is not None:
+            decision.expected_refund = _apply_site_refund(decision, site_refund)
         decision.points_back = sum(line.points_back for line in lines)
         if decision.expected_refund >= AUTO_APPROVE_LIMIT:
             hits.append(

@@ -59,10 +59,6 @@ LLM_KEY = "LLM_API_KEY"
 A_INQUIRY, B_INQUIRY = 101, 202
 
 STAGE4 = "4단계(세션 회사로 데이터 고르기)"
-LEAK_SUPPORT = (
-    f"격리 미완: /api/dashboard/conversations/* — support 호출 meta.tenant_id가 세션 회사가 아니라 "
-    f"기본값 shop-demo(=B) — {STAGE4}"
-)
 
 ROWS = [
     {
@@ -396,13 +392,6 @@ def test_5_control_b_sees_its_own_handoff(client: TestClient, people: Any) -> No
     assert [t["task_id"] for t in rows] == [task_id]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "격리 미완: /api/dashboard/handoffs — 목록이 세션 회사가 아니라 설치 TENANT_ID(기본 "
-        f"shop-demo=B)로 걸러지고, 끝내기(complete)는 회사를 보지 않는다 — {STAGE4}"
-    ),
-)
 def test_5_a_sees_no_b_handoff_and_cannot_close_one(
     client: TestClient, people: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -485,9 +474,6 @@ def test_6_member_cannot_reach_admin_screens_or_switch_the_company(
     assert found is not None and found.enabled and found.tenant == B  # 그대로다
 
 
-@pytest.mark.xfail(
-    strict=True, reason=LEAK_SUPPORT.replace("conversations/*", "conversations/*·handoffs")
-)
 def test_6_member_cannot_read_b_inquiry_or_handoff(client: TestClient, people: Any) -> None:
     _b_handoff()
     assert client.get(f"{API}/conversations/{B_INQUIRY}", headers=people["m"]).status_code == 404

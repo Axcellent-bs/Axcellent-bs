@@ -34,7 +34,13 @@ from ax_contracts.schemas.planning import (
     WithdrawTicketInput,
     WithdrawTicketOutput,
 )
-from ax_workflow.a2a import _gate_rejected, _invalid, _missing_key, _requester
+from ax_workflow.a2a import (
+    _gate_rejected,
+    _invalid,
+    _missing_key,
+    _requester,
+    handoff_known_handler,
+)
 from ax_workflow.core import GateRefused
 from planning_agent.runtime import get_service
 
@@ -316,6 +322,8 @@ PLANNING_HANDLERS = {
     "create_ticket": create_ticket,
     "withdraw_ticket": withdraw_ticket,
     "receive_dev_result": receive_dev_result,
+    # 다시 켰을 때 맞추기: 개발이 넘긴 것을 받았는지 (read, 개발과 같은 핸들러)
+    "handoff_known": handoff_known_handler(get_service),
     "receive_planning_answer": receive_planning_answer,
     "request_release_check": request_release_check,
     "receive_insight": receive_insight,

@@ -34,17 +34,26 @@ from ax_contracts.schemas.planning import (
     RequestPauseInput,
     RequestPauseOutput,
     RevertMergedPrInput,
+    VerifyDeployRequestInput,
+    VerifyDeployRequestOutput,
     VerifyHandoverInput,
     VerifyHandoverOutput,
     VerifyRollbackTargetInput,
     VerifyRollbackTargetOutput,
 )
-from ax_workflow.a2a import _gate_rejected, _invalid, _missing_key, _requester
+from ax_workflow.a2a import (
+    _gate_rejected,
+    _invalid,
+    _missing_key,
+    _requester,
+    handoff_known_handler,
+)
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.handover import ROSTER_AREAS, Item, is_roster_area
 from ax_workflow.models import PR
 from ax_workflow.rules import ROLLBACK_LOOKBACK
 from dev_agent import dev_chat, incident_repo
+from dev_agent.deploy_store import get_deploy_store
 from dev_agent.runtime import get_service
 from dev_agent.vcs.base import VcsError
 
@@ -287,6 +296,80 @@ async def verify_rollback_target(request: AgentRequest) -> AgentResult:
             ref_ids=([f"execution:{execution_id}"] if execution_id else []) + _refs(related),
         ),
     )
+
+
+async def verify_deploy_request(request: AgentRequest) -> AgentResult:
+    """infra deploy_version(B)의 교차검증 (read). 거절도 completed + rejected_by_review.
+
+    배포 기록(DEP-n)이 사람이 승인한 `approved` 상태이고 승인자·서비스·버전이 요청과 같을 때만
+    승인한다. 입력은 계약 `VerifyDeployRequestInput` 또는 safety 검토 형식(`SafetyReviewInput`,
+    params = infra `DeployVersionInput` + tool) 둘 다 받는다. safety는 `approved == true`일 때만
+    승인으로 본다. 입력을 못 읽으면 failed(invalid_input) → safety가 보류한다(fail-closed).
+    """
+    try:
+        inp, execution_id = _deploy_input(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    except ValueError as exc:
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.FAILED,
+            outcome="invalid_input",
+            output={"message": str(exc)},
+        )
+    approved, reason, dep = get_deploy_store().verify_request(
+        inp.request_id, inp.service, inp.version, inp.approved_by
+    )
+    # 이유 코드는 계약 값으로 다시 검사한다 (계약 밖 값이면 예외 → safety는 무응답으로 보고 보류)
+    out = VerifyDeployRequestOutput.model_validate(
+        {
+            "approved": approved,
+            "reason_code": reason,
+            "deployment_id": dep.id if dep is not None else None,
+        }
+    )
+    found = "기록 없음"
+    if dep is not None:
+        found = f"기록 {dep.id} 상태 {dep.status} · 승인 {dep.approved_by or '-'}"
+        found += f" · 버전 {dep.version or '-'}"
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=None if approved else "rejected_by_review",
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            queries=[
+                f"deployments WHERE request_id = {inp.request_id}",
+                "status == approved AND approved_by == 요청 승인자 AND (service, version) == 요청",
+            ],
+            data_summary=(
+                f"배포 요청 {inp.request_id} {inp.service} {inp.version} "
+                f"(승인 {inp.approved_by or '-'}): {reason} · {found}"
+            ),
+            ref_ids=([f"execution:{execution_id}"] if execution_id else [])
+            + ([f"deploy_request:{inp.request_id}"]),
+        ),
+    )
+
+
+DEPLOY_ACTIONS = ("deploy_version",)
+
+
+def _deploy_input(raw: dict[str, Any]) -> tuple[VerifyDeployRequestInput, str | None]:
+    """계약 형식이면 그대로, safety 검토 형식이면 계약 입력으로 바꾼다. (입력, execution_id)."""
+    if "execution_id" not in raw or "params" not in raw:
+        return VerifyDeployRequestInput.model_validate(raw), None
+    review = SafetyReviewInput.model_validate(raw)
+    if review.action not in DEPLOY_ACTIONS:
+        raise ValueError(f"verify_deploy_request가 검증하지 않는 액션: {review.action}")
+    p = review.params
+    converted = {
+        "request_id": p.get("request_id"),
+        "service": p.get("service"),
+        "version": p.get("version"),
+        "approved_by": p.get("approved_by"),
+    }
+    return VerifyDeployRequestInput.model_validate(converted), review.execution_id
 
 
 def _items(rows: list[Item]) -> list[InProgressItem]:
@@ -787,11 +870,14 @@ DEV_HANDLERS = {
     "link_incident": link_incident,
     "revert_merged_pr": revert_merged_pr,
     "verify_rollback_target": verify_rollback_target,
+    "verify_deploy_request": verify_deploy_request,
     "list_in_progress": list_in_progress,
     "list_dev_progress": list_dev_progress,
     "list_dev_outcomes": list_dev_outcomes,
     "verify_handover": verify_handover,
     "start_dev": start_dev,
+    # 다시 켰을 때 맞추기: 기획이 넘긴 것을 받았는지 (read, 기획과 같은 핸들러)
+    "handoff_known": handoff_known_handler(get_service),
     "receive_release_order": receive_release_order,
     "receive_request_pause": receive_request_pause,
     # 사람과 직접 대화 (dashboard-api /api/dashboard/dev-chat)

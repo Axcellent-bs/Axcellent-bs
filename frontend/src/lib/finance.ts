@@ -960,7 +960,10 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
 };
 
 /** 마케팅 화면에서 결정하는 보류 건 */
-export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_media", "start_campaign", "set_publish_control"] as const;
+export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_media", "start_campaign", "set_publish_control", "generate_creative_video", "publish_youtube"] as const;
+/** 마케팅 › SNS·미디어 › 사람 결정 대기에서 결정하는 보류 건 (게시·이미지·영상 만들기·유튜브 올리기, 11/23) */
+export const SNS_HOLD_ACTIONS = ["publish_sns", "generate_media", "generate_creative_video", "publish_youtube"] as const;
+export const SNS_HOLD_PAGE = "/marketing/sns?view=holds";
 /** 개발·배포 화면(/dev/work/holds)에서 결정하는 보류 건 (PR 만들기·머지·되돌리기, 자동 머지 기준 바꾸기, 배포 되돌리기) */
 export const DEV_HOLD_ACTIONS = ["generate_pr", "merge_pr", "repo_revert_pr", "auto_policy_update", "rollback_deployment"] as const;
 /** 기획서 화면(/planning/work/specs/<기획서 번호>)의 "교차검증 대기" 칸에서 결정하는 보류 건 (기획서 확정) */

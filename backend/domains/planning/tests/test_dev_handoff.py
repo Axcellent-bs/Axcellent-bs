@@ -24,8 +24,16 @@ class Wire:
     def __init__(self, forward: bool = True):
         self.forward = forward
         self.sent: list[tuple[str, str]] = []
+        self.asked: list[tuple[str, list[str]]] = []
         self.planning = PlanningService(dev_sender=self.send)
         self.dev = DevService(dev_sender=self.send)
+        # 다시 켰을 때 맞추기가 받는 쪽에 받았는지 묻는다 (`handoff_known`). 바꿔 끼운 서비스를 본다
+        self.planning._ask_known = self.ask
+        self.dev._ask_known = self.ask
+
+    async def ask(self, peer: str, tenant: str, keys: list[str]) -> list[str] | None:
+        self.asked.append((peer, list(keys)))
+        return (self.dev if peer == "dev" else self.planning).handoff_known(keys)
 
     async def send(self, skill: str, ctx: str, tenant: str, payload: BaseModel, key: str) -> str:
         self.sent.append((skill, key))
@@ -350,6 +358,7 @@ def test_resync_restores_lost_peer() -> None:
         spec = w.planning.state.specs[-1].id
         assert any(s.id == spec for s in w.dev.state.specs)
         w.dev = DevService(dev_sender=w.send)  # 상태 없이 다시 뜸
+        w.dev._ask_known = w.ask
         assert not any(s.id == spec for s in w.dev.state.specs)
         await w.planning.resync_peer()
         await w.settle()
@@ -358,6 +367,49 @@ def test_resync_restores_lost_peer() -> None:
         await w.planning.resync_peer()  # 또 맞춰도 늘지 않는다 (멱등)
         await w.settle()
         assert len(w.dev.state.specs) == n
+        return w
+
+    asyncio.run(run())
+
+
+def test_resync_with_peer_that_kept_its_state_asks_once_and_sends_nothing() -> None:
+    """개발이 상태를 가진 채 기획만 다시 켜면: 한 번 묻고(`handoff_known`) start_dev는 안 보낸다
+    (11/23, 켤 때마다 "start dev 부탁해요"가 몇 줄씩 쌓이던 문제)."""
+
+    async def run() -> Wire:
+        w = Wire()
+        await w.planning.inbound("support_ticket")
+        await w.settle()
+        w.sent.clear()
+        await w.planning.resync_peer()
+        await w.settle()
+        assert START_DEV not in w.skills()
+        assert [peer for peer, _ in w.asked] == ["dev"]
+        return w
+
+    asyncio.run(run())
+
+
+def test_resync_when_asking_fails_skips_acked() -> None:
+    """묻지 못하면(답 없음) 받았다는 기록대로 건너뛴다. 모두 다시 보내지 않는다."""
+
+    async def run() -> Wire:
+        w = Wire()
+        await w.planning.inbound("support_ticket")
+        await w.settle()
+        w.dev = DevService(dev_sender=w.send)  # 상태를 잃었지만 묻지 못한다
+
+        async def down(peer: str, tenant: str, keys: list[str]) -> list[str] | None:
+            return None
+
+        w.planning._ask_known = down
+        w.sent.clear()
+        await w.planning.resync_peer()
+        await w.settle()
+        assert START_DEV not in w.skills()
+        await w.planning.dispatch({"type": "resendHandoff", "all": True})  # 사람이 모두 다시 보냄
+        await w.settle()
+        assert START_DEV in w.skills()
         return w
 
     asyncio.run(run())

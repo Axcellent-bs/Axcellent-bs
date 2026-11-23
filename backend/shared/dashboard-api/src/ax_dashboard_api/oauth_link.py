@@ -12,6 +12,11 @@
 
 state 안: 공급자(`p`)·회사 ID(`c`)·시작한 계정 ID(`a`)·만료(`e`, 10분)·임의값(`n`).
 서버 비밀(`AX_SESSION_SECRET`)로 HMAC 서명한다. 값(코드·토큰)은 state에 넣지 않는다.
+
+PKCE(Higgsfield처럼 공개 클라이언트가 S256을 요구할 때, 11/23): verifier는 서버 비밀과 state로
+HMAC해서 만든다(`pkce_verifier`). 동의 화면 주소에는 challenge(verifier의 SHA-256)만 나가고,
+verifier는 `complete`에서 서버가 다시 계산해 토큰 요청에만 쓴다. 따로 저장할 곳이 없어도 되고
+(서버가 다시 켜져도 10분 안이면 마칠 수 있다), state를 가진 사람도 서버 비밀 없이는 만들 수 없다.
 """
 
 from __future__ import annotations
@@ -19,11 +24,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import html
 import json
 import os
 import secrets
 import time
 from dataclasses import dataclass
+
+from fastapi.responses import HTMLResponse
 
 from ax_agent_template import human_auth
 from ax_dashboard_api.envelope import ApiError
@@ -89,9 +97,41 @@ def read_state(state: str, provider: str, now: float | None = None) -> LinkState
     return LinkState(provider=provider, company_id=str(c), account_id=str(a))
 
 
-def require_owner(
-    state: str, provider: str, human: human_auth.Human, company_id: str
-) -> LinkState:
+def pkce_verifier(state: str) -> str:
+    """이 state의 PKCE verifier(43자, RFC 7636). 서버 비밀이 있어야 만든다. 주소에 넣지 않는다."""
+    return _b64(hmac.new(_secret(), b"pkce:" + state.encode("utf-8"), hashlib.sha256).digest())
+
+
+def pkce_challenge(verifier: str) -> str:
+    """S256 challenge: verifier의 SHA-256을 base64url(덧붙임 없이)."""
+    return _b64(hashlib.sha256(verifier.encode("ascii")).digest())
+
+
+def app_value(name: str) -> str:
+    """앱(AXcellent) 단위 설정값: 키 저장소 기본 tenant, 없으면 환경값. 값은 로그에 내지 않는다."""
+    from ax_secret_store import get_secret
+
+    try:
+        return (get_secret(name) or os.getenv(name, "")).strip()
+    except Exception:  # noqa: BLE001 - 키 저장소 장애는 환경값으로
+        return os.getenv(name, "").strip()
+
+
+def back_page(url: str, result: str, label: str) -> HTMLResponse:
+    """콜백이 화면으로 돌아가는 작은 페이지. 주소는 이스케이프한다(코드 값이 HTML을 깨지 못하게)."""
+    safe = html.escape(url, quote=True)
+    body = (
+        '<!doctype html><meta charset="utf-8">'
+        f'<meta http-equiv="refresh" content="0;url={safe}">'
+        f"<p>{html.escape(label)} 연결: {html.escape(result)}. "
+        f'<a href="{safe}">마케팅 화면으로 돌아가기</a></p>'
+    )
+    return HTMLResponse(
+        body, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+    )
+
+
+def require_owner(state: str, provider: str, human: human_auth.Human, company_id: str) -> LinkState:
     """`complete`에서: 연결을 시작한 계정·회사가 지금 로그인한 계정·회사와 같아야 한다."""
     found = read_state(state, provider)
     if found is None:

@@ -388,6 +388,23 @@ async def test_new_claims_are_judged_and_the_result_is_written_back(
 
 
 @pytest.mark.asyncio
+async def test_site_rule_refund_travels_with_the_claim_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """사이트 변환기 신청의 사이트 규칙 예상 환불은 `site_refund`로 판정에 간다 (없으면 칸 없음)."""
+    site = {"site_refund_amount": 650000, "site_fee": 250000, "site_fee_rate": 0.1}
+    empty = {"site_refund_amount": None, "site_fee": None, "site_fee_rate": None}
+    shop = FakeShop([], claims=[claim_item(1, **site), claim_item(2, order_id="ord_0002", **empty)])
+    wire(monkeypatch, shop)
+    seen = wire_claims(monkeypatch)
+    await inquiry_pull.pull_once(owned=inquiry_pull.ALL_PULL)
+    first, second = seen
+    assert first.input["site_refund"] == {"refund_amount": 650000, "fee": 250000, "fee_rate": 0.1}
+    assert "site_refund" not in second.input
+    assert "site_refund" not in first.untrusted
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["not_found", "duplicate_claim"])
 async def test_a_request_that_is_not_a_claim_is_closed_with_its_reason(
     monkeypatch: pytest.MonkeyPatch, outcome: str

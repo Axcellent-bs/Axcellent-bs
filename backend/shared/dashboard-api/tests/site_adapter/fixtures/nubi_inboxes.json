@@ -18,7 +18,10 @@
       "description": "reason",
       "buyer_id": "order.member_id",
       "customer_name": "order.contact.name",
-      "created_at": "created_at"
+      "created_at": "created_at",
+      "site_refund_amount": "refund",
+      "site_fee": "fee",
+      "site_fee_rate": "fee_rate"
     },
     "values": {
       "status": {

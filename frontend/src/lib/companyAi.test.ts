@@ -246,3 +246,25 @@ test("유튜브 동의에서 돌아온 # 뒤 값: 코드·state가 둘 다 있�
   assert.equal(readYoutubeReturn(""), null);
   assert.equal(readYoutubeReturn(`#youtube_code=${"x".repeat(2001)}&youtube_state=s`), null);
 });
+
+test("Higgsfield 동의에서 돌아온 # 뒤 값은 higgsfield_ 칸만 읽는다(유튜브 칸과 섞이지 않는다)", async () => {
+  const { readHiggsfieldReturn, readYoutubeReturn } = await import("./companyAi.ts");
+  assert.deepEqual(readHiggsfieldReturn("#higgsfield_code=c1&higgsfield_state=s.1"), { code: "c1", state: "s.1" });
+  assert.equal(readHiggsfieldReturn("#youtube_code=c1&youtube_state=s.1"), null);
+  assert.equal(readYoutubeReturn("#higgsfield_code=c1&higgsfield_state=s.1"), null);
+  assert.equal(readHiggsfieldReturn(`#higgsfield_code=c&higgsfield_state=${"s".repeat(2001)}`), null);
+});
+
+test("회사 Higgsfield 계정 연결 응답: 모양이 맞을 때만 읽고 모르는 칸은 null", async () => {
+  const { readHiggsfieldAccount, KEY_NAMES, KEY_LABEL } = await import("./companyAi.ts");
+  assert.deepEqual(readHiggsfieldAccount({ app_configured: true, connected: true, email: "o@x.test", connected_by: "민지", connected_at: "2026-11-23T00:00:00Z" }), {
+    app_configured: true, connected: true, email: "o@x.test", connected_by: "민지", connected_at: "2026-11-23T00:00:00Z",
+  });
+  assert.deepEqual(readHiggsfieldAccount({ connected: false, email: 3 }), {
+    app_configured: false, connected: false, email: null, connected_by: null, connected_at: null,
+  });
+  assert.equal(readHiggsfieldAccount({ app_configured: true }), null);
+  assert.equal(readHiggsfieldAccount(null), null);
+  assert.ok(KEY_NAMES.includes("MARKETING_HIGGSFIELD_MCP_REFRESH_TOKEN"));
+  assert.equal(KEY_LABEL.MARKETING_HIGGSFIELD_MCP_REFRESH_TOKEN, "Higgsfield 계정 연결");
+});
