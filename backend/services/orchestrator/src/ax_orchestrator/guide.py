@@ -48,7 +48,8 @@ ORCHESTRATOR_REAL_DEPTS=finance uv run python -m ax_orchestrator
 |---|---|
 | `shop.degraded`, `infra.anomaly_detected` | 이벤트 열기. 같은 `component`의 열린 이벤트가 있으면 합침 |
 | `metric.anomaly` | `data.severity`가 high·critical이면 이벤트, 아니면 기록만 |
-| `shop.recovered`, `support.inquiry_received`, `support.inquiry_surge` | 이벤트 아님. 열린 이벤트가 있으면 근거로 기록 |
+| `shop.recovered`, `infra.recovered` | 복구 신호. 같은 `component`에서 복귀 시각이 없는 가장 최근 이벤트에 복귀를 붙인다. `infra.recovered`는 `source_ref`가 같은 장애와 이어 붙이고, 복구 시각은 DejaFix가 알려 준 `recovered_at`을 쓴다 |
+| `support.inquiry_received`, `support.inquiry_surge` | 이벤트 아님. 열린 이벤트가 있으면 근거로 기록 |
 | 그 밖의 이벤트 | 무시 |
 
 ```
