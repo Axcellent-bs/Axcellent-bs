@@ -237,10 +237,30 @@ def test_new_claims_from_nubi_cancellations(client: TestClient, site: FakeSite) 
         "evidence_count": 0,
         "description": CUSTOMER_TEXT,
         "created_at": "2026-11-23T01:00:00.000Z",
+        # 사이트 규칙 예상 환불 (누비투어 `refund`·`fee`·`fee_rate` 그대로)
+        "site_refund_amount": 650000,
+        "site_fee": 250000,
+        "site_fee_rate": 0.1,
     }
     cancel_reads = [r for r in site.reads if r.url.path == "/api/v1/cancellations"]
     assert len(cancel_reads) == 2  # 두 쪽
     assert cancel_reads[0].headers["authorization"] == f"Bearer {SITE_TOKEN}"
+
+
+def test_site_refund_fields_empty_without_mapping() -> None:
+    """사이트 규칙 칸 짝이 없으면 비운다 (고객지원은 책 쇼핑몰 규칙 그대로)."""
+    raw = load("nubi_inboxes.json")["claims"]
+    for name in claims.SITE_REFUND_FIELDS:
+        raw["fields"].pop(name)
+    res = m.ResourceMap.model_validate(raw)
+    row = load("nubi_cancellations_p1.json")["data"][1]
+    claim = claims.to_claim(row, res, {})
+    line = claims.inbox_row({**claim, "seq": 2})
+    assert {k: line[k] for k in claims.SITE_REFUND_FIELDS} == {
+        "site_refund_amount": None,
+        "site_fee": None,
+        "site_fee_rate": None,
+    }
 
 
 def test_new_claims_page_by_limit(client: TestClient) -> None:
@@ -376,6 +396,37 @@ def test_refund_becomes_nubi_approve(client: TestClient, site: FakeSite, adapter
     (entry,) = ledger(adapter_dir).values()
     assert (entry["status"], entry["execution_id"]) == ("done", "exe_refund_9")
     assert entry["site_path"] == "/api/v1/cancellations/{site_id}/decision"
+
+
+def test_site_rule_amount_goes_to_decision_body(
+    client: TestClient, site: FakeSite, safety: FakeSafety
+) -> None:
+    """사이트 규칙 환불액(받은 900000원 중 650000원)이 관문 기록·결정 본문까지 같은 금액이다.
+
+    누비투어는 수수료 = 받은 금액 − 환불 금액(900000 − 650000 = 250000)으로 정해 규칙 수수료와 같다.
+    """
+    row = inbox(client).json()["data"][0]
+    amount = row["site_refund_amount"]
+    assert amount == 650000
+    safety.amount = amount  # 고객지원이 판정 금액 그대로 `execute("refund_request")`에 보낸 값
+    resp = refund(client, refund_amount=amount)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["refund_amount"] == 650000
+    body = json.loads(site.writes[0].content)
+    assert body["decision"] == "approve" and body["refund_amount"] == 650000
+    paid = load("nubi_cancellations_p1.json")["data"][1]["paid"]
+    assert paid - body["refund_amount"] == row["site_fee"]
+
+
+def test_full_amount_against_site_rule_gate_is_refused(
+    client: TestClient, site: FakeSite, safety: FakeSafety
+) -> None:
+    """관문 기록이 사이트 규칙 금액(650000원)인데 전액(900000원)을 보내면 사이트를 부르지 않는다."""
+    inbox(client)
+    safety.amount = 650000
+    resp = refund(client)
+    assert resp.status_code != 200
+    assert site.writes == []
 
 
 def test_decision_body_meets_nubi_schema(client: TestClient, site: FakeSite) -> None:
