@@ -168,6 +168,8 @@ SERVICES: tuple[Service, ...] = (
             "channel_followers",
             "character_sheet_prompt",
             "storyboard_prompt",
+            "creative_script",
+            "creative_script_save",
             "higgsfield_status",
             "creative_records_list",
             "creative_record_get",

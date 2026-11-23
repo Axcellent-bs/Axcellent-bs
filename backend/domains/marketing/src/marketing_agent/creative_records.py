@@ -117,6 +117,8 @@ class CreativeRecords:
                 self._conn.execute("ALTER TABLE marketing_creative_records ADD COLUMN render TEXT")
             if "brand" not in have:  # 2026-11-23 회사 대표 캐릭터 표시
                 self._conn.execute("ALTER TABLE marketing_creative_records ADD COLUMN brand TEXT")
+            if "script" not in have:  # 2026-11-23 영상 대본(시트 → 대본 → 스토리보드)
+                self._conn.execute("ALTER TABLE marketing_creative_records ADD COLUMN script TEXT")
             company_scope.ensure_tenant_column(
                 self._conn, "marketing_creative_records"
             )  # 옛 줄은 캣북스
@@ -168,6 +170,24 @@ class CreativeRecords:
             )
         return cur.rowcount == 1
 
+    def attach_script(self, record_id: str, script: dict[str, Any], story: str | None) -> bool:
+        """기록에 대본을 붙인다(다시 쓰거나 고치면 바꾼다). 줄거리를 주면 같이 남긴다.
+
+        스토리보드는 그대로 둔다(대본을 고친 뒤 스토리보드를 다시 만들면 새 대본을 따른다).
+        기록이 없으면 False."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE marketing_creative_records SET script = ?, story = COALESCE(?, story)"
+                " WHERE record_id = ? AND tenant_id = ?",
+                (
+                    json.dumps(script, ensure_ascii=False),
+                    story[:MAX_STORY] if story else None,
+                    record_id,
+                    self.company_id,
+                ),
+            )
+        return cur.rowcount == 1
+
     def list(self, limit: int = 50) -> list[dict[str, Any]]:
         """목록은 가볍게: 요약·미리보기·칸 수만."""
         with self._lock:
@@ -180,6 +200,7 @@ class CreativeRecords:
         for r in rows:
             sheet = json.loads(r["sheet"])
             board = json.loads(r["storyboard"]) if r["storyboard"] else None
+            script = _script(r)
             out.append(
                 {
                     "record_id": r["record_id"],
@@ -192,6 +213,8 @@ class CreativeRecords:
                     "shot_count": len(board.get("shots", [])) if board else 0,
                     "storyboard_at": r["storyboard_at"],
                     "render": _statuses(r["render"]),
+                    "script_scenes": len(script.get("scenes") or []) if script else 0,
+                    "script_at": script.get("at") if script else None,
                 }
             )
         return out
@@ -215,6 +238,7 @@ class CreativeRecords:
             "storyboard": json.loads(r["storyboard"]) if r["storyboard"] else None,
             "storyboard_at": r["storyboard_at"],
             "render": json.loads(r["render"]) if r["render"] else {},
+            "script": _script(r),
         }
 
     def get_render(self, record_id: str) -> dict[str, Any]:
@@ -412,6 +436,12 @@ class CreativeRecords:
                 (self.company_id, max(1, limit)),
             ).fetchall()
         return {r["post_draft_id"]: json.loads(r["instagram"]) for r in rows}
+
+
+def _script(row: sqlite3.Row) -> dict[str, Any] | None:
+    """기록의 대본(옛 기록·대본 없는 기록은 None)."""
+    raw = row["script"] if "script" in row.keys() else None
+    return json.loads(raw) if raw else None
 
 
 def _statuses(raw: str | None) -> dict[str, str]:

@@ -12,8 +12,9 @@
   대화는 `execute()`를 부르지 않는다(대화 기록 저장은 업무 상태가 아니다. 인사 AI와 같다).
 - LLM 설정(`MARKETING_LLM_*` → `LLM_*`)이 없으면 답을 지어내지 않고 `llm_not_configured`로 거절한다.
 - 이미지 시트·스토리보드: 화면이 캐릭터 이미지로 이미지 시트를 먼저 만들고(제작 기록 CR-…)
-  그 번호(`record_id`)를 말과 함께 보낸다. 말에 줄거리가 있으면 그 캐릭터로 스토리보드를 만들어
-  같은 기록에 붙이고, 답에 기록 카드(`card.kind=creative`)를 단다. 줄거리가 없으면 시트만 알린다.
+  그 번호(`record_id`)를 말과 함께 보낸다. 말에 줄거리가 있으면 그 캐릭터로 대본을 쓰고(11/23)
+  대본 장면을 따라 스토리보드를 만들어 같은 기록에 붙이고, 답에 기록 카드(`card.kind=creative`,
+  `has_script`)를 단다. 줄거리가 없으면 시트만 알린다.
   이미지 없이 "스토리보드"·"줄거리"를 말하면 이 대화의 가장 최근 시트로 만든다
   (읽기 일, 상태 변경 아님).
 - 열람: 본인(`who` 같음)은 원문 전부, 다른 사람 대화는 `messages: []` + 요약 + `restricted: true`,
@@ -33,6 +34,7 @@ from pydantic import BaseModel, Field
 from ax_agent_template.llm import LLMClient, LLMSettings
 from ax_contracts.schemas.common import AxModel
 from marketing_agent import creative_records as _creative
+from marketing_agent import creative_script as _script
 from marketing_agent import storyboard as _storyboard
 from marketing_agent.chat_store import ChatStore, make_title
 
@@ -112,8 +114,18 @@ class StoryAsk(BaseModel):
     shots: int | None = None
 
 
-def _card(record_id: str, role: str, storyboard: bool = False) -> dict[str, Any]:
-    return {"kind": "creative", "record_id": record_id, "role": role, "has_storyboard": storyboard}
+def _card(
+    record_id: str, role: str, storyboard: bool = False, script: bool = False
+) -> dict[str, Any]:
+    card: dict[str, Any] = {
+        "kind": "creative",
+        "record_id": record_id,
+        "role": role,
+        "has_storyboard": storyboard,
+    }
+    if script:  # 대본이 붙은 답 카드만(11/23). 화면은 없으면 false로 본다
+        card["has_script"] = True
+    return card
 
 
 class ChatOut(BaseModel):
@@ -352,13 +364,24 @@ class ChatService:
             "shots": shots,
             "character_en": (rec["sheet"] or {}).get("consistency_en") or "",
         }
+        script = await self._script(rid, rec, story, shots, llm)
         try:
             board = await asyncio.wait_for(
-                _storyboard.make_storyboard(untrusted, lambda: llm), CREATIVE_TIMEOUT_SEC
+                _storyboard.make_storyboard(
+                    untrusted,
+                    lambda: llm,
+                    script_scenes=_script.storyboard_scenes(script),
+                    cta=str((script or {}).get("cta_ko") or ""),
+                ),
+                CREATIVE_TIMEOUT_SEC,
             )
         except _storyboard.StoryboardRefused as refused:
+            done = "대본은 만들어 아래 카드에 남겼어요. " if script else ""
             self.store.finish_turn(
-                th["id"], f"스토리보드를 만들지 못했어요. {refused.message}", kind="error"
+                th["id"],
+                f"{done}스토리보드를 만들지 못했어요. {refused.message}",
+                kind="error",
+                card=_card(rid, "result", script=True) if script else None,
             )
             return True
         except Exception:  # noqa: BLE001 - 이유만 남기고 예외 내용은 싣지 않는다
@@ -375,12 +398,32 @@ class ChatService:
                 self.on_board(meta, rid)
             except Exception:  # noqa: BLE001 - 그림 시작 실패는 답을 막지 않는다
                 _creative.logger.exception("대화의 스토리보드 그림을 시작하지 못함")
+        made = f"대본 {len(script['scenes'])}장면과 " if script else ""
         reply = (
-            f"스토리보드 {len(board.shots)}칸을 만들었어요 — {board.title_ko}. "
+            f"{made}스토리보드 {len(board.shots)}칸을 만들었어요 — {board.title_ko}. "
             "이 캐릭터의 이미지 시트와 함께 아래에서 볼 수 있어요."
         )
-        self.store.finish_turn(th["id"], reply, card=_card(rid, "result", storyboard=True))
+        card = _card(rid, "result", storyboard=True, script=bool(script))
+        self.store.finish_turn(th["id"], reply, card=card)
         return True
+
+    async def _script(
+        self, rid: str, rec: dict[str, Any], story: str, scenes: int, llm: Any
+    ) -> dict[str, Any] | None:
+        """줄거리로 대본을 쓰고 기록에 붙인다. 못 쓰면 None(줄거리로 스토리보드를 만든다)."""
+        try:
+            out = await asyncio.wait_for(
+                _script.write_script(
+                    story, scenes, _script.DEFAULT_SECONDS, rec.get("sheet"), lambda: llm
+                ),
+                ANSWER_TIMEOUT_SEC,
+            )
+            script = out.model_dump(mode="json")
+            _creative.store().attach_script(rid, script, story)
+        except Exception:  # noqa: BLE001 - 대본은 스토리보드를 막지 않는다
+            _creative.logger.exception("제작 기록: 대화의 대본을 만들지 못함")
+            return None
+        return script
 
 
 def short(text: Any) -> str:

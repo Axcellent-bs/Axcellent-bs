@@ -941,6 +941,69 @@ async def creative_video_call(record_id: str, who: str | None) -> dict[str, Any]
     return await _creative_read("creative_video_request", payload)
 
 
+SCRIPT_REFUSALS = {
+    "not_found": (404, "NOT_FOUND"),
+    "no_story": (422, "NO_STORY"),
+    "invalid_input": (400, "INVALID_INPUT"),
+}
+SCRIPT_DEADLINE_SECONDS = 120  # 대본은 LLM 한 번이라 스토리보드와 같은 마감
+
+
+async def creative_script_call(
+    record_id: str, story: str | None, scenes: int, seconds: int
+) -> dict[str, Any]:
+    """영상 대본 쓰기(마케팅 `creative_script`, read). 줄거리는 사람이 넣은 것이라 untrusted로만."""
+    config.set_agent_name(AGENT_NAME)
+    request = AgentRequest(
+        meta=RequestMeta(
+            context_id=f"ctx_script_{uuid.uuid4().hex[:12]}",
+            token=config.agent_token(AGENT_NAME),
+            deadline=datetime.now(UTC) + timedelta(seconds=SCRIPT_DEADLINE_SECONDS),
+            idempotency_key=f"ui:script:{uuid.uuid4().hex}",
+            **tenant_meta(),
+        ),
+        skill="creative_script",
+        input={"record_id": record_id, "scenes": scenes, "seconds": seconds},
+        untrusted={"story": story} if story else {},
+    )
+    return await _script_result(request)
+
+
+async def creative_script_save_call(
+    record_id: str, script: dict[str, Any], who: str | None
+) -> dict[str, Any]:
+    """사람이 고친 대본 저장(마케팅 `creative_script_save`, read)."""
+    payload: dict[str, Any] = {"record_id": record_id, **script}
+    if who:
+        payload["who"] = who
+    config.set_agent_name(AGENT_NAME)
+    request = AgentRequest(
+        meta=RequestMeta(
+            context_id=f"ctx_script_{uuid.uuid4().hex[:12]}",
+            token=config.agent_token(AGENT_NAME),
+            deadline=datetime.now(UTC) + timedelta(seconds=20),
+            idempotency_key=f"ui:script-save:{uuid.uuid4().hex}",
+            **tenant_meta(),
+        ),
+        skill="creative_script_save",
+        input=payload,
+    )
+    return await _script_result(request)
+
+
+async def _script_result(request: AgentRequest) -> dict[str, Any]:
+    result = await SEND(TARGET, request)
+    if result.status == TaskStatus.COMPLETED:
+        return result.output or {}
+    if result.status == TaskStatus.CANCELED:
+        raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
+    status, code = SCRIPT_REFUSALS.get(result.outcome or "", (502, "UPSTREAM_FAILED"))
+    message = (result.output or {}).get("message") or (
+        f"마케팅이 요청을 처리하지 못했다 ({result.outcome})"
+    )
+    raise ApiError(status, code, str(message))
+
+
 THUMB_ID = re.compile(r"^thm_[0-9a-f]{12}$")
 THUMB_DIR = "thumbs"
 

@@ -401,6 +401,8 @@ export interface CreativeCard {
   record_id: string
   role: 'attached' | 'result'
   has_storyboard: boolean
+  /** 대본이 붙은 답 카드(11/23). 없으면 false */
+  has_script?: boolean
 }
 export type ChatCard = TrendRequestCard | TrendReportProgressCard | TrendReportDoneCard | CreativeCard
 

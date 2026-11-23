@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import os
 import re
 from collections.abc import Awaitable, Callable
@@ -751,21 +752,71 @@ async def check_video(ledger: MediaLedger, meta: RequestMeta, record_id: str) ->
     _set(record_id, "video", status="rejected", error=f"gate_{decision.status}")
 
 
-def storyboard_video_prompt(style_en: str | None) -> str:
+VIDEO_PROMPT_MAX = 2000  # 키 길(`_api_video`)·MCP 길(`creative_mcp.video_params`)이 자르는 길이
+SCRIPT_HEAD = "Follow this script panel by panel:"
+
+
+def _one(text: Any) -> str:
+    return " ".join(str(text or "").split())
+
+
+def _secs(x: Any) -> str:
+    """초 표기. 화면(`higgsfieldWeb.ts`)과 같게: 정수면 소수점 없이, 아니면 소수 한 자리."""
+    v = math.floor(float(x or 0) * 10 + 0.5) / 10  # JS Math.round와 같은 반올림
+    return str(int(v)) if v == int(v) else str(v)
+
+
+def _scene_line(shot: dict[str, Any]) -> str:
+    line = f"Scene {shot.get('no')} ({_secs(shot.get('start_s'))}-{_secs(shot.get('end_s'))}s): "
+    line += _one(shot.get("scene_ko"))
+    said = _one(shot.get("line_ko"))
+    if said:
+        who = _one(shot.get("speaker_ko"))
+        line += f' / {who + ": " if who else "narration: "}"{said}"'
+    caption = _one(shot.get("caption_ko"))
+    if caption:
+        line += f' / on-screen text "{caption}"'
+    return line + "."
+
+
+def script_flow(shots: list[dict[str, Any]] | None, cta: str | None, room: int) -> str:
+    """대본을 따라 만든 스토리보드의 장면 흐름·대사 요지·자막. `room` 글자 안에 맞춘다.
+
+    장면마다 같은 몫(남은 길이 ÷ 장면 수)까지만 쓰고, 끝 CTA는 늘 남긴다."""
+    rows = [s for s in (shots or []) if s.get("start_s") is not None]
+    if not rows:
+        return ""
+    tail = f' End with the call to action "{_one(cta)[:100]}".' if _one(cta) else ""
+    share = max(0, (room - len(SCRIPT_HEAD) - len(tail)) // len(rows) - 1)
+    body = " ".join(_scene_line(s)[:share] for s in rows)
+    return f"{SCRIPT_HEAD} {body}{tail}"
+
+
+def storyboard_video_prompt(
+    style_en: str | None,
+    shots: list[dict[str, Any]] | None = None,
+    cta: str | None = None,
+) -> str:
     """스토리보드 영상 프롬프트(스토리보드 그림을 시작 이미지로 쓴다).
 
+    대본을 따라 만든 스토리보드면(칸에 시간이 있으면) 장면 흐름·대사 요지·자막·CTA를 붙이고
+    `VIDEO_PROMPT_MAX` 안에 맞춘다(11/23).
     화면의 [영상 프롬프트 복사 + Higgsfield 열기]가 같은 문장을 만든다
     (`frontend/src/lib/higgsfieldWeb.ts`의 `storyboardVideoPrompt`). 바꾸면 둘 다 바꾼다.
     """
-    return (
+    base = (
         "Animate this storyboard as one continuous short film, panel by panel in order, "
         "keeping the same characters, outfits and art style. "
         f"{style_en or ''}"
-    ).strip()
+    ).strip()[:VIDEO_PROMPT_MAX]
+    flow = script_flow(shots, cta, VIDEO_PROMPT_MAX - len(base) - 1)
+    return f"{base} {flow}"[:VIDEO_PROMPT_MAX] if flow else base
 
 
 def _video_prompt(rec: dict[str, Any]) -> str:
-    return storyboard_video_prompt((rec.get("storyboard") or {}).get("style_en"))
+    board = rec.get("storyboard") or {}
+    shots = board.get("shots") if board.get("script_used") else None
+    return storyboard_video_prompt(board.get("style_en"), shots, board.get("cta_ko"))
 
 
 def _video_mcp_params(rec: dict[str, Any], seconds: int) -> dict[str, Any]:
