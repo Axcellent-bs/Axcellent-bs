@@ -46,6 +46,8 @@ class EventType(StrEnum):
     TREND_REPORT_READY = "data.trend_report_ready"
     # 인프라(DejaFix 어댑터)
     INFRA_ANOMALY_DETECTED = "infra.anomaly_detected"
+    # DejaFix에서 장애가 풀림 (infra가 보낸 장애가 현재 장애 목록에서 빠짐). 2026-11-23 추가
+    INFRA_RECOVERED = "infra.recovered"
     # 재무: 더 이상 발행하지 않는다 (재무 감사를 없앴다). 값은 계약 호환으로만 남긴다
     FINANCE_ANOMALY_DETECTED = "finance.anomaly_detected"
     # 통합 에이전트
@@ -231,6 +233,11 @@ class InfraAnomalyData(AxModel):
     threshold: float | None = None
     detected_at: UtcDatetime
     source_ref: str | None = None
+    # `infra.recovered`에만 (2026-11-23 추가). 장애 신호와 같은 `component`·`source_ref`를 싣는다.
+    # 어떻게 정상으로 돌아왔는지: `ShopDegradedData.recovery`와 같은 값. 모르면 비운다
+    recovery: Literal["fault_released", "metrics_normal"] | None = None
+    # DejaFix가 알려 준 장애 해소 시각 (감시가 알아챈 시각이 아님). 모르면 비운다
+    recovered_at: UtcDatetime | None = None
 
 
 class IncidentData(AxModel):
@@ -513,6 +520,7 @@ EVENT_DATA_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.PRODUCT_CREATED: ProductCreatedData,
     EventType.METRIC_ANOMALY: MetricAnomalyData,
     EventType.INFRA_ANOMALY_DETECTED: InfraAnomalyData,
+    EventType.INFRA_RECOVERED: InfraAnomalyData,
     EventType.INCIDENT_OPENED: IncidentData,
     EventType.INCIDENT_RESOLVED: IncidentData,
     EventType.NOTICE_PUBLISHED: NoticePublishedData,
