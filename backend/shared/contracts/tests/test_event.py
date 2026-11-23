@@ -66,7 +66,7 @@ def test_unknown_event_type_is_rejected() -> None:
 
 def test_event_type_catalog() -> None:
     values = {t.value for t in EventType}
-    assert len(values) == 31
+    assert len(values) == 32
     for expected in (
         "data.trend_report_ready",
         "order.created",
@@ -80,6 +80,7 @@ def test_event_type_catalog() -> None:
         "finance.anomaly_detected",
         "incident.resolved",
         "coupon.issued",
+        "sns.post_published",
         "safety.review_decided",
         "handoff.completed",
         "task.progress",

@@ -7,11 +7,14 @@
 from __future__ import annotations
 
 import hashlib
-import itertools
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from marketing_agent.schemas import DraftNoticeInput, NoticeDraft, NoticeView
+
+if TYPE_CHECKING:
+    from marketing_agent.state_db import StateDb
 
 _COMPONENT_LABEL = {"api": "서비스 접속", "db": "데이터 조회", "payment": "결제"}
 
@@ -46,28 +49,85 @@ def make_draft(context_id: str, data: DraftNoticeInput) -> NoticeDraft:
 
 
 class NoticeStore:
-    """초안·게시 공지를 메모리에 둔다(목 모드). 같은 초안을 두 번 게시하면 같은 `notice_id`다.
+    """초안·게시 공지. 같은 초안을 두 번 게시하면 같은 `notice_id`다.
+
+    `db`(`StateDb`)를 주면 바뀔 때마다 저장하고 켤 때 다시 읽는다(서버를 다시 켜도 게시 중인 배너
+    목록·같이 쓰는 사건이 남는다, 2026-11-23). 없으면 메모리만.
 
     공지는 게시되면 `published`이고 다음 둘 중 하나로 `ended`가 된다.
     - 복구 공지(`incident_resolved`)를 게시하면 같은 `context_id`의 장애 공지가 끝난다.
     - `valid_to`가 지났다.
 
     같은 문구의 장애 배너가 이미 떠 있으면 다른 사건도 그 배너를 같이 쓴다(`join`). 같이 쓰는
-    배너는 그 사건들이 모두 끝나야 끝난다. 같이 쓰는 사건 목록은 메모리에만 있다.
+    배너는 그 사건들이 모두 끝나야 끝난다.
     """
 
-    def __init__(self, now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
+    def __init__(
+        self,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        db: StateDb | None = None,
+    ) -> None:
         self.now = now
+        self._db = db
         self._drafts: dict[str, NoticeDraft] = {}
         self._published: dict[str, tuple[str, NoticeDraft]] = {}  # notice_id → (context_id, draft)
         self._by_draft: dict[str, str] = {}
         self._ended: set[str] = set()
         self._published_at: dict[str, datetime] = {}
         self._holders: dict[str, set[str]] = {}  # 장애 공지 notice_id → 아직 그 공지를 쓰는 사건
-        self._counter = itertools.count(1)
+        self._next = 1
+        self._load()
+
+    # ---- 저장(있을 때만)
+    def _load(self) -> None:
+        if self._db is None:
+            return
+        for draft_id, raw in self._db.all("notice_draft"):
+            self._drafts[draft_id] = NoticeDraft.model_validate(raw)
+        rows = self._db.all("notice_published")
+        for notice_id, raw in sorted(rows, key=lambda r: r[1]["published_at"]):
+            draft = NoticeDraft.model_validate(raw["draft"])
+            self._published[notice_id] = (raw["context_id"], draft)
+            self._published_at[notice_id] = datetime.fromisoformat(raw["published_at"])
+        self._by_draft = dict(self._db.all("notice_by_draft"))
+        self._ended = {k for k, _ in self._db.all("notice_ended")}
+        self._holders = {k: set(v) for k, v in self._db.all("notice_holders")}
+        counter = dict(self._db.all("notice_counter")).get("next")
+        self._next = int(counter) if counter else 1
+
+    def _save_published(self, notice_id: str) -> None:
+        if self._db is None:
+            return
+        context_id, draft = self._published[notice_id]
+        self._db.put(
+            "notice_published",
+            notice_id,
+            {
+                "context_id": context_id,
+                "draft": draft.model_dump(mode="json"),
+                "published_at": self._published_at[notice_id].isoformat(),
+            },
+        )
+
+    def _save_holders(self, notice_id: str) -> None:
+        if self._db is not None and notice_id in self._holders:
+            self._db.put("notice_holders", notice_id, sorted(self._holders[notice_id]))
+
+    def _save_by_draft(self, draft_id: str) -> None:
+        if self._db is not None:
+            self._db.put("notice_by_draft", draft_id, self._by_draft[draft_id])
+
+    def _new_id(self) -> str:
+        notice_id = f"ntc_{self._next:04d}"
+        self._next += 1
+        if self._db is not None:
+            self._db.put("notice_counter", "next", self._next)
+        return notice_id
 
     def save_draft(self, draft: NoticeDraft) -> None:
         self._drafts[draft.draft_id] = draft
+        if self._db is not None:
+            self._db.put("notice_draft", draft.draft_id, draft.model_dump(mode="json"))
 
     def get_draft(self, draft_id: str) -> NoticeDraft | None:
         return self._drafts.get(draft_id)
@@ -108,9 +168,12 @@ class NoticeStore:
         if notice_id not in self._published:  # 재시작 뒤라 쇼핑몰에만 있는 배너
             self._published[notice_id] = (context_id, draft)
             self._published_at[notice_id] = self.now()
+            self._save_published(notice_id)
         first = self._published[notice_id][0]
         self._holders.setdefault(notice_id, {first}).add(context_id)
         self._by_draft[draft.draft_id] = notice_id
+        self._save_holders(notice_id)
+        self._save_by_draft(draft.draft_id)
         return notice_id
 
     def can_end(self, context_id: str, notice_id: str) -> bool:
@@ -122,9 +185,12 @@ class NoticeStore:
         holders = self._holders.get(notice_id)
         if holders is not None:
             holders.discard(context_id)
+            self._save_holders(notice_id)
             if holders:
                 return
         self._ended.add(notice_id)
+        if self._db is not None:
+            self._db.put("notice_ended", notice_id, True)
 
     def end_incident_notices(self, context_id: str) -> list[str]:
         """같은 사건의 열린 장애 공지를 모두 끝낸 것으로 하고 그 번호를 돌려준다.
@@ -140,15 +206,18 @@ class NoticeStore:
         """게시한다. `notice_id`를 주면 그 번호를 쓴다(쇼핑몰 배너 번호라 겹치면 안 된다)."""
         if draft.draft_id in self._by_draft:
             return self._by_draft[draft.draft_id]
-        notice_id = notice_id or f"ntc_{next(self._counter):04d}"
+        notice_id = notice_id or self._new_id()
         if draft.kind == "incident_resolved":  # 복구 공지가 나가면 같은 사건의 장애 공지는 끝난다
             for earlier_id in self.open_incident_notice_ids(context_id):
                 self._release(context_id, earlier_id)
         if draft.kind == "incident_opened":
             self._holders[notice_id] = {context_id}
+            self._save_holders(notice_id)
         self._published[notice_id] = (context_id, draft)
         self._published_at[notice_id] = self.now()
         self._by_draft[draft.draft_id] = notice_id
+        self._save_published(notice_id)
+        self._save_by_draft(draft.draft_id)
         return notice_id
 
     def _status(self, notice_id: str, draft: NoticeDraft, at: datetime | None = None) -> str:

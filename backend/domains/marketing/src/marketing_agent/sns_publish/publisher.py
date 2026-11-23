@@ -230,6 +230,11 @@ class Runtime:
 
 RT = Runtime()
 
+# 게시가 끝나면(published) 부르는 함수들: (게시 대기 행, media_id, 결과).
+# handlers가 `sns.post_published` 이벤트를 outbox에 쌓으려고 등록한다(2026-11-23).
+# 테스트 초기화(reset_runtime)로 지워지지 않는다
+PUBLISHED_HOOKS: list[Callable[[PendingPost, str | None, dict[str, Any]], None]] = []
+
 
 def reset_runtime() -> None:
     """테스트 사이에 대기 저장소·설정·주입 값을 비운다."""
@@ -603,6 +608,14 @@ async def publish_sns(
 # -- 승인 처리 (구독자·폴링·재전송 공통)
 def _close(row: PendingPost, old: str, new: str, code: str | None, **fields: Any) -> bool:
     won = store().transition(row.idempotency_key, old, new, failure_code=code, **fields)
+    if won and new == PUBLISHED:
+        for hook in PUBLISHED_HOOKS:
+            try:
+                hook(
+                    row, fields.get("media_id") or row.media_id, fields.get("result") or row.result
+                )
+            except Exception:  # noqa: BLE001 - 이벤트를 못 쌓아도 게시 기록은 그대로 둔다
+                _log.exception("sns_published_hook_failed")
     if won:
         _row_log(
             row,
