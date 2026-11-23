@@ -44,6 +44,8 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/api/dashboard/auth/company"),
         # 구글이 돌려보내는 유튜브 연결 주소. Authorization이 없어 서명한 state로 회사를 확인한다
         ("GET", "/api/dashboard/marketing/youtube/callback"),
+        # Higgsfield가 돌려보내는 회사 계정 연결 주소(MCP OAuth). 유튜브와 같이 state로 확인한다
+        ("GET", "/api/dashboard/marketing/higgsfield/callback"),
     }
 )
 # 사람이 아니라 서버가 부르는 경로. 사람 토큰 대신 각자 다른 토큰을 본다

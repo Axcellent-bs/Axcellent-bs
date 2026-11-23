@@ -10,10 +10,13 @@ export type Tone = "ok" | "wait" | "bad" | "off";
 export type KeyName =
   | "LLM_API_KEY" | "DEV_CODER_LLM_API_KEY" | "MARKETING_VIDEO_API_KEY"
   // SNS 계정 연결(회사마다 다름, 11/23)
-  | "MARKETING_IG_ACCESS_TOKEN" | "MARKETING_IG_USER_ID" | "MARKETING_YOUTUBE_REFRESH_TOKEN" | "MARKETING_HIGGSFIELD_API_KEY";
+  | "MARKETING_IG_ACCESS_TOKEN" | "MARKETING_IG_USER_ID" | "MARKETING_YOUTUBE_REFRESH_TOKEN" | "MARKETING_HIGGSFIELD_API_KEY"
+  // Higgsfield 계정 연결(원격 MCP OAuth, 회사 구독 크레딧, 11/23)
+  | "MARKETING_HIGGSFIELD_MCP_REFRESH_TOKEN";
 export const KEY_NAMES: readonly KeyName[] = [
   "LLM_API_KEY", "DEV_CODER_LLM_API_KEY", "MARKETING_VIDEO_API_KEY",
   "MARKETING_IG_ACCESS_TOKEN", "MARKETING_IG_USER_ID", "MARKETING_YOUTUBE_REFRESH_TOKEN", "MARKETING_HIGGSFIELD_API_KEY",
+  "MARKETING_HIGGSFIELD_MCP_REFRESH_TOKEN",
 ];
 
 export type CoderMode = "company" | "separate";
@@ -278,18 +281,40 @@ export function videoView(hasKey: boolean, enabled: boolean): { tone: Tone; labe
   return enabled ? { tone: "ok", label: "켜짐" } : { tone: "off", label: "꺼짐" };
 }
 
-/** 유튜브 동의에서 돌아온 주소의 `#` 뒤(youtube_code·youtube_state). 둘 다 있어야 마치기를 부른다 */
-export function readYoutubeReturn(hash: string): { code: string; state: string } | null {
+/** 동의 화면에서 돌아온 주소의 `#` 뒤(`<prefix>_code`·`<prefix>_state`). 둘 다 있어야 마치기를 부른다 */
+function readOauthReturn(hash: string, prefix: "youtube" | "higgsfield"): { code: string; state: string } | null {
   const p = new URLSearchParams(hash.replace(/^#/, ""));
-  const code = p.get("youtube_code") ?? "";
-  const state = p.get("youtube_state") ?? "";
+  const code = p.get(`${prefix}_code`) ?? "";
+  const state = p.get(`${prefix}_state`) ?? "";
   return code && state && code.length <= 2000 && state.length <= 2000 ? { code, state } : null;
+}
+export const readYoutubeReturn = (hash: string) => readOauthReturn(hash, "youtube");
+export const readHiggsfieldReturn = (hash: string) => readOauthReturn(hash, "higgsfield");
+
+/** 회사 Higgsfield 계정 연결(GET /marketing/higgsfield/connection). 토큰 값은 오지 않는다 */
+export interface HiggsfieldAccount {
+  app_configured: boolean;
+  connected: boolean;
+  email: string | null;
+  connected_by: string | null;
+  connected_at: string | null;
+}
+export function readHiggsfieldAccount(v: unknown): HiggsfieldAccount | null {
+  if (!isObj(v) || typeof v.connected !== "boolean") return null;
+  return {
+    app_configured: v.app_configured === true,
+    connected: v.connected,
+    email: strOrNull(v.email),
+    connected_by: strOrNull(v.connected_by),
+    connected_at: strOrNull(v.connected_at),
+  };
 }
 
 export const keyHintKo = (hint: string) => (hint ? `••••${hint}` : "—");
 export const KEY_LABEL: Record<KeyName, string> = {
   LLM_API_KEY: "회사 AI 키", DEV_CODER_LLM_API_KEY: "코딩 에이전트 키", MARKETING_VIDEO_API_KEY: "영상 생성 키",
   MARKETING_IG_ACCESS_TOKEN: "인스타 토큰", MARKETING_IG_USER_ID: "인스타 계정 ID", MARKETING_YOUTUBE_REFRESH_TOKEN: "유튜브 채널 연결", MARKETING_HIGGSFIELD_API_KEY: "Higgsfield 키",
+  MARKETING_HIGGSFIELD_MCP_REFRESH_TOKEN: "Higgsfield 계정 연결",
 };
 const keyLabel = (name?: string) => (name && KEY_LABEL[name as KeyName]) || name || "키";
 const OP_LABEL: Record<string, string> = { add: "등록", replace: "교체", delete: "삭제" };

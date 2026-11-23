@@ -11,6 +11,13 @@
   - `unreachable`: 시간 초과·네트워크 오류·5xx로 확인하지 못했다
 - `image_model`: 나노바나나 등 이미지 모델 경로 설정값
   (`MARKETING_HIGGSFIELD_IMAGE_MODEL`). 없으면 null.
+
+회사 계정 연결(원격 MCP + OAuth, 회사 구독 크레딧, 11/23 추가. 칸은 모두 선택이라 옛 응답도 맞다)
+- `source`: 그림·영상을 어느 길로 만드는가. `mcp`(회사가 연결한 Higgsfield 계정, 구독 크레딧) |
+  `api_key`(키, API 크레딧) | null(둘 다 없음). 회사 계정 연결이 있으면 늘 `mcp`가 먼저다
+- `source=mcp`일 때 `connection`은 그 연결의 상태다: `ok` | `invalid_key`(Higgsfield가 연결을
+  거절 → 다시 연결) | `unreachable`. `key_configured`는 그대로 API 키가 있는지다
+- `credits`·`plan`: 연결한 계정의 남은 크레딧과 구독 요금제(Higgsfield `balance`). 모르면 null
 """
 
 from __future__ import annotations
@@ -25,6 +32,7 @@ from ax_contracts.schemas.common import AxModel
 HIGGSFIELD_STATUS_SKILL = "higgsfield_status"
 
 HiggsfieldConnection = Literal["ok", "invalid_key", "unreachable", "not_configured"]
+HiggsfieldSource = Literal["mcp", "api_key"]
 
 
 class HiggsfieldStatusInput(AxModel):
@@ -38,3 +46,6 @@ class HiggsfieldStatusOutput(AxModel):
     image_model: str | None = Field(default=None, max_length=120)
     checked_at: datetime
     message_ko: str = Field(min_length=1, max_length=200)
+    source: HiggsfieldSource | None = None
+    credits: float | None = Field(default=None, ge=0)
+    plan: str | None = Field(default=None, max_length=40)
