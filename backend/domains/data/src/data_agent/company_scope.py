@@ -51,6 +51,17 @@ def active() -> str:
     return _ACTIVE.get() or current_id()
 
 
+def meta_tenant() -> str:
+    """다른 부서를 부르거나 이벤트를 낼 때 meta에 넣을 회사 값.
+
+    캣북스면 예전 값(`TENANT_ID_DEFAULT`, 별칭 shop-demo) 그대로다. 공통 로그·이벤트를 기본값으로
+    거르는 쪽이 있어 1단계에서는 바꾸지 않는다. 다른 회사면 그 회사 id."""
+    from ax_contracts.schemas.common import TENANT_ID_DEFAULT
+
+    cid = active()
+    return TENANT_ID_DEFAULT if cid == CATBOOKS else cid
+
+
 def resolve(company_id: str | None) -> str:
     """저장소에 넘긴 값이 있으면 그 회사, 없으면 `active()`."""
     return scope_id(company_id) if company_id else active()
@@ -132,6 +143,17 @@ def rebuild_with_tenant_key(conn: sqlite3.Connection, table: str, create: str) -
         conn.rollback()
         raise
     return True
+
+
+def read_filter(
+    conn: sqlite3.Connection, table: str, company_id: str | None = None
+) -> tuple[str, tuple[str, ...]]:
+    """읽기 전용으로 바로 여는 곳의 회사 조건 `(SQL, 값)`. 회사 칸이 있으면 `tenant_id = ?`.
+    아직 칸이 없는 옛 파일이면 모든 줄이 캣북스다 (캣북스면 전부, 다른 회사면 없음)."""
+    cid = resolve(company_id)
+    if TENANT_COLUMN in {name for name, _ in _columns(conn, table)}:
+        return f"{TENANT_COLUMN} = ?", (cid,)
+    return ("1 = 1", ()) if cid == CATBOOKS else ("1 = 0", ())
 
 
 def key_columns(conn: sqlite3.Connection, table: str) -> list[str]:

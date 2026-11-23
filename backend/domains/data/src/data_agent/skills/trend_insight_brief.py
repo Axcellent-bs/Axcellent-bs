@@ -68,7 +68,7 @@ from ax_contracts.schemas.data import (
     TrendVerdict,
     VideoLink,
 )
-from data_agent import caution, llm_failure
+from data_agent import caution, company_scope, llm_failure
 from data_agent.llm_budget import no_llm
 from data_agent.skills import brief_line
 from data_agent.skills import evidence_highlights as hl
@@ -271,39 +271,56 @@ class BriefStore:
     "만드는 중" 잠금(`brief_lock`)과 다시 추천 작업(`brief_jobs`)도 같은 파일 (서버·수집기 공용).
     """
 
-    def __init__(self, path: str | Path) -> None:
+    # 여러 회사 1-5 (11/23): 회사마다 따로. 키에 tenant_id (옛 표는 다시 만들어 캣북스로).
+    # "만드는 중" 잠금은 회사마다 하나 (예전 id = 1 한 줄 → tenant_id 키)
+    TABLES = {
+        "briefs": (
+            "CREATE TABLE IF NOT EXISTS {table} (day TEXT NOT NULL, rules TEXT NOT NULL,"
+            " created_at TEXT NOT NULL, output TEXT NOT NULL, expires_at TEXT,"
+            " tenant_id TEXT NOT NULL DEFAULT 'catbooks', PRIMARY KEY (tenant_id, day, rules))"
+        ),
+        "brief_versions": (
+            "CREATE TABLE IF NOT EXISTS {table} (day TEXT NOT NULL, rules TEXT NOT NULL,"
+            " version INTEGER NOT NULL, created_at TEXT NOT NULL, trigger TEXT NOT NULL,"
+            " requested_by TEXT, detect_as_of TEXT, detect_key TEXT, snapshot_id TEXT,"
+            " tokens INTEGER, output TEXT NOT NULL, degraded TEXT,"
+            " tenant_id TEXT NOT NULL DEFAULT 'catbooks',"
+            " PRIMARY KEY (tenant_id, day, rules, version))"
+        ),
+        "brief_lock": (
+            "CREATE TABLE IF NOT EXISTS {table} (id INTEGER NOT NULL DEFAULT 1,"
+            " token TEXT NOT NULL, who TEXT NOT NULL, trigger TEXT NOT NULL,"
+            " started_at TEXT NOT NULL, until TEXT NOT NULL,"
+            " tenant_id TEXT NOT NULL DEFAULT 'catbooks', PRIMARY KEY (tenant_id))"
+        ),
+    }
+
+    def __init__(self, path: str | Path, company_id: str | None = None) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._company = company_scope.scope_id(company_id) if company_id else None
         self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=10.0)
         self._lock = threading.Lock()
         with self._lock, self._conn:
-            self._conn.execute(
-                "CREATE TABLE IF NOT EXISTS briefs (day TEXT NOT NULL, rules TEXT NOT NULL,"
-                " created_at TEXT NOT NULL, output TEXT NOT NULL, PRIMARY KEY (day, rules))"
-            )
-            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(briefs)")]
-            if "expires_at" not in cols:  # 예전 파일: 만료 칸 (NULL = 하루 캐시)
-                self._conn.execute("ALTER TABLE briefs ADD COLUMN expires_at TEXT")
-            self._conn.execute(
-                "CREATE TABLE IF NOT EXISTS brief_versions (day TEXT NOT NULL, rules TEXT NOT NULL,"
-                " version INTEGER NOT NULL, created_at TEXT NOT NULL, trigger TEXT NOT NULL,"
-                " requested_by TEXT, detect_as_of TEXT, detect_key TEXT, snapshot_id TEXT,"
-                " tokens INTEGER, output TEXT NOT NULL, PRIMARY KEY (day, rules, version))"
-            )
-            # 11/19: 덜 만든 판 표시 (NULL · "capped"(LLM 상한) · "failed"(LLM 실패))
-            vcols = [r[1] for r in self._conn.execute("PRAGMA table_info(brief_versions)")]
-            if "degraded" not in vcols:
-                self._conn.execute("ALTER TABLE brief_versions ADD COLUMN degraded TEXT")
-            self._conn.execute(
-                "CREATE TABLE IF NOT EXISTS brief_lock (id INTEGER PRIMARY KEY CHECK (id = 1),"
-                " token TEXT NOT NULL, who TEXT NOT NULL, trigger TEXT NOT NULL,"
-                " started_at TEXT NOT NULL, until TEXT NOT NULL)"
-            )
+            for table, old_col in (("briefs", "expires_at"), ("brief_versions", "degraded")):
+                cols = [r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")]  # noqa: S608
+                if cols and old_col not in cols:  # 예전 파일: 만료 칸 · 11/19 덜 만든 판 표시
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {old_col} TEXT")
+        with self._lock:
+            for table, create in self.TABLES.items():
+                company_scope.rebuild_with_tenant_key(self._conn, table, create)
+        with self._lock, self._conn:
             self._conn.execute(
                 "CREATE TABLE IF NOT EXISTS brief_jobs (job_id TEXT PRIMARY KEY, day TEXT NOT NULL,"
                 " rules TEXT NOT NULL, state TEXT NOT NULL, requested_by TEXT,"
                 " started_at TEXT NOT NULL, finished_at TEXT, version INTEGER, tokens INTEGER,"
-                " reason TEXT)"
+                " reason TEXT, tenant_id TEXT NOT NULL DEFAULT 'catbooks')"
             )
+            company_scope.ensure_tenant_column(self._conn, "brief_jobs")
+
+    @property
+    def company_id(self) -> str:
+        """이 저장소가 읽고 쓰는 회사: 만들 때 준 값, 없으면 지금 요청·지금 회사 (부를 때마다)."""
+        return self._company or company_scope.active()
 
     # ---- 판 ----------------------------------------------------------------------
 
@@ -314,14 +331,15 @@ class BriefStore:
         """판 표가 생기기 전(v4)에 저장된 그날 브리프를 1번 "자동" 판으로 옮긴다 (잠금 안에서).
 
         배포하는 날 다시 추천이 `briefs`의 그날 브리프를 덮어 지우지 않게 한다."""
+        cid = self.company_id
         if self._conn.execute(
-            "SELECT 1 FROM brief_versions WHERE day = ? AND rules = ? LIMIT 1",
-            (day.isoformat(), rules),
+            "SELECT 1 FROM brief_versions WHERE tenant_id = ? AND day = ? AND rules = ? LIMIT 1",
+            (cid, day.isoformat(), rules),
         ).fetchone():
             return
         old = self._conn.execute(
-            "SELECT created_at, output FROM briefs WHERE day = ? AND rules = ?",
-            (day.isoformat(), rules),
+            "SELECT created_at, output FROM briefs WHERE tenant_id = ? AND day = ? AND rules = ?",
+            (cid, day.isoformat(), rules),
         ).fetchone()
         if old is None:
             return
@@ -330,26 +348,27 @@ class BriefStore:
             "created_at": datetime.fromisoformat(old[0]),
         }).model_dump_json()  # fmt: skip
         self._conn.execute(
-            "INSERT INTO brief_versions (day, rules, version, created_at, trigger, output)"
-            " VALUES (?,?,1,?,'auto',?)",
-            (day.isoformat(), rules, old[0], body),
+            "INSERT INTO brief_versions (day, rules, version, created_at, trigger, output,"
+            " tenant_id) VALUES (?,?,1,?,'auto',?,?)",
+            (day.isoformat(), rules, old[0], body, cid),
         )
 
     def versions(self, day: date, rules: str) -> list[dict[str, Any]]:
         """그날·규칙 버전의 판 목록 (오래된 순, 출력 JSON 없이)."""
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT {', '.join(self._VERSION_COLS)} FROM brief_versions"
-                " WHERE day = ? AND rules = ? ORDER BY version",
-                (day.isoformat(), rules),
+                f"SELECT {', '.join(self._VERSION_COLS)} FROM brief_versions"  # noqa: S608
+                " WHERE tenant_id = ? AND day = ? AND rules = ? ORDER BY version",
+                (self.company_id, day.isoformat(), rules),
             ).fetchall()
         return [dict(zip(self._VERSION_COLS, r, strict=True)) for r in rows]
 
     def version(self, day: date, rules: str, n: int) -> TrendInsightBriefOutput | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT output FROM brief_versions WHERE day = ? AND rules = ? AND version = ?",
-                (day.isoformat(), rules, n),
+                "SELECT output FROM brief_versions WHERE tenant_id = ? AND day = ? AND rules = ?"
+                " AND version = ?",
+                (self.company_id, day.isoformat(), rules, n),
             ).fetchone()
         return TrendInsightBriefOutput.model_validate_json(row[0]) if row else None
 
@@ -358,9 +377,9 @@ class BriefStore:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT version, trigger, tokens, degraded FROM brief_versions"
-                " WHERE day = ? AND rules = ? AND trigger IN ('auto', 'auto_retry')"
-                " ORDER BY version",
-                (day.isoformat(), rules),
+                " WHERE tenant_id = ? AND day = ? AND rules = ?"
+                " AND trigger IN ('auto', 'auto_retry') ORDER BY version",
+                (self.company_id, day.isoformat(), rules),
             ).fetchall()
         return [dict(zip(("version", "trigger", "tokens", "degraded"), r, strict=True))
                 for r in rows]  # fmt: skip
@@ -369,9 +388,9 @@ class BriefStore:
         """보여 줄 이전 판: 그날 최신 판(만료 무시), 없으면 그 전 날들 중 가장 최근."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT output FROM briefs WHERE rules = ? AND day <= ?"
+                "SELECT output FROM briefs WHERE tenant_id = ? AND rules = ? AND day <= ?"
                 " ORDER BY day DESC LIMIT 1",
-                (rules, day.isoformat()),
+                (self.company_id, rules, day.isoformat()),
             ).fetchone()
         return TrendInsightBriefOutput.model_validate_json(row[0]) if row else None
 
@@ -379,9 +398,10 @@ class BriefStore:
         """최근 다시 추천 판들의 실제 토큰 (날짜 상관없이, 최근 순)."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT tokens FROM brief_versions WHERE trigger = 'manual' AND tokens IS NOT NULL"
-                " ORDER BY created_at DESC LIMIT ?", (limit,),
-            ).fetchall()  # fmt: skip
+                "SELECT tokens FROM brief_versions WHERE tenant_id = ? AND trigger = 'manual'"
+                " AND tokens IS NOT NULL ORDER BY created_at DESC LIMIT ?",
+                (self.company_id, limit),
+            ).fetchall()
         return [int(r[0]) for r in rows]
 
     # ---- "만드는 중" 잠금 (sqlite, 서버·수집기 공용. 만든 프로세스가 죽어도 만료되면 풀림) ----
@@ -393,16 +413,19 @@ class BriefStore:
 
         token = uuid.uuid4().hex
         until = now + timedelta(seconds=lease if lease is not None else lock_seconds())
+        cid = self.company_id
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                row = self._conn.execute("SELECT until FROM brief_lock WHERE id = 1").fetchone()
+                row = self._conn.execute("SELECT until FROM brief_lock WHERE tenant_id = ?",
+                                         (cid,)).fetchone()  # fmt: skip
                 if row is not None and datetime.fromisoformat(row[0]) >= now:
                     self._conn.rollback()
                     return None
                 self._conn.execute(
-                    "INSERT OR REPLACE INTO brief_lock VALUES (1, ?, ?, ?, ?, ?)",
-                    (token, who, trigger, now.isoformat(), until.isoformat()),
+                    "INSERT OR REPLACE INTO brief_lock (id, token, who, trigger, started_at,"
+                    " until, tenant_id) VALUES (1, ?, ?, ?, ?, ?, ?)",
+                    (token, who, trigger, now.isoformat(), until.isoformat(), cid),
                 )
                 self._conn.commit()
             except BaseException:
@@ -412,13 +435,15 @@ class BriefStore:
 
     def release_build(self, token: str) -> None:
         with self._lock, self._conn:
-            self._conn.execute("DELETE FROM brief_lock WHERE id = 1 AND token = ?", (token,))
+            self._conn.execute("DELETE FROM brief_lock WHERE tenant_id = ? AND token = ?",
+                               (self.company_id, token))  # fmt: skip
 
     def building(self, now: datetime) -> dict[str, Any] | None:
         """지금 살아 있는 잠금 (누가·무엇으로·언제). 없거나 만료면 None."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT who, trigger, started_at, until FROM brief_lock WHERE id = 1"
+                "SELECT who, trigger, started_at, until FROM brief_lock WHERE tenant_id = ?",
+                (self.company_id,),
             ).fetchone()
         if row is None or datetime.fromisoformat(row[3]) < now:
             return None
@@ -433,9 +458,9 @@ class BriefStore:
                   at: datetime) -> None:  # fmt: skip
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO brief_jobs (job_id, day, rules, state, requested_by, started_at)"
-                " VALUES (?, ?, ?, 'running', ?, ?)",
-                (job_id, day.isoformat(), rules, who, at.isoformat()),
+                "INSERT INTO brief_jobs (job_id, day, rules, state, requested_by, started_at,"
+                " tenant_id) VALUES (?, ?, ?, 'running', ?, ?, ?)",
+                (job_id, day.isoformat(), rules, who, at.isoformat(), self.company_id),
             )
 
     def job_finish(self, job_id: str, state: str, at: datetime, *, version: int | None = None,
@@ -450,9 +475,10 @@ class BriefStore:
     def last_job(self, day: date, rules: str) -> dict[str, Any] | None:
         with self._lock:
             row = self._conn.execute(
-                f"SELECT {', '.join(self._JOB_COLS)} FROM brief_jobs WHERE day = ? AND rules = ?"
-                " ORDER BY started_at DESC LIMIT 1", (day.isoformat(), rules),
-            ).fetchone()  # fmt: skip
+                f"SELECT {', '.join(self._JOB_COLS)} FROM brief_jobs"  # noqa: S608
+                " WHERE tenant_id = ? AND day = ? AND rules = ? ORDER BY started_at DESC LIMIT 1",
+                (self.company_id, day.isoformat(), rules),
+            ).fetchone()
         return dict(zip(self._JOB_COLS, row, strict=True)) if row else None
 
     def close(self) -> None:
@@ -463,8 +489,9 @@ class BriefStore:
     ) -> TrendInsightBriefOutput | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT output, expires_at FROM briefs WHERE day = ? AND rules = ?",
-                (day.isoformat(), rules),
+                "SELECT output, expires_at FROM briefs WHERE tenant_id = ? AND day = ?"
+                " AND rules = ?",
+                (self.company_id, day.isoformat(), rules),
             ).fetchone()
         if row is None:
             return None
@@ -479,11 +506,13 @@ class BriefStore:
             detect_key: str | None = None, tokens: int | None = None,
             degraded: str | None = None) -> int:  # fmt: skip
         """새 판으로 저장하고 판 번호를 돌려준다. `briefs` 표(그날 최신 판)도 같이 바꾼다."""
+        cid = self.company_id
         with self._lock, self._conn:
             self._backfill(day, rules)
             row = self._conn.execute(
-                "SELECT COALESCE(MAX(version), 0) FROM brief_versions WHERE day = ? AND rules = ?",
-                (day.isoformat(), rules),
+                "SELECT COALESCE(MAX(version), 0) FROM brief_versions WHERE tenant_id = ?"
+                " AND day = ? AND rules = ?",
+                (cid, day.isoformat(), rules),
             ).fetchone()
             n = int(row[0]) + 1
             out = out.model_copy(update={
@@ -492,18 +521,18 @@ class BriefStore:
             })  # fmt: skip
             body = out.model_dump_json()
             self._conn.execute(
-                "INSERT OR REPLACE INTO briefs (day, rules, created_at, output, expires_at)"
-                " VALUES (?,?,?,?,?)",
+                "INSERT OR REPLACE INTO briefs (day, rules, created_at, output, expires_at,"
+                " tenant_id) VALUES (?,?,?,?,?,?)",
                 (day.isoformat(), rules, at.isoformat(), body,
-                 expires_at.isoformat() if expires_at else None),
+                 expires_at.isoformat() if expires_at else None, cid),
             )  # fmt: skip
             self._conn.execute(
                 "INSERT INTO brief_versions (day, rules, version, created_at, trigger,"
-                " requested_by, detect_as_of, detect_key, snapshot_id, tokens, output, degraded)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " requested_by, detect_as_of, detect_key, snapshot_id, tokens, output, degraded,"
+                " tenant_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (day.isoformat(), rules, n, at.isoformat(), trigger, requested_by,
                  detect_as_of.isoformat() if detect_as_of else None, detect_key,
-                 out.snapshot_id, tokens, body, degraded),
+                 out.snapshot_id, tokens, body, degraded, cid),
             )  # fmt: skip
         return n
 

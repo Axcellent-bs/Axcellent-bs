@@ -30,6 +30,8 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+from data_agent import company_scope
+
 KST = timezone(timedelta(hours=9))
 DB_ENV = "DATA_TREND_RESPONSES_DB"
 MAX_ENTRIES = 64  # 메모리 모드 상한
@@ -147,18 +149,25 @@ class ResponseCache:
                 self._conn.execute(
                     "CREATE INDEX IF NOT EXISTS responses_skill ON responses (skill, stored_at)"
                 )
+                # 여러 회사 1-5 (11/23): 회사 칸 (옛 줄은 캣북스). 키 해시에도 회사 ID
+                company_scope.ensure_tenant_column(self._conn, "responses")
 
     @staticmethod
     def key(skill: str, payload: Any, stamp: str, rules: str) -> str:
-        body = json.dumps([skill, payload, stamp, rules], ensure_ascii=False, sort_keys=True,
-                          default=str)  # fmt: skip
+        """응답 캐시 키. 회사 ID를 넣는다 (같은 요청이라도 회사가 다르면 다른 키).
+        캣북스는 예전 키 그대로 (저장분을 다시 계산하지 않게)."""
+        parts: list[Any] = [skill, payload, stamp, rules]
+        if (cid := company_scope.active()) != company_scope.CATBOOKS:
+            parts.append(cid)
+        body = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
         return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> Any | None:
         with self._lock:
             if self._conn is not None:
                 row = self._conn.execute(
-                    "SELECT value FROM responses WHERE key = ?", (key,)
+                    "SELECT value FROM responses WHERE key = ? AND tenant_id = ?",
+                    (key, company_scope.active()),
                 ).fetchone()
                 value = json.loads(row[0]) if row else None
             else:
@@ -177,8 +186,9 @@ class ResponseCache:
             if self._conn is None:
                 return None  # 메모리 저장은 skill을 남기지 않는다
             row = self._conn.execute(
-                "SELECT value FROM responses WHERE skill = ? ORDER BY stored_at DESC LIMIT 1",
-                (skill,),
+                "SELECT value FROM responses WHERE skill = ? AND tenant_id = ?"
+                " ORDER BY stored_at DESC LIMIT 1",
+                (skill, company_scope.active()),
             ).fetchone()
         return json.loads(row[0]) if row else None
 
@@ -187,14 +197,18 @@ class ResponseCache:
             if self._conn is not None:
                 at = datetime.now(UTC).isoformat()
                 body = json.dumps(value, ensure_ascii=False, default=str)
+                cid = company_scope.active()
                 with self._conn:
                     self._conn.execute(
-                        "INSERT OR REPLACE INTO responses VALUES (?,?,?,?)", (key, skill, at, body)
+                        "INSERT OR REPLACE INTO responses (key, skill, stored_at, value, tenant_id)"
+                        " VALUES (?,?,?,?,?)",
+                        (key, skill, at, body, cid),
                     )
-                    self._conn.execute(
-                        "DELETE FROM responses WHERE skill = ? AND key NOT IN (SELECT key FROM"
-                        " responses WHERE skill = ? ORDER BY stored_at DESC LIMIT ?)",
-                        (skill, skill, KEEP_PER_SKILL),
+                    self._conn.execute(  # 회사·skill마다 최근 KEEP_PER_SKILL개
+                        "DELETE FROM responses WHERE skill = ? AND tenant_id = ? AND key NOT IN"
+                        " (SELECT key FROM responses WHERE skill = ? AND tenant_id = ?"
+                        " ORDER BY stored_at DESC LIMIT ?)",
+                        (skill, cid, skill, cid, KEEP_PER_SKILL),
                     )
                 return
             self._data[key] = value
@@ -206,5 +220,6 @@ class ResponseCache:
         with self._lock:
             self._data.clear()
             if self._conn is not None:
-                with self._conn:
-                    self._conn.execute("DELETE FROM responses")
+                with self._conn:  # 그 회사 것만
+                    self._conn.execute("DELETE FROM responses WHERE tenant_id = ?",
+                                       (company_scope.active(),))  # fmt: skip

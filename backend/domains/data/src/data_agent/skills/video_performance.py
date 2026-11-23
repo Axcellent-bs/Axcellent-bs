@@ -46,6 +46,7 @@ from ax_contracts.schemas.data import (
     VideoPerformanceRequest,
     VideoPlatform,
 )
+from data_agent import company_scope
 from data_agent.connectors import ConnectorUnavailable
 
 DB_ENV = "DATA_VIDEO_PERF_DB"
@@ -175,17 +176,21 @@ class VideoStore:
             for col in ("promo_id", "coupon_id"):  # v4 칸: 예전 파일이면 끝에 더한다
                 if col not in cols:
                     self._conn.execute(f"ALTER TABLE videos ADD COLUMN {col} TEXT")
+            # 여러 회사 1-5 (11/23): 회사 영상 등록이라 회사 칸 (옛 줄은 캣북스).
+            # 시점 값(points)은 영상 키에 딸린 공유 측정값이라 그대로
+            company_scope.ensure_tenant_column(self._conn, "videos")
 
     def close(self) -> None:
         self._conn.close()
 
     def upsert(self, v: Video) -> None:
-        """등록 (있으면 비어 있던 칸만 채운다. 시험 표시는 한 번 붙으면 그대로)."""
+        """등록 (있으면 비어 있던 칸만 채운다. 시험 표시는 한 번 붙으면 그대로).
+        회사는 지금 요청의 회사 (같은 영상을 다른 회사가 다시 등록해도 처음 회사 그대로)."""
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO videos (key, platform, video_id, video_url, campaign_id, insight_id,"
                 " proposal_id, test, published_at, title, registered_at, category, shorts_format,"
-                " promo_id, coupon_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                " promo_id, coupon_id, tenant_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(key) DO UPDATE"
                 " SET campaign_id = COALESCE(videos.campaign_id, excluded.campaign_id),"
                 " promo_id = COALESCE(excluded.promo_id, videos.promo_id),"
@@ -213,23 +218,31 @@ class VideoStore:
                     v.shorts_format,
                     v.promo_id,
                     v.coupon_id,
+                    company_scope.active(),
                 ),  # fmt: skip
             )
 
-    def videos(self, *, include_test: bool = True) -> list[Video]:
+    def videos(self, *, include_test: bool = True, all_companies: bool = False) -> list[Video]:
+        """그 회사 영상 (등록 순). all_companies는 공유 측정(수집기)용."""
+        where, args = ("1 = 1", ()) if all_companies else ("tenant_id = ?",
+                                                           (company_scope.active(),))  # fmt: skip
         with self._lock:
-            rows = self._conn.execute("SELECT * FROM videos ORDER BY registered_at").fetchall()
+            rows = self._conn.execute(
+                f"SELECT * FROM videos WHERE {where} ORDER BY registered_at", args  # noqa: S608
+            ).fetchall()
         out = [_video(r) for r in rows]
         return out if include_test else [v for v in out if not v.test]
 
     def find(self, *, key: str | None = None, campaign_id: str | None = None) -> Video | None:
+        """영상 키로(공유 측정값이라 회사를 보지 않는다) 또는 캠페인으로(그 회사만) 찾는다."""
         with self._lock:
             if key is not None:
                 row = self._conn.execute("SELECT * FROM videos WHERE key = ?", (key,)).fetchone()
             else:
                 row = self._conn.execute(
-                    "SELECT * FROM videos WHERE campaign_id = ? ORDER BY registered_at DESC",
-                    (campaign_id,),
+                    "SELECT * FROM videos WHERE campaign_id = ? AND tenant_id = ?"
+                    " ORDER BY registered_at DESC",
+                    (campaign_id, company_scope.active()),
                 ).fetchone()
         return _video(row) if row else None
 
@@ -333,7 +346,7 @@ async def measure_due(
     """추적 중인 YouTube 영상 중 지금 잴 시점이 있는 것만 videos.list로 잰다. (잰 값 수, 문제)."""
     now = now or datetime.now(UTC)
     want: dict[str, tuple[Video, list[VideoCheckpointName]]] = {}
-    for v in store.videos():
+    for v in store.videos(all_companies=True):  # 측정은 공유: 모든 회사 영상을 한 번에
         if v.platform != "youtube" or v.published_at is None:
             continue
         due = due_checkpoints(v.published_at, now, set(store.points(v.key)))
@@ -371,8 +384,11 @@ def find_insight(env: Mapping[str, str], insight_id: str, days: int = 14) -> Tre
         return None
     conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=5.0)
     try:
+        where, mine = company_scope.read_filter(conn, "briefs")  # 그 회사 브리프만 (1-5)
         rows = conn.execute(
-            "SELECT output FROM briefs ORDER BY day DESC, created_at DESC LIMIT ?", (days * 3,)
+            f"SELECT output FROM briefs WHERE {where}"  # noqa: S608
+            " ORDER BY day DESC, created_at DESC LIMIT ?",
+            (*mine, days * 3),
         ).fetchall()
     finally:
         conn.close()
