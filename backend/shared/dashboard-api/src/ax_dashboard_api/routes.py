@@ -1548,6 +1548,53 @@ async def marketing_campaign_link(
     return ok(await marketing_client.campaign_link_call(campaign_id, body.model_dump()))
 
 
+class YoutubeDraftBody(BaseModel):
+    """비운 칸은 그대로 둔다. regenerate=true면 AI가 다시 쓴다."""
+
+    regenerate: bool = False
+    title: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=5000)
+    tags: list[str] | None = Field(default=None, max_length=15)
+    privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
+    part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+
+
+@router.get("/marketing/youtube/status")
+async def marketing_youtube_status() -> dict:
+    """AXcellent 유튜브 채널 연결 상태(마케팅 `youtube_status`, read)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "유튜브 연결은 실제 모드에서만 된다")
+    return ok(await marketing_client.youtube_status_call())
+
+
+@router.post("/marketing/creative-records/{record_id}/youtube/draft")
+async def marketing_youtube_draft(
+    body: YoutubeDraftBody,
+    request: Request,
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """AI 유튜브 제목·설명·태그 초안 또는 사람이 고친 값 저장(`creative_youtube_draft`).
+
+    사람 토큰.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "유튜브 초안은 실제 모드에서만 된다")
+    human_from_authorization(request.headers.get("authorization"))
+    payload = body.model_dump(exclude_none=True)
+    return ok(await marketing_client.youtube_draft_call(record_id, payload))
+
+
+@router.post("/marketing/creative-records/{record_id}/youtube")
+async def marketing_youtube_request(
+    request: Request, record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$")
+) -> dict:
+    """초안대로 유튜브 올리기를 사람 승인(C publish_youtube)에 올린다. 사람 토큰."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "유튜브 올리기는 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.youtube_request_call(record_id, who))
+
+
 class MarketingChatSendBody(BaseModel):
     thread_id: str | None = Field(default=None, min_length=1, max_length=64)
     message: str = Field(min_length=1, max_length=2000)

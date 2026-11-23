@@ -49,6 +49,10 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeRecordsListOutput,
     CreativeVideoRequestInput,
     CreativeVideoRequestOutput,
+    CreativeYoutubeDraftInput,
+    CreativeYoutubeOutput,
+    CreativeYoutubeRequestInput,
+    YoutubeStatusOutput,
 )
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import ad_metrics as _ad_metrics
@@ -71,6 +75,7 @@ from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import storyboard as _storyboard
+from marketing_agent import youtube as _youtube
 from marketing_agent.brief_handoff import (
     AUTO,
     DRAFT_MEDIA_KIND,
@@ -765,6 +770,8 @@ async def creative_record_get(request: AgentRequest) -> AgentResult:
         try:
             _render.expire_stale(data.record_id)
             await _render.check_video(STATE.media_ledger, request.meta, data.record_id)
+            _youtube.expire_stale(data.record_id)
+            await _youtube.check_upload(request.meta, data.record_id)
         except Exception:  # noqa: BLE001 - 진행 확인 실패는 읽기를 막지 않는다
             _render.logger.exception("제작 기록: 영상 승인 확인 실패")
     row = _creative.store().get(data.record_id)
@@ -851,6 +858,78 @@ async def creative_record_attach(request: AgentRequest) -> AgentResult:
         evidence=_evidence(
             ["creative_record_attach"], f"파일 붙임 {data.record_id} {data.part}", []
         ),
+    )
+
+
+# 유튜브 초안(read: 기록에 초안만 남긴다). 테스트는 이 값을 가짜 LLM 함수로 바꾼다
+YOUTUBE_LLM: Any = None
+
+
+def _youtube_failed(request: AgentRequest, error: Exception) -> AgentResult:
+    return _result(request, TaskStatus.FAILED, outcome=str(error), output={"message": str(error)})
+
+
+async def creative_youtube_draft(request: AgentRequest) -> AgentResult:
+    """AI가 유튜브 제목·설명·태그 초안을 쓰거나 사람이 고친 값을 저장한다(올리지는 않는다)."""
+    from marketing_agent.chat import default_llm
+
+    data = _parse(request, CreativeYoutubeDraftInput)
+    if isinstance(data, AgentResult):
+        return data
+    edits = data.model_dump(include={"title", "description", "tags", "privacy", "part"})
+    try:
+        youtube = await _youtube.write_draft(
+            data.record_id,
+            YOUTUBE_LLM or default_llm,
+            request.meta.context_id,
+            edits=edits,
+            regenerate=data.regenerate,
+        )
+    except _youtube.YoutubeError as error:
+        return _youtube_failed(request, error)
+    out = CreativeYoutubeOutput(record_id=data.record_id, youtube=youtube)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["creative_youtube_draft"],
+            f"유튜브 초안 {data.record_id} ({youtube.get('source')})",
+            [],
+        ),
+    )
+
+
+async def creative_youtube_request(request: AgentRequest) -> AgentResult:
+    """초안대로 유튜브에 올리기를 사람 승인(C publish_youtube)에 올린다. 승인 뒤에만 올린다."""
+    data = _parse(request, CreativeYoutubeRequestInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        youtube = await _youtube.request_upload(request.meta, data.record_id, data.who)
+    except _youtube.YoutubeError as error:
+        return _youtube_failed(request, error)
+    out = CreativeYoutubeOutput(record_id=data.record_id, youtube=youtube)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["creative_youtube_request"],
+            f"유튜브 올리기 요청 {data.record_id}: {youtube.get('status')}",
+            [],
+        ),
+    )
+
+
+async def youtube_status(request: AgentRequest) -> AgentResult:
+    """AXcellent 유튜브 채널 연결 상태(read). 키 값은 돌려주지 않는다."""
+    out = YoutubeStatusOutput(**await _youtube.status())
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["youtube_status"], f"유튜브 연결 {out.connection}", []),
     )
 
 
@@ -1846,6 +1925,9 @@ HANDLERS = {
     "creative_records_list": creative_records_list,
     "creative_record_get": creative_record_get,
     "creative_video_request": creative_video_request,
+    "creative_youtube_draft": creative_youtube_draft,
+    "creative_youtube_request": creative_youtube_request,
+    "youtube_status": youtube_status,
     "creative_record_attach": creative_record_attach,
     "receive_campaign_brief": receive_campaign_brief,
     "record_campaign_ad_metrics": record_campaign_ad_metrics,

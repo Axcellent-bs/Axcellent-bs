@@ -6,6 +6,8 @@ import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
 import { BriefMediaMaker } from "./BriefMediaMaker";
 import { PublishControlCard } from "./PublishControlCard";
+import { HiggsfieldStatusCard } from "./HiggsfieldStatusCard";
+import { YoutubeStatusCard } from "./YoutubeStatusCard";
 import { CharacterSheetMaker } from "./CharacterSheetMaker";
 import { RequestVideos } from "./RequestVideos";
 import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, draftStateKo, handoffReasonKo, mediaFieldKo, mediaKindKo, type StoredBrief } from "@/lib/briefs";
@@ -17,8 +19,8 @@ import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, dr
 // 이미지 시트 · 스토리보드 카드(Higgsfield 결과는 카드 안 RenderPanel이 보여 준다).
 
 const REFRESH_MS = 15_000;
-const SNS_ACTIONS = ["publish_sns", "generate_media", "generate_creative_video"] as const;
-const ACTION_NAME: Record<string, string> = { publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", generate_creative_video: "스토리보드 영상 만들기" };
+const SNS_ACTIONS = ["publish_sns", "generate_media", "generate_creative_video", "publish_youtube"] as const;
+const ACTION_NAME: Record<string, string> = { publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", generate_creative_video: "스토리보드 영상 만들기", publish_youtube: "유튜브에 영상 올리기" };
 // 캐러셀 게시 요청의 요약("SNS 캐러셀 게시 요청(N장): ...")에서 장수만 읽는다. 다른 요청이면 null이다.
 const carouselCount = (summary?: string): number | null => {
   const m = /^SNS 캐러셀 게시 요청\((\d+)장\)/.exec(summary ?? "");
@@ -83,6 +85,11 @@ export function SnsMedia() {
       </header>
 
       <PublishControlCard />
+
+      {/* 로그인한 회사의 연결 상태대로 보인다(회사마다 다른 키·채널, 11/23) */}
+      <HiggsfieldStatusCard />
+
+      <YoutubeStatusCard />
 
       <CharacterSheetMaker />
 

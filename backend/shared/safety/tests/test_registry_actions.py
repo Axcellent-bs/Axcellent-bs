@@ -184,6 +184,13 @@ async def test_record_campaign_ad_metrics_is_a_for_marketing(gate: Gate, act) ->
 
 
 @pytest.mark.asyncio
+async def test_publish_youtube_always_needs_a_human(gate: Gate, act) -> None:
+    """유튜브 올리기는 공개되고 되돌리기 어려워 늘 사람 결정(C)이다."""
+    decision = await gate.execute(act("publish_youtube", "marketing", "yt-1"))
+    assert (decision.grade, decision.status) == ("C", "held")
+
+
+@pytest.mark.asyncio
 async def test_confirm_spec_rules(gate: Gate, act) -> None:
     clean = dict(open_questions=0, warnings=0, basis_count=2, irreversible_count=0)
     ok = await gate.execute(act("confirm_spec", "planning", "spec-ok", **clean))
