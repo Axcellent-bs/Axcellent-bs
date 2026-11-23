@@ -4,6 +4,7 @@
 | --- | --- | --- |
 | `POST /api/safety/executions` | 실행 관문 (`ExecuteRequest` → `ExecuteDecision`) | 에이전트 |
 | `GET /api/safety/executions?context_id=` | 실행 기록 | 없음(조회) |
+| `GET /api/safety/executions/{execution_id}` | 실행 기록 하나 (없으면 404) | 없음(조회) |
 | `GET /api/safety/reviews?status=pending` | C 보류 큐 | 없음(조회) |
 | `GET /api/safety/reviews/{review_id}` | 보류 건과 근거 리포트 | 없음(조회) |
 | `POST /api/safety/reviews/{review_id}/decision` | 승인·거절 (`decided_as` 선택) | **사람만** |
@@ -228,6 +229,14 @@ def create_app(
     def list_executions(context_id: str | None = None) -> dict:
         records = gate.store.list_executions(context_id)
         return _ok([r.model_dump(mode="json") for r in records])
+
+    @app.get("/api/safety/executions/{execution_id}", response_model=None)
+    def get_execution(execution_id: str) -> dict | JSONResponse:
+        """실행 기록 하나 (목록과 같은 모양). 없으면 404 `NOT_FOUND`."""
+        record = gate.store.get_execution(execution_id)
+        if record is None:
+            return _error(404, "NOT_FOUND", "실행 기록이 없다")
+        return _ok(record.model_dump(mode="json"))
 
     @app.get("/api/safety/reviews")
     async def list_reviews(

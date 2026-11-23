@@ -1,8 +1,10 @@
-"""사이트 변환기 쓰기 뼈대 (W1): 판정 1·3·4·6, 할 일함 넣기, 쓰기 장부.
+"""사이트 변환기 쓰기 (W1 뼈대·W2 관문 확인): 판정 1·2·3·4·6, 할 일함 넣기, 쓰기 장부.
 
-설계 "③-쓰기"·"② 사람 반영". 직접 쓰기는 아직 없어 허용 서비스가 보낸 쓰기는 모두 할 일함이다.
+설계 "③-쓰기"·"② 사람 반영". 직접 쓰기는 아직 없어 판정 1·2를 지난 쓰기는 모두 할 일함이다.
+safety는 실행 기록 응답을 흉내 낸다(`gate_check.TRANSPORT`).
 """
 
+import copy
 import json
 import logging
 from collections.abc import Iterator
@@ -17,11 +19,12 @@ from ax_agent_template import company_connection as cc
 from ax_contracts.schemas import TENANT_ID_DEFAULT
 from ax_dashboard_api import handoffs
 from ax_dashboard_api.main import app
+from ax_dashboard_api.site_adapter import gate_check, writes
 from ax_dashboard_api.site_adapter import mapping as m
 from ax_dashboard_api.site_adapter import upstream as up
-from ax_dashboard_api.site_adapter import writes
 
 SITE = "http://10.0.0.9:3000"
+SAFETY_URL = "http://safety.test:8001"
 BASE = "/site-adapter"
 SUPPORT = {"authorization": "Bearer sup-tok"}
 MARKETING = {"authorization": "Bearer mkt-tok"}
@@ -31,11 +34,97 @@ HUMAN = {"authorization": "Bearer test-human-token"}
 SITE_TOKEN = "site-secret-token-9"
 REFUND_KEY = "ctx_shop_abc:refund_request:claim:1"
 REFUND = {"refund_amount": 23000, "idempotency_key": REFUND_KEY, "context_id": "ctx_shop_abc"}
+COUPON_KEY = "ctx_a:issue_coupon:buy_1"
+
+
+def execution(
+    execution_id: str,
+    action: str,
+    requester: str,
+    context_id: str,
+    key: str,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """safety `GET /api/safety/executions` 한 줄 모양 (`ExecutionRecord`)."""
+    return {
+        "execution_id": execution_id,
+        "created_at": "2026-11-23T01:00:00Z",
+        "request": {
+            "action": action,
+            "requester": requester,
+            "context_id": context_id,
+            "tenant_id": TENANT_ID_DEFAULT,
+            "idempotency_key": key,
+            "params": params,
+        },
+        "decision": {"execution_id": execution_id, "grade": "A", "status": "executed"},
+    }
+
+
+# 도메인이 `execute()`에 보낸 것과 같은 모양 (고객지원 claim_handlers, 마케팅 handlers)
+REFUND_RECORD = execution(
+    "exe_refund_1",
+    "refund_request",
+    "support",
+    "ctx_shop_abc",
+    REFUND_KEY,
+    {"claim_id": 1, "order_id": "ord_1", "buyer_id": "buy_1", "refund_amount": 23000},
+)
+COUPON_RECORD = execution(
+    "exe_coupon_1",
+    "issue_coupon",
+    "marketing",
+    "ctx_a",
+    COUPON_KEY,
+    {
+        "purpose_code": "compensation",
+        "buyer_id": "buy_1",
+        "count": 2,
+        "unit_value": 1500,
+        "campaign_id": None,
+        "total_value": 3000,
+    },
+)
+
+
+class FakeSafety:
+    """safety 실행 기록 목록 흉내. `mode`: ok·down(연결 오류)·5xx·bad(이상한 본문)."""
+
+    def __init__(self) -> None:
+        self.records = [copy.deepcopy(REFUND_RECORD), copy.deepcopy(COUPON_RECORD)]
+        self.calls: list[httpx.Request] = []
+        self.mode = "ok"
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.calls.append(request)
+        if self.mode == "down":
+            raise httpx.ConnectError("safety down", request=request)
+        if self.mode == "5xx":
+            return httpx.Response(503)
+        if self.mode == "bad":
+            return httpx.Response(200, json={"data": {"oops": True}})
+        assert request.url.path == "/api/safety/executions"
+        ctx = request.url.params.get("context_id")
+        rows = [r for r in self.records if r["request"]["context_id"] == ctx]
+        return httpx.Response(200, json={"data": rows, "error": None})
+
+    def record(self, action: str) -> dict[str, Any]:
+        wanted = gate_check.SAFETY_ACTION[action]
+        return next(r for r in self.records if r["request"]["action"] == wanted)
+
+
+@pytest.fixture
+def safety(monkeypatch: pytest.MonkeyPatch) -> FakeSafety:
+    fake = FakeSafety()
+    monkeypatch.setenv("AX_SAFETY_URL", SAFETY_URL)
+    monkeypatch.delenv("DASHBOARD_API_TOKEN", raising=False)
+    monkeypatch.setattr(gate_check, "TRANSPORT", httpx.MockTransport(fake.handle))
+    return fake
 
 
 @pytest.fixture
 def client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, adapter_dir: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, adapter_dir: Path, safety: FakeSafety
 ) -> Iterator[TestClient]:
     path = tmp_path / "company_connection.json"
     path.write_text(
@@ -44,7 +133,10 @@ def client(
     )
     monkeypatch.setenv(cc.CONNECTION_FILE_ENV, str(path))
     monkeypatch.setattr(cc, "_cache", None)
-    monkeypatch.setenv("AX_AGENT_TOKENS", "support=sup-tok,marketing=mkt-tok,infra=inf-tok")
+    monkeypatch.setenv(
+        "AX_AGENT_TOKENS",
+        "support=sup-tok,marketing=mkt-tok,infra=inf-tok,dashboard-api=dash-tok",
+    )
     monkeypatch.setenv("AX_SHOP_CLIENT_KEYS", "inquiry:shop-key-1")
     monkeypatch.setenv("AX_SITE_API_TOKEN", SITE_TOKEN)
     monkeypatch.delenv(handoffs.DB_ENV, raising=False)
@@ -58,7 +150,7 @@ def client(
     monkeypatch.setattr(up, "TRANSPORT", httpx.MockTransport(handle))
     yield TestClient(app)
     handoffs.reset_store()
-    assert calls == []  # W1은 고객사에 쓰지 않는다
+    assert calls == []  # W1·W2는 고객사에 쓰지 않는다
 
 
 def tasks() -> list[Any]:
@@ -76,7 +168,7 @@ CASES: dict[str, tuple[str, str, dict[str, Any] | None, dict[str, str]]] = {
         "POST",
         "/api/shop/coupons",
         {
-            "idempotency_key": "ctx_a:issue_coupon:buy_1",
+            "idempotency_key": COUPON_KEY,
             "purpose_code": "compensation",
             "buyer_id": "buy_1",
             "count": 2,
@@ -204,8 +296,12 @@ def test_same_key_twice_is_one_task(client: TestClient, adapter_dir: Path) -> No
 
 def test_same_key_different_body_is_409(client: TestClient) -> None:
     send(client, "refund")
-    resp = send(client, "refund", refund_amount=99000)
+    # 금액은 같아 관문 기록 확인(판정 2)은 지나지만 본문이 다르다
+    resp = send(client, "refund", cancel_order=True)
     assert resp.status_code == 409 and resp.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
+    # 금액까지 다르면 판정 2(멱등보다 앞)에서 403
+    resp = send(client, "refund", refund_amount=99000)
+    assert resp.status_code == 403 and resp.json()["error"]["code"] == "GATE_NOT_PASSED"
     assert len(tasks()) == 1
 
 
@@ -270,12 +366,14 @@ def test_switch_on_is_per_action(client: TestClient, adapter_dir: Path) -> None:
     )
     assert writes.direct_write_on("inquiry_answer") is True
     assert writes.direct_write_on("claim_result") is False  # 켠 동작만
-    assert writes.direct_write_on("refund") is False  # 돈이 걸린 동작은 W2 전에는 못 켠다
+    # 돈이 걸린 동작은 관문 기록을 확인한 쓰기(execution_id)에서만 켜진 것으로 본다
+    assert writes.direct_write_on("refund") is False
+    assert writes.direct_write_on("refund", "exe_refund_1") is True
     send(client, "inquiry_answer")
     send(client, "refund")
     reasons = {e["action"]: e["reason"] for e in ledger(adapter_dir).values()}
-    # 켰어도 직접 쓰기(W3) 전이라 할 일함
-    assert reasons == {"inquiry_answer": "direct_not_ready", "refund": "direct_off"}
+    # 켰고 관문도 지났지만 직접 쓰기(W3) 전이라 할 일함
+    assert reasons == {"inquiry_answer": "direct_not_ready", "refund": "direct_not_ready"}
 
 
 def test_money_actions_always_go_to_inbox(client: TestClient, adapter_dir: Path) -> None:
@@ -320,9 +418,10 @@ def test_ledger_and_logs_hold_no_raw_body_or_keys(
     caplog.set_level(logging.DEBUG, logger="ax.site_adapter")
     send(client, "refund")
     send(client, "inquiry_answer", view={"id": 4, "status": "answered", "messages": [secret_text]})
-    assert send(client, "refund", refund_amount=1).status_code == 409  # 409도 본문을 남기지 않는다
+    assert send(client, "refund", cancel_order=True).status_code == 409  # 409도 본문을 안 남김
+    assert send(client, "refund", refund_amount=1).status_code == 403  # 관문 실패도 마찬가지
     text = (adapter_dir / writes.LEDGER_FILE).read_text(encoding="utf-8")
-    for raw in (REFUND_KEY, secret_text, SITE_TOKEN, "sup-tok"):
+    for raw in (REFUND_KEY, secret_text, SITE_TOKEN, "sup-tok", "dash-tok"):
         assert raw not in text
         assert raw not in caplog.text
     task = next(t for t in tasks() if t.skill == "site_apply_inquiry_answer")
@@ -337,3 +436,164 @@ def test_old_mapping_without_writes_still_loads(adapter_dir: Path) -> None:
 def test_unmapped_write_is_still_404(client: TestClient) -> None:
     resp = client.post(f"{BASE}/api/shop/sellers/s1/payouts", json={}, headers=SUPPORT)
     assert resp.status_code == 404 and resp.json()["error"]["code"] == "NOT_MAPPED"
+
+
+# ---------------------------------------------------------------- 판정 2 (W2): 관문 기록 확인
+
+MONEY = ("refund", "coupon_issue")
+
+
+def assert_nothing_kept(adapter_dir: Path) -> None:
+    """통과 못 한 쓰기는 할 일함·장부에 남지 않는다 (고객사 호출 0번은 `client`가 본다)."""
+    assert tasks() == []
+    assert not (adapter_dir / writes.LEDGER_FILE).exists()
+
+
+@pytest.mark.parametrize(
+    ("action", "execution_id"), [("refund", "exe_refund_1"), ("coupon_issue", "exe_coupon_1")]
+)
+def test_gate_passed_keeps_execution_id(
+    client: TestClient, adapter_dir: Path, safety: FakeSafety, action: str, execution_id: str
+) -> None:
+    resp = send(client, action)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["applied"] == "pending_human"
+    (entry,) = ledger(adapter_dir).values()
+    assert entry["execution_id"] == execution_id
+    (call,) = safety.calls
+    # 실행 기록은 context_id로 찾고, dashboard-api 에이전트 토큰을 붙인다
+    body = CASES[action][2]
+    assert body is not None and call.url.params["context_id"] == body["context_id"]
+    assert call.headers["authorization"] == "Bearer dash-tok"
+
+
+def test_non_money_writes_do_not_ask_safety(
+    client: TestClient, adapter_dir: Path, safety: FakeSafety
+) -> None:
+    for action in ("banner_post", "claim_result", "inquiry_answer", "fault_release"):
+        assert send(client, action).status_code == 200
+    assert safety.calls == []
+    assert all(e["execution_id"] is None for e in ledger(adapter_dir).values())
+
+
+@pytest.mark.parametrize("action", MONEY)
+@pytest.mark.parametrize(
+    "spoil",
+    [
+        pytest.param(lambda r: r["request"].update(action="publish_notice"), id="action_differs"),
+        pytest.param(lambda r: r["request"].update(requester="infra"), id="requester_differs"),
+        pytest.param(
+            lambda r: r["decision"].update(status="held", hold_reason="amount_over"), id="held"
+        ),
+        pytest.param(lambda r: r["decision"].update(status="verifying"), id="verifying"),
+        pytest.param(lambda r: r["decision"].update(status="rejected"), id="rejected"),
+        pytest.param(lambda r: r["request"].update(idempotency_key="other"), id="no_record"),
+        pytest.param(lambda r: r["request"].update(tenant_id="other-co"), id="other_tenant"),
+    ],
+)
+def test_gate_record_mismatch_is_403(
+    client: TestClient, adapter_dir: Path, safety: FakeSafety, action: str, spoil: Any
+) -> None:
+    spoil(safety.record(action))
+    resp = send(client, action)
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["error"]["code"] == "GATE_NOT_PASSED"
+    assert_nothing_kept(adapter_dir)
+
+
+@pytest.mark.parametrize(
+    ("action", "body"),
+    [
+        ("refund", {"refund_amount": 22000}),
+        ("refund", {"refund_amount": "23000"}),  # 글자는 금액이 아니다
+        ("refund", {"refund_amount": None}),
+        ("coupon_issue", {"count": 3}),
+        ("coupon_issue", {"count": 3, "unit_value": 1000}),  # 합계만 같아도 다른 쿠폰
+        ("coupon_issue", {"unit_value": 2000}),
+        ("coupon_issue", {"buyer_id": "buy_2"}),
+    ],
+)
+def test_gate_amount_mismatch_is_403(
+    client: TestClient, adapter_dir: Path, action: str, body: dict[str, Any]
+) -> None:
+    resp = send(client, action, **body)
+    assert resp.status_code == 403 and resp.json()["error"]["code"] == "GATE_NOT_PASSED"
+    assert_nothing_kept(adapter_dir)
+
+
+def test_coupon_record_total_must_match(
+    client: TestClient, adapter_dir: Path, safety: FakeSafety
+) -> None:
+    safety.record("coupon_issue")["request"]["params"]["total_value"] = 9999
+    assert send(client, "coupon_issue").json()["error"]["code"] == "GATE_NOT_PASSED"
+    assert_nothing_kept(adapter_dir)
+
+
+@pytest.mark.parametrize("action", MONEY)
+def test_gate_without_context_id_is_403(
+    client: TestClient, adapter_dir: Path, safety: FakeSafety, action: str
+) -> None:
+    resp = send(client, action, context_id=None)
+    assert resp.status_code == 403 and resp.json()["error"]["code"] == "GATE_NOT_PASSED"
+    assert safety.calls == []  # 찾을 길이 없어 safety를 부르지 않는다
+    assert_nothing_kept(adapter_dir)
+
+
+@pytest.mark.parametrize("action", MONEY)
+@pytest.mark.parametrize("mode", ["down", "5xx", "bad"])
+def test_safety_error_is_503_and_not_written(
+    client: TestClient, adapter_dir: Path, safety: FakeSafety, action: str, mode: str
+) -> None:
+    """safety에 닿지 못하면 통과가 아니다(fail-closed). 403과 구분해 503."""
+    safety.mode = mode
+    resp = send(client, action)
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["error"]["code"] == "GATE_UNAVAILABLE"
+    assert_nothing_kept(adapter_dir)
+
+
+def test_no_agent_token_is_503(
+    client: TestClient, adapter_dir: Path, safety: FakeSafety, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AX_AGENT_TOKENS", "support=sup-tok,marketing=mkt-tok,infra=inf-tok")
+    monkeypatch.setattr(gate_check.config, "is_mock", lambda name=None: False)
+    resp = send(client, "refund")
+    assert resp.status_code == 503 and resp.json()["error"]["code"] == "GATE_UNAVAILABLE"
+    assert safety.calls == []
+    assert_nothing_kept(adapter_dir)
+
+
+def test_replay_is_checked_again(client: TestClient, adapter_dir: Path, safety: FakeSafety) -> None:
+    """같은 쓰기를 다시 보내도 판정 2를 다시 본다: 그 사이 기록이 바뀌면 받지 않는다."""
+    assert send(client, "refund").status_code == 200
+    safety.record("refund")["decision"]["status"] = "rejected"
+    assert send(client, "refund").json()["error"]["code"] == "GATE_NOT_PASSED"
+    assert len(tasks()) == 1 and len(ledger(adapter_dir)) == 1
+
+
+def test_gate_failure_logs_hold_no_key_or_body(
+    client: TestClient, safety: FakeSafety, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="ax.site_adapter")
+    send(client, "refund", refund_amount=22000)
+    send(client, "coupon_issue", buyer_id="buy_secret_77")
+    safety.mode = "down"
+    send(client, "refund")
+    assert "관문 기록" in caplog.text  # 경고는 남는다
+    for raw in (REFUND_KEY, COUPON_KEY, "22000", "buy_secret_77", "dash-tok"):
+        assert raw not in caplog.text
+
+
+def test_money_switch_on_but_gate_failed_never_reaches_route(
+    client: TestClient, adapter_dir: Path, safety: FakeSafety
+) -> None:
+    """켜 둬도 관문을 못 지나면 '직접 쓰기 가능'까지 가지 않는다."""
+    _with_writes(adapter_dir, refund=REFUND_MAP)
+    (adapter_dir / writes.SWITCH_FILE).write_text(
+        json.dumps({"enabled": ["refund"]}), encoding="utf-8"
+    )
+    assert writes.route("refund") == "direct_off"  # execution_id 없이는 꺼짐
+    assert writes.route("refund", "exe_refund_1") == writes.DIRECT_READY
+    safety.record("refund")["decision"]["status"] = "held"
+    assert send(client, "refund").status_code == 403
+    assert_nothing_kept(adapter_dir)
