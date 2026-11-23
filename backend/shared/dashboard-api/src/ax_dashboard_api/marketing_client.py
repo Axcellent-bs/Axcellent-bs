@@ -795,6 +795,10 @@ VIDEO_REFUSALS = {
     "quota_not_configured": (409, "QUOTA_NOT_CONFIGURED"),
     "in_progress": (409, "IN_PROGRESS"),
     "storage_error": (500, "STORAGE_ERROR"),
+    "draft_missing": (409, "DRAFT_MISSING"),
+    "video_not_ready": (409, "VIDEO_NOT_READY"),
+    "youtube_not_connected": (409, "YOUTUBE_NOT_CONNECTED"),
+    "already_requested": (409, "ALREADY_REQUESTED"),
     "bad_asset": (422, "BAD_ASSET"),
     "file_missing": (409, "FILE_MISSING"),
     "gate_held": (409, "GATE_HELD"),
@@ -926,3 +930,20 @@ async def creative_upload(
     if who:
         payload["who"] = who
     return await _creative_read("creative_record_attach", payload)
+
+
+async def youtube_draft_call(record_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """유튜브 제목·설명 초안(마케팅 `creative_youtube_draft`). 올리지는 않는다."""
+    return await _creative_read("creative_youtube_draft", {"record_id": record_id, **body})
+
+
+async def youtube_request_call(record_id: str, who: str | None) -> dict[str, Any]:
+    """유튜브 올리기를 사람 승인에 올린다(마케팅 `creative_youtube_request`)."""
+    payload: dict[str, Any] = {"record_id": record_id}
+    if who:
+        payload["who"] = who
+    return await _creative_read("creative_youtube_request", payload)
+
+
+async def youtube_status_call() -> dict[str, Any]:
+    return await _creative_read("youtube_status", {})

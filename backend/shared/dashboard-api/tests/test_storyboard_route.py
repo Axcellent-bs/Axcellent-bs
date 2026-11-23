@@ -196,3 +196,31 @@ def test_upload_rejects_a_non_video_body(
     assert not list((tmp_path / "creative" / "CR-0123456789ab").iterdir())
     assert all(r.skill != "creative_record_attach" for _, r in fake.calls)
     assert client.post(UPLOAD_URL.replace("final_video", "secret"), content=MP4).status_code == 422
+
+
+YT = "/api/dashboard/marketing/creative-records/CR-0123456789ab/youtube"
+
+
+def test_youtube_draft_and_request_go_to_marketing(client: TestClient, fake: Fake) -> None:
+    fake.output = {"record_id": "CR-0123456789ab", "youtube": {"status": "draft"}}
+    res = client.post(f"{YT}/draft", json={"title": "제목", "privacy": "public", "who": "x"})
+    assert res.status_code == 200 and res.json()["data"]["youtube"]["status"] == "draft"
+    _, request = fake.calls[-1]
+    assert request.skill == "creative_youtube_draft"
+    assert request.input == {
+        "record_id": "CR-0123456789ab",
+        "regenerate": False,
+        "title": "제목",
+        "privacy": "public",
+    }
+    assert client.post(f"{YT}/draft", json={"privacy": "secret"}).status_code == 422
+    fake.output = {"record_id": "CR-0123456789ab", "youtube": {"status": "awaiting_approval"}}
+    assert client.post(YT).status_code == 200
+    _, request = fake.calls[-1]
+    assert (request.skill, request.input["who"]) == ("creative_youtube_request", "tester")
+    fake.status, fake.outcome, fake.output = (
+        TaskStatus.FAILED,
+        "youtube_not_connected",
+        {"message": "x"},
+    )
+    assert client.post(YT).status_code == 409
