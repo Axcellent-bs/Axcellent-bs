@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { speaker } from "@/lib/agentChat";
+import { BrandCharacterAsk } from "@/components/office/BrandCharacterAsk";
 import { ago } from "@/lib/format";
 import { handoffRequests, requestTitle, shortNo } from "@/lib/requestHandoffs";
 import { REQUEST_STATUS } from "@/lib/workRequests";
@@ -63,6 +64,8 @@ export function RequestHandoffCard({ compact = false }: { compact?: boolean } = 
                     </li>
                   ))}
                 </ol>
+                {/* 11/23 홍보 영상 의뢰: 회사 캐릭터 질문 (영상 준비 전까지만) */}
+                <BrandCharacterAsk row={row} />
               </li>
             ))}
           </ul>

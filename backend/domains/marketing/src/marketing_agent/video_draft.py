@@ -100,6 +100,9 @@ class PrepareVideoDraftInput(AxModel):
     video_plan: VideoPlanIn
     # 사람이 정한 템플릿 필드 값(가장 우선, 화이트리스트 검사). 보통 비운다
     fields: dict[str, str] | None = Field(default=None, max_length=FIELDS_MAX)
+    # 11/23 의뢰자가 고른 회사 대표 캐릭터(제작 기록 CR-…). 총괄이 의뢰 기록 값을 그대로 넘긴다.
+    # 있으면 의뢰용 기록을 만들고 기획 장면으로 스토리보드를 붙여 영상은 캐릭터 경로(C)로 만든다
+    brand_character_record_id: str | None = Field(default=None, pattern=r"^CR-[0-9a-f]{12}$")
 
 
 class DurationAdjusted(AxModel):
@@ -135,6 +138,10 @@ class PreparedVideoDraft(AxModel):
     draft_state: str = "caption_only"
     next_steps: list[str] = Field(default_factory=lambda: ["generate_media", "check_sns_post"])
     ai_generated: bool = True
+    # 11/23 캐릭터 경로: 이 의뢰의 제작 기록(이미지 시트·스토리보드). 총괄이 단계 결과 번호로 읽는다
+    creative_record_id: str | None = None
+    # 대표 캐릭터를 못 쓴 이유(record_not_found · no_scenes). 쓰면 None
+    brand_character_skipped: str | None = None
 
 
 def _now() -> datetime:
@@ -386,6 +393,17 @@ def prepare_video_draft(
         "resolution": template.resolution,
         "duration_s": used_s,
     }
+    creative_id: str | None = None
+    skipped: str | None = None
+    if data.brand_character_record_id:  # 11/23 캐릭터 경로 (없으면 지금 그대로)
+        from marketing_agent import request_creative
+
+        rid, skipped = request_creative.prepare_storyboard(
+            data.brand_character_record_id, request.meta.context_id, plan
+        )
+        if rid is not None and skipped is None:
+            creative_id = rid
+            generate_input[request_creative.INPUT_KEY] = rid
     aspect = plan.aspect
     out = PreparedVideoDraft(
         post_draft_id=draft.post_draft_id,
@@ -409,6 +427,8 @@ def prepare_video_draft(
             else None
         ),
         generate_media_input=generate_input,
+        creative_record_id=creative_id,
+        brand_character_skipped=skipped,
     )
     return AgentResult(
         meta=request.meta,

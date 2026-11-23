@@ -1512,6 +1512,52 @@ async def marketing_creative_video(
     return ok(await marketing_client.creative_video_call(record_id, who))
 
 
+class BrandCharacterMarkBody(BaseModel):
+    # 사람이 "우리 회사가 쓸 권리가 있는 그림이에요"를 체크했는가. true가 아니면 422
+    rights_confirmed: bool = False
+
+
+@router.get("/marketing/brand-characters")
+async def marketing_brand_characters(request: Request) -> dict:
+    """로그인한 회사의 대표 캐릭터(최대 3개, 마지막 것이 기본).
+
+    사람 토큰이 필요하고, 다른 회사 기록은 보이지 않는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.brand_characters_call())
+
+
+@router.post("/marketing/brand-characters/{record_id}")
+async def marketing_brand_character_mark(
+    request: Request,
+    body: BrandCharacterMarkBody,
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """제작 기록을 회사 대표 캐릭터로 표시한다. 권리 확인(rights_confirmed=true)이 없으면 422.
+
+    확인한 사람은 사람 토큰에서 채워 기록에 남긴다(누가·언제)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    if not body.rights_confirmed:
+        raise ApiError(
+            422, "RIGHTS_NOT_CONFIRMED", "우리 회사가 쓸 권리가 있는 그림인지 확인해 주세요"
+        )
+    return ok(await marketing_client.brand_character_mark_call(record_id, True, who))
+
+
+@router.delete("/marketing/brand-characters/{record_id}")
+async def marketing_brand_character_unmark(
+    request: Request, record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$")
+) -> dict:
+    """대표 캐릭터 표시만 뗀다(제작 기록은 남는다)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.brand_character_unmark_call(record_id, who))
+
+
 @router.get("/marketing/creative-records/{record_id}/asset/{part}")
 async def marketing_creative_asset(
     record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),

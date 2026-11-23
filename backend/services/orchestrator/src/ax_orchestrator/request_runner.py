@@ -71,6 +71,16 @@ WATCH_INTERVAL = 60.0
 MAX_EARLY_KEYS = 100
 MAX_EARLY_EACH = 20
 REF_PATTERN = re.compile(r"[\w:.\-]{1,80}")  # 부서가 정한 결과 번호 모양 (문장은 받지 않는다)
+# 11/23 회사 캐릭터 홍보 영상: 마케팅이 영상(C generate_creative_video)을 사람 승인에 올렸다(보류)·
+# 사람이 거절했다. 보류는 실패가 아니라 "영상 승인 대기"이고, 승인 결정이 오면 같은 단계를
+# 다시 보낸다
+VIDEO_HELD = "video_held"
+VIDEO_REJECTED = "video_rejected"
+VIDEO_APPROVAL = "video_approval"
+VIDEO_WAIT_NOTE = "영상 승인 대기"
+VIDEO_REJECT_NOTE = "사람이 영상 생성을 거절함"
+CATBOOKS = "catbooks"
+CREATIVE_RECORD = re.compile(r"CR-[0-9a-f]{12}")  # 마케팅 제작 기록 번호
 Notifier = Callable[[str, str], None]
 Escalator = Callable[[str, str, str | None], None]
 ScopeCheck = Callable[[dict[str, Any], dict[str, Any]], bool]
@@ -330,6 +340,9 @@ class RequestRunner:
                 finished_at=stamp(),
             )
             return
+        for key in spec.get("row_input") or []:  # 사람이 화면에서 정한 의뢰 기록 값(번호)만
+            if row.get(key):
+                payload = {**payload, key: row[key]}
         self._update(rid, step_id, status="running", grade=grade, started_at=stamp())
         result = await self._call(engine, row, spec, entry.dept, step_id, payload, grade)
         self._apply(rid, step_id, result, spec)
@@ -389,6 +402,7 @@ class RequestRunner:
                     path=["orchestrator"],
                     deadline=now() + timedelta(seconds=timeout),
                     idempotency_key=f"{rid}:{spec['skill']}:{step_id}",
+                    **self._tenant_meta(),
                 ),
                 skill=spec["skill"],
                 input=payload,
@@ -457,7 +471,7 @@ class RequestRunner:
                 note="확인할 수 없다 (받는 서비스가 꺼져 있다)",
                 finished_at=done,
             )
-        else:
+        elif not self._video_gate(rid, step_id, {**out, "outcome": outcome}):
             self._update(
                 rid,
                 step_id,
@@ -619,7 +633,7 @@ class RequestRunner:
         if data.get("status") == "done":
             out = data.get("output")
             self._complete(rid, step_id, spec, out if isinstance(out, dict) else {}, "긴 작업 완료")
-        else:
+        elif not self._video_gate(rid, step_id, data.get("output")):
             self._update(
                 rid,
                 step_id,
@@ -665,6 +679,117 @@ class RequestRunner:
                 self.expire_silent(max_silence)
             except Exception:  # noqa: BLE001 - 점검 실패가 서버를 멈추지 않게 한다
                 log.exception("긴 작업 응답 끊김 점검 실패")
+            try:  # 승인 결정 알림을 놓쳤을 때를 대비해 영상 승인 대기를 안전 관문에 되묻는다
+                await self.recheck_videos()
+            except Exception:  # noqa: BLE001
+                log.exception("영상 승인 대기 점검 실패")
+
+    # ---- 회사 캐릭터 홍보 영상: 영상 승인 대기 (11/23) -------------------------------------
+    def _tenant_meta(self) -> dict[str, str]:
+        """부서를 부를 때 회사 칸.
+
+        캣북스(지금 기본)면 비워 받는 쪽 기본값(shop-demo)을 그대로 둔다."""
+        company = self._requests.company_id
+        return {"tenant_id": company} if company and company != CATBOOKS else {}
+
+    def _video_gate(self, rid: str, step_id: str, out: Any) -> bool:
+        """마케팅이 영상을 사람 승인에 올렸거나(보류) 사람이 거절했으면 단계에 옮기고 True.
+
+        보류는 실패로 치지 않고 `held`(영상 승인 대기)로 두며 `review_id`를 남긴다. 거절은
+        `rejected_by_human`이고 의뢰는 사람 확인(needs_human)으로 간다(`_finish`)."""
+        out = out if isinstance(out, dict) else {}
+        outcome = out.get("outcome")
+        if outcome == VIDEO_HELD:
+            review = out.get("review_id")
+            ok = isinstance(review, str) and REF_PATTERN.fullmatch(review) is not None
+            self._update(
+                rid,
+                step_id,
+                status="held",
+                reason_code=VIDEO_APPROVAL,
+                review_id=review if ok else None,
+                note=VIDEO_WAIT_NOTE,
+            )
+            return True
+        if outcome == VIDEO_REJECTED:
+            self._update(
+                rid,
+                step_id,
+                status="rejected_by_human",
+                reason_code=VIDEO_REJECTED,
+                note=VIDEO_REJECT_NOTE,
+                finished_at=now().isoformat(),
+            )
+            return True
+        return False
+
+    def set_brand_character(
+        self, request_id: str, record_id: str | None, by: str | None = None
+    ) -> str:
+        """홍보 영상 의뢰에 쓸 회사 대표 캐릭터를 정한다.
+
+        돌려주는 값: ok · missing · invalid(번호 모양이 아님) · not_video · started.
+        영상 준비 단계를 시작하기 전까지만 받는다(그 뒤면 `started`). 질문 때문에 의뢰를 멈추지
+        않는다: 사람 확인 전까지 답하면 반영되고, 답이 없으면 캐릭터 없이 진행한다."""
+        if record_id is not None and not CREATIVE_RECORD.fullmatch(record_id):
+            return "invalid"
+        row = self._requests.get(request_id)
+        if row is None:
+            return "missing"
+        key = request_tasks.BRAND_CHARACTER_KEY
+        prepare = next((p for p in row["plan"] if key in (p.get("row_input") or [])), None)
+        if prepare is None:
+            return "not_video"
+        step = row["steps"].get(prepare["step_id"]) or {}
+        closed = row["status"] not in OPEN_STATES or bool(row.get("stopped_at"))
+        if closed or step.get("status") != "pending":
+            return "started"
+        self._requests.set_brand_character(request_id, record_id, by)
+        return "ok"
+
+    def held_videos(self, review_id: str | None = None) -> list[tuple[str, str, str]]:
+        """영상 승인 대기 단계: (의뢰, 단계, review_id). `review_id`를 주면 그것만."""
+        found = []
+        for row in self._requests.open_requests():
+            if row.get("stopped_at"):
+                continue
+            for sid, step in row["steps"].items():
+                rev = step.get("review_id")
+                if step["status"] != "held" or step.get("reason_code") != VIDEO_APPROVAL:
+                    continue
+                if rev and (review_id is None or rev == review_id):
+                    found.append((row["request_id"], sid, rev))
+        return found
+
+    def resume_video(self, request_id: str, step_id: str) -> bool:
+        """승인 결정이 난 영상 단계를 다시 보낸다(같은 멱등 키·같은 입력).
+
+        마케팅이 같은 키로 안전 관문에 다시 묻고 승인이면 그때 만든다(관문 밖에서 만들지 않는다)."""
+        row = self._requests.get(request_id)
+        step = (row or {}).get("steps", {}).get(step_id) or {}
+        if row is None or row["status"] not in OPEN_STATES or row.get("stopped_at"):
+            return False
+        if step.get("status") != "held" or step.get("reason_code") != VIDEO_APPROVAL:
+            return False
+        self._update(
+            request_id, step_id, status="pending", note="영상 승인 결정을 받아 다시 확인한다"
+        )
+        self.start(request_id)
+        return True
+
+    async def recheck_videos(self, review_id: str | None = None) -> int:
+        """영상 승인 대기 단계를 안전 관문에 되묻는다(engine.settle_review).
+
+        결정이 났으면(승인·거절·만료) 그 단계를 다시 보낸다. 아직이면 그대로 둔다."""
+        engine = self._get_engine()
+        if engine is None:
+            return 0
+        resumed = 0
+        for rid, sid, rev in self.held_videos(review_id):
+            if await engine.settle_review(rev, None) is None:
+                continue  # 아직 사람이 정하지 않았다
+            resumed += self.resume_video(rid, sid)
+        return resumed
 
     # ---- 마무리 ------------------------------------------------------------------
     def _finish(self, rid: str) -> None:
@@ -697,6 +822,9 @@ class RequestRunner:
             skipped = next(k for k, v in row["steps"].items() if v["reason_code"] == NO_INSIGHT)
             if self.escalate is not None:
                 self.escalate(rid, "step_failed", skipped)
+        elif any(v["reason_code"] == VIDEO_REJECTED for v in row["steps"].values()):
+            self._requests.set_status(rid, "needs_human", VIDEO_REJECT_NOTE)
+            self._tell(row, "영상 생성을 거절해서 담당자가 확인할 거예요.")
         elif any(s in NOT_OK for s in states):  # 사람이 거절했거나 앞 단계 때문에 건너뜀
             self._requests.set_status(rid, "failed", "사람이 거절했거나 앞 단계가 끝나지 못했다")
             self._tell(row, "의뢰를 진행하지 않기로 했어요.")
