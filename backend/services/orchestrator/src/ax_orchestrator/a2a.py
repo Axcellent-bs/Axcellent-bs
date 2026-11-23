@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -219,16 +219,29 @@ def diagnose_agent_issue(get_manager: GetManager) -> Handler:
     return handler
 
 
-def build_a2a_app(get_manager: GetManager) -> FastAPI:
-    """`/a2a`와 `/.well-known/agent-card.json`을 가진 앱. 총괄 서버 맨 끝에 붙인다."""
+def _ensured(handler: Handler, ensure: Callable[[], Awaitable[None]]) -> Handler:
+    async def run(request: AgentRequest) -> AgentResult:
+        await ensure()  # 이 요청 회사의 매니저가 아직 없으면 먼저 만든다
+        return await handler(request)
+
+    return run
+
+
+def build_a2a_app(
+    get_manager: GetManager, ensure: Callable[[], Awaitable[None]] | None = None
+) -> FastAPI:
+    """`/a2a`와 `/.well-known/agent-card.json`을 가진 앱. 총괄 서버 맨 끝에 붙인다.
+
+    `ensure`는 skill을 부르기 전에 그 요청 회사의 매니저를 마련한다(회사마다 매니저가 따로다).
+    """
     get_chat_service(get_manager)  # 대화가 이벤트 기록을 읽을 수 있게 매니저를 넘겨 둔다
-    return create_agent_app(
-        load_card(),
-        {
-            "find_active_incident": find_active_incident(get_manager),
-            "answer_planning_question": answer_planning_question(get_manager),
-            "receive_finance_opinion": receive_finance_opinion(get_manager),
-            "diagnose_agent_issue": diagnose_agent_issue(get_manager),
-            **CHAT_HANDLERS,
-        },
-    )
+    handlers: dict[str, Handler] = {
+        "find_active_incident": find_active_incident(get_manager),
+        "answer_planning_question": answer_planning_question(get_manager),
+        "receive_finance_opinion": receive_finance_opinion(get_manager),
+        "diagnose_agent_issue": diagnose_agent_issue(get_manager),
+        **CHAT_HANDLERS,
+    }
+    if ensure is not None:
+        handlers = {name: _ensured(h, ensure) for name, h in handlers.items()}
+    return create_agent_app(load_card(), handlers)

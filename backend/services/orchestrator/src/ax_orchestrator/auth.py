@@ -16,11 +16,11 @@ safety의 `auth.py`는 다른 패키지라 같은 규칙을 여기 작게 다시
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 
 from fastapi import Header, HTTPException
 
-from ax_agent_template import human_auth
+from ax_agent_template import company_scope, human_auth
 from ax_agent_template.config import is_mock
 from ax_agent_template.server import verify_token
 from ax_agent_template.services import department_of
@@ -59,6 +59,32 @@ def _agent(token: str) -> str | None:
         return verify_token(token)
     except PermissionError:
         return None
+
+
+def _session_company(authorization: str | None) -> str | None:
+    """로그인 세션 토큰의 회사 ID. 세션 토큰이 아니거나 못 받으면 None(판단은 각 경로가 한다)."""
+    scheme, _, token = (authorization or "").partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not human_auth.is_session_token(token):
+        return None
+    try:
+        return human_auth.verify_session(token).company_id
+    except human_auth.HumanAuthError:
+        return None
+
+
+async def bind_company(authorization: str | None = Header(default=None)) -> AsyncIterator[None]:
+    """화면에서 온 요청이 로그인한 사람의 회사 기록만 보게 한다 (여러 회사 5단계).
+
+    세션 토큰의 회사(`cid`)를 이 요청의 회사로 걸어 둔다. 공용 사람 토큰·에이전트 토큰·토큰이 없는
+    요청은 회사를 정하지 않아 기본 회사(catbooks) 기록을 본다(지금까지와 같다).
+    """
+    cid = _session_company(authorization)
+    if cid is None:
+        yield
+        return
+    with company_scope.using(cid):
+        yield
 
 
 def require_human(authorization: str | None = Header(default=None)) -> str:
