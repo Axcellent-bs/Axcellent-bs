@@ -2,7 +2,7 @@
 
 마케팅 › SNS·미디어 › SNS 계정 연결 카드가 "연결됨" 옆에 프로필 링크를 보이려고 쓴다.
 - 로그인한 회사의 토큰·계정 ID(`instagram_graph._company_secret`)로
-  Instagram API `me?fields=username`을 읽는다
+  Instagram API `<인스타 계정 ID>?fields=username`을 읽는다
 - 결과: missing_keys(토큰·계정 ID 없음) · invalid_credentials(토큰 거절·만료)
   · ok(username·프로필 주소) · error
 - 회사마다 60초 기억한다. 토큰 값은 응답·로그에 넣지 않는다
@@ -51,7 +51,10 @@ async def probe() -> dict[str, Any]:
     except GraphConfigError:
         return _out("missing_keys")
     try:
-        body = await adapter._request("GET", "me", params={"fields": "username"})  # noqa: SLF001
+        # `me`는 Facebook 그래프(graph.facebook.com)에선 페이스북 사용자를 가리켜 username이 없다.
+        # 두 API 모두 되는 인스타 계정 ID 경로로 읽는다(11/23 운영 "닿지 않음")
+        user_id = adapter._user_id  # noqa: SLF001
+        body = await adapter._request("GET", user_id, params={"fields": "username"})  # noqa: SLF001
     except IgApiError as error:
         code = getattr(error, "code", None)
         return _out("invalid_credentials" if code in _AUTH_CODES else "error")
