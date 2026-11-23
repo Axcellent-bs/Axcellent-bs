@@ -81,7 +81,7 @@ bash backend/scripts/shop_fault.sh         # 풀렸는지 확인
 - **카드에 남는 처리 방식:** 1차에서 사람이 `shop_fault.sh clear`로 해제했다면, 카드에 처리 방식 "장애 해제(`release_fault`)"가 남습니다. [27]
 - **2차가 스스로 해제하는 조건:** 같은 장애를 다시 넣으면, 아래 조건이 맞을 때 인프라 AI가 **"과거 같은 장애의 처리 방식 다시 하기"로 스스로 해제**합니다. [28] [29] 이것은 의도된 동작입니다.
   - 원인 배포를 못 찾았다. 원인을 찾았으면 되돌리기로 처리합니다.
-  - 과거 사례와 85% 이상 비슷하다.
+  - 과거 사례와 95% 이상 비슷하다.
   - 지금 결제 서버가 실제로 이상하고, **장애 스위치가 켜져 있다.** 스위치가 꺼진 채 결제가 이상하면(결제사 지연 등) 다른 원인이라 해제하지 않고 사람에게 넘깁니다.
   - 이 해제도 안전 관문을 거치므로 승인 대기가 될 수 있습니다. [29]
 - **결과 보는 곳:** 1차와 2차의 복구 시간은 **데이터 분석 → 운영 지표(`/data/ops`) → 복구 속도 → "사건별 복구 시간 비교"**에서 "1차", "2차"로 나란히 보입니다. 2건 이상이면 몇 % 빨라졌는지 나옵니다. [30]
@@ -200,7 +200,7 @@ bash backend/scripts/pg_demo_file.sh clear    # 시연 끝나면 빼기
 | [25] | 재무 기록, 처리 시간 요약, 사례 기록 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:638-656` |
 | [26] | 복구 확인 실패 시 정상화 공지 없이 이관 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:1-14` (맨 위 설명) |
 | [27] | 사람이 해제해 풀린 사건은 처리 방식 `release_fault` | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:440-447` |
-| [28] | 과거 처리 다시 하기 조건 (원인 배포 없음, 유사도 0.85 이상, `release_fault`) | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:155-178` |
+| [28] | 과거 처리 다시 하기 조건 (원인 배포 없음, 유사도 0.95 이상, `release_fault`) | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:155-178` |
 | [29] | 결제 서버가 이상할 때만 해제, 안전 관문 거침 | `backend/domains/infra-dejafix/agent-card.json:33-34` |
 | [30] | 운영 지표 > 복구 속도, 1차·2차 비교 | `frontend/src/demo/services.ts:126`, `frontend/src/components/data/LearningKpi.tsx:57`, `:73-74`, `:83` |
 | [31] | `slow_agent.ps1` Windows 로컬 전용, "확인 필요" | `backend/scripts/slow_agent.ps1:1-2` |

@@ -160,7 +160,7 @@ def _end_notice_gate(inc: Incident) -> tuple[str, str, str] | None:
 
 
 # 같은 유형 과거 장애의 처리 방식을 다시 할 때 필요한 유사도 하한
-PAST_FIX_MIN_SIMILARITY = 0.85
+PAST_FIX_MIN_SIMILARITY = 0.95
 # 다시 할 수 있는 처리 방식 → 인프라 skill. 이전 버전으로 되돌리기는 원인 배포가 있어야 해서
 # 진단이 원인 배포를 찾은 경우(아래 rollback 단계)에만 한다
 REPLAYABLE = {"release_fault"}
