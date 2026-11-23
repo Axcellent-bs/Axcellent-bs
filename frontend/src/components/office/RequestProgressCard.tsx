@@ -160,7 +160,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   if (!showRequestCard(hasToken, requestId) || !row) return null;
   const proposal = proposalOfRequest(row, proposals);
   const found = proposal ? proposals?.find((p) => p.id === proposal) : undefined;
-  const plan = found ? planCard(found) : null;
+  const plan = found ? planCard(found, row.request_id) : null;
   const perfView = made ? perfStep(perf.out, Date.now()) : null;
   const result = perfView ? resultStep(row.request_id, found, perfView) : null;
   const st = REQUEST_STATUS[row.status];
@@ -209,7 +209,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                 {report && <ReportCell reportId={report} />}
                 {isInsight && plan && <PlanCell card={plan} />}
                 {isInsight && proposal && !plan && (
-                  <button type="button" className="btn-ghost mt-1 px-2.5 py-1 text-xs" onClick={() => navigate(planDocPath({ id: proposal }))}>기획 제안 열기</button>
+                  <button type="button" className="btn-ghost mt-1 px-2.5 py-1 text-xs" onClick={() => navigate(planDocPath({ id: proposal, request: row.request_id }))}>기획 제안 열기</button>
                 )}
                 {s.decide && !decided.has(s.stepId) && (
                   <span className="mt-1 flex flex-wrap gap-1.5">

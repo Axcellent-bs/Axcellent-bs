@@ -18,8 +18,13 @@ export function specCreatedAt(activity: { t: string; point: string; text: string
 export const PRINT_QUERY = "print";
 export const wantsPrint = (search: string) => new URLSearchParams(search).get(PRINT_QUERY) === "1";
 
-/** 기획서가 있으면 기획서 화면, 없으면 제안 화면. print면 ?print=1 */
-export function planDocPath(x: { id: string; spec?: string | null }, print = false): string {
+/** 기획서가 있으면 기획서 화면, 없으면 제안 화면. print면 ?print=1.
+ *  대화방 의뢰 카드에서 열면 ?request=wr_… (그 화면 아래 고정 줄에서 의뢰 사람 확인을 한다, 11/23) */
+export function planDocPath(x: { id: string; spec?: string | null; request?: string | null }, print = false): string {
   const path = x.spec ? `/planning/work/specs/${encodeURIComponent(x.spec)}` : `/planning/proposals/${encodeURIComponent(x.id)}`;
-  return print ? `${path}?${PRINT_QUERY}=1` : path;
+  const q = new URLSearchParams();
+  if (print) q.set(PRINT_QUERY, "1");
+  if (x.request) q.set("request", x.request);
+  const qs = q.toString();
+  return qs ? `${path}?${qs}` : path;
 }

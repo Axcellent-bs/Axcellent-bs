@@ -1,5 +1,7 @@
 // 기획서 화면: 문서가 원본이고 문단에 작업·PR·결정이 붙는다
 import { useEffect, useState, type Dispatch } from 'react'
+import { RequestDecideBar, VideoStoryboard } from '@/components/planning/videoPlan'
+import { requestOfSearch, storyBasis } from '@/lib/videoStoryboard'
 import { Button, Notice, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, nextDocId, type Action, type Decision, type Spec, type State as S } from '@/lib/planningData'
 import { State, Tag, rowNav } from '@/components/planning-common/parts'
@@ -442,6 +444,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
   const setParaId = (id: string) => go(toPath(`work/specs/${spec.id}/${id}`))
   const jump = (id: string) => setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0)
   const decisions = s.decisions.filter((x) => x.spec === spec.id)
+  const fromProp = (s.proposals ?? []).find((x) => x.spec === spec.id)
   const thread = s.threads.find((t) => t.on === spec.id)
   const xr = reviewOf(s, spec.id)
   const toast = useToast()
@@ -701,6 +704,8 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
           <PlanHandoff s={s} d={d} spec={spec} />
           {spec.status === '확정' && <ReleaseCheckBox d={d} spec={spec.id} />}
         </div>
+        {/* 제안에 영상 제작안이 있으면 같은 스토리보드를 본문 위에 (11/23 재현 님 시안 ④) */}
+        {fromProp?.videoPlan && <VideoStoryboard v={fromProp.videoPlan} audience={fromProp.audience} basis={storyBasis(fromProp)} />}
         <FreeCanvas value={cur.bodyMd} editing={editing} onChange={(bodyMd) => set({ bodyMd })} />
         {spec.question && (
           <div className="question print-hide" id="sec-question">
@@ -714,6 +719,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
         )}
         <h3 className="sec">근거</h3>
         <span className="tags">{spec.basis.map((b) => <Tag key={b}>{b}</Tag>)}</span>
+        {fromProp && <RequestDecideBar request={requestOfSearch(window.location.search)} proposal={fromProp.id} />}
       </section>
 
       {historyOpen && <History s={s} spec={spec} onClose={() => setHistoryOpen(false)} />}
