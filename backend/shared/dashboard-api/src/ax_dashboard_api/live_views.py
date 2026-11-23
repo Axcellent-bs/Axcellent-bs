@@ -1,6 +1,8 @@
 """목 데이터만 있던 화면 API의 실제 버전 (사용자·주문·건강 상태·집계·지식·후기).
 
-- 사용자·주문은 고객사 쇼핑몰(shop-api)에서 읽는다. 주소는 `AX_SHOP_API_URL`(없으면 기본 포트 표).
+- 사용자·주문은 고객사 쇼핑몰(shop-api)에서 읽는다. 주소는 `agent_url("shop-api")`:
+  로그인 세션 회사의 회사 연결(`site_adapter.company_route`) → `AX_SHOP_API_URL`(캣북스만)
+  → 기본 포트.
 - 집계는 support의 `inquiry_overview`·`list_claims`·`claim_queue`에서 코드로 센다.
 - 지식 조각·후기는 아직 실제 출처(API)가 없다. 지어내지 않고 빈 목록을 돌려준다.
 """
@@ -138,7 +140,9 @@ def clear_orders_cache() -> None:
 
 async def _shop_orders_cached(params: dict[str, Any], max_rows: int) -> list[dict[str, Any]]:
     """`_shop_orders`를 `ORDERS_CACHE_SECONDS` 동안 기억한다. 돌려받은 목록은 고치지 않는다."""
-    key = (tuple(sorted(params.items())), max_rows)
+    # 판매 서버 주소를 키에 넣는다: 화면이 세션 회사의 연결을 따르므로(`company_route`)
+    # 회사마다 주소가 다르고, 다른 회사 목록을 기억에서 꺼내 주지 않는다
+    key = (_shop_url(), tuple(sorted(params.items())), max_rows)
     hit = _orders_cache.get(key)
     if hit is not None and time.monotonic() - hit[0] < ORDERS_CACHE_SECONDS:
         return hit[1]

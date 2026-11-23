@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import IO, Any
 
 from ax_agent_template import routing
-from ax_contracts.schemas import TENANT_ID_DEFAULT, UNASSIGNED_UNIT, HandoffCreate
+from ax_contracts.schemas import UNASSIGNED_UNIT, HandoffCreate
 from ax_dashboard_api import handoffs
 from ax_dashboard_api.envelope import ApiError
 from ax_dashboard_api.site_adapter import direct, gate_check, upstream
@@ -283,7 +283,7 @@ def _handoff(req: WriteRequest, reason: str, extra: dict[str, Any] | None = None
     assignment = routing.assignment_for(req.service, skill)
     task = handoffs.get_store().add(
         HandoffCreate(
-            tenant_id=os.getenv("TENANT_ID", TENANT_ID_DEFAULT),
+            tenant_id=gate_check.request_tenant(),  # 그 회사 할 일함 (캣북스는 예전 값)
             context_id=req.context_id or DEFAULT_CONTEXT,
             from_service=FROM_SERVICE,
             to_service=req.service,

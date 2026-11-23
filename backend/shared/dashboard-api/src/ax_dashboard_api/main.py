@@ -34,6 +34,7 @@ from ax_dashboard_api.higgsfield_mcp_oauth import router as higgsfield_mcp_route
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
 from ax_dashboard_api.routes import router
 from ax_dashboard_api.secret_routes import router as secret_router
+from ax_dashboard_api.site_adapter.company_route import CompanyRouteMiddleware
 from ax_dashboard_api.site_adapter.router import router as site_adapter_router
 from ax_dashboard_api.site_adapter.setup import router as site_adapter_setup_router
 from ax_dashboard_api.youtube_oauth import router as youtube_oauth_router
@@ -123,6 +124,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 install_error_handlers(app)
+# 회사 연결·변환기 저장소를 요청 회사로 고른다(변환기 경로의 회사, 화면은 세션 회사).
+# 세션 회사를 읽으므로 SessionCompanyMiddleware보다 먼저 더한다(나중에 더한 것이 바깥)
+app.add_middleware(CompanyRouteMiddleware)
 app.add_middleware(SessionCompanyMiddleware)  # 응답 meta.tenant_id가 세션 회사를 따른다
 app.include_router(router)
 # 영상 비용 상한·안전 정책 화면 (로그인 세션의 운영자·관리자, 변경은 limit_editor·policy_editor)
