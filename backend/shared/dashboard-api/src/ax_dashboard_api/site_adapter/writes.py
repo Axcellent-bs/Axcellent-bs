@@ -20,6 +20,8 @@
   - 짝의 `ok` 코드 → `done`, shop-api 성공 모양 + `applied: "site"` (+ 짝 `result` 칸)
   - 400·404·409·422 → `rejected`, 409 `SITE_REJECTED` + `error.site_code` (재시도 안 함)
   - 401·403 → `rejected` + 그 동작을 "키에 쓰기 권한 없음"으로 표시, 할 일함
+  - 짝의 `partial_codes`에 든 오류 코드(W5, 예: 누비투어 502 `REFUND_FAILED`) → `partial`,
+    재시도 안 함, 할 일함 "결제사 환불 확인"(반영은 됐으니 모름이 아니다)
   - 그 밖(429·5xx·3xx·시간 초과·연결 끊김) → `unknown`, 재시도 안 함, 할 일함
     "사이트에 반영됐는지 확인 후 처리"(멱등 키·본문 요약)
 
@@ -27,7 +29,7 @@
 더한 것이다(부르는 쪽은 완료가 아니라 사람 반영 대기로 본다).
 
 쓰기 장부 `<변환기 폴더>/writes.json`: 키 = (보낸 서비스, 동작, 멱등 키의 sha256),
-값 = 본문 지문(sha256)·상태(sending·done·rejected·unknown·handoff)·응답 요약·할 일 id·시각·
+값 = 본문 지문(sha256)·상태(sending·done·rejected·partial·unknown·handoff)·응답 요약·할 일 id·시각·
 context_id·확인한 safety `execution_id`(돈이 걸린 동작)·고객사 메서드·호스트·경로 틀·응답 코드·
 `x-request-id`·오류 코드. 본문 원문·멱등 키 원문·고객사 키·사이트 오류 문구는 남기지 않는다.
 
@@ -114,6 +116,12 @@ REASONS = {
     "link_missing": "사이트 쪽 번호 짝(link)이 아직 없어 사람이 반영해요",
     "rate_limited": "사이트 쓰기 시간당 한도에 닿아 사람이 반영해요",
     "site_unknown": "사이트에 반영됐는지 알 수 없어요. 사이트에서 확인한 뒤 처리해 주세요",
+    # W5: 사이트가 쓰기는 반영했는데 뒤따르는 일만 실패했다고 답함 (짝의 `partial_codes`)
+    "site_refund_failed": (
+        "사이트에 취소 결정은 반영됐지만 결제사 환불이 실패했어요. "
+        "사이트 결제 내역에서 환불을 확인하고 다시 시도해 주세요"
+    ),
+    "site_partial": "사이트에 반영은 됐지만 뒤따르는 처리가 실패했어요. 사이트에서 확인해 주세요",
 }
 
 _lock = threading.Lock()
@@ -452,8 +460,10 @@ def _finish(
     req: WriteRequest, entry_key: str, key_digest: str, plan: direct.Plan, reply: direct.Reply
 ) -> dict[str, Any]:
     """고객사 응답을 장부에 적고 AI가 받을 `data`를 낸다 (직접 쓰기 결과 표)."""
-    outcome = direct.classify(reply, plan.ok)
-    site_code, short = direct.site_error(reply.body) if outcome == "rejected" else (None, None)
+    outcome = direct.classify(reply, plan.ok, plan.partial_codes)
+    site_code, short = (
+        direct.site_error(reply.body) if outcome in ("rejected", "partial") else (None, None)
+    )
     rejected: ApiError | None = None
     data: dict[str, Any] = {}
     folder = adapter_dir()
@@ -488,6 +498,26 @@ def _finish(
             update = {
                 "status": "rejected",
                 "reason": "no_write_permission",
+                "handoff_task_id": task_id,
+                "response": data,
+            }
+        elif outcome == "partial":
+            # 사이트에 반영은 됐다(다시 보내지 않는다). 뒤따르는 일(결제사 환불)만 사람이 본다
+            reason = "site_refund_failed" if req.action == "refund" else "site_partial"
+            task_id = _handoff(
+                req,
+                reason,
+                {
+                    "site_method": plan.method,
+                    "site_path": plan.path_template,
+                    "site_status": reply.status,
+                    "site_code": site_code,
+                },
+            )
+            data = _pending(req, task_id)
+            update = {
+                "status": "partial",
+                "reason": reason,
                 "handoff_task_id": task_id,
                 "response": data,
             }
