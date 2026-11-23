@@ -12,7 +12,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from support_agent import claim_handlers, company_scope, handlers, orders
+from ax_agent_template import company_scope
+from support_agent import claim_handlers, handlers, orders
 from support_agent.claim_rules import decide
 from support_agent.claims import ClaimStore
 from support_agent.main import app

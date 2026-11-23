@@ -19,7 +19,7 @@ from typing import Any
 from ax_agent_template import config
 from ax_agent_template.client import call_agent
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
-from ax_dashboard_api.envelope import ApiError
+from ax_dashboard_api.envelope import ApiError, tenant_meta
 
 AGENT_NAME = "dashboard-api"
 TARGET = "marketing"
@@ -46,6 +46,7 @@ async def call(
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=deadline_s),
             idempotency_key=key,
+            **tenant_meta(),
         ),
         skill=skill,
         input=payload,
@@ -697,7 +698,7 @@ async def chat_call(
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=CHAT_DEADLINE_SECONDS),
             idempotency_key=f"ui:chat:{uuid.uuid4().hex}",
-            **({"tenant_id": tenant_id} if tenant_id else {}),  # 개인 MCP 창구: 토큰의 회사
+            **tenant_meta(tenant_id),  # 명시 값 먼저, 없으면 세션 회사
         ),
         skill=skill,
         input=payload,
@@ -746,6 +747,7 @@ async def character_sheet_call(
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=CHARACTER_SHEET_DEADLINE_SECONDS),
             idempotency_key=f"ui:charsheet:{uuid.uuid4().hex}",
+            **tenant_meta(),
         ),
         skill="character_sheet_prompt",
         input={},
@@ -798,6 +800,7 @@ async def storyboard_call(
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=STORYBOARD_DEADLINE_SECONDS),
             idempotency_key=f"ui:storyboard:{uuid.uuid4().hex}",
+            **tenant_meta(),
         ),
         skill="storyboard_prompt",
         input={},
@@ -824,6 +827,7 @@ async def higgsfield_status_call() -> dict[str, Any]:
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=20),
             idempotency_key=f"ui:hfstatus:{uuid.uuid4().hex}",
+            **tenant_meta(),
         ),
         skill="higgsfield_status",
         input={},
@@ -844,6 +848,7 @@ async def _creative_read(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=20),
             idempotency_key=f"ui:creative:{uuid.uuid4().hex}",
+            **tenant_meta(),
         ),
         skill=skill,
         input=payload,
@@ -894,6 +899,7 @@ VIDEO_REFUSALS = {
     "gate_held": (409, "GATE_HELD"),
     "gate_rejected": (409, "GATE_REJECTED"),
     "gate_blocked": (409, "GATE_BLOCKED"),
+    "unknown_campaign": (422, "UNKNOWN_CAMPAIGN"),
 }
 CREATIVE_FILES = {
     "sheet_image": ("sheet.jpg", "image/jpeg"),
@@ -1118,5 +1124,14 @@ async def request_video_youtube_request_call(post_draft_id: str, who: str | None
     return await _request_video_youtube("request_video_youtube_request", payload)
 
 
+async def campaigns_list_call(limit: int) -> dict[str, Any]:
+    """마케팅이 시작한 캠페인 대장(`list_marketing_campaigns`, read)."""
+    return await _creative_read("list_marketing_campaigns", {"limit": limit})
+
+
 async def youtube_status_call() -> dict[str, Any]:
     return await _creative_read("youtube_status", {})
+
+
+async def instagram_status_call() -> dict[str, Any]:
+    return await _creative_read("instagram_status", {})

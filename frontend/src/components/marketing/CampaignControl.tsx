@@ -7,6 +7,8 @@ import { videoFields, type VideoKind } from "@/lib/campaignVideo";
 import { missingVideoFields, startFields, type ContentFormat } from "@/lib/campaignStart";
 import { digitsOnly, krwText, periodSpend, type AdMetricsRow } from "@/lib/adMetrics";
 import { adMetricsApi, adMetricsEnabled } from "@/lib/adMetricsApi";
+import { contentFields, contentPrefill, type ContentForm, type MarketingCampaign } from "@/lib/campaignLinks";
+import { marketingCampaigns } from "@/lib/marketingCampaignsApi";
 
 // 캠페인 시작·결과·취소. 재무는 예산에 의견만 내고 막지 않는다(2026-11-06). 시작을 막는 것은
 // 안전 관문의 금액 규칙(사람 승인 보류)이다. 광고 플랫폼 연결이 없어
@@ -116,8 +118,13 @@ export function CampaignControl() {
   const [waiting, setWaiting] = useState<CampaignRecord[]>([]);
   const [names, setNames] = useState<Record<string, { name: string; channel: string }>>({});
   const [left, setLeft] = useState<string | null>(null);
+  // 마케팅 캠페인 대장: 결과 칸에 시작 때 카테고리·형식·제작비를 미리 채운다. 못 읽으면 빈 칸으로 둔다
+  const [started, setStarted] = useState<Record<string, MarketingCampaign>>({});
 
   const load = useCallback(async () => {
+    marketingCampaigns(true)
+      .then((items) => setStarted(Object.fromEntries(items.map((c) => [c.campaign_id, c]))))
+      .catch(() => setStarted({}));
     try {
       const { data } = await finance.campaigns();
       setRunning(data.running);
@@ -202,10 +209,10 @@ export function CampaignControl() {
       {(running.length > 0 || waiting.length > 0) && (
         <ul className="mt-4 space-y-3">
           {running.map((r) => (
-            <ResultRow key={r.campaign_id} id={r.campaign_id} amount={r.active_krw} name={names[r.campaign_id]?.name ?? r.campaign_id} channel={names[r.campaign_id]?.channel ?? ""} busy={busy} run={run} canCancel />
+            <ResultRow key={r.campaign_id} id={r.campaign_id} amount={r.active_krw} name={names[r.campaign_id]?.name ?? started[r.campaign_id]?.campaign_name ?? r.campaign_id} channel={names[r.campaign_id]?.channel ?? started[r.campaign_id]?.channel ?? ""} busy={busy} run={run} canCancel started={started[r.campaign_id]} />
           ))}
           {waiting.map((c) => (
-            <ResultRow key={c.campaign_id} id={c.campaign_id} amount={c.spend_krw} name={c.campaign_name} channel={c.channel} busy={busy} run={run} canCancel={false} />
+            <ResultRow key={c.campaign_id} id={c.campaign_id} amount={c.spend_krw} name={c.campaign_name} channel={c.channel} busy={busy} run={run} canCancel={false} started={started[c.campaign_id]} recorded={c} />
           ))}
         </ul>
       )}
@@ -213,9 +220,10 @@ export function CampaignControl() {
   );
 }
 
-function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
+function ResultRow({ id, amount, name, channel, busy, run, canCancel, started, recorded }: {
   id: string; amount: number; name: string; channel: string; busy: boolean; canCancel: boolean;
   run: (job: () => Promise<CampaignAnswer>) => Promise<void>;
+  started?: MarketingCampaign; recorded?: CampaignRecord;
 }) {
   const today = todayKst();
   const [from, setFrom] = useState(today);
@@ -224,7 +232,10 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
   const [gmv, setGmv] = useState("");
   const [orders, setOrders] = useState("");
   const [coupon, setCoupon] = useState("");
-  const [production, setProduction] = useState("");
+  // 콘텐츠 카테고리·형식·제작비: 손대기 전에는 시작 때 값(마케팅 대장)·재무 기록 값을 보인다
+  const [content, setContent] = useState<ContentForm | null>(null);
+  const contentForm = content ?? contentPrefill(started, recorded);
+  const editContent = (patch: Partial<ContentForm>) => setContent({ ...contentForm, ...patch });
   const [reason, setReason] = useState("");
   const [effect, setEffect] = useState<Effect | null>(null);
   const [effectNote, setEffectNote] = useState<string | null>(null);
@@ -272,7 +283,7 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
     spend_krw: Number(spendValue), coupon_krw: Number(coupon || 0), gmv_krw: gmv ? Number(gmv) : null, orders: orders ? Number(orders) : null,
     source: effect?.source ?? SOURCE,
     measured_gmv_krw: effect?.measuredGmv ?? null, measured_orders: effect?.measuredOrders ?? null, effect_generated_at: effect?.generatedAt ?? null,
-    ...(production !== "" ? { production_cost_krw: Number(production) } : {}),
+    ...contentFields(contentForm),
   }));
   const digits = (set: (v: string) => void) => (e: { target: { value: string } }) => set(e.target.value.replace(/[^0-9]/g, ""));
   return (
@@ -284,15 +295,24 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
         <button className="btn-ghost" disabled={loading || !kpiLive || !periodOk} onClick={() => void pull()}>{loading ? "불러오는 중" : "데이터 AI에서 불러오기"}</button>
       </div>
       {effectNote && <p role="status" className="mt-2 rounded-xl bg-ink-50 px-3 py-2 text-ink-700">{effectNote}</p>}
-      <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto] sm:items-end">
+      <div className="mt-2 grid gap-2 sm:grid-cols-4 sm:items-end">
         <label className="block"><span className="text-ink-700">실제 광고비(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={spendValue} onChange={(e) => { setSpend(digitsOnly(e.target.value)); setSpendTouched(true); }} /></label>
         <label className="block"><span className="text-ink-700">늘어난 판매액(원, 모르면 비움)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={gmv} onChange={typed(setGmv)} /></label>
         <label className="block"><span className="text-ink-700">증분 주문(건, 모르면 비움)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={orders} onChange={typed(setOrders)} /></label>
         <label className="block"><span className="text-ink-700">회사 부담 쿠폰(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={coupon} onChange={digits(setCoupon)} /></label>
-        <label className="block"><span className="text-ink-700">영상 제작비(원, 선택)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={production} onChange={digits(setProduction)} /></label>
-        <button className="btn-primary" disabled={busy || loading || !humanTokenSet || spendValue === "" || !periodOk} onClick={save}>결과 저장</button>
       </div>
       <AdSpendNote spend={adSpend} prefilled={!spendTouched && prefill !== null} failed={adError} />
+      <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_160px_160px_auto] sm:items-end">
+        <label className="block"><span className="text-ink-700">콘텐츠 카테고리(선택)</span><input className="field mt-0.5 w-full" list="campaign-category-hints" placeholder="예: 아재개그" maxLength={40} value={contentForm.category} onChange={(e) => editContent({ category: e.target.value })} /></label>
+        <label className="block"><span className="text-ink-700">형식(선택)</span>
+          <select className="field mt-0.5 w-full" value={contentForm.format} onChange={(e) => editContent({ format: e.target.value as ContentFormat | "" })}>
+            <option value="">정하지 않음</option><option value="shorts">유튜브 쇼츠</option><option value="reels">인스타 릴스</option>
+          </select>
+        </label>
+        <label className="block"><span className="text-ink-700">영상 제작비(원, 선택)</span><input className="field mt-0.5 w-full" inputMode="numeric" placeholder="없으면 0" value={contentForm.production} onChange={(e) => editContent({ production: digitsOnly(e.target.value) })} /></label>
+        <button className="btn-primary" disabled={busy || loading || !humanTokenSet || spendValue === "" || !periodOk} onClick={save}>결과 저장</button>
+      </div>
+      <p className="mt-1 text-xs text-ink-500">Higgsfield 구독(Ultra) 등으로 만든 영상 제작비도 여기에 적어야 재무 '콘텐츠 카테고리별 제작비'에 잡혀요. {content === null && (contentForm.category || contentForm.format || contentForm.production) ? "시작 때 적은 값을 채워 두었어요. 고치면 고친 값으로 저장해요." : "비워 두면 시작 때 적은 값을 이어 써요."}</p>
       {canCancel && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input className="field min-w-0 flex-1" aria-label="취소 이유" placeholder="쓰지 않고 멈출 때 취소 이유" value={reason} onChange={(e) => setReason(e.target.value)} />

@@ -1,7 +1,7 @@
 """사이트 변환기 쓰기 (W1 뼈대·W2 관문 확인): 판정 1·2·3·4·6, 할 일함 넣기, 쓰기 장부.
 
-설계 "③-쓰기"·"② 사람 반영". 직접 쓰기는 아직 없어 판정 1·2를 지난 쓰기는 모두 할 일함이다.
-safety는 실행 기록 응답을 흉내 낸다(`gate_check.TRANSPORT`).
+설계 "③-쓰기"·"② 사람 반영". 이 파일은 고객사에 쓰지 않는 길(할 일함)만 본다. 직접 쓰기(W3)는
+`test_direct_writes.py`. safety는 실행 기록 응답을 흉내 낸다(`gate_check.TRANSPORT`).
 """
 
 import copy
@@ -150,7 +150,7 @@ def client(
     monkeypatch.setattr(up, "TRANSPORT", httpx.MockTransport(handle))
     yield TestClient(app)
     handoffs.reset_store()
-    assert calls == []  # W1·W2는 고객사에 쓰지 않는다
+    assert calls == []  # 이 파일의 시험은 고객사에 쓰지 않는다 (직접 쓰기는 test_direct_writes.py)
 
 
 def tasks() -> list[Any]:
@@ -369,11 +369,13 @@ def test_switch_on_is_per_action(client: TestClient, adapter_dir: Path) -> None:
     # 돈이 걸린 동작은 관문 기록을 확인한 쓰기(execution_id)에서만 켜진 것으로 본다
     assert writes.direct_write_on("refund") is False
     assert writes.direct_write_on("refund", "exe_refund_1") is True
+    assert writes.route("inquiry_answer") == writes.DIRECT_READY
+    assert writes.route("refund", "exe_refund_1") == writes.DIRECT_READY
+    # 켰지만 문의 번호 짝(link)이 없어 고객사에 보내지 않고 할 일함 (W3).
+    # 고객사에 실제로 쓰는 경우는 test_direct_writes.py가 본다 (이 파일의 client는 호출 0번)
     send(client, "inquiry_answer")
-    send(client, "refund")
     reasons = {e["action"]: e["reason"] for e in ledger(adapter_dir).values()}
-    # 켰고 관문도 지났지만 직접 쓰기(W3) 전이라 할 일함
-    assert reasons == {"inquiry_answer": "direct_not_ready", "refund": "direct_not_ready"}
+    assert reasons == {"inquiry_answer": "link_missing"}
 
 
 def test_money_actions_always_go_to_inbox(client: TestClient, adapter_dir: Path) -> None:

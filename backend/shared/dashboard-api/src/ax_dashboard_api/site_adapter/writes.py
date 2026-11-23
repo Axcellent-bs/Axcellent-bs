@@ -1,4 +1,5 @@
-"""③-쓰기 (W1 뼈대 + W2 관문 확인): AI가 shop-api로 알고 보낸 쓰기를 판정하고 할 일함에 넣는다.
+"""③-쓰기 (W1 뼈대 + W2 관문 확인 + W3 직접 쓰기): AI가 shop-api로 알고 보낸 쓰기를 판정해
+고객사에 직접 쓰거나 할 일함에 넣는다.
 
 설계: `docs/superpowers/specs/2026-11-18-site-adapter-design.md` "③-쓰기"·"② 사람 반영".
 
@@ -12,17 +13,25 @@
    `IDEMPOTENCY_CONFLICT` (할 일을 새로 만들기 전에 본다)
 3. 짝 파일에 그 동작의 `writes` 항목 없음 → 할 일함
 4. 회사 연결에서 그 동작의 직접 쓰기를 꺼 둠(동작별, 기본 꺼짐) → 할 일함
-- 모두 지나면 "직접 쓰기 가능"(`DIRECT_READY`). 직접 쓰기(고객사 호출, 판정 5·7)는 W3라
-  `apply`의 한 곳에서 할 일함(`direct_not_ready`)으로 돌린다
+5. 키에 쓰기 권한이 없다고 기록됨(앞서 고객사가 401·403, `direct.denied_actions`) → 할 일함
+- 모두 지나면 "직접 쓰기 가능"(`DIRECT_READY`, 판정 7). 본문 식을 계산하지 못하면(칸·번호 짝
+  없음) 또는 시간당 호출 한도에 닿으면 할 일함. 아니면 장부에 `sending`을 먼저 쓰고(파일 잠금)
+  고객사에 한 번 보낸다(`direct`). 응답 처리:
+  - 짝의 `ok` 코드 → `done`, shop-api 성공 모양 + `applied: "site"` (+ 짝 `result` 칸)
+  - 400·404·409·422 → `rejected`, 409 `SITE_REJECTED` + `error.site_code` (재시도 안 함)
+  - 401·403 → `rejected` + 그 동작을 "키에 쓰기 권한 없음"으로 표시, 할 일함
+  - 짝의 `partial_codes`에 든 오류 코드(W5, 예: 누비투어 502 `REFUND_FAILED`) → `partial`,
+    재시도 안 함, 할 일함 "결제사 환불 확인"(반영은 됐으니 모름이 아니다)
+  - 그 밖(429·5xx·3xx·시간 초과·연결 끊김) → `unknown`, 재시도 안 함, 할 일함
+    "사이트에 반영됐는지 확인 후 처리"(멱등 키·본문 요약)
 
-그래서 지금은 1·2번에서 막히지 않은 모든 쓰기가 할 일함이다. 응답은 shop-api 성공 모양에
-`applied: "pending_human"`·`handoff_task_id`를 더한 것이다(부르는 쪽은 완료가 아니라 사람 반영
-대기로 본다).
+할 일함으로 간 쓰기의 응답은 shop-api 성공 모양에 `applied: "pending_human"`·`handoff_task_id`를
+더한 것이다(부르는 쪽은 완료가 아니라 사람 반영 대기로 본다).
 
 쓰기 장부 `<변환기 폴더>/writes.json`: 키 = (보낸 서비스, 동작, 멱등 키의 sha256),
-값 = 본문 지문(sha256)·상태(sending·done·rejected·unknown·handoff)·응답 요약·할 일 id·시각·
-context_id·확인한 safety `execution_id`(돈이 걸린 동작). 본문 원문·멱등 키 원문·고객사 키는
-남기지 않는다.
+값 = 본문 지문(sha256)·상태(sending·done·rejected·partial·unknown·handoff)·응답 요약·할 일 id·시각·
+context_id·확인한 safety `execution_id`(돈이 걸린 동작)·고객사 메서드·호스트·경로 틀·응답 코드·
+`x-request-id`·오류 코드. 본문 원문·멱등 키 원문·고객사 키·사이트 오류 문구는 남기지 않는다.
 
 직접 쓰기 켜기: `<변환기 폴더>/direct_writes.json` `{"enabled": ["inquiry_answer", ...]}`.
 없으면 모두 꺼짐. 지금은 읽기만 한다(켜는 화면은 W4). 돈이 걸린 동작은 관문 확인을 지난
@@ -47,7 +56,7 @@ from ax_agent_template import routing
 from ax_contracts.schemas import TENANT_ID_DEFAULT, UNASSIGNED_UNIT, HandoffCreate
 from ax_dashboard_api import handoffs
 from ax_dashboard_api.envelope import ApiError
-from ax_dashboard_api.site_adapter import gate_check
+from ax_dashboard_api.site_adapter import direct, gate_check, upstream
 from ax_dashboard_api.site_adapter.mapping import (
     MappingError,
     WriteAction,
@@ -60,6 +69,9 @@ LOCK_FILE = "writes.json.lock"
 SWITCH_FILE = "direct_writes.json"
 DEFAULT_CONTEXT = "ctx_site_adapter"
 FROM_SERVICE = "site-adapter"
+# 고객사 직접 쓰기 시간당 상한 (보안 요구 5번). 넘으면 보내지 않고 할 일함
+WRITES_PER_HOUR_ENV = "AX_SITE_ADAPTER_WRITES_PER_HOUR"
+DEFAULT_WRITES_PER_HOUR = 60
 
 logger = logging.getLogger("ax.site_adapter")
 
@@ -98,6 +110,18 @@ REASONS = {
     "gate_not_ready": "돈이 걸린 쓰기라 관문 기록 확인(W2) 전에는 사람이 반영해요",
     "direct_not_ready": "직접 쓰기(W3) 전이라 사람이 반영해요",
     "left_unfinished": "앞선 쓰기가 끝나지 않은 채 남아 사이트 반영 여부를 사람이 확인해요",
+    # W3 직접 쓰기
+    "no_write_permission": "사이트 키에 쓰기 권한이 없어 사람이 반영해요 (회사 연결에서 키 확인)",
+    "calc_failed": "쓰기 짝의 본문 칸을 요청에서 찾지 못해 사람이 반영해요",
+    "link_missing": "사이트 쪽 번호 짝(link)이 아직 없어 사람이 반영해요",
+    "rate_limited": "사이트 쓰기 시간당 한도에 닿아 사람이 반영해요",
+    "site_unknown": "사이트에 반영됐는지 알 수 없어요. 사이트에서 확인한 뒤 처리해 주세요",
+    # W5: 사이트가 쓰기는 반영했는데 뒤따르는 일만 실패했다고 답함 (짝의 `partial_codes`)
+    "site_refund_failed": (
+        "사이트에 취소 결정은 반영됐지만 결제사 환불이 실패했어요. "
+        "사이트 결제 내역에서 환불을 확인하고 다시 시도해 주세요"
+    ),
+    "site_partial": "사이트에 반영은 됐지만 뒤따르는 처리가 실패했어요. 사이트에서 확인해 주세요",
 }
 
 _lock = threading.Lock()
@@ -123,6 +147,9 @@ class WriteRequest:
     gate_claim: dict[str, Any] = field(default_factory=dict)
     # 판정 2를 지나며 확인한 safety `execution_id` (`apply`가 채운다)
     execution_id: str | None = None
+    # 직접 쓰기 본문 식의 재료: 요청 본문(장부·로그·할 일함에 남기지 않는다)과 shop-api 경로 값
+    source: dict[str, Any] = field(default_factory=dict, repr=False)
+    path_values: dict[str, str] = field(default_factory=dict)
 
 
 def digest(value: Any) -> str:
@@ -161,7 +188,7 @@ def direct_write_on(action: WriteAction, execution_id: str | None = None) -> boo
 
 
 def route(action: WriteAction, execution_id: str | None = None) -> str:
-    """판정 3·4: 할 일함으로 가는 까닭, 모두 지나면 `DIRECT_READY`."""
+    """판정 3·4·5: 할 일함으로 가는 까닭, 모두 지나면 `DIRECT_READY`."""
     try:
         mapping = load_mapping()
     except MappingError:
@@ -170,7 +197,28 @@ def route(action: WriteAction, execution_id: str | None = None) -> str:
         return "no_write_map"
     if not direct_write_on(action, execution_id):
         return "direct_off"
+    if action in direct.denied_actions():
+        return "no_write_permission"
     return DIRECT_READY
+
+
+def _writes_per_hour() -> int:
+    try:
+        return max(0, int(os.getenv(WRITES_PER_HOUR_ENV, "") or DEFAULT_WRITES_PER_HOUR))
+    except ValueError:
+        return DEFAULT_WRITES_PER_HOUR
+
+
+def _sent_last_hour(ledger: dict[str, dict[str, Any]], now: datetime) -> int:
+    count = 0
+    for entry in ledger.values():
+        try:
+            sent = datetime.fromisoformat(str(entry.get("sent_at") or ""))
+        except ValueError:
+            continue
+        if (now - sent).total_seconds() < 3600:
+            count += 1
+    return count
 
 
 def _os_lock(handle: IO[str]) -> None:
@@ -229,7 +277,7 @@ def _save_ledger(folder: Path, ledger: dict[str, dict[str, Any]]) -> None:
     os.replace(tmp, path)
 
 
-def _handoff(req: WriteRequest, reason: str) -> str:
+def _handoff(req: WriteRequest, reason: str, extra: dict[str, Any] | None = None) -> str:
     """할 일함에 넣고 할 일 id. 같은 멱등 키면 할 일함이 처음 일을 돌려준다."""
     skill = f"site_apply_{req.action}"
     assignment = routing.assignment_for(req.service, skill)
@@ -240,7 +288,12 @@ def _handoff(req: WriteRequest, reason: str) -> str:
             from_service=FROM_SERVICE,
             to_service=req.service,
             skill=skill,
-            input={"title": TITLES[req.action], "shop_path": req.shop_path, **req.summary},
+            input={
+                "title": TITLES[req.action],
+                "shop_path": req.shop_path,
+                **req.summary,
+                **(extra or {}),
+            },
             reason=REASONS[reason],
             assignee_unit=assignment.unit if assignment else UNASSIGNED_UNIT,
             assignee=assignment.assignee if assignment else None,
@@ -263,6 +316,7 @@ async def apply(req: WriteRequest) -> tuple[dict[str, Any], bool]:
     folder = adapter_dir()
     key_digest = digest(req.idempotency_key)
     entry_key = f"{req.service}|{req.action}|{key_digest}"
+    plan: direct.Plan | None = None
     with _locked(folder):
         ledger = read_ledger(folder)
         prior = ledger.get(entry_key)
@@ -276,38 +330,226 @@ async def apply(req: WriteRequest) -> tuple[dict[str, Any], bool]:
                     "IDEMPOTENCY_CONFLICT",
                     "같은 멱등 키로 내용이 다른 쓰기가 왔어요. 새 키로 보내 주세요",
                 )
-            response = prior.get("response")
-            if prior.get("status") in ("handoff", "done") and isinstance(response, dict):
-                return dict(response), True
-        # 앞 기록이 sending·unknown으로 남았으면 다시 보내지 않고 사람에게 확인을 맡긴다
-        reason = "left_unfinished" if prior is not None else route(req.action, req.execution_id)
-        if reason == DIRECT_READY:
-            # W3 자리: 여기서 장부에 sending을 쓰고 고객사에 직접 쓴다(판정 5·7, 응답 표).
-            # 지금은 고객사를 부르지 않고 할 일함으로 보낸다
-            reason = "direct_not_ready"
-        task_id = _handoff(req, reason)
-        data = {**req.response, "applied": "pending_human", "handoff_task_id": task_id}
-        data.update(dict.fromkeys(req.task_id_fields, task_id))
-        ledger[entry_key] = {
-            "at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "service": req.service,
-            "action": req.action,
-            "shop_path": req.shop_path,
-            "context_id": req.context_id,
-            "execution_id": req.execution_id,
-            "key_digest": key_digest,
-            "fingerprint": req.fingerprint,
-            "status": "handoff",
-            "reason": reason,
-            "handoff_task_id": task_id,
-            "response": data,
-        }
+            replayed = _replay(prior)
+            if replayed is not None:
+                return replayed, True
+            # 앞 기록이 sending으로 남았으면(보내는 도중 죽음) 다시 보내지 않고 사람에게 맡긴다
+            reason = "left_unfinished"
+        else:
+            reason = route(req.action, req.execution_id)
+            if reason == DIRECT_READY:
+                reason, plan = _prepare(req, ledger)
+        if plan is None:
+            data = _to_inbox(req, reason, ledger, entry_key, key_digest)
+        else:
+            # 판정 7: 보내기 전에 sending을 먼저 남긴다(도중에 죽어도 두 번 보내지 않게)
+            ledger[entry_key] = {
+                **_entry(req, key_digest),
+                "status": "sending",
+                "reason": None,
+                "sent_at": _now(),
+                "site_method": plan.method,
+                "site_host": plan.host,
+                "site_path": plan.path_template,
+            }
+        _save_ledger(folder, ledger)
+    if plan is None:
+        logger.info(
+            "사이트 쓰기를 할 일함으로: service=%s action=%s reason=%s",
+            req.service,
+            req.action,
+            reason,
+        )
+        return data, False
+    # 장부 잠금 밖에서 보낸다(같은 키가 그 사이 오면 sending을 보고 할 일함으로 간다)
+    reply = await direct.send(plan)
+    return _finish(req, entry_key, key_digest, plan, reply), False
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _entry(req: WriteRequest, key_digest: str) -> dict[str, Any]:
+    return {
+        "at": _now(),
+        "service": req.service,
+        "action": req.action,
+        "shop_path": req.shop_path,
+        "context_id": req.context_id,
+        "execution_id": req.execution_id,
+        "key_digest": key_digest,
+        "fingerprint": req.fingerprint,
+    }
+
+
+def _pending(req: WriteRequest, task_id: str) -> dict[str, Any]:
+    data = {**req.response, "applied": "pending_human", "handoff_task_id": task_id}
+    data.update(dict.fromkeys(req.task_id_fields, task_id))
+    return data
+
+
+def _site_rejected(error: dict[str, Any], message: str | None = None) -> ApiError:
+    return ApiError(
+        409,
+        "SITE_REJECTED",
+        "고객사 사이트가 이 쓰기를 받지 않았어요 (입력·상태 거절)",
+        {**error, "site_message": message},
+    )
+
+
+def _replay(prior: dict[str, Any]) -> dict[str, Any] | None:
+    """같은 쓰기가 다시 왔을 때 앞 결과. 거절이면 같은 409, sending이면 None(할 일함으로)."""
+    status = prior.get("status")
+    error = prior.get("error")
+    if status == "rejected" and isinstance(error, dict):
+        raise _site_rejected(error)
+    response = prior.get("response")
+    if status != "sending" and isinstance(response, dict):
+        return dict(response)
+    return None
+
+
+def _to_inbox(
+    req: WriteRequest,
+    reason: str,
+    ledger: dict[str, dict[str, Any]],
+    entry_key: str,
+    key_digest: str,
+) -> dict[str, Any]:
+    task_id = _handoff(req, reason)
+    data = _pending(req, task_id)
+    ledger[entry_key] = {
+        **_entry(req, key_digest),
+        "status": "handoff",
+        "reason": reason,
+        "handoff_task_id": task_id,
+        "response": data,
+    }
+    return data
+
+
+def _prepare(
+    req: WriteRequest, ledger: dict[str, dict[str, Any]]
+) -> tuple[str, direct.Plan | None]:
+    """판정 7 직전: 본문을 계산하고 호출 한도를 본다. 못 보내면 (할 일함 까닭, None)."""
+    try:
+        found = load_mapping()
+    except MappingError:
+        return "mapping_broken", None
+    if found is None or req.action not in found.writes:
+        return "no_write_map", None
+    if _sent_last_hour(ledger, datetime.now(UTC)) >= _writes_per_hour():
+        logger.warning("사이트 쓰기 시간당 한도에 닿음: action=%s", req.action)
+        return "rate_limited", None
+    ctx = direct.Context(
+        source=req.source,
+        path_values=req.path_values,
+        key_material=f"{req.service}|{req.action}|{req.idempotency_key}",
+    )
+    try:
+        return DIRECT_READY, direct.plan(found, found.writes[req.action], ctx)
+    except direct.CalcError as exc:
+        logger.warning("쓰기 본문을 계산하지 못함: action=%s why=%s", req.action, exc.why)
+        return ("link_missing" if exc.why == "link" else "calc_failed"), None
+    except upstream.UpstreamError as exc:
+        raise ApiError(exc.status, exc.code, str(exc)) from exc
+
+
+def _finish(
+    req: WriteRequest, entry_key: str, key_digest: str, plan: direct.Plan, reply: direct.Reply
+) -> dict[str, Any]:
+    """고객사 응답을 장부에 적고 AI가 받을 `data`를 낸다 (직접 쓰기 결과 표)."""
+    outcome = direct.classify(reply, plan.ok, plan.partial_codes)
+    site_code, short = (
+        direct.site_error(reply.body) if outcome in ("rejected", "partial") else (None, None)
+    )
+    rejected: ApiError | None = None
+    data: dict[str, Any] = {}
+    folder = adapter_dir()
+    with _locked(folder):
+        ledger = read_ledger(folder)
+        entry = ledger.get(entry_key) or {**_entry(req, key_digest), "status": "sending"}
+        # 그 사이 같은 키가 와서 할 일함으로 갔으면 그 결과(응답)는 그대로 두고 사이트 결과만 적는다
+        mine = entry.get("status") == "sending"
+        entry.update(
+            finished_at=_now(),
+            site_status=reply.status,
+            site_request_id=reply.request_id,
+            site_code=site_code,
+            site_error=reply.error_kind,
+        )
+        update: dict[str, Any]
+        if outcome == "done":
+            data = {
+                **req.response,
+                "applied": "site",
+                **direct.result_fields(plan.result, reply.body),
+            }
+            update = {"status": "done", "response": data}
+        elif outcome == "rejected":
+            error = {"site_code": site_code, "site_status": reply.status}
+            rejected = _site_rejected(error, short)
+            update = {"status": "rejected", "reason": "site_rejected", "error": error}
+        elif outcome == "denied":
+            direct.mark_denied(req.action)
+            task_id = _handoff(req, "no_write_permission")
+            data = _pending(req, task_id)
+            update = {
+                "status": "rejected",
+                "reason": "no_write_permission",
+                "handoff_task_id": task_id,
+                "response": data,
+            }
+        elif outcome == "partial":
+            # 사이트에 반영은 됐다(다시 보내지 않는다). 뒤따르는 일(결제사 환불)만 사람이 본다
+            reason = "site_refund_failed" if req.action == "refund" else "site_partial"
+            task_id = _handoff(
+                req,
+                reason,
+                {
+                    "site_method": plan.method,
+                    "site_path": plan.path_template,
+                    "site_status": reply.status,
+                    "site_code": site_code,
+                },
+            )
+            data = _pending(req, task_id)
+            update = {
+                "status": "partial",
+                "reason": reason,
+                "handoff_task_id": task_id,
+                "response": data,
+            }
+        else:
+            task_id = _handoff(
+                req,
+                "site_unknown",
+                {
+                    "idempotency_key": req.idempotency_key,
+                    "site_method": plan.method,
+                    "site_path": plan.path_template,
+                    "site_status": reply.status,
+                },
+            )
+            data = _pending(req, task_id)
+            update = {
+                "status": "unknown",
+                "reason": "site_unknown",
+                "handoff_task_id": task_id,
+                "response": data,
+            }
+        if mine:
+            entry.update(update)
+        ledger[entry_key] = entry
         _save_ledger(folder, ledger)
     logger.info(
-        "사이트 쓰기를 할 일함으로: service=%s action=%s reason=%s task=%s",
+        "사이트 직접 쓰기: service=%s action=%s site_status=%s outcome=%s",
         req.service,
         req.action,
-        reason,
-        task_id,
+        reply.status,
+        outcome,
     )
-    return data, False
+    if rejected is not None:
+        raise rejected
+    return data

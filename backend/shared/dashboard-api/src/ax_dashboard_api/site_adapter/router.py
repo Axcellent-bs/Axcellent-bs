@@ -1,12 +1,14 @@
 """`/site-adapter` 주소: AI들이 shop-api로 알고 부르는 곳.
 
-- ① 짝 맞춘 읽기: 주문(목록·하나)·상품·분류·고객·판매 합계·내보내기·상태 확인
+- ① 짝 맞춘 읽기: 주문(목록·하나)·상품·분류·고객·판매 합계·내보내기·상태 확인,
+  신청 받은함(`GET /admin/claims`, 짝 `inboxes.claims`가 있을 때, `claims`)
 - ③ 사이트에 없는 자료: 각 주소의 응답 모양 그대로 빈 값 (`meta.source = "site_adapter"`)
 - 고객지원 접수 동기화(POST): 변환기 장부에 기록만 (에이전트 토큰 또는 판매 서버 서비스 키 필요)
 - ③-쓰기(환불·쿠폰·배너·신청 결과·문의 화면 값·롤백·장애 해제): `writes`가 판정한다.
-  환불·쿠폰은 safety 실행 기록 확인(판정 2, `gate_check`)을 지나야 받는다. 직접 쓰기(W3) 전이라
-  받은 쓰기는 모두 할 일함(`applied: "pending_human"`)
-- 그 밖: 404 `NOT_MAPPED` (문의·신청 읽기는 다음 PR)
+  환불·쿠폰은 safety 실행 기록 확인(판정 2, `gate_check`)을 지나야 받는다. 짝 파일에 쓰기 짝이
+  있고 회사 연결에서 그 동작을 켰으면 고객사에 직접 쓰고(`applied: "site"`, W3), 아니면 할 일함
+  (`applied: "pending_human"`)
+- 그 밖: 404 `NOT_MAPPED` (문의 읽기는 다음 PR)
 
 읽기는 shop-api처럼 토큰 없이 받는다(dashboard-api는 사내망에만 있다).
 """
@@ -25,10 +27,11 @@ from fastapi import APIRouter, Depends, Header, Query, Request
 from ax_agent_template.server import verify_token
 from ax_dashboard_api.auth import bearer
 from ax_dashboard_api.envelope import ApiError
-from ax_dashboard_api.site_adapter import bookkeeping, resources, upstream, writes
+from ax_dashboard_api.site_adapter import bookkeeping, claims, resources, upstream, writes
 from ax_dashboard_api.site_adapter.mapping import (
     MappingError,
     Resource,
+    ResourceMap,
     SiteMapping,
     WriteAction,
     load_mapping,
@@ -174,10 +177,64 @@ def attributed() -> dict[str, Any]:  # ③: 유입 꼬리표는 사이트에 없
 
 @router.get("/api/shop/orders/{order_id}")
 async def order_detail(order_id: str) -> dict[str, Any]:
+    """주문 하나. 고객지원 클레임 판정이 읽는 결제 번호·줄 번호를 더한다(`order_detail`)."""
     for o in await _rows("orders"):
         if o["order_id"] == order_id:
-            return _ok(o)
+            return _ok(resources.order_detail(o))
     raise ApiError(404, "NOT_FOUND", "주문을 찾지 못했어요")
+
+
+@router.get("/api/shop/admin/claims")
+async def claim_inbox(
+    state: str = "new",
+    limit: int | None = None,
+    after: int = 0,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """신청 받은함 (W5, `claims`). 고객 글이 있어 접수 동기화와 같은 인증을 받는다.
+
+    짝(`inboxes.claims`)이 없으면 예전처럼 404 `NOT_MAPPED`.
+    """
+    _writer(authorization)
+    m = _mapping()
+    res = m.inboxes.get("claims")
+    if res is None:
+        return _not_mapped("GET", "/api/shop/admin/claims")
+    size = max(1, min(limit or DEFAULT_LIMIT, MAX_LIMIT))
+    if state == "open":
+        page, next_after = claims.open_rows(after, size)
+        return _ok(page, next_after=next_after)
+    if state != "new":
+        raise ApiError(422, "INVALID_REQUEST", "state는 new 또는 open이에요")
+    page, total = claims.new_rows(await _claim_rows(m, res), size)
+    return _ok(page, total=total, failed=0)
+
+
+async def _claim_rows(m: SiteMapping, res: ResourceMap) -> list[dict[str, Any]]:
+    """고객사 신청 전체를 받은함 재료로 (주문 원본을 `order`로 붙이고 번호를 매긴다)."""
+    orders_map = m.resources.get("orders")
+    try:
+        raw, truncated = await upstream.fetch_all(m, res)
+        order_rows: list[dict[str, Any]] = []
+        if orders_map is not None:
+            order_rows, cut = await upstream.fetch_all(m, orders_map)
+            truncated = truncated or cut
+        if truncated:
+            raise ApiError(
+                503,
+                "UPSTREAM_TRUNCATED",
+                "고객사 신청·주문이 읽을 수 있는 양보다 많아 일부만 받았어요. 상한을 늘려 주세요",
+            )
+        by_id = (
+            {str(resources.to_order(o, orders_map)["order_id"]): o for o in order_rows}
+            if orders_map is not None
+            else {}
+        )
+        return claims.number([claims.to_claim(row, res, by_id) for row in raw])
+    except upstream.UpstreamError as exc:
+        raise ApiError(exc.status, exc.code, str(exc)) from exc
+    except resources.MappingBroken as exc:
+        raise ApiError(502, "MAPPING_BROKEN", str(exc)) from exc
 
 
 @router.get("/api/shop/products")
@@ -402,7 +459,7 @@ async def sync_write(
     return await _sync(request, kind, seq, action, authorization)
 
 
-# ---------------------------------------------------------------- ③-쓰기 (W2: 관문 확인 뒤 할 일함)
+# ---------------------------------------------------------------- ③-쓰기 (직접 쓰기·할 일함)
 
 
 def _agent(authorization: str | None, action: WriteAction) -> str:
@@ -469,6 +526,8 @@ async def refund(
             # 환불 id·주문 취소 여부는 사람이 사이트에서 처리한 뒤에야 안다: 싣지 않는다
             response={"payment_id": payment_id, "refund_amount": amount},
             gate_claim={"refund_amount": amount},
+            source=body,
+            path_values={"payment_id": payment_id},
         )
     )
 
@@ -494,6 +553,7 @@ async def coupon_issue(
             response=dict(picked),
             task_id_fields=("coupon_id",),
             gate_claim={k: picked[k] for k in ("buyer_id", "count", "unit_value")},
+            source=body,
         )
     )
 
@@ -516,6 +576,8 @@ async def banner_post(
             # 공지 문구는 고객에게 보일 글이라 사람이 그대로 올릴 수 있게 싣는다
             summary={k: body.get(k) for k in ("notice_id", "text", "valid_from", "valid_to")},
             response={"notice_id": notice_id, "context_id": _context(body)},
+            source=body,
+            path_values={"notice_id": notice_id},
         )
     )
 
@@ -535,6 +597,7 @@ async def banner_end(
             context_id=None,
             summary={"notice_id": notice_id},
             response={"notice_id": notice_id},
+            path_values={"notice_id": notice_id},
         )
     )
 
@@ -557,6 +620,7 @@ async def payment_rollback(
             summary={"to_version": to_version},
             # 되돌렸는지는 사람이 한 뒤에야 안다: 전후 버전을 비워 인프라 확인이 성공으로 보지 않게
             response={"before": None, "version": None, "to_version": to_version},
+            source=body,
         )
     )
 
@@ -579,11 +643,15 @@ async def fault_release(authorization: str | None = Header(default=None)) -> dic
 
 
 async def claim_result(request: Request, seq: str, authorization: str | None) -> dict[str, Any]:
-    """신청 결과 쓰기 (판정 결과를 고객 화면에 옮김, 관문 없음). `sync_write`가 넘긴다."""
+    """신청 결과 쓰기 (판정 결과를 고객 화면에 옮김, 관문 없음). `sync_write`가 넘긴다.
+
+    쓰기 판정을 지나면(직접 썼든 할 일함이든) 신청 받은함 처리 기록에도 적는다(W5): 그 신청은
+    `state=new`에서 빠지고 `state=open`에 나온다. 판정에서 막히면(403·409) 적지 않는다.
+    """
     service = _agent(authorization, "claim_result")
     body = await _json_body(request)
     body_digest = digest(body)
-    return await _write(
+    written = await _write(
         WriteRequest(
             action="claim_result",
             service=service,
@@ -598,8 +666,13 @@ async def claim_result(request: Request, seq: str, authorization: str | None) ->
                 "result": body.get("result"),
             },
             response={"ok": True},
+            source=body,
+            path_values={"seq": seq},
         )
     )
+    if seq.isdigit():
+        claims.record_result(seq, body)
+    return written
 
 
 def _agent_name(authorization: str | None) -> str | None:
@@ -644,8 +717,35 @@ async def inquiry_view(request: Request, seq: str, authorization: str | None) ->
                 "view_digest": view_digest,
             },
             response={"ok": True},
+            # 본문 식 `view.answer`: 사이트의 답변 칸 하나에 고객지원 답변 글을 모아 넣는다
+            source={**body, "view": {**view, "answer": _answer_text(view)}},
+            path_values={"seq": seq},
         )
     )
+
+
+def _answer_text(view: dict[str, Any]) -> str | None:
+    """고객이 볼 답변 글: `view.answer`가 있으면 그것, 없으면 상담원(`agent`) 메시지 글을 순서대로
+    빈 줄로 이어 붙인 것. 답변이 아직 없으면 None (직접 쓰기에서 계산 실패 → 할 일함).
+
+    사이트(누비투어·스터디온에듀)는 문의마다 답변 칸이 하나이고 다시 보내면 고쳐 쓰므로,
+    답변이 늘 때마다 모은 글 전체를 다시 보낸다.
+    """
+    given = view.get("answer")
+    if isinstance(given, str) and given.strip():
+        return given.strip()
+    messages = view.get("messages")
+    if not isinstance(messages, list):
+        return None
+    texts = [
+        m["text"].strip()
+        for m in messages
+        if isinstance(m, dict)
+        and m.get("role") == "agent"
+        and isinstance(m.get("text"), str)
+        and m["text"].strip()
+    ]
+    return "\n\n".join(texts) or None
 
 
 # ---------------------------------------------------------------- 그 밖

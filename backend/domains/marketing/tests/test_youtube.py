@@ -244,3 +244,63 @@ def test_draft_description_carries_hashtags(env: dict[str, Any]) -> None:
     found = _tags_in(draft["description"])
     assert 3 <= len(found) <= 5 and len(set(found)) == len(found)
     assert yt.AI_NOTICE in draft["description"]
+
+
+@pytest.mark.parametrize(
+    ("item", "url"),
+    [
+        ({"id": "UCabcdefghijklmnop12", "snippet": {"title": "A", "customUrl": "@axcellent"}},
+         "https://www.youtube.com/@axcellent"),
+        ({"id": "UCabcdefghijklmnop12", "snippet": {"title": "A", "customUrl": "axcellent"}},
+         "https://www.youtube.com/@axcellent"),
+        ({"id": "UCabcdefghijklmnop12", "snippet": {"title": "A"}},
+         "https://www.youtube.com/channel/UCabcdefghijklmnop12"),
+        ({"snippet": {"title": "A"}}, None),
+    ],
+)  # fmt: skip
+def test_status_gives_channel_profile_url(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, item: dict[str, Any], url: str | None
+) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == yt.TOKEN_URL:
+            return httpx.Response(200, json={"access_token": "ya29.DUMMY"})
+        return httpx.Response(200, json={"items": [item]})
+
+    monkeypatch.setattr(
+        yt, "CLIENT", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    )
+    out = asyncio.run(yt.status(force=True))
+    assert (out["connection"], out["channel_url"]) == ("ok", url)
+
+
+def test_status_cache_is_per_company(env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    from ax_agent_template import company_ai
+
+    monkeypatch.setattr(company_ai, "company_id", lambda: "catbooks")
+    assert asyncio.run(yt.status())["connection"] == "ok"
+    monkeypatch.delenv(yt.KEYS[2])
+    monkeypatch.setattr(company_ai, "company_id", lambda: "nubi")
+    assert (
+        asyncio.run(yt.status())["connection"] == "missing_keys"
+    )  # 캣북스 결과를 빌려 쓰지 않는다
+
+
+def test_app_values_fall_back_to_env_in_db_mode(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """db 모드에 앱 값(클라이언트 ID·비밀)이 없으면 .env 값을 쓴다. 연결 값은 회사 것만."""
+    store = {("catbooks", yt.KEYS[2]): "DUMMY-REFRESH"}
+
+    def fake(name: str, *, tenant: str | None = None, **_: object) -> str:
+        return store.get((tenant, name), "")
+
+    import ax_secret_store
+
+    monkeypatch.setattr(ax_secret_store, "get_secret", fake)
+    from ax_agent_template import company_ai
+
+    monkeypatch.setattr(company_ai, "company_id", lambda: "catbooks")
+    assert yt._secret(yt.KEYS[0]) == f"DUMMY-{yt.KEYS[0]}"  # noqa: SLF001 - env 값
+    assert yt._secret(yt.KEYS[2]) == "DUMMY-REFRESH"  # noqa: SLF001
+    monkeypatch.setattr(company_ai, "company_id", lambda: "nubi")
+    assert yt._secret(yt.KEYS[2]) == ""  # noqa: SLF001 - 다른 회사 연결 값은 env로 대신하지 않는다

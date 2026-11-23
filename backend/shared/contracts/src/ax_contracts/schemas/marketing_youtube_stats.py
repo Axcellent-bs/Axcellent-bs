@@ -83,6 +83,22 @@ class YoutubeUpload(AxModel):
     campaign_id: str | None = None  # 기록에 연결된 캠페인·의뢰 번호(없으면 None)
 
 
+class YoutubeRequestUpload(AxModel):
+    """의뢰로 만든 영상(SNS 초안 `post_draft_id`)을 올린 것. 제작 기록 id가 없다(11/23)."""
+
+    post_draft_id: str = Field(min_length=1, max_length=80)
+    request_id: str | None = None  # 의뢰 번호(wr_…)
+    video_id: str
+    url: str | None = None
+    uploaded_at: str | None = None
+    title: str | None = None
+    privacy: str | None = None
+    # 사람이 유튜브 칸에서 고른 캠페인(cmp_…, 11/23 추가). 고르지 않았으면 None
+    campaign_id: str | None = None
+
+
 class YoutubeUploadsListOutput(AxModel):
     items: list[YoutubeUpload] = Field(default_factory=list)
-    total: int = 0
+    total: int = 0  # 제작 기록 업로드(items) 수
+    # 의뢰로 만든 영상 업로드. campaign_id를 주면 그 의뢰(wr_…) 것만
+    request_items: list[YoutubeRequestUpload] = Field(default_factory=list)

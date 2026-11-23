@@ -11,7 +11,10 @@
 
 쓰기 짝(`writes`, 동작 → `WriteMap`)은 추가 필드다. 없으면 모든 쓰기가 할 일함으로 간다(예전
 짝 파일 그대로 읽힘). 쓰기 본문 식은 위 셋에 `path:`·`key_code:`·`now_plus:`·`json:`·`link:`를
-더한다. 지금(W1)은 모양만 검사하고, 계산은 직접 쓰기(W3)에서 한다.
+더한다. 여기서는 모양만 검사하고, 계산은 직접 쓰기(`direct.evaluate`)에서 한다.
+
+받은함 짝(`inboxes`, 받은함 → `ResourceMap`)도 추가 필드다. 지금은 `claims`(취소·환불 신청)만
+있고, 변환은 `claims.py`가 한다.
 """
 
 from __future__ import annotations
@@ -31,6 +34,8 @@ DEFAULT_DIR = Path(__file__).resolve().parents[5] / ".data" / "site_adapter"
 MAPPING_FILE = "mapping.json"
 
 Resource = Literal["orders", "products"]
+# 고객지원 받은함 (① 읽기 중 접수함). 문의(`inquiries`)는 다음 PR
+Inbox = Literal["claims"]
 # 쓰기 동작. shop-api 경로 → 동작은 변환기 코드(`writes.py`)에 고정한다(짝 파일이 정하지 않는다)
 WriteAction = Literal[
     "refund",
@@ -108,6 +113,7 @@ class ResourceMap(BaseModel):
 _KEY_CODE = re.compile(r"[A-Z0-9_-]{1,30}")
 _LINK = re.compile(r"[a-z_]+\.[a-z_]+")
 _PATH_PARAM = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_SITE_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 
 def check_write_expr(expr: str) -> str:
@@ -147,11 +153,22 @@ class WriteMap(BaseModel):
     ok: list[int] = [200, 201]
     # 고객사 응답 → shop-api 응답 칸 (필요한 동작만, 예: 쿠폰 `coupon_id`)
     result: dict[str, str] = {}
+    # 추가 필드: "쓰기는 반영됐는데 뒤따르는 일만 실패"를 뜻하는 고객사 오류 코드
+    # (예: 누비투어 취소 결정 502 `REFUND_FAILED` = 결정은 반영, 결제사 환불만 실패).
+    # 이 코드면 `unknown`이 아니라 `partial`로 적고 할 일함에 따로 까닭을 남긴다
+    partial_codes: list[str] = []
 
     @field_validator("path")
     @classmethod
     def _local_path(cls, value: str) -> str:
         return local_path(value)
+
+    @field_validator("partial_codes")
+    @classmethod
+    def _site_codes(cls, value: list[str]) -> list[str]:
+        if any(not _SITE_CODE.fullmatch(code) for code in value):
+            raise ValueError("partial_codes는 A-Z a-z 0-9 _ . - 64자 이하 코드만 쓸 수 있어요")
+        return value
 
     @field_validator("ok")
     @classmethod
@@ -186,6 +203,9 @@ class SiteMapping(BaseModel):
     resources: dict[Resource, ResourceMap]
     # 추가 필드: 동작별 쓰기 짝. 없으면 모든 쓰기가 할 일함 (예전 짝 파일 그대로 읽힘)
     writes: dict[WriteAction, WriteMap] = {}
+    # 추가 필드: 고객지원 받은함 짝 (`claims` = 취소·환불 신청). 없으면 그 받은함은 404
+    # `NOT_MAPPED`(예전 그대로). 회사 연결 화면의 주문·상품 짝 저장(`resources`)과 따로 둔다
+    inboxes: dict[Inbox, ResourceMap] = {}
 
 
 ADAPTER_DIR_NAME = "site_adapter"
