@@ -25,7 +25,13 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def call(client: TestClient, skill: str, input: dict[str, Any], key: str | None = None) -> dict:
+def call(
+    client: TestClient,
+    skill: str,
+    input: dict[str, Any],
+    key: str | None = None,
+    tenant_id: str | None = None,
+) -> dict:
     body = {
         "meta": {
             "context_id": "ctx_ui_triage",
@@ -33,6 +39,7 @@ def call(client: TestClient, skill: str, input: dict[str, Any], key: str | None 
             "path": [],
             "deadline": (datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
             "idempotency_key": key,
+            **({"tenant_id": tenant_id} if tenant_id else {}),
         },
         "skill": skill,
         "input": input,
@@ -190,7 +197,14 @@ def test_the_list_carries_the_company_and_the_triage_mark(client: TestClient) ->
     other = make("shipping", tenant_id="acme-books")
     items = {i["id"]: i for i in call(client, "list_inquiries", {})["output"]["items"]}
     assert items[cat.id]["tenant_id"] == "shop-demo" and items[cat.id]["triage"] is None
-    assert items[other.id]["tenant_id"] == "acme-books"
-    call(client, "set_triage", {"inquiry_id": other.id, "action": "send"})
-    items = {i["id"]: i for i in call(client, "list_inquiries", {})["output"]["items"]}
+    assert other.id not in items  # 회사가 나뉘어 캣북스 요청에는 다른 회사 문의가 없다
+    acme = "acme-books"
+    items = {
+        i["id"]: i for i in call(client, "list_inquiries", {}, tenant_id=acme)["output"]["items"]
+    }
+    assert items[other.id]["tenant_id"] == "acme-books" and cat.id not in items
+    call(client, "set_triage", {"inquiry_id": other.id, "action": "send"}, tenant_id=acme)
+    items = {
+        i["id"]: i for i in call(client, "list_inquiries", {}, tenant_id=acme)["output"]["items"]
+    }
     assert items[other.id]["triage"]["state"] == "needed"

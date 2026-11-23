@@ -7,6 +7,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
+from support_agent import company_scope
 from support_agent.claim_rules import Decision
 from support_agent.claim_schemas import (
     Claim,
@@ -42,16 +43,21 @@ class ClaimStore:
         self._ids = itertools.count(1)
         self._claims: dict[int, Claim] = {}
 
-    # ---- 읽기
+    # ---- 읽기 (요청 안이면 그 회사 클레임만 본다. `company_scope`)
+    def _mine(self) -> list[Claim]:
+        return [c for c in self._claims.values() if company_scope.visible(c.tenant_id)]
+
     def get(self, claim_id: int) -> Claim | None:
-        return self._claims.get(claim_id)
+        """클레임 하나. 다른 회사 클레임은 없는 것처럼 None."""
+        found = self._claims.get(claim_id)
+        return found if found is not None and company_scope.visible(found.tenant_id) else None
 
     def list(self, status: str | None = None) -> list[Claim]:
-        items = [c for c in self._claims.values() if status is None or c.status == status]
+        items = [c for c in self._mine() if status is None or c.status == status]
         return sorted(items, key=lambda c: c.id, reverse=True)
 
     def count_for_buyer(self, buyer_id: str) -> int:
-        return sum(1 for c in self._claims.values() if c.buyer_id == buyer_id)
+        return sum(1 for c in self._mine() if c.buyer_id == buyer_id)
 
     def blocking_claim(self, order_id: str, order_item_ids: set[str]) -> Claim | None:
         """같은 주문 품목의 재접수를 막는 클레임.
@@ -59,7 +65,7 @@ class ClaimStore:
         끝나지 않은 클레임과, 안전 장치가 환불을 거절·만료로 닫아 `rejected`로 끝낸 클레임이다
         (거절한 품목을 다시 접수해 거절을 우회하지 못하게 한다).
         """
-        for claim in self._claims.values():
+        for claim in self._mine():
             if claim.order_id != order_id or claim.status == "completed":
                 continue
             if claim.status == "rejected" and not claim.refund_rejected:
@@ -73,7 +79,7 @@ class ClaimStore:
         return self.blocking_claim(order_id, order_item_ids) is not None
 
     def stats(self) -> ClaimStats:
-        claims = list(self._claims.values())
+        claims = list(self._mine())
         hits = Counter(r.code for c in claims for r in c.reasons)
         return ClaimStats(
             total=len(claims),
@@ -85,7 +91,7 @@ class ClaimStore:
     def queue(self) -> ClaimQueue:
         """보상 큐: 환불할 금액이 있고 (반품 없는 승인 또는 반품 입고)인 클레임."""
         entries: list[QueueEntry] = []
-        for claim in sorted(self._claims.values(), key=lambda c: c.id):
+        for claim in sorted(self._mine(), key=lambda c: c.id):
             if claim.status not in ("approved", "return_received") or claim.expected_refund <= 0:
                 continue
             blockers: list[ClaimReasonHit] = []
