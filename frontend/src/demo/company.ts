@@ -53,7 +53,11 @@ const subscribe = (l: () => void) => { listeners.add(l); return () => { listener
 const fromServer = (c: ServerInfo): CompanyInfo => ({ name: c.name, industry: c.industry, network: c.network, siteUrl: c.site_url || undefined })
 const toServer = (c: CompanyInfo) => ({ name: c.name, industry: c.industry, network: c.network, site_url: c.siteUrl ?? '' })
 
+// 이 사람 토큰으로 연결 키 목록을 읽었나. 읽었으면 서버가 준 세션 회사의 줄이 답이라 로그인 전 공개 정보로 채우지 않는다
+// (공개 정보는 세션이 없어 늘 캣북스. 다른 회사 관리자 화면에 캣북스 이름이 보이지 않게, 설계 6.2)
+let keysRead = false
 function apply(s: ServerState) {
+  keysRead = true
   company = s.company
     ? { id: s.company.id, name: s.company.name, industry: s.company.industry, network: s.company.network, siteUrl: s.company.site_url || undefined, key: s.company.key ?? undefined, connectedAt: s.company.connected_at }
     : null
@@ -101,7 +105,7 @@ function loadPublicCompany(): Promise<void> {
 let loaded = false
 export function refreshCompany(): Promise<void> {
   const keysNow = call<ServerState>('GET', PATH).then(apply).catch((e: unknown) => {
-    if (refusedForThisPerson(e)) { keys = []; company = null; notify() } // 연결 실패면 지난 값 그대로
+    if (refusedForThisPerson(e)) { keys = []; company = null; keysRead = false; notify() } // 연결 실패면 지난 값 그대로
   })
   return Promise.all([keysNow, loadSiteCompany(), loadPublicCompany()]).then(() => {
     if (!loaded) { loaded = true; notify() }
@@ -116,7 +120,7 @@ onSessionChange(() => {
   try { void refreshCompany() } catch { loaded = true; notify() }
 })
 
-export const getCompany = () => pickCompany(company, siteCompany, publicCompany)
+export const getCompany = () => pickCompany(company, siteCompany, keysRead ? null : publicCompany)
 export const useCompany = () => useSyncExternalStore(subscribe, getCompany)
 /** 서버에서 연결 회사를 처음 한 번 다 읽었나 */
 export const useCompanyLoaded = () => useSyncExternalStore(subscribe, () => loaded)
