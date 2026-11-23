@@ -352,6 +352,7 @@ class RecordClaimActivityInput(AxModel):
     decision: Literal["approve", "reject"] | None = None
     inspection: str | None = None
     amount: int | None = None
+    requested_by: str | None = None  # 지급을 요청한 사람(감사용). `claim_paid`에만 채운다
     # `kind="compensation"`(보상 쿠폰 요청 결과)일 때만 쓴다.
     # 문장은 문의 쪽이 `compensation_result`로 만든다
     compensation_result: CompensationResult | None = None

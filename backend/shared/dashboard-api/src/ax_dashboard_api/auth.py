@@ -107,6 +107,27 @@ def buyer_id_from_authorization(authorization: str | None) -> str | None:
     return accounts.buyer_id_of_account(human.account_id)
 
 
+def requester_label(authorization: str | None) -> str | None:
+    """감사 기록용 호출자 표시: `이름 (account:계정ID, company:회사ID)`. 로그인 세션 토큰만.
+
+    돈이 움직이는 경로가 support에 넘겨 기록하게 한다. 확인할 수 없으면 None (지어내지 않는다)."""
+    token = bearer(authorization)
+    if not token or token.startswith("mock:"):
+        return None
+    try:
+        human = human_auth.find_human(token, shared_tokens=_configured(), mock=is_mock())
+    except human_auth.HumanAuthError:
+        return None
+    if human is None:
+        return None
+    if human.shared or not human.account_id:
+        return None  # 공용·목 토큰은 누가 쓰는지 모른다. 이름을 사람으로 기록하지 않는다
+    parts = [f"account:{human.account_id}"]
+    if human.company_id:
+        parts.append(f"company:{human.company_id}")
+    return f"{human.name} ({', '.join(parts)})"
+
+
 def require_human(request: Request) -> None:
     """읽기·쓰기 모두 사람 토큰을 요구한다. 없으면 401, 에이전트·모르는 토큰이면 403."""
     if request.method in OPEN_METHODS:

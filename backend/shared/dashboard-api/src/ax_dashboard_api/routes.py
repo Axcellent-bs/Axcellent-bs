@@ -85,9 +85,11 @@ from ax_dashboard_api import (
 from ax_dashboard_api import (
     communications as communication_log,
 )
+from ax_dashboard_api.accounts import require_session_role
 from ax_dashboard_api.auth import (
     buyer_id_from_authorization,
     human_from_authorization,
+    requester_label,
     require_human,
 )
 from ax_dashboard_api.envelope import ApiError, is_mock, ok, or_unavailable, require_mock
@@ -340,14 +342,37 @@ async def inspect_claim(claim_id: int, body: InspectionBody) -> dict:
     return ok(claim_mapping.to_detail(out))
 
 
-@router.post("/queue-entries/process")
-async def process_queue(body: QueueProcessBody | None = None) -> dict:
+# 한 번에 지급할 클레임 수 상한(환불은 실제 돈이다). 빈 본문이 큐 전체를 지급하지 못하게 한다
+QUEUE_PROCESS_MAX_ENV = "DASHBOARD_QUEUE_PROCESS_MAX"
+QUEUE_PROCESS_MAX_DEFAULT = 20
+
+
+def queue_process_max() -> int:
+    try:
+        value = int(os.getenv(QUEUE_PROCESS_MAX_ENV, "").strip() or QUEUE_PROCESS_MAX_DEFAULT)
+    except ValueError:
+        return QUEUE_PROCESS_MAX_DEFAULT
+    return value if value >= 1 else QUEUE_PROCESS_MAX_DEFAULT
+
+
+# 운영자·관리자 계정만(일반회원은 403 ROLE_REQUIRED JSON). 공용 토큰은 `require_session_role`의
+# 기존 규칙대로 옮기는 동안 통과한다(`AX_ALLOW_SHARED_HUMAN_TOKEN=0`이 되면 막힌다)
+@router.post(
+    "/queue-entries/process",
+    dependencies=[Depends(require_session_role("operator", "admin"))],
+)
+async def process_queue(request: Request, body: QueueProcessBody | None = None) -> dict:
     body = body or QueueProcessBody()
+    cap = queue_process_max()
+    # 상한 위는 상한으로 줄인다(오류 아님). 생략하면 support가 같은 상한을 적용한다
+    limit = None if body.limit is None else min(body.limit, cap)
     if is_mock():
-        return ok(mock_actions.process_queue(body.limit, body.claim_ids))
-    out = await support_client.call(
-        "process_claim_queue", {"limit": body.limit, "claim_ids": body.claim_ids}
-    )
+        return ok(mock_actions.process_queue(limit, body.claim_ids))
+    payload: dict[str, Any] = {"limit": limit, "claim_ids": body.claim_ids}
+    requested_by = requester_label(request.headers.get("authorization"))
+    if requested_by:
+        payload["requested_by"] = requested_by
+    out = await support_client.call("process_claim_queue", payload)
     return ok(claim_mapping.to_run(out))
 
 
