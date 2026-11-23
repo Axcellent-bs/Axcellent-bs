@@ -99,7 +99,7 @@
     },
     {
       "id": "verify_campaign_budget",
-      "description": "안전 관문 start_campaign의 금액이 재무 승인 한도 안인지 검증한다. 재무 기록만 남기고 외부 상태를 바꾸지 않는다.",
+      "description": "예전 안전 관문 검증 skill. 재무는 비용을 승인·반려하지 않으므로 통과(approved)를 주지 않고 재무 의견만(decision=advisory, opinion·suggested_krw) 돌려준다. 관문은 approved가 아니면 사람 결정으로 넘긴다. 외부 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#VerifyAmountInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/finance.py#CampaignBudgetReviewOutput",
       "grade": "read",
