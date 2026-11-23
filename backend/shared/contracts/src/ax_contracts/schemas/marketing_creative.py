@@ -141,6 +141,21 @@ class YoutubeStatusOutput(AxModel):
     connection: str
     channel: str | None = None
     checked_at: str
+    # 채널 주소(연결됐을 때. @핸들이 있으면 youtube.com/@핸들, 없으면 channel/<id>) — 11/23
+    channel_url: str | None = None
+
+
+class InstagramStatusInput(AxModel):
+    """입력 없음(지금 회사의 인스타 연결 상태를 본다)."""
+
+
+class InstagramStatusOutput(AxModel):
+    """인스타 연결: missing_keys · invalid_credentials · ok · error. 토큰 값은 없다(11/23)."""
+
+    connection: str
+    username: str | None = None
+    profile_url: str | None = None
+    checked_at: str
 
 
 # ---- 의뢰로 만든 영상(wr_…)의 유튜브 올리기 (2026-11-23). 제작 기록 유튜브와 같은 흐름이다.

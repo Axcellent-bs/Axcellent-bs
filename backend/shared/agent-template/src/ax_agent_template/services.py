@@ -175,6 +175,7 @@ SERVICES: tuple[Service, ...] = (
             "creative_youtube_draft",
             "creative_youtube_request",
             "youtube_status",
+            "instagram_status",
             "youtube_video_stats",
             "youtube_uploads_list",
             "creative_record_attach",

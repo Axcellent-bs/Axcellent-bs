@@ -1074,3 +1074,7 @@ async def request_video_youtube_request_call(post_draft_id: str, who: str | None
 
 async def youtube_status_call() -> dict[str, Any]:
     return await _creative_read("youtube_status", {})
+
+
+async def instagram_status_call() -> dict[str, Any]:
+    return await _creative_read("instagram_status", {})

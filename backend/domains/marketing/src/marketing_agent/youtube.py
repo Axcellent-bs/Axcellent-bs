@@ -60,7 +60,8 @@ HASHTAG_RE = re.compile(r"#([^\W_][\w]*)")
 
 # 테스트에서 바꿔 끼운다
 CLIENT: Callable[[], httpx.AsyncClient] = lambda: httpx.AsyncClient(timeout=600)  # noqa: E731
-_status_cache: dict[str, Any] = {"at": 0.0, "value": None}
+_status_cache: dict[str, Any] = {"at": 0.0, "value": None}  # 옛 이름(테스트가 비운다)
+_status_by_company: dict[str, tuple[float, dict[str, Any]]] = {}
 _tasks: set[asyncio.Task[Any]] = set()
 
 
@@ -137,9 +138,14 @@ async def _access_token(client: httpx.AsyncClient) -> str:
 
 async def status(force: bool = False) -> dict[str, Any]:
     """채널 연결 상태: missing_keys · invalid_credentials · ok(채널 이름) · error. 60초 캐시."""
-    cached = _status_cache["value"]
-    if cached and not force and time.monotonic() - _status_cache["at"] < STATUS_TTL:
-        return cached
+    from ax_agent_template import company_ai
+
+    cid = company_ai.company_id() or ""
+    if _status_cache["value"] is None:
+        _status_by_company.clear()  # 옛 캐시를 비우면(테스트) 회사별 캐시도 비운다
+    hit = _status_by_company.get(cid)
+    if hit and not force and time.monotonic() - hit[0] < STATUS_TTL:
+        return hit[1]
     checked_at = _now().isoformat()
     if not configured():
         value = {"connection": "missing_keys", "channel": None, "checked_at": checked_at}
@@ -153,15 +159,33 @@ async def status(force: bool = False) -> dict[str, Any]:
                     headers={"Authorization": f"Bearer {token}"},
                 )
             items = (res.json().get("items") or []) if res.status_code == 200 else []
-            title = (items[0].get("snippet") or {}).get("title") if items else None
-            value = {"connection": "ok", "channel": title, "checked_at": checked_at}
+            snippet = (items[0].get("snippet") or {}) if items else {}
+            title = snippet.get("title")
+            value = {
+                "connection": "ok",
+                "channel": title,
+                "checked_at": checked_at,
+                "channel_url": _channel_url(items[0] if items else {}),
+            }
         except YoutubeError as error:
             value = {"connection": str(error), "channel": None, "checked_at": checked_at}
         except (httpx.HTTPError, ValueError) as error:
             value = {"connection": "error", "channel": None, "checked_at": checked_at}
             logger.warning("youtube status 실패: %s", type(error).__name__)
     _status_cache.update(at=time.monotonic(), value=value)
+    _status_by_company[cid] = (time.monotonic(), value)
     return value
+
+
+def _channel_url(item: dict[str, Any]) -> str | None:
+    """@핸들(customUrl)이 있으면 youtube.com/@핸들, 없으면 youtube.com/channel/<id>."""
+    handle = str((item.get("snippet") or {}).get("customUrl") or "").strip()
+    if re.fullmatch(r"@?[A-Za-z0-9._-]{1,100}", handle):
+        return f"https://www.youtube.com/{handle if handle.startswith('@') else '@' + handle}"
+    cid = str(item.get("id") or "")
+    if re.fullmatch(r"UC[A-Za-z0-9_-]{10,40}", cid):
+        return f"https://www.youtube.com/channel/{cid}"
+    return None
 
 
 # ---------------------------------------------------------------- 초안
