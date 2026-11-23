@@ -7,6 +7,7 @@
 - `upstream`: 고객사 API 호출(인증·페이지·오류)
 - `resources`: 원본 행 → shop-api 모양 (주문·상품·분류·고객·판매 합계)
 - `bookkeeping`: 고객지원 접수 동기화 기록 (사이트가 아니라 AXcellent 쪽 장부)
-- `writes`: ③-쓰기 판정·쓰기 장부(`writes.json`)·할 일함 넣기 (W1: 모든 쓰기가 할 일함)
+- `writes`: ③-쓰기 판정·쓰기 장부(`writes.json`)·할 일함 넣기 (W1·W2: 모든 쓰기가 할 일함)
+- `gate_check`: 판정 2, 돈이 걸린 쓰기의 safety 실행 기록 확인 (W2)
 - `router`: `/site-adapter` 주소
 """

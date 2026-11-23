@@ -4,7 +4,8 @@
 - ③ 사이트에 없는 자료: 각 주소의 응답 모양 그대로 빈 값 (`meta.source = "site_adapter"`)
 - 고객지원 접수 동기화(POST): 변환기 장부에 기록만 (에이전트 토큰 또는 판매 서버 서비스 키 필요)
 - ③-쓰기(환불·쿠폰·배너·신청 결과·문의 화면 값·롤백·장애 해제): `writes`가 판정한다.
-  W1은 직접 쓰기가 없어 허용 서비스가 보낸 쓰기는 모두 할 일함(`applied: "pending_human"`)
+  환불·쿠폰은 safety 실행 기록 확인(판정 2, `gate_check`)을 지나야 받는다. 직접 쓰기(W3) 전이라
+  받은 쓰기는 모두 할 일함(`applied: "pending_human"`)
 - 그 밖: 404 `NOT_MAPPED` (문의·신청 읽기는 다음 PR)
 
 읽기는 shop-api처럼 토큰 없이 받는다(dashboard-api는 사내망에만 있다).
@@ -401,7 +402,7 @@ async def sync_write(
     return await _sync(request, kind, seq, action, authorization)
 
 
-# ---------------------------------------------------------------- ③-쓰기 (W1: 모두 할 일함)
+# ---------------------------------------------------------------- ③-쓰기 (W2: 관문 확인 뒤 할 일함)
 
 
 def _agent(authorization: str | None, action: WriteAction) -> str:
@@ -440,8 +441,8 @@ def _hour() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H")
 
 
-def _write(req: WriteRequest) -> dict[str, Any]:
-    data, replayed = writes.apply(req)
+async def _write(req: WriteRequest) -> dict[str, Any]:
+    data, replayed = await writes.apply(req)
     return _ok(data, replayed=replayed)
 
 
@@ -452,7 +453,7 @@ async def refund(
     service = _agent(authorization, "refund")
     body = await _json_body(request)
     amount = body.get("refund_amount")
-    return _write(
+    return await _write(
         WriteRequest(
             action="refund",
             service=service,
@@ -467,6 +468,7 @@ async def refund(
             },
             # 환불 id·주문 취소 여부는 사람이 사이트에서 처리한 뒤에야 안다: 싣지 않는다
             response={"payment_id": payment_id, "refund_amount": amount},
+            gate_claim={"refund_amount": amount},
         )
     )
 
@@ -480,7 +482,7 @@ async def coupon_issue(
     picked = {
         k: body.get(k) for k in ("purpose_code", "buyer_id", "count", "unit_value", "campaign_id")
     }
-    return _write(
+    return await _write(
         WriteRequest(
             action="coupon_issue",
             service=service,
@@ -491,6 +493,7 @@ async def coupon_issue(
             summary=picked,
             response=dict(picked),
             task_id_fields=("coupon_id",),
+            gate_claim={k: picked[k] for k in ("buyer_id", "count", "unit_value")},
         )
     )
 
@@ -502,7 +505,7 @@ async def banner_post(
     service = _agent(authorization, "banner_post")
     body = await _json_body(request)
     notice_id = _text(body, "notice_id")
-    return _write(
+    return await _write(
         WriteRequest(
             action="banner_post",
             service=service,
@@ -522,7 +525,7 @@ async def banner_end(
     notice_id: str, authorization: str | None = Header(default=None)
 ) -> dict[str, Any]:
     service = _agent(authorization, "banner_end")
-    return _write(
+    return await _write(
         WriteRequest(
             action="banner_end",
             service=service,
@@ -543,7 +546,7 @@ async def payment_rollback(
     service = _agent(authorization, "payment_rollback")
     body = await _json_body(request)
     to_version = _text(body, "to_version")
-    return _write(
+    return await _write(
         WriteRequest(
             action="payment_rollback",
             service=service,
@@ -561,7 +564,7 @@ async def payment_rollback(
 @router.delete("/api/shop/admin/faults")
 async def fault_release(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     service = _agent(authorization, "fault_release")
-    return _write(
+    return await _write(
         WriteRequest(
             action="fault_release",
             service=service,
@@ -580,7 +583,7 @@ async def claim_result(request: Request, seq: str, authorization: str | None) ->
     service = _agent(authorization, "claim_result")
     body = await _json_body(request)
     body_digest = digest(body)
-    return _write(
+    return await _write(
         WriteRequest(
             action="claim_result",
             service=service,
@@ -625,7 +628,7 @@ async def inquiry_view(request: Request, seq: str, authorization: str | None) ->
     view_digest = body.get("view_digest")
     body_digest = digest(body)
     key_part = view_digest if isinstance(view_digest, str) and view_digest else body_digest[:16]
-    return _write(
+    return await _write(
         WriteRequest(
             action="inquiry_answer",
             service=agent,
