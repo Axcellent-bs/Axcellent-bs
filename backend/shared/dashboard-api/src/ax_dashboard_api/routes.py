@@ -1000,6 +1000,7 @@ async def record_campaign_result(campaign_id: str, body: CampaignResultBody) -> 
     key = (
         f"ui:result:{campaign_id}:{body.period_from}:{body.period_to}:{body.spend_krw}"
         f":{body.gmv_krw}:{body.orders}:{body.coupon_krw}:{body.production_cost_krw}"
+        f":{body.content_category}:{body.format}"
     )
     return ok(
         await marketing_client.call(
@@ -1596,6 +1597,10 @@ async def marketing_campaign_link(
     return ok(await marketing_client.campaign_link_call(campaign_id, body.model_dump()))
 
 
+# 유튜브 영상의 캠페인 연결: 시작한 캠페인 번호 또는 ""(연결 풀기)
+_YOUTUBE_CAMPAIGN = r"^(cmp_[A-Za-z0-9][A-Za-z0-9_-]{0,63})?$"
+
+
 class YoutubeDraftBody(BaseModel):
     """비운 칸은 그대로 둔다. regenerate=true면 AI가 다시 쓴다."""
 
@@ -1605,6 +1610,19 @@ class YoutubeDraftBody(BaseModel):
     tags: list[str] | None = Field(default=None, max_length=15)
     privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
     part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+    # 어느 캠페인(cmp_…) 영상인지(선택). ""면 연결을 푼다. 올린 뒤에도 바꿀 수 있다
+    campaign_id: str | None = Field(default=None, pattern=_YOUTUBE_CAMPAIGN)
+
+
+@router.get("/marketing/campaigns")
+async def marketing_campaigns(limit: int = Query(50, ge=1, le=200)) -> dict:
+    """마케팅이 시작한 캠페인 대장(`list_marketing_campaigns`, read).
+
+    유튜브 칸의 캠페인 고르기와 결과 저장 칸 미리 채우기에 쓴다.
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "캠페인 대장은 실제 모드에서만 된다")
+    return ok(await marketing_client.campaigns_list_call(limit))
 
 
 @router.get("/marketing/youtube/status")
@@ -1659,6 +1677,7 @@ class RequestVideoYoutubeDraftBody(BaseModel):
     description: str | None = Field(default=None, max_length=5000)
     tags: list[str] | None = Field(default=None, max_length=15)
     privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
+    campaign_id: str | None = Field(default=None, pattern=_YOUTUBE_CAMPAIGN)
 
 
 @router.post("/marketing/request-videos/{post_draft_id}/youtube/draft")

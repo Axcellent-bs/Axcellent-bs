@@ -12,9 +12,9 @@
   내용이 같으면
   `already_recorded`로 그대로 돌려주며, 빠진 카테고리·제작비·조회수는 앞서 받은 값을 지우지 않는다.
   그래도 이 대장은 성공한 캠페인을 `recorded_auto`로 닫아 한 번만 보낸다.
-- 사람이 결과를 저장한(`recorded_human`) 캠페인은 자동으로 덮지 않는다. 자동 전송의 광고비는 실제
-  집행액이 아니라 승인 예산이라(광고 플랫폼 연결이 없다)
-  사람이 적은 실제 광고비보다 낮은 신뢰의 값이다.
+- 사람이 결과를 저장한(`recorded_human`) 캠페인은 자동으로 덮지 않는다. 자동 전송의 광고비는 아래
+  "광고비 고르기"대로 광고 숫자 합계 또는 승인 예산이다. 어느 쪽이든 사람이 적은 실제 광고비가
+  이긴다.
   사람이 나중에 저장하면 재무가 그 값으로 덮어쓴다.
 - 취소한 캠페인(`canceled`)은 보내지 않는다.
 - 판매액을 데이터가 아직 못 줘서 재무가 `waiting_revenue`로 답하거나 실패하면 `retry_after_h` 뒤에
@@ -23,10 +23,13 @@
   `CampaignTracker.log(campaign_id)`.
 - 외부 게시·돈이 드는 일이 아니라 재무 장부에 손익을 적는 내부 호출뿐이다(실제 광고는 안 나간다).
 
-- 자동 전송 값 표시(`AUTO_SOURCE`): 재무 `CampaignResultInput.source`(숫자의 출처)에 항상
-  `marketing.auto.approved_budget`을 보낸다(계약은 그대로). 광고비가 승인 예산이라 재무 화면이
-  '예산 기준(잠정)'으로 구분할 수 있다. 사람이 저장하면 `source`를 안 주거나(데이터 값으로 채움)
-  자기 값을 주므로, 재무가 같은 campaign_id를 덮어쓰며 이 값이 사라진다(`source`는 안 잇는다).
+- 광고비 고르기(11/23): 캠페인 기간(시작일~종료일, KST)에 사람이 적은 광고 숫자(`ad_metrics`)가
+  있고, 그 합계 광고비(`totals.spend_krw`)가 있으며 광고비 빈 날짜(`missing_dates`)가 없으면 그
+  합계를 광고비로 보내고 `source`는 `AD_METRICS_SOURCE`(`marketing.auto.ad_metrics`)다. 줄이 없거나
+  광고비를 모르는 날이 섞였거나 광고 숫자를 못 읽으면 지금처럼 승인 예산 + `AUTO_SOURCE`
+  (`marketing.auto.approved_budget`, 재무 화면 '예산 기준(잠정)')를 보낸다. 사람이 저장하면
+  `source`를 안 주거나(데이터 값으로 채움) 자기 값을 주므로, 재무가 같은 campaign_id를 덮어쓰며
+  이 값이 사라진다(`source`는 안 잇는다).
 - 7일 조회수 재확인(11/18): 조회수는 게시 7일 뒤에야 완성돼 종료일 직후 전송엔 3d 등 빠른 값이
   실린다. 영상 캠페인(`format` 있음)은 `recorded_auto` 뒤 하루 한 번 같은 `record_campaign_result`를
   다시 불러(재무는 같은 campaign_id를 덮어써 안전, 내용이 같으면 `already_recorded`) 데이터
@@ -60,6 +63,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
+from ax_contracts.schemas.ad_metrics import GetAdMetricsInput
 from marketing_agent import company_scope
 from marketing_agent.campaign import (
     KST_OFFSET_H,
@@ -79,6 +83,8 @@ ATTEMPTS_ENV = "MARKETING_CAMPAIGN_AUTO_MAX_ATTEMPTS"
 VIEWS_DAYS_ENV = "MARKETING_CAMPAIGN_AUTO_VIEWS_DAYS"
 # 자동 전송의 재무 `source`: 광고비가 승인 예산이라는 표시('예산 기준(잠정)'). 바꾸면 재무와 맞춘다
 AUTO_SOURCE = "marketing.auto.approved_budget"
+# 광고비가 사람이 적은 광고 숫자의 기간 합계라는 표시('광고 숫자 합계'). 바꾸면 재무 화면과 맞춘다
+AD_METRICS_SOURCE = "marketing.auto.ad_metrics"
 VIEWS_RECHECK_H = 24
 CALL_DEADLINE_S = 90
 
@@ -322,6 +328,16 @@ class CampaignTracker:
                 ),
             )
 
+    def list(self, limit: int = 50) -> list[tuple[str, StartedCampaign]]:
+        """이 회사 대장의 (상태, 캠페인). 최근 시작한 것부터."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT status, payload FROM campaign_runs WHERE tenant_id = ?"
+                " ORDER BY started_at DESC, campaign_id LIMIT ?",
+                (self.company_id, max(1, limit)),
+            ).fetchall()
+        return [(status, StartedCampaign.model_validate_json(payload)) for status, payload in rows]
+
     def log(self, campaign_id: str | None = None) -> list[dict[str, Any]]:
         import json
 
@@ -343,8 +359,43 @@ def views_deadline(item: StartedCampaign, cfg: AutoConfig) -> datetime:
     return midnight - timedelta(hours=KST_OFFSET_H) + timedelta(days=cfg.views_days)
 
 
-def _request(item: StartedCampaign, now: datetime, key: str | None = None) -> AgentRequest:
-    """자동 전송 요청. 토큰은 `call_agent`가 마케팅 자기 토큰으로 바꾼다."""
+# 캠페인 → 광고 숫자 기간 합계 광고비(원). 쓸 수 없으면 None(승인 예산을 쓴다)
+AdSpend = Callable[[StartedCampaign], int | None]
+
+
+def ad_metrics_spend(store: Any, item: StartedCampaign) -> int | None:
+    """캠페인 기간(시작일~종료일)에 적은 광고 숫자의 광고비 합계. 줄이 없거나, 광고비를 모르는 날이
+    섞였거나, 읽지 못하면 None. 0원 줄만 있으면 0이다(0은 0, 모름과 다르다)."""
+    from marketing_agent import ad_metrics as _ad
+
+    try:
+        ask = GetAdMetricsInput(
+            campaign_id=item.campaign_id, date_from=item.started_on, date_to=item.ends_on
+        )
+        rows = store.query(ask)
+    except Exception as exc:  # noqa: BLE001 - 광고 숫자를 못 읽으면 승인 예산으로 보낸다
+        _log.warning("캠페인 %s 광고 숫자를 읽지 못함: %s", item.campaign_id, type(exc).__name__)
+        return None
+    if not rows:
+        return None
+    sums = _ad.totals(rows)
+    if sums.spend_krw is None or sums.missing_dates.get("spend_krw"):
+        return None
+    return sums.spend_krw
+
+
+def _request(
+    item: StartedCampaign,
+    now: datetime,
+    key: str | None = None,
+    ad_spend: AdSpend | None = None,
+) -> AgentRequest:
+    """자동 전송 요청. 토큰은 `call_agent`가 마케팅 자기 토큰으로 바꾼다.
+
+    광고 숫자 합계(`ad_spend`)가 있으면 그 값과 `AD_METRICS_SOURCE`,
+    없으면 승인 예산과 `AUTO_SOURCE`.
+    """
+    spend = ad_spend(item) if ad_spend is not None else None
     meta = RequestMeta(
         context_id=f"auto_campaign_{item.campaign_id}",
         token="internal:marketing-auto",
@@ -358,9 +409,9 @@ def _request(item: StartedCampaign, now: datetime, key: str | None = None) -> Ag
             "campaign_id": item.campaign_id,
             "campaign_name": item.campaign_name,
             "channel": item.channel,
-            # 실제 집행액을 모른다(광고 플랫폼 연결 없음). 승인 예산을 넣고 사람이 저장하면 덮는다
-            "spend_krw": item.budget_krw,
-            "source": AUTO_SOURCE,
+            # 광고 숫자 합계가 없으면 실제 집행액을 모른다. 승인 예산을 넣고 사람이 저장하면 덮는다
+            "spend_krw": spend if spend is not None else item.budget_krw,
+            "source": AD_METRICS_SOURCE if spend is not None else AUTO_SOURCE,
             "period_from": item.started_on,
             "period_to": item.ends_on,
             **{
@@ -385,9 +436,10 @@ async def send_one(
     cfg: AutoConfig,
     now: datetime,
     brief_content: BriefContent | None = None,
+    ad_spend: AdSpend | None = None,
 ) -> str:
     """종료된 캠페인 한 건을 재무로 보낸다. 닫힌 상태 이름이나 `retry`를 돌려준다."""
-    request = _request(item, now)
+    request = _request(item, now, ad_spend=ad_spend)
     sent = {
         k: request.input[k]
         for k in ("spend_krw", "source", "period_from", "period_to", "content_category", "format")
@@ -459,11 +511,14 @@ async def recheck_views(
     cfg: AutoConfig,
     now: datetime,
     brief_content: BriefContent | None = None,
+    ad_spend: AdSpend | None = None,
 ) -> str:
     """7일 조회수가 완성될 때까지 같은 결과를 다시 보낸다(재무는 campaign_id로 덮어쓴다)."""
     if tracker.status(item.campaign_id) != RECORDED_AUTO:
         return "skipped"  # 그 사이 사람이 저장하거나 취소했다
-    request = _request(item, now, f"auto:views:{item.campaign_id}:{now.date().isoformat()}")
+    request = _request(
+        item, now, f"auto:views:{item.campaign_id}:{now.date().isoformat()}", ad_spend
+    )
     seven_day: list[bool] = []
     try:
         answer = await record_campaign_result(
@@ -492,6 +547,7 @@ async def auto_record_once(
     cfg: AutoConfig | None = None,
     now: datetime | None = None,
     brief_content: BriefContent | None = None,
+    ad_spend: AdSpend | None = None,
 ) -> int:
     """종료일이 지난 캠페인을 재무로 보낸다. 꺼져 있으면 아무것도 안 한다. 시도 건수를 돌려준다."""
     cfg = cfg or AutoConfig.from_env()
@@ -500,10 +556,10 @@ async def auto_record_once(
     now = now or datetime.now(UTC)
     items = tracker.due(now)
     for item in items:
-        await send_one(tracker, item, cfg, now, brief_content)
+        await send_one(tracker, item, cfg, now, brief_content, ad_spend)
     rechecks = tracker.views_due(now)
     for item in rechecks:
-        await recheck_views(tracker, item, cfg, now, brief_content)
+        await recheck_views(tracker, item, cfg, now, brief_content, ad_spend)
     return len(items) + len(rechecks)
 
 
@@ -518,13 +574,15 @@ RT = Runtime()
 
 
 async def auto_record_loop(
-    tracker: CampaignTracker, brief_content: BriefContent | None = None
+    tracker: CampaignTracker,
+    brief_content: BriefContent | None = None,
+    ad_spend: AdSpend | None = None,
 ) -> None:
     while True:
         cfg = AutoConfig.from_env()  # 환경변수를 매 주기 다시 읽어 재시작 없이 끄고 켠다
         await RT.sleep(cfg.poll_s or 600)
         try:
-            await auto_record_once(tracker, brief_content=brief_content)
+            await auto_record_once(tracker, brief_content=brief_content, ad_spend=ad_spend)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001

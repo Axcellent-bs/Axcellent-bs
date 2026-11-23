@@ -263,3 +263,36 @@ def test_request_video_youtube_draft_and_request_go_to_marketing(
     fake.outcome = "not_found"
     missing = client.post(RYT)
     assert missing.status_code == 404 and "의뢰" in missing.json()["error"]["message"]
+
+
+def test_youtube_campaign_link_and_campaign_list_go_to_marketing(
+    client: TestClient, fake: Fake
+) -> None:
+    """유튜브 칸의 캠페인 고르기(11/23): campaign_id를 그대로 넘기고, ""(연결 풀기)도 넘긴다."""
+    fake.output = {"record_id": "CR-0123456789ab", "youtube": {"campaign_id": "cmp_1"}}
+    assert client.post(f"{YT}/draft", json={"campaign_id": "cmp_1"}).status_code == 200
+    assert fake.calls[-1][1].input == {
+        "record_id": "CR-0123456789ab",
+        "regenerate": False,
+        "campaign_id": "cmp_1",
+    }
+    fake.output = {"post_draft_id": "spd_abc", "youtube": {}}
+    assert client.post(f"{RYT}/draft", json={"campaign_id": ""}).status_code == 200
+    assert fake.calls[-1][1].input["campaign_id"] == ""
+    # 캠페인 번호 모양이 아니면 막는다(의뢰 번호 wr_는 고를 수 없다)
+    assert client.post(f"{YT}/draft", json={"campaign_id": "wr_1"}).status_code == 422
+    fake.status, fake.outcome, fake.output = (
+        TaskStatus.FAILED,
+        "unknown_campaign",
+        {"message": "마케팅이 모르는 캠페인이다: cmp_x"},
+    )
+    refused = client.post(f"{YT}/draft", json={"campaign_id": "cmp_x"})
+    assert refused.status_code == 422 and "cmp_x" in refused.json()["error"]["message"]
+    fake.status, fake.outcome = TaskStatus.COMPLETED, None
+    fake.output = {"items": [{"campaign_id": "cmp_1"}], "total": 1}
+    listed = client.get("/api/dashboard/marketing/campaigns?limit=20")
+    assert listed.status_code == 200 and listed.json()["data"]["total"] == 1
+    assert (fake.calls[-1][1].skill, fake.calls[-1][1].input) == (
+        "list_marketing_campaigns",
+        {"limit": 20},
+    )
