@@ -430,6 +430,181 @@ def test_other_company_cannot_see_or_post_a_request_video(env: dict[str, Any]) -
     assert env["gate"].calls == []
 
 
+# ---------------------------------------------------------------- 릴스 표지(고른 썸네일)
+JPEG = b"\xff\xd8\xff\xe0" + bytes(32)
+
+
+def _with_thumbs(env: dict[str, Any]) -> list[str]:
+    from marketing_agent import creative_thumbnails as ct
+
+    folder = ct._folder(env["rid"])  # noqa: SLF001
+    folder.mkdir(parents=True, exist_ok=True)
+    cands = []
+    for n in (1, 2):
+        data = JPEG + bytes([n])
+        media_id = f"thm_{hashlib.sha256(data).hexdigest()[:12]}"
+        (folder / f"{media_id}.jpg").write_bytes(data)
+        cands.append({"media_id": media_id, "sha256": hashlib.sha256(data).hexdigest()})
+    render = env["store"].get_render(env["rid"])
+    render[ct.PART] = {"status": "done", "candidates": cands}
+    env["store"].set_render(env["rid"], render)
+    return [c["media_id"] for c in cands]
+
+
+def test_record_reel_uses_the_chosen_thumbnail_as_cover(env: dict[str, Any]) -> None:
+    from marketing_agent import creative_thumbnails as ct
+
+    _with_video(env)
+    first, second = _with_thumbs(env)
+    _run(lambda: ip.write_record_draft(env["rid"], FakeLlm, "ctx"))
+    held = _run(lambda: ip.request_record(META, env["rid"], "민지"))
+    params, key = env["gate"].calls[0][1], env["gate"].calls[0][2]
+    assert held["status"] == "awaiting_approval"
+    assert params["cover_media_id"] == first  # 안 고르면 첫 장
+    assert params["cover_token"] == ct.cover_token(env["rid"])
+    assert params["cover_ref"].endswith(f"{first}.jpg")
+
+    # 승인 대기 중에 썸네일을 바꾸면 초안으로 돌아가고 다시 승인받아야 한다
+    picked = ct.select(env["rid"], second, "민지")
+    assert "instagram" in picked["approvals_reset"]
+    back = ip.get(_record(env))
+    assert (back["status"], back["error"], back["key"]) == ("draft", "cover_changed", None)
+
+    again = _run(lambda: ip.request_record(META, env["rid"], "민지"))
+    assert again["status"] == "awaiting_approval"
+    assert env["gate"].calls[-1][1]["cover_media_id"] == second
+    assert env["gate"].calls[-1][2] != key  # 표지가 승인 해시에 들어간다
+    env["gate"].status = "executed"
+    _run(lambda: ip.check_record(META, env["rid"]))
+    done = ip.get(_record(env))
+    assert done["status"] == "done", done
+    assert done["cover"] == {"media_id": second, "applied": True, "reason": None}
+    container = env["graph"].posted(f"/{USER}/media")[0]
+    assert container["cover_url"] == f"https://media.example/{second}.jpg"
+    with pytest.raises(ct.ThumbError, match="cover_locked"):  # 올린 뒤에는 바꾸지 않는다
+        ct.select(env["rid"], first, "민지")
+
+
+def test_record_cover_changed_after_approval_is_not_posted(env: dict[str, Any]) -> None:
+    from marketing_agent import creative_thumbnails as ct
+
+    _with_video(env)
+    first, _ = _with_thumbs(env)
+    _run(lambda: ip.write_record_draft(env["rid"], FakeLlm, "ctx"))
+    _run(lambda: ip.request_record(META, env["rid"], "민지"))
+    (ct._folder(env["rid"]) / f"{first}.jpg").write_bytes(JPEG + b"changed")  # noqa: SLF001
+    env["gate"].status = "executed"
+    _run(lambda: ip.check_record(META, env["rid"]))
+    failed = ip.get(_record(env))
+    assert (failed["status"], failed["error"]) == ("failed", "cover_changed")
+    assert env["graph"].posted(f"/{USER}/media") == []
+
+
+def test_record_without_thumbnails_keeps_the_old_hash_and_no_cover(env: dict[str, Any]) -> None:
+    _with_video(env)
+    _run(lambda: ip.write_record_draft(env["rid"], FakeLlm, "ctx"))
+    _run(lambda: ip.request_record(META, env["rid"], "민지"))
+    params = env["gate"].calls[0][1]
+    assert "cover_token" not in params and "cover_ref" not in params
+    env["gate"].status = "executed"
+    _run(lambda: ip.check_record(META, env["rid"]))
+    done = ip.get(_record(env))
+    assert done["status"] == "done" and "cover" not in done
+    assert "cover_url" not in env["graph"].posted(f"/{USER}/media")[0]
+
+
+def test_request_reel_uses_the_chosen_frame_as_cover(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from marketing_agent import handlers
+    from marketing_agent import request_video_cover as rvc
+
+    async def register(row: Any, *, drafts: Any = None, send: Any = None) -> dict[str, Any]:
+        return {"registered": True}
+
+    monkeypatch.setattr(request_video_publish, "register_published", register)
+    monkeypatch.setattr(handlers.STATE, "sns", env["sns"])
+    linked = _with_request_video(env)
+    covers = env["media"] / "catbooks" / CTX / "med_1" / "covers"
+    covers.mkdir()
+    cands = []
+    for n in (1, 2):
+        data = JPEG + bytes([n])
+        sha = hashlib.sha256(data).hexdigest()
+        path = covers / f"cov_{sha[:12]}.jpg"
+        path.write_bytes(data)
+        ref = sns_media.asset_ref_for(path)
+        cands.append({"media_id": f"cov_{sha[:12]}", "at_s": n, "asset_ref": ref, "sha256": sha})
+    env["sns"].update_meta([linked.model_copy(update={"cover_candidates": cands})])
+    _run(lambda: ip.write_request_draft(env["sns"], "spd_a", FakeLlm, "ctx"))
+    _run(lambda: ip.request_request(META, env["sns"], "spd_a", "민지"))
+    params = env["gate"].calls[0][1]
+    assert (params["cover_media_id"], params["cover_ref"]) == (
+        cands[0]["media_id"],
+        cands[0]["asset_ref"],
+    )
+    assert rvc.approval_waiting("spd_a", None) is True  # 화면이 바꾸기 전에 확인을 묻는다
+
+    picked = rvc.select_cover(env["sns"], "spd_a", cands[1]["media_id"])
+    assert "instagram" in picked["approvals_reset"]
+    assert ip.get(ip.Target("request", "spd_a"))["status"] == "draft"
+
+    _run(lambda: ip.request_request(META, env["sns"], "spd_a", "민지"))
+    env["gate"].status = "executed"
+
+    async def go() -> None:
+        await ip.refresh_requests(META)
+        await ip.wait_idle()
+
+    asyncio.run(go())
+    done = ip.get(ip.Target("request", "spd_a"))
+    assert done["status"] == "done", done
+    assert done["cover"]["media_id"] == cands[1]["media_id"]
+    container = env["graph"].posted(f"/{USER}/media")[0]
+    assert container["cover_url"] == f"https://media.example/{cands[1]['media_id']}.jpg"
+    with pytest.raises(rvc.CoverError, match="cover_locked"):
+        rvc.select_cover(env["sns"], "spd_a", cands[0]["media_id"])
+
+
+def test_reel_cover_skips_the_feed_aspect_check_and_uses_the_signed_host() -> None:
+    """릴스 표지는 9:16이어도 된다(피드 이미지 비율 검사는 표지에 쓰지 않는다)."""
+
+    class Host:
+        def __init__(self) -> None:
+            self.sent: list[bytes] = []
+
+        async def upload_jpeg(self, content: bytes) -> str:
+            self.sent.append(content)
+            return "https://bucket.example/signed?X-Amz-Expires=3600"
+
+    host = Host()
+    adapter = GraphInstagramAdapter(access_token=TOKEN, user_id=USER, media_host=host)  # type: ignore[arg-type]
+    return_value: dict[str, str] = {}
+
+    async def go(ref: str) -> None:
+        return_value["url"] = await adapter._cover_url(ref)  # noqa: SLF001
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        media = Path(tmp)
+        tall = media / "c" / "cov_tall.jpg"
+        tall.parent.mkdir()
+        tall.write_bytes(JPEG)
+        mp = pytest.MonkeyPatch()
+        mp.setenv(sns_media.MEDIA_DIR_ENV, str(media))
+        try:
+            asyncio.run(go("c/cov_tall.jpg"))
+            assert return_value["url"].startswith("https://bucket.example/") and host.sent == [JPEG]
+            tall.write_bytes(b"PNG-not-jpeg")
+            from marketing_agent.sns_publish.instagram import IgApiError
+
+            with pytest.raises(IgApiError):
+                asyncio.run(go("c/cov_tall.jpg"))
+        finally:
+            mp.undo()
+
+
 # ---------------------------------------------------------------- 로그인 연결 어댑터
 @pytest.fixture
 def login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

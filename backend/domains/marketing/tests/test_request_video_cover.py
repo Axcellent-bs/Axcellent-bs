@@ -284,6 +284,83 @@ def test_skill_maps_refusals(env: dict[str, Any]) -> None:
     assert done.status == TaskStatus.COMPLETED and done.output["cover_media_id"] == _ids(env)[2]
 
 
+# ---------------------------------------------------------------- 옛 영상 채우기
+def test_backfill_reports_missing_ffmpeg_and_retries_later(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cover, "_tried", {})
+    _labeled(env)
+    calls: list[str] = []
+    now = [100.0]
+
+    def maker(store: sns.SnsStore, pid: str) -> dict[str, Any]:
+        calls.append(pid)
+        return _make(env)
+
+    def run(missing: str | None) -> tuple[int, dict[str, str]]:
+        return cover.backfill(
+            env["sns"], [DRAFT_ID], maker=maker, preflight=lambda: missing, clock=lambda: now[0]
+        )
+
+    assert run("ffmpeg_missing") == (0, {DRAFT_ID: "ffmpeg_missing"})  # 조용히 넘기지 않는다
+    assert calls == []
+    now[0] += 60
+    assert run(None) == (0, {DRAFT_ID: "ffmpeg_missing"})  # 10분 안에는 다시 시도하지 않는다
+    now[0] += cover.RETRY_AFTER_S
+    assert run(None) == (1, {})  # ffmpeg를 깔고 나면 재시작 없이 만든다
+    assert calls == [DRAFT_ID] and len(env["sns"].get(DRAFT_ID).cover_candidates) == 3
+
+
+def test_backfill_makes_at_most_two_per_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cover, "_tried", {})
+    calls: list[str] = []
+
+    def maker(store: Any, pid: str) -> dict[str, Any]:
+        calls.append(pid)
+        return {"covers_skipped": "frame_grab_failed"} if pid == "b" else {"covers": 3}
+
+    made, errors = cover.backfill(
+        None,
+        ["a", "b", "c"],
+        maker=maker,
+        preflight=lambda: None,  # type: ignore[arg-type]
+    )
+    assert (made, errors, calls) == (1, {"b": "frame_grab_failed"}, ["a", "b"])
+
+
+def test_listing_old_videos_backfills_covers_and_shows_the_reason(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cover, "_tried", {})
+    _labeled(env)
+    env["sns"].update_meta(
+        [
+            env["sns"]
+            .get(DRAFT_ID)
+            .model_copy(update={"media_check": {"verdict": "approved", "publishable": True}})
+        ]  # fmt: skip
+    )
+    monkeypatch.setattr(cover, "tools_missing", lambda: "ffmpeg_missing")
+    req = AgentRequest(meta=META, skill="list_request_videos", input={})
+    got = asyncio.run(handlers.list_request_videos_skill(req))
+    item = got.output["items"][0]
+    assert (item["covers"], item["covers_error"]) == ([], "ffmpeg_missing")
+
+    monkeypatch.setattr(cover, "_tried", {})
+    monkeypatch.setattr(cover, "tools_missing", lambda: None)
+    frames, real = Frames(), cover.make_covers
+    monkeypatch.setattr(
+        cover,
+        "make_covers",
+        lambda store, pid: real(
+            store, pid, grab=frames.grab, stats=frames.stats, duration=lambda _p: 10.0
+        ),  # fmt: skip
+    )
+    got = asyncio.run(handlers.list_request_videos_skill(req))
+    item = got.output["items"][0]
+    assert len(item["covers"]) == 3 and "covers_error" not in item, item
+
+
 # ---------------------------------------------------------------- Instagram 승인
 class Gate:
     def __init__(self) -> None:

@@ -4,6 +4,7 @@ import { useAuthedMedia } from "@/lib/authedMedia";
 import { InstagramPanel } from "./InstagramPanel";
 import { HIGGSFIELD_URL, acceptFor, isVideoPart, pickDropped, storyboardVideoPrompt, uploadProblem } from "@/lib/higgsfieldWeb";
 import { ThumbnailPicker } from "./ThumbnailPicker";
+import { chosenThumb, thumbUrl } from "@/lib/creativeThumbnails";
 import { YoutubePanel } from "./YoutubePanel";
 import type { StoryboardResult } from "@/lib/storyboard";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
@@ -184,6 +185,8 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   }, [pending, load]);
 
   const video = render.video;
+  const thumb = chosenThumb(render.thumbnails); // 인스타 릴스 표지 = 고른 썸네일(안 고르면 첫 장)
+  const reelCover = thumb ? { url: thumbUrl(recordId, thumb.media_id), picked: thumb.picked } : null;
   const canAsk = render.board_image?.status === "done" && !["awaiting_approval", "running", "done"].includes(video?.status ?? "");
   const ask = async () => {
     setAsking(true);
@@ -222,12 +225,12 @@ export function RenderPanel({ recordId }: { recordId: string }) {
       <div className="border-t border-ink-100 pt-3">
         <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError} />
       </div>
-      <ThumbnailPicker recordId={recordId} state={render.thumbnails} youtubeStatus={render.youtube?.status}
+      <ThumbnailPicker recordId={recordId} state={render.thumbnails} youtubeStatus={render.youtube?.status} instagramStatus={render.instagram?.status}
         hasVideo={render.video?.status === "done" || render.final_video?.status === "done"} onChanged={() => void load()} />
       <YoutubePanel recordId={recordId} youtube={render.youtube} hasVideo={render.video?.status === "done"}
         hasFinal={render.final_video?.status === "done"} onChanged={() => void load()} />
       <InstagramPanel recordId={recordId} instagram={render.instagram} hasVideo={render.video?.status === "done"}
-        hasFinal={render.final_video?.status === "done"} onChanged={() => void load()} />
+        hasFinal={render.final_video?.status === "done"} cover={reelCover} onChanged={() => void load()} />
       {error && <p className="text-xs text-accent" role="alert">{error}</p>}
     </section>
   );

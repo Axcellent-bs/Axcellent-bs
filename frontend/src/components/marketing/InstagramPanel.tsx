@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { useAuthedMedia } from "@/lib/authedMedia";
 import { parseHashtags } from "@/lib/instagramCaption";
 import {
   INSTAGRAM_STATUS_KO, instagramErrorKo, requestInstagramPost, requestRequestVideoInstagramPost, safePermalink,
@@ -26,8 +27,22 @@ function api(t: Target) {
   return { save: (e: InstagramDraftEdits) => saveInstagramDraft(id, e), request: () => requestInstagramPost(id) };
 }
 
-export function InstagramPanel(props: Target & { instagram?: InstagramPostState | null; onChanged: () => void }) {
-  const { instagram, onChanged } = props;
+/** 릴스 표지: 고른 썸네일(안 골랐으면 첫 장). 주소는 사람 토큰이 필요해 useAuthedMedia로 읽는다 */
+export interface ReelCover { url: string | null; picked: boolean }
+
+function CoverLine({ cover }: { cover: ReelCover }) {
+  const { src, failed } = useAuthedMedia(cover.url);
+  return (
+    <div className="flex items-center gap-2 text-xs text-ink-700" aria-label="릴스 표지">
+      {src ? <img src={src} alt="릴스 표지로 쓸 썸네일" className="h-12 w-auto rounded border border-ink-100 object-cover" />
+        : <span className="grid h-12 w-8 place-items-center rounded border border-ink-100 bg-ink-50 text-[10px] text-ink-500">{failed ? "없음" : "…"}</span>}
+      <span>표지: 고른 썸네일{cover.picked ? "" : " (안 골라서 첫 장)"} · 썸네일을 바꾸면 승인을 다시 받아요</span>
+    </div>
+  );
+}
+
+export function InstagramPanel(props: Target & { instagram?: InstagramPostState | null; cover?: ReelCover | null; onChanged: () => void }) {
+  const { instagram, onChanged, cover } = props;
   const forRequest = props.requestVideoId !== undefined;
   const hasVideo = forRequest || !!props.hasVideo;
   const hasFinal = !forRequest && !!props.hasFinal;
@@ -94,6 +109,7 @@ export function InstagramPanel(props: Target & { instagram?: InstagramPostState 
               </label>
             )}
           </div>
+          {cover?.url && <CoverLine cover={cover} />}
           {!locked && (
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" className="btn-ghost text-xs" disabled={busy !== null} onClick={() => void run("save", () => save(edits()))}>{busy === "save" ? "저장 중…" : "초안 저장"}</button>

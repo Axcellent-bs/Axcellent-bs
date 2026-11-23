@@ -2,7 +2,7 @@
 // 선택 상태(체크·눌러 둔 것) · [이걸로 정하기] · 바꾸기 전 확인 상자 · ?request= 스크롤 표시 · 주소.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { COVER_CONFIRM_KO, VIDEO_NOT_FOUND_KO, canCommitCover, coverCells, focusDraftId, needsCoverConfirm, type RequestVideo } from "./requestVideoView.ts";
+import { COVER_CONFIRM_KO, VIDEO_NOT_FOUND_KO, canCommitCover, coverCells, coverErrorKo, focusDraftId, needsCoverConfirm, type RequestVideo } from "./requestVideoView.ts";
 
 const A = "cov_aaaaaaaaaaaa";
 const B = "cov_bbbbbbbbbbbb";
@@ -52,4 +52,11 @@ test("?request= 스크롤 표시: 그 의뢰의 가장 최근 영상 하나, 없
   assert.equal(focusDraftId(items, "wr_cccccccccc"), null);
   assert.equal(focusDraftId(items, null), null);
   assert.equal(VIDEO_NOT_FOUND_KO, "이 의뢰의 영상을 아직 찾지 못했어요. 영상 제작이 끝났는지 의뢰 진행을 확인해 주세요.");
+});
+
+test("후보를 못 만든 사유: ffmpeg가 없으면 이유를 보여 준다, 모르는 코드도 숨기지 않는다", () => {
+  assert.match(coverErrorKo("ffmpeg_missing") ?? "", /ffmpeg가 없어/);
+  assert.match(coverErrorKo("ffprobe_missing") ?? "", /ffprobe/);
+  assert.equal(coverErrorKo("weird_code"), "썸네일 후보를 만들지 못했어요 (weird_code)");
+  assert.equal(coverErrorKo(null), null);
 });

@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router";
 import { Skeleton } from "@/components/finance/bits";
 import { useAuthedMedia } from "@/lib/authedMedia";
 import { shortDateTime } from "@/lib/format";
-import { listRequestVideos, requestVideoPreviewUrl } from "@/lib/requestVideos";
+import { listRequestVideos, requestVideoCoverUrl, requestVideoPreviewUrl } from "@/lib/requestVideos";
 import { AI_LABEL_NOTE_KO, REQUEST_VIDEOS_PATH, VIDEOS_EMPTY_KO, VIDEO_NOT_FOUND_KO, canUploadToYoutube, durationKo, focusDraftId, requestFilterOf, sortForRequest, statusKo, videoPane, type RequestVideo } from "@/lib/requestVideoView";
 import { CoverPicker } from "./CoverPicker";
 import { InstagramPanel } from "./InstagramPanel";
@@ -51,7 +51,8 @@ function Item({ v, focus, onChanged }: { v: RequestVideo; focus: boolean; onChan
       {canUploadToYoutube(v)
         ? <>
           <YoutubePanel requestVideoId={v.post_draft_id} youtube={v.youtube} onChanged={onChanged} />
-          <InstagramPanel requestVideoId={v.post_draft_id} instagram={v.instagram} onChanged={onChanged} />
+          <InstagramPanel requestVideoId={v.post_draft_id} instagram={v.instagram} onChanged={onChanged}
+            cover={v.cover_media_id ? { url: requestVideoCoverUrl(v.post_draft_id, v.cover_media_id), picked: v.cover_picked === true } : null} />
         </>
         : <p className="text-ink-500">AI 표시가 입혀진 뒤에 회사 유튜브·인스타그램에 올릴 수 있어요.</p>}
     </li>

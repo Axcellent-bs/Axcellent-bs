@@ -15,6 +15,9 @@
 - 고르기(`select_cover`): 후보 안의 값만 받는다. 고르면 `cover_media_id`와 `cover_rev`(+1)를 적는다.
   승인 대기·승인 뒤에 바꾸면 그 승인을 무효로 한다(Instagram 대기 건은 `cover_changed`로 닫고,
   유튜브는 초안 상태로 되돌린다). 이미 올라간(게시 중·게시됨·올리는 중·올림) 영상은 바꾸지 않는다
+- 옛 영상(`backfill`): 기능이 생기기 전에 만든 의뢰 영상은 목록을 읽을 때 후보가 없으면 한 번
+  만든다(읽을 때마다 최대 2건). ffmpeg·ffprobe가 없거나 실패하면 사유(`covers_error`)를 목록에
+  붙여 화면에 보이고, 10분 뒤 다시 시도한다
 - 기본값: 고르지 않으면 첫 후보. 승인 요청 전에 `ensure_cover`가 초안에 적는다
 - 승인 해시(`cover_token`): `media_id:파일 sha256:cover_rev`. Instagram(`publish_sns`)·유튜브
   (`publish_youtube`) 승인 해시에 들어가고, 게시 직전에 지금 값으로 다시 만들어 맞춘다
@@ -25,7 +28,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
+import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -213,9 +218,7 @@ def make_covers(
     if prepared is None:
         return {"covers_skipped": "label_missing"}  # 라벨 없는 영상이면 후보를 만들지 않는다
     labeled = (root / prepared["asset_ref"]).resolve()
-    if draft.cover_candidates and all(
-        _candidate_ok(root, c) for c in draft.cover_candidates
-    ):
+    if draft.cover_candidates and all(_candidate_ok(root, c) for c in draft.cover_candidates):
         return {"covers": len(draft.cover_candidates), "covers_reused": True}
     label = _label_record(labeled)
     if label is None:
@@ -372,6 +375,7 @@ def _request_draft(store: SnsStore, post_draft_id: str) -> SnsPostDraft:
 
 def select_cover(store: SnsStore, post_draft_id: str, media_id: str) -> dict[str, Any]:
     """사람이 고른 후보를 적는다. 승인 대기·승인 뒤면 그 승인을 무효로 한다."""
+    from marketing_agent import instagram_post as _ig
     from marketing_agent import request_video_youtube as _rvy
     from marketing_agent.sns_publish import pending as pend
     from marketing_agent.sns_publish import publisher
@@ -387,9 +391,12 @@ def select_cover(store: SnsStore, post_draft_id: str, media_id: str) -> dict[str
     except pend.PendingStorageError as error:
         raise CoverError("storage_error") from error
     youtube = _rvy.get(post_draft_id)
-    if any(r.status in (pend.PUBLISHING, pend.PUBLISHED) for r in rows) or youtube.get(
-        "status"
-    ) in ("uploading", "done"):
+    reel = _ig.Target("request", post_draft_id)
+    if (
+        any(r.status in (pend.PUBLISHING, pend.PUBLISHED) for r in rows)
+        or youtube.get("status") in ("uploading", "done")
+        or _ig.cover_locked(reel)
+    ):
         raise CoverError("cover_locked")  # 이미 올라간 영상의 썸네일은 여기서 바꾸지 않는다
     store.update_meta(
         [draft.model_copy(update={"cover_media_id": media_id, "cover_rev": draft.cover_rev + 1})]
@@ -402,6 +409,8 @@ def select_cover(store: SnsStore, post_draft_id: str, media_id: str) -> dict[str
             reset.append("instagram")
     if _rvy.reset_for_cover(post_draft_id):
         reset.append("youtube")
+    if _ig.reset_for_cover(reel):  # 인스타 릴스 올리기(표지)도 다시 승인받아야 한다
+        reset.append("instagram")
     return {
         "post_draft_id": post_draft_id,
         "cover_media_id": media_id,
@@ -415,10 +424,13 @@ def approval_waiting(post_draft_id: str, youtube: dict[str, Any] | None) -> bool
     """승인 대기·승인됨(게시 전)인 게시·유튜브 요청이 있나.
 
     화면은 참이면 바꾸기 전에 확인을 묻는다."""
+    from marketing_agent import instagram_post as _ig
     from marketing_agent.sns_publish import pending as pend
     from marketing_agent.sns_publish import publisher
 
     if (youtube or {}).get("status") == "awaiting_approval":
+        return True
+    if _ig.awaiting(_ig.Target("request", post_draft_id)):
         return True
     try:
         rows = publisher.store().with_draft(post_draft_id)
@@ -440,8 +452,69 @@ def cover_file(store: SnsStore, post_draft_id: str, media_id: str) -> dict[str, 
     return None
 
 
+# ---------------------------------------------------------------- 옛 영상 채우기
+BACKFILL_PER_READ = 2  # 목록을 한 번 읽을 때 새로 만드는 영상 수(읽기가 너무 느려지지 않게)
+RETRY_AFTER_S = 600.0  # 실패한 영상은 10분 뒤 다시 시도(ffmpeg를 깐 뒤 재시작 없이 풀리게)
+_tried: dict[str, tuple[float, str]] = {}  # post_draft_id → (시도 시각, 실패 사유 또는 "")
+
+
+def tools_missing() -> str | None:
+    """후보를 만들 도구가 서버에 없으면 그 사유(`ffmpeg_missing`·`ffprobe_missing`)."""
+    if shutil.which(ffmpeg_bin()) is None:
+        return "ffmpeg_missing"
+    if shutil.which("ffprobe") is None:
+        return "ffprobe_missing"
+    return None
+
+
+def backfill(
+    store: SnsStore,
+    post_draft_ids: Sequence[str],
+    *,
+    maker: Callable[[SnsStore, str], dict[str, Any]] | None = None,
+    preflight: Callable[[], str | None] | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[int, dict[str, str]]:
+    """후보 없는 의뢰 영상(기능이 생기기 전에 만든 영상)에 후보를 한 번 만든다(ffmpeg, 크레딧 0).
+
+    결과는 (새로 만든 영상 수, {post_draft_id: 실패 사유}). 실패는 조용히 넘기지 않고
+    화면에 보이도록 사유를 돌려준다. 같은 영상은 `RETRY_AFTER_S` 안에 다시 시도하지 않는다."""
+    maker = maker or make_covers
+    preflight = preflight or tools_missing
+    now = clock()
+    errors: dict[str, str] = {}
+    made = ran = 0
+    for pid in post_draft_ids:
+        tried = _tried.get(pid)
+        if tried is not None and now - tried[0] < RETRY_AFTER_S:
+            if tried[1]:
+                errors[pid] = tried[1]
+            continue
+        if ran >= BACKFILL_PER_READ:
+            continue  # 다음에 읽을 때 만든다
+        missing = preflight()
+        if missing is not None:
+            _tried[pid] = (now, missing)
+            errors[pid] = missing
+            continue
+        ran += 1
+        try:
+            out = maker(store, pid)
+        except Exception as error:  # noqa: BLE001 - 사유만 남기고 목록 읽기는 막지 않는다
+            out = {"covers_skipped": type(error).__name__}
+        reason = str(out.get("covers_skipped") or "")
+        _tried[pid] = (now, reason)
+        if reason:
+            errors[pid] = reason
+        elif out.get("covers") and not out.get("covers_reused"):
+            made += 1
+    return made, errors
+
+
 __all__ = [
+    "BACKFILL_PER_READ",
     "CoverError",
+    "backfill",
     "cover_file",
     "cover_token",
     "current_cover",

@@ -68,7 +68,10 @@ AI_TEXT = "AI로 만든 썸네일입니다 (Higgsfield)"
 NO_TEXT = "No text, no letters, no captions, no logos, no watermark."
 NEGATIVE = "text, letters, words, captions, watermark, logo, blurry, low quality"
 # 이미 올라간 영상이면 썸네일을 바꾸지 않는다(유튜브 올리는 중·올림, 인스타 게시 중·게시됨)
-LOCKED = {"youtube": ("uploading", "done"), "instagram": ("publishing", "published", "done")}
+LOCKED = {
+    "youtube": ("uploading", "done"),
+    "instagram": ("posting", "publishing", "published", "done"),
+}
 _ERRORS = (McpError, McpAuthError, _render.RenderError, httpx.HTTPError, OSError, ValueError)
 
 
@@ -688,10 +691,14 @@ def ensure_cover(record_id: str) -> None:
 
 
 def _reset_approvals(record_id: str) -> list[str]:
-    """썸네일이 바뀌면 승인 대기 중인 유튜브 올리기를 초안으로 되돌린다(다시 승인받아야 한다)."""
+    """썸네일이 바뀌면 승인 대기 중인 유튜브·인스타 올리기를 초안으로 되돌린다(다시 승인받는다)."""
+    from marketing_agent import instagram_post as _ig
     from marketing_agent import youtube as _yt
 
-    return ["youtube"] if _yt.reset_for_cover(record_id) else []
+    reset = ["youtube"] if _yt.reset_for_cover(record_id) else []
+    if _ig.reset_for_cover(_ig.Target("record", record_id)):
+        reset.append("instagram")
+    return reset
 
 
 def select(record_id: str, media_id: str, who: str | None) -> dict[str, Any]:
