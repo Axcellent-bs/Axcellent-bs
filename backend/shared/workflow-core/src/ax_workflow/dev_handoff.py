@@ -22,14 +22,17 @@ import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.client import call_agent
 from ax_agent_template.services import BY_ID
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
+from ax_contracts.schemas.planning import HandoffKnownInput, HandoffKnownOutput
 
 START_DEV = "start_dev"
 RECEIVE_DEV_RESULT = "receive_dev_result"
+# 받는 쪽에 넘기기를 받았는지 묻는다 (read, 기획·개발 둘 다 받는다). 다시 켰을 때 맞추기가 쓴다
+HANDOFF_KNOWN = "handoff_known"
 ROLES = ("planning", "dev")
 # 개발 AI 대화가 기획에 넘긴 변경 요청의 source_ref 머리 (뒤에 대화 id). 기획은 이 요청을
 # 간단 요청·자동 확정으로 돌리지 않고 사람이 기획서를 확정해야 개발로 넘긴다 (11/09)
@@ -147,3 +150,31 @@ async def send_to_service(
         return SendResult("보냄", out.status.value, out.outcome or "")
     text = f"보내지 못함 ({out.status.value} {out.outcome or ''})".strip()
     return SendResult(text, out.status.value, out.outcome or "")
+
+
+# (받는 쪽 역할, tenant_id, 멱등 키들) → 받는 쪽이 반영한 키 (묻지 못하면 None)
+KnownAsker = Callable[[str, str, list[str]], Awaitable[list[str] | None]]
+
+
+async def ask_known(peer: str, tenant_id: str, keys: list[str]) -> list[str] | None:
+    """받는 쪽(`peer`: planning·dev)에 keys 중 반영한 것을 한 번 묻는다 (`handoff_known`, read).
+
+    답이 없거나 깨졌으면 None (부르는 쪽은 받았다는 기록대로 건너뛴다)."""
+    meta = RequestMeta(
+        context_id=f"handoff_known:{peer}",
+        tenant_id=tenant_id,
+        token="replaced-by-call_agent",
+        path=[],
+        deadline=datetime.now(UTC) + timedelta(seconds=CALL_TIMEOUT_SECONDS),
+    )
+    body = HandoffKnownInput(keys=keys).model_dump(mode="json")
+    try:
+        out = await call_agent(peer, AgentRequest(meta=meta, skill=HANDOFF_KNOWN, input=body))
+    except Exception:  # noqa: BLE001 - 토큰 없음 등. 묻지 못한 것으로 본다
+        return None
+    if out.status != TaskStatus.COMPLETED:
+        return None
+    try:
+        return HandoffKnownOutput.model_validate(out.output).known
+    except ValidationError:
+        return None

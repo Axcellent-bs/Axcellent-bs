@@ -33,6 +33,7 @@ MEDIA_TIMEOUT_S = (
     300.0  # 영상 제작은 공급자가 몇십 초~몇 분 걸린다(마케팅이 긴 작업으로 바뀌기 전까지)
 )
 HUMAN_GRADE = "C"  # 총괄이 사람 승인을 먼저 받는 등급(`human_gate`가 있는 단계도 같다)
+BRAND_CHARACTER_KEY = "brand_character_record_id"  # 홍보 영상에 쓸 회사 대표 캐릭터 (11/23)
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,9 @@ class TaskStep:
     on_missing: str = "skip"
     # 이 단계 호출에 기다리는 시간(초). 없으면 실행기 기본값(30초). 영상 제작처럼 오래 걸리는 일용
     timeout_s: float | None = None
+    # 의뢰 기록에서 값이 있으면 입력에 그대로 더할 칸 이름(11/23 홍보 영상: 사람이 고른 회사 대표
+    # 캐릭터 `brand_character_record_id`). 사람이 화면에서 정한 번호만 넣는다(고객 글이 아니다)
+    row_input: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -159,6 +163,9 @@ PROMO_VIDEO = TaskDef(
         TaskStep("confirm", None, "human_check", "사람 확인", None, after=("plan",), kind="human"),
         # 사람이 제작안을 확인한 뒤: 마케팅이 제작안으로 SNS 초안·장면 템플릿을 정하고(읽기),
         # 그 결과(`generate_media_input`)를 그대로 영상 제작(B)에 넘긴다
+        # 11/23: 의뢰자가 회사 대표 캐릭터를 골랐으면 그 번호를 같이 넘긴다. 마케팅이 의뢰용 제작
+        # 기록(이미지 시트·스토리보드)을 만들고 그 번호(`creative_record_id`)가 이 단계 결과 번호다.
+        # 그때 영상 제작은 캐릭터 경로(그림 B + 영상 C 사람 승인)이고, 없으면 지금 그대로다
         TaskStep(
             "prepare",
             "marketing",
@@ -170,6 +177,8 @@ PROMO_VIDEO = TaskDef(
             carry_from="plan",
             carries="generate_media_input",
             on_missing="fail",
+            ref_key="creative_record_id",
+            row_input=(BRAND_CHARACTER_KEY,),
         ),
         TaskStep(
             "make",
@@ -394,6 +403,8 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "carry_from": s.carry_from,
             "on_missing": s.on_missing,
             "timeout_s": s.timeout_s,
+            # 의뢰 기록 칸을 입력에 더하는 단계만 둔다(다른 일의 계획 모양은 그대로)
+            **({"row_input": list(s.row_input)} if s.row_input else {}),
         }
         for s in task.steps
     ]

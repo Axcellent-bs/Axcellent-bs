@@ -109,6 +109,7 @@ class GraphInstagramAdapter:
         carousel_enabled: bool = False,
     ) -> None:
         self.supports_carousel = carousel_enabled
+        self.supports_cover = True  # 릴스 컨테이너의 `cover_url`(JPEG 공개 주소)
         self._media_host = media_host
         self._token = access_token
         self._user_id = user_id
@@ -279,6 +280,8 @@ class GraphInstagramAdapter:
             else:
                 params["video_url"] = self.public_media_url(request.media_ref)
             params["share_to_feed"] = "true" if request.share_to_feed else "false"
+            if request.cover_ref:  # 의뢰 영상 썸네일(AI 표시가 든 JPEG)
+                params["cover_url"] = await self._image_url(request.cover_ref)
         body = await self._request("POST", f"{self._user_id}/media", params=params)
         container_id = body.get("id")
         if not isinstance(container_id, str) or not container_id:

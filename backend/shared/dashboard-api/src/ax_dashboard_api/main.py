@@ -30,6 +30,7 @@ from ax_dashboard_api.accounts import router as accounts_router
 from ax_dashboard_api.connection_keys import router as connection_keys_router
 from ax_dashboard_api.cost_limit_routes import router as cost_limit_router
 from ax_dashboard_api.envelope import SessionCompanyMiddleware, install_error_handlers, is_mock
+from ax_dashboard_api.higgsfield_mcp_oauth import router as higgsfield_mcp_router
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
 from ax_dashboard_api.routes import router
 from ax_dashboard_api.secret_routes import router as secret_router
@@ -154,6 +155,8 @@ app.include_router(accounts_router)
 app.include_router(public_info.router)
 app.include_router(instagram_radar_router)
 app.include_router(youtube_oauth_router)
+# 회사 Higgsfield 계정 연결(원격 MCP + OAuth, 구독 크레딧). 콜백만 토큰 없이(auth.PUBLIC_ROUTES)
+app.include_router(higgsfield_mcp_router)
 app.include_router(tool_connections.router)
 # 알림 받는 주소: 고객사 판매 서버가 회사 키로 이벤트를 보낸다 (사람 토큰 대신 회사 키)
 app.include_router(shop_events.router)

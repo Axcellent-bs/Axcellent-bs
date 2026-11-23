@@ -205,7 +205,8 @@ AI가 shop-api(→ 변환기)에 보내는 쓰기는 아래가 전부다(`backen
       "claim_id": "id", "order_id": "booking_code", "status": "status",
       "type": "const:cancel", "reason": "const:other", "description": "reason",
       "buyer_id": "order.member_id", "customer_name": "order.contact.name",
-      "created_at": "created_at"
+      "created_at": "created_at",
+      "site_refund_amount": "refund", "site_fee": "fee", "site_fee_rate": "fee_rate"
     },
     "values": { "status": { "requested": "requested", "done": "closed", "rejected": "closed" } }
   }
@@ -232,6 +233,8 @@ AI가 shop-api(→ 변환기)에 보내는 쓰기는 아래가 전부다(`backen
   }
 }
 ```
+
+사이트 규칙 환불 (11/23 결정): 신청 짝의 선택 칸 `site_refund_amount`·`site_fee`·`site_fee_rate`(누비투어 `refund`·`fee`·`fee_rate`)를 받은함 줄에 옮긴다. 고객지원은 사이트 예상 환불액을 판정·환불 승인 금액으로 쓴다(책 쇼핑몰 규칙 = 받은 금액 전액이 아니라). 그래서 safety 실행 기록 `params.refund_amount` = 관문 대조 금액 = 결정 본문 `refund_amount` = 사이트 규칙 환불액이고, 누비투어 수수료(받은 금액 − 환불 금액)도 규칙 수수료 그대로다. 사이트 환불액이 받은 금액 기준 환불 가능액보다 크면 그 금액으로 막고 사람 검토(`SITE_REFUND_OVER_PAID`)로 넘긴다. 보류 카드 요약에 "사이트 규칙: 수수료율·수수료·환불"이 붙는다.
 
 시험 고정 파일: `backend/shared/dashboard-api/tests/site_adapter/fixtures/nubi_inboxes.json`·`nubi_writes.json`·`nubi_cancellations_p1.json`·`_p2.json`.
 

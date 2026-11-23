@@ -27,6 +27,8 @@ from ax_contracts.schemas import (
     RelatedPr,
     RollbackDeploymentParams,
     SuspectDeployment,
+    VerifyDeployRequestInput,
+    VerifyDeployRequestOutput,
     VerifyRecoveryInput,
     VerifyRecoveryOutput,
     VerifyRollbackTargetInput,
@@ -152,6 +154,35 @@ def test_verify_rollback_target() -> None:
     assert answer.related_prs[0].pr_number == 42
     with pytest.raises(ValidationError):
         VerifyRollbackTargetOutput.model_validate({"approved": True, "reason_code": "because"})
+
+
+def test_verify_deploy_request() -> None:
+    ask = VerifyDeployRequestInput.model_validate(
+        {
+            "request_id": "DEP-3.1a2b3c4d",
+            "service": "shop-api",
+            "version": "v2.5.0",
+            "approved_by": "예진",
+        }
+    )
+    assert ask.request_id == "DEP-3.1a2b3c4d"
+    ok = VerifyDeployRequestOutput.model_validate(
+        {"approved": True, "reason_code": "deploy_approved", "deployment_id": "DEP-3"}
+    )
+    assert ok.deployment_id == "DEP-3"
+    no = VerifyDeployRequestOutput.model_validate(
+        {"approved": False, "reason_code": "approver_mismatch"}
+    )
+    assert no.deployment_id is None
+    for bad in (
+        {"approved": True, "reason_code": "because"},
+        {"approved": True, "reason_code": "target_mismatch"},  # 거절 이유인데 승인
+        {"approved": False, "reason_code": "deploy_approved"},
+    ):
+        with pytest.raises(ValidationError):
+            VerifyDeployRequestOutput.model_validate(bad)
+    with pytest.raises(ValidationError):
+        VerifyDeployRequestInput.model_validate({"request_id": "", "service": "a", "version": "b"})
 
 
 def test_infra_diagnose_and_rollback() -> None:

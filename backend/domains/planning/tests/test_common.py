@@ -41,7 +41,10 @@ def test_agent_card_format_and_served() -> None:
     chat = {f"planning_chat_{x}" for x in ("send", "list", "get", "close", "remove")}
     rest = {"receive_dev_result", "request_release_check"}
     notes = {"receive_improvement_note"}  # 총괄이 보낸 진단을 받는 공통 skill (11/18)
-    assert set(skills) == intake | proposals | chat | rest | notes
+    resync = {"handoff_known"}  # 다시 켰을 때 맞추기: 개발이 넘긴 것을 받았는지 (read, 11/23)
+    assert set(skills) == intake | proposals | chat | rest | notes | resync
+    assert skills["handoff_known"].grade == "read"
+    assert skills["handoff_known"].allowed_requesters == ["dev"]
     for name in chat:
         assert skills[name].allowed_requesters == ["dashboard-api"], name
     assert skills["request_release_check"].allowed_requesters == ["dev"]
@@ -59,6 +62,7 @@ def test_agent_card_format_and_served() -> None:
     assert withdraw.allowed_requesters == skills["create_ticket"].allowed_requesters
     assert skills["receive_dev_result"].allowed_requesters == ["dev"]
     reads = {"planning_chat_list", "planning_chat_get"}  # 대화 목록·읽기만 read
+    reads |= resync  # 받았는지 묻기도 read (상태를 바꾸지 않는다)
     assert all(skills[k].grade == ("read" if k in reads else "A") for k in skills)
     for skill in card.skills:
         if skill.id == "receive_improvement_note":  # 공통 skill: 계약이 diagnosis.py에 있다

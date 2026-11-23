@@ -320,3 +320,11 @@ def start_daily() -> None:
             await asyncio.sleep(_hours() * 3600)
 
     _task = asyncio.get_running_loop().create_task(loop())
+
+
+def stop_daily() -> None:
+    """하루마다 읽기를 끈다 (서버를 끌 때). 다시 켜면 start_daily가 새로 띄운다."""
+    global _task
+    task, _task = _task, None
+    if task is not None:
+        task.cancel()

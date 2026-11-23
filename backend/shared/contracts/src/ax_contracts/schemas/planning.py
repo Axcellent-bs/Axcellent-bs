@@ -4,6 +4,7 @@
   후보만 돌려주고 원인은 판정하지 않는다.
 - `link_incident`: orchestrator·infra → planning, 등급 A. 사건에 PR·기획 문단을 연결한다.
 - `verify_rollback_target`: safety → planning. infra `rollback_deployment`(B)의 교차검증이다.
+- `verify_deploy_request`: safety → dev. infra `deploy_version`(B)의 교차검증이다.
 """
 
 from __future__ import annotations
@@ -65,6 +66,40 @@ class VerifyRollbackTargetOutput(AxModel):
     approved: bool
     reason_code: Literal["deploy_before_incident", "no_deploy_in_window", "deploy_after_incident"]
     related_prs: list[RelatedPr] = Field(default_factory=list)
+
+
+# ---- verify_deploy_request: safety → dev, 등급 read
+#
+# infra `deploy_version`(B)의 교차검증. dev 배포 기록(DEP-n)이 정말 사람이 승인한(approved) 기록이고
+# 승인자·서비스·버전이 배포 요청과 같은지 본다. 거절도 completed + outcome rejected_by_review.
+
+
+class VerifyDeployRequestInput(AxModel):
+    # 배포 기록 id + 고유 꼬리 ("DEP-3.1a2b3c4d")
+    request_id: str = Field(min_length=1, max_length=64)
+    service: str = Field(min_length=1, max_length=120)
+    version: str = Field(min_length=1, max_length=120)
+    approved_by: str | None = Field(default=None, max_length=80)
+
+
+class VerifyDeployRequestOutput(AxModel):
+    """`approved`는 `reason_code == "deploy_approved"`일 때만 참이다."""
+
+    approved: bool
+    reason_code: Literal[
+        "deploy_approved",  # 승인된 기록이고 승인자·서비스·버전이 같다
+        "deploy_not_found",  # 그 id(고유 꼬리 포함)의 배포 기록이 없다
+        "deploy_not_approved",  # 기록이 approved 상태가 아니다
+        "approver_mismatch",  # 승인자가 비었거나 기록과 다르다
+        "target_mismatch",  # 서비스·버전이 기록과 다르다
+    ]
+    deployment_id: str | None = None  # 찾은 배포 기록 id ("DEP-3")
+
+    @model_validator(mode="after")
+    def _verdict_is_consistent(self) -> VerifyDeployRequestOutput:
+        if self.approved != (self.reason_code == "deploy_approved"):
+            raise ValueError("approved와 reason_code가 서로 다르다")
+        return self
 
 
 # ---- revert_merged_pr: infra → dev, 등급 B (execute 경유)
@@ -367,6 +402,24 @@ class DevResultInput(AxModel):
 
 class DevResultOutput(AxModel):
     applied: int  # planning 쪽에 반영한 작업·PR 수
+
+
+# ---- 넘기기 받았는지 묻기 (planning ↔ dev `handoff_known`, 등급 read, 2026-11-23)
+#
+# 다시 켰을 때 맞추기가 받았다고 기록한 넘기기를 다 다시 보내지 않고, 받는 쪽에 한 번 묻는다.
+# 받는 쪽은 준 멱등 키 중 자기가 반영한(중복 거르기 기록에 있는) 키만 돌려준다.
+# 상태를 바꾸지 않는다.
+# 빠진 키(받는 쪽이 상태를 잃음)만 보내는 쪽이 다시 보낸다.
+
+HANDOFF_KNOWN_MAX_KEYS = 2000
+
+
+class HandoffKnownInput(AxModel):
+    keys: list[str] = Field(default_factory=list, max_length=HANDOFF_KNOWN_MAX_KEYS)
+
+
+class HandoffKnownOutput(AxModel):
+    known: list[str] = Field(default_factory=list)  # keys 중 받는 쪽이 반영한 것 (준 순서)
 
 
 # ---- 기획 → 요청 서비스 되묻기 (planning, 2026-11-02)

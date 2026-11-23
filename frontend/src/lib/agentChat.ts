@@ -1,5 +1,5 @@
 import { SCREEN_KEEP_OUTCOMES, chatLanes, closedTimes, isBackgroundRead, mergeClosed, requestClosedTimes } from "./commFilter";
-import { DEV_HOLD_ACTIONS, FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, PLANNING_HOLD_ACTION, SETTLEMENT_HOLD_ACTION, SUPPORT_DELETION_HOLD_ACTIONS, type ExecutionRecord } from "./finance";
+import { DEV_HOLD_ACTIONS, FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, SNS_HOLD_ACTIONS, SNS_HOLD_PAGE, PLANNING_HOLD_ACTION, SETTLEMENT_HOLD_ACTION, SUPPORT_DELETION_HOLD_ACTIONS, type ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
 import { isRedeployFailed } from "./rollbackResult";
 export type { Redeploy, RollbackView } from "./rollbackResult";
@@ -144,6 +144,7 @@ export function holdPage(action: string | null | undefined, target?: unknown): s
   // 환불과 개인정보·기한 지난 기록 삭제는 고객지원 보상 큐(/queue)에서 결정한다 (#1229)
   if (action === "refund_request" || (!!action && (SUPPORT_DELETION_HOLD_ACTIONS as readonly string[]).includes(action))) return "/queue";
   if (action === SETTLEMENT_HOLD_ACTION) return "/settlements";
+  if (action && (SNS_HOLD_ACTIONS as readonly string[]).includes(action)) return SNS_HOLD_PAGE;
   if (action && (MARKETING_HOLD_ACTIONS as readonly string[]).includes(action)) return "/marketing";
   // 담당 화면이 접힌 일은 안전 처리 로그 화면에 "담당 화면 없음(접힘)"으로만 보인다
   // PR 만들기·머지·되돌리기·자동 머지 기준은 개발 화면 안전 확인 탭에서 결정한다 (#1232)

@@ -3,9 +3,9 @@ import { Navigate, useSearchParams } from "react-router";
 import { Tabs } from "@/components/connect/parts";
 import { Skeleton } from "@/components/finance/bits";
 import { useVisibleInterval } from "@/lib/visibleInterval";
-import { shortDateTime, won } from "@/lib/format";
-import { finance, type Review } from "@/lib/finance";
-import { holdKo } from "@/lib/marketingLive";
+import { shortDateTime } from "@/lib/format";
+import { SNS_HOLD_ACTIONS, finance, type Review } from "@/lib/finance";
+import { ActionQueue } from "@/components/finance/SafetyQueue";
 import { REQUEST_VIDEOS_PATH } from "@/lib/requestVideoView";
 import { BriefMediaMaker } from "./BriefMediaMaker";
 import { SnsAccountsCard } from "./SnsAccountsCard";
@@ -22,14 +22,11 @@ import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, dr
 // 고른 탭은 주소 ?view=에 남는다. 유튜브 연결에서 돌아오면(?youtube=) 계정·연결 탭을 연다.
 
 const REFRESH_MS = 15_000;
-const SNS_ACTIONS = ["publish_sns", "generate_media", "generate_creative_video", "publish_youtube"] as const;
-const ACTION_NAME: Record<string, string> = { publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", generate_creative_video: "스토리보드 영상 만들기", publish_youtube: "유튜브에 영상 올리기" };
-// 캐러셀 게시 요청의 요약("SNS 캐러셀 게시 요청(N장): ...")에서 장수만 읽는다. 다른 요청이면 null이다.
-const carouselCount = (summary?: string): number | null => {
-  const m = /^SNS 캐러셀 게시 요청\((\d+)장\)/.exec(summary ?? "");
-  return m ? Number(m[1]) : null;
-};
+const SNS_ACTIONS = SNS_HOLD_ACTIONS;
 const fromMarketing = (requester: string) => requester === "coupon" || requester === "marketing";
+
+/** 계정 연결에서 돌아올 때 붙는 표시(유튜브 ?youtube=, Higgsfield ?higgsfield=finish, 인스타 ?instagram=) */
+export const OAUTH_RETURN_PARAMS = ["youtube", "higgsfield", "instagram"] as const;
 
 type View = "make" | "briefs" | "holds" | "accounts";
 const VIEWS: readonly View[] = ["make", "briefs", "holds", "accounts"];
@@ -51,7 +48,6 @@ const Empty = ({ children }: { children: ReactNode }) => <p className="py-6 text
 
 export function SnsMedia() {
   const [holds, setHolds] = useState<Review[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [handed, setHanded] = useState<StoredBrief[] | null>(null);
   const [handedError, setHandedError] = useState<string | null>(null);
@@ -71,9 +67,8 @@ export function SnsMedia() {
     try {
       const all = await finance.reviews(true);
       setHolds(all.filter((r) => r.status === "pending" && fromMarketing(r.requester) && (SNS_ACTIONS as readonly string[]).includes(r.action)));
-      setError(null);
-    } catch (e) {
-      setError((e as Error).message);
+    } catch {
+      setHolds(null); // 탭의 건수만 비운다. 결정 대기 목록은 ActionQueue가 따로 읽고 오류를 보여 준다
     } finally {
       setLoading(false);
     }
@@ -83,11 +78,14 @@ export function SnsMedia() {
 
   const [params, setParams] = useSearchParams();
   const asked = params.get("view");
-  const view: View = isView(asked) ? asked : params.get("youtube") ? "accounts" : "make";
+  // 계정 연결(유튜브·Higgsfield·인스타)에서 돌아오면 계정·연결 탭을 연다. 연결 마무리(complete)는 그 탭의
+  // SNS 계정 연결 카드가 한다(만들기 탭의 한 줄 요약은 하지 않는다). 11/23 Higgsfield가 만들기 탭으로 돌아와 연결이 안 되던 문제
+  const returning = OAUTH_RETURN_PARAMS.some((k) => params.get(k));
+  const view: View = isView(asked) ? asked : returning ? "accounts" : "make";
   const pick = (next: View) => setParams((cur) => {
     const out = new URLSearchParams(cur);
     out.set("view", next);
-    out.delete("youtube");
+    for (const k of OAUTH_RETURN_PARAMS) out.delete(k);
     return out;
   }, { replace: true });
   const tabs: { id: View; label: string; count?: number }[] = [
@@ -176,25 +174,8 @@ export function SnsMedia() {
       )}
 
       {view === "holds" && (
-      <Section title="사람 결정 대기 (SNS·미디어)" desc="안전 장치 보류 큐에서 마케팅 AI가 요청한 SNS 게시·이미지·영상 만들기를 읽기만 하는 목록입니다. 게시 승인·거절은 위 기획안 카드의 승인 패널에서 하고, 이 목록에서는 누를 수 없습니다.">
-        {error ? <p className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">보류 건을 읽지 못했습니다. {error}</p>
-          : holds === null ? <Skeleton stats={0} lines={2} />
-            : holds.length === 0 ? <Empty>기다리는 건이 없습니다.</Empty> : (
-              <ul className="divide-y divide-ink-100 rounded-2xl border border-ink-100">
-                {holds.map((r) => (
-                  <li key={r.review_id} className="space-y-1 px-4 py-2 text-xs" title={`보류 건 ${r.review_id}`}>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <span className="font-medium">{ACTION_NAME[r.action] ?? "기타 요청"}</span>
-                      {r.action === "publish_sns" && carouselCount(r.report.summary) != null && <span className="chip">캐러셀 {carouselCount(r.report.summary)}장</span>}
-                      {r.report.computed_amount != null && <span className="tabular-nums">{won(r.report.computed_amount)}</span>}
-                      {r.report.hold_reason && <span className="chip bg-amber-50 text-amber-800" title={r.report.hold_reason}>{holdKo(r.report.hold_reason)}</span>}
-                      <span className="ml-auto text-ink-500">{shortDateTime(r.expires_at)}까지 결정</span>
-                    </div>
-                    {r.report.summary && <p className="text-ink-700">{r.report.summary}</p>}
-                  </li>
-                ))}
-              </ul>
-            )}
+      <Section title="사람 결정 대기 (SNS·미디어)" desc="마케팅 AI가 요청한 SNS 게시·이미지·영상 만들기·유튜브 올리기 가운데 사람이 정해야 하는 일입니다. 내용을 보고 진행 또는 멈춤을 누르세요. 요청한 계정과 다른 계정으로만 진행할 수 있어요.">
+        <ActionQueue action={SNS_HOLD_ACTIONS} intro="안전 장치가 사람 확인으로 보류한 SNS 게시·이미지·영상 만들기·유튜브 올리기가 여기 모입니다. " />
       </Section>
       )}
     </div>

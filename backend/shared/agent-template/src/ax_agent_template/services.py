@@ -180,6 +180,9 @@ SERVICES: tuple[Service, ...] = (
             "youtube_uploads_list",
             "list_marketing_campaigns",
             "creative_record_attach",
+            "brand_characters_list",
+            "brand_character_mark",
+            "brand_character_unmark",
             "receive_campaign_brief",
             "record_campaign_ad_metrics",
             "get_campaign_ad_metrics",
@@ -202,6 +205,7 @@ SERVICES: tuple[Service, ...] = (
             "list_request_videos",
             "request_video_youtube_draft",
             "request_video_youtube_request",
+            "request_video_cover_select",
             "merge_outage_sns_drafts",
             "check_sns_post",
             "publish_sns",
@@ -407,6 +411,8 @@ SERVICES: tuple[Service, ...] = (
             # 요청 부서가 자기 요청 거둬들이기 (재무 화면 "요청 빼기", 11/13)
             "withdraw_ticket",
             "receive_dev_result",
+            # 다시 켰을 때 맞추기: 개발이 넘긴 것을 받았는지 묻기 (read, 개발과 같이 받는다)
+            "handoff_known",
             "receive_planning_answer",
             "request_release_check",
             # 마케팅 게시(published)·데이터분석 성과(result)를 제안에 기록
@@ -433,11 +439,15 @@ SERVICES: tuple[Service, ...] = (
             "link_incident",
             "revert_merged_pr",
             "verify_rollback_target",
+            # infra deploy_version(B) 교차검증 (safety → dev)
+            "verify_deploy_request",
             "list_in_progress",
             "list_dev_progress",
             "list_dev_outcomes",
             "verify_handover",
             "start_dev",
+            # 다시 켰을 때 맞추기: 기획이 넘긴 것을 받았는지 묻기 (read, 기획과 같이 받는다)
+            "handoff_known",
             "receive_release_order",
             "receive_request_pause",
             # 사람과 직접 대화 (dashboard-api /api/dashboard/dev-chat)

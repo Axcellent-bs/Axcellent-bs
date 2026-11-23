@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -21,14 +22,16 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from ax_agent_template import company_scope as request_company
 from ax_agent_template import events
 from ax_agent_template.config import set_agent_name
 from ax_contracts.schemas import TENANT_ID_DEFAULT, EventEnvelope, EventType
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 from ax_orchestrator import request_tasks
 from ax_orchestrator.a2a import build_a2a_app
-from ax_orchestrator.auth import require_admin, require_agent, require_human
+from ax_orchestrator.auth import bind_company, require_admin, require_agent, require_human
 from ax_orchestrator.chat.turn import notify_thread
 from ax_orchestrator.diagnosis_cards import fetch_cards_via_archive
 from ax_orchestrator.diagnosis_notes import send_note_via_agent
@@ -43,6 +46,9 @@ from ax_orchestrator.real import http_review_checker
 from ax_orchestrator.registry import Registry
 from ax_orchestrator.store import DB_ENV, IncidentStore
 from ax_orchestrator.usage import BUCKET_SECONDS, WINDOW_SECONDS, RecordingCaller, UsageRecorder
+from ax_orchestrator.work_requests import MAX_TEXT
+
+log = logging.getLogger("orchestrator.main")
 
 STATIC = Path(__file__).parent / "static"
 DEPTS = ["infra", "data", "planning", "dev", "marketing", "support", "finance", "archive"]
@@ -76,20 +82,57 @@ class AppState:
         self.latency = float(os.getenv("ORCHESTRATOR_MOCK_LATENCY", "0.7"))
         self.registry = Registry()
         self.fakes: FakeDepartments | None = None
-        self.manager: IncidentManager | None = None
+        # 회사마다 이벤트 목록·저장소·의뢰 실행기를 따로 둔다 (여러 회사 5단계, {회사: manager}).
+        # skill 요청·이벤트·로그인 요청 안에서는 `company()`가 그 요청의 회사를 주고, 요청 밖(스스로
+        # 도는 루틴·시험)은 기본 회사(catbooks)다. 매니저는 그 회사의 첫 요청에 만든다
+        self.managers: dict[str, IncidentManager] = {}
+        self.watchers: dict[str, asyncio.Task[None]] = {}
+        self.serving = (
+            False  # 서버가 떠 있는 동안만 True (늦게 만든 회사의 실행기를 이어 돌릴 때 쓴다)
+        )
         self.published: list[dict[str, Any]] = []
         self.modes: dict[str, str] = {}
         self.usage = UsageRecorder()  # 이벤트·옵션이 바뀌어도 부서별 사용량은 이어서 쌓는다
         # 이벤트 저장소(ORCHESTRATOR_DB). 이벤트 목록(manager)과 같이 만든다.
         # 비어 있으면 메모리라 다시 켜면 사라진다
-        self.store: IncidentStore | None = None
+        self.stores: dict[str, IncidentStore] = {}
+
+    @staticmethod
+    def company() -> str:
+        """지금 요청의 회사. 요청 밖이면 기본 회사(catbooks)."""
+        return request_company.active() or TENANT_ID_CATBOOKS
+
+    @property
+    def manager(self) -> IncidentManager | None:
+        """지금 요청 회사의 이벤트 매니저. 아직 안 만들었으면 None."""
+        return self.managers.get(self.company())
+
+    @manager.setter
+    def manager(self, value: IncidentManager | None) -> None:
+        if value is None:
+            self.managers.pop(self.company(), None)
+        else:
+            self.managers[self.company()] = value
+
+    @property
+    def store(self) -> IncidentStore | None:
+        return self.stores.get(self.company())
+
+    @store.setter
+    def store(self, value: IncidentStore | None) -> None:
+        if value is None:
+            self.stores.pop(self.company(), None)
+        else:
+            self.stores[self.company()] = value
 
     async def build(self, demo: DemoRequest | None = None) -> IncidentManager:
         demo = demo or DemoRequest()
-        if self.manager is None:  # 새 이벤트 목록이면 저장소도 새로 연다
+        cid = self.company()
+        created = self.manager is None
+        if created:  # 새 이벤트 목록이면 저장소도 새로 연다 (그 회사 칸만 본다)
             if self.store is not None:
                 self.store.close()
-            self.store = IncidentStore.from_env()
+            self.store = IncidentStore.from_env(cid)
         assert self.store is not None
         fakes = FakeDepartments(latency=self.latency)
         if demo.infra_card_empty:
@@ -125,7 +168,10 @@ class AppState:
             persist=self.store.save,
             # 사람에게 넘긴("이관 큐") 단계는 사람의 받은 요청에도 올린다. 목 모드는 올리지 않는다
             inbox=None if self.mock else post_to_inbox,
-            tenant_id=os.getenv("TENANT_ID", TENANT_ID_DEFAULT),
+            # 기본 회사는 지금까지처럼 `TENANT_ID`, 다른 회사는 그 회사 ID를 봉투·받은 요청에 싣는다
+            tenant_id=os.getenv("TENANT_ID", TENANT_ID_DEFAULT)
+            if cid == TENANT_ID_CATBOOKS
+            else cid,
             # 안전 관문의 사람 결정을 되물어 확인한다. 목 모드는 AX_SAFETY_URL을 줄 때만 부른다
             review_check=(
                 http_review_checker() if not self.mock or os.getenv("AX_SAFETY_URL") else None
@@ -140,12 +186,42 @@ class AppState:
             self.manager.request_escalation.poster = None if self.mock else post_to_inbox
         else:  # 같은 이벤트 목록을 유지하면서 부서 동작만 교체
             self.manager.engine = engine
+        if created and self.serving and cid != TENANT_ID_CATBOOKS:
+            await self.start_runner(cid)  # 서버가 뜬 뒤 처음 온 회사도 의뢰를 이어서 시킨다
         # 인사가 보낸 에이전트 평가 진단 요청은 받자마자 진단한다(목 모드·시험은 자동 시작 안 함)
         diagnoses = self.manager.agent_diagnoses
         diagnoses.auto_run = not self.mock
         diagnoses.cards_fetcher = None if self.mock else fetch_cards_via_archive
         diagnoses.note_sender = None if self.mock else send_note_via_agent
         return self.manager
+
+    async def ensure_manager(self) -> None:
+        """skill 요청 회사의 매니저가 없으면 만든다. 기본 회사는 지금까지처럼 켠 뒤에 만든다."""
+        if self.manager is None and self.company() != TENANT_ID_CATBOOKS:
+            await self.build()
+
+    async def prepare_companies(self) -> list[str]:
+        """기록이 있는 회사의 매니저를 미리 만들고, 의뢰를 이어 시킬 회사들을 돌려준다."""
+        base = self.stores.get(TENANT_ID_CATBOOKS)
+        if base is not None:
+            for cid in base.company_ids():
+                if cid != TENANT_ID_CATBOOKS and cid not in self.managers:
+                    with request_company.using(cid):
+                        await self.build()
+        return list(self.managers)
+
+    async def start_runner(self, cid: str) -> None:
+        """그 회사의 의뢰 중 시킬 단계가 남은 것을 이어 시키고, 부서의 긴 작업 알림을 지켜본다."""
+        manager = self.managers[cid]
+        with request_company.using(cid):  # 대화에 알리는 일이 그 회사 대화 저장소로 가게 한다
+            await manager.request_runner.resume_open()
+            if cid not in self.watchers:
+                self.watchers[cid] = asyncio.create_task(manager.request_runner.watch_async())
+
+    async def stop_runners(self) -> None:
+        for task in self.watchers.values():
+            task.cancel()
+        self.watchers.clear()
 
     async def _publish(self, kind: str, inc: Incident) -> None:
         self.published.append({"type": kind, "context_id": inc.context_id})
@@ -163,10 +239,14 @@ async def start_event_bus() -> bool:
     if state.mock or not events.redis_configured():
         return False
     set_agent_name("orchestrator")
-    manager = state.manager or await state.build()
+    if state.manager is None:
+        await state.build()
 
     async def on_event(env: EventEnvelope) -> None:
-        await manager.process(env)
+        # 이벤트는 요청 밖에서 오므로 봉투 `tenant_id` 회사의 매니저가 받는다(별칭·빈 값은 catbooks)
+        with request_company.using(env.tenant_id):
+            manager = state.manager or await state.build()
+            await manager.process(env)
 
     events.subscribe(SUBSCRIBED, on_event)
     events.start_consumer()
@@ -180,20 +260,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # (실제 모드, 또는 저장 파일을 준 목 모드)
     if state.manager is None and (not state.mock or os.getenv(DB_ENV)):
         await state.build()
-    watcher: asyncio.Task[None] | None = None
-    if state.manager is not None:  # 다시 켠 뒤 시킬 단계가 남은 의뢰를 이어서 시킨다
-        await state.manager.request_runner.resume_open()
-        # 부서의 긴 작업 알림이 끊긴 의뢰 단계를 주기적으로 닫는다
-        watcher = asyncio.create_task(state.manager.request_runner.watch_async())
+    # 다시 켠 뒤 시킬 단계가 남은 의뢰를 이어서 시키고, 부서의 긴 작업 알림이 끊긴 의뢰 단계를
+    # 주기적으로 닫는다. 저장소에 기록이 있는 회사는 첫 요청을 기다리지 않고 미리 만들어 같이 한다
+    for cid in await state.prepare_companies():
+        await state.start_runner(cid)
+    state.serving = True
     try:
         yield
     finally:
-        if watcher is not None:
-            watcher.cancel()
+        state.serving = False
+        await state.stop_runners()
         await events.stop_consumer()
 
 
-app = FastAPI(title="ax-orchestrator", lifespan=lifespan)
+app = FastAPI(title="ax-orchestrator", lifespan=lifespan, dependencies=[Depends(bind_company)])
 
 
 @app.get("/health")
@@ -365,8 +445,9 @@ async def receive_event(env: EventEnvelope, caller: str = Depends(require_agent(
     # 사람 결정 이벤트는 안전 관문만 보낼 수 있다(다른 에이전트가 승인을 흉내 내지 못하게)
     if env.type == EventType.SAFETY_REVIEW_DECIDED and caller != "safety":
         raise HTTPException(403, "안전 관문만 보낼 수 있는 이벤트다")
-    manager = state.manager or await state.build()
-    outcome, inc = await manager.process(env)
+    with request_company.using(env.tenant_id):  # 봉투의 회사 매니저가 받는다
+        manager = state.manager or await state.build()
+        outcome, inc = await manager.process(env)
     return {
         "data": {"outcome": outcome, "context_id": inc.context_id if inc else None},
         "meta": {"mock": state.mock},
@@ -386,6 +467,35 @@ async def decide(
     if not (state.manager and state.manager.hold_decision(context_id, step_id, body.approved)):
         raise HTTPException(404, "대기 중인 보류가 없음")
     return {"data": {"ok": True}, "meta": {}}
+
+
+class BrandCharacterBody(BaseModel):
+    """홍보 영상 의뢰에 쓸 회사 대표 캐릭터(마케팅 제작 기록 번호). null이면 캐릭터 없이."""
+
+    record_id: str | None = None  # CR-<16진수 12자리>. 모양은 실행기가 본다(아니면 422)
+
+
+@app.post("/api/requests/{request_id}/brand-character")
+async def set_request_brand_character(
+    request_id: str, body: BrandCharacterBody, who: str = Depends(require_human)
+) -> dict:
+    """의뢰에 회사 캐릭터를 정한다(11/23). 사람 토큰, 같은 회사, 영상 준비 시작 전까지만.
+
+    캐릭터를 쓰면 영상은 만들기 전에 사람 승인(C)을 한 번 받는다. 값이 없으면 지금 흐름 그대로다.
+    """
+    runner = state.manager.request_runner if state.manager else None
+    outcome = (
+        runner.set_brand_character(request_id, body.record_id, by=who) if runner else "missing"
+    )
+    if outcome == "missing":
+        raise HTTPException(404, "없는 의뢰")
+    if outcome == "invalid":
+        raise HTTPException(422, "캐릭터 기록 번호가 맞지 않아요")
+    if outcome == "not_video":
+        raise HTTPException(422, "홍보 영상 의뢰가 아니에요")
+    if outcome == "started":
+        raise HTTPException(409, "영상 준비가 시작돼서 바꿀 수 없어요")
+    return {"data": {"ok": True, "record_id": body.record_id}, "meta": {}}
 
 
 @app.post("/api/requests/{request_id}/steps/{step_id}/decision")
@@ -411,9 +521,14 @@ def _public(row: dict) -> dict:
 
 
 @app.get("/api/requests")
-async def list_requests(status: str | None = None, _: str = Depends(require_human)) -> dict:
-    """접수된 고객 의뢰 (최근 것부터, 최대 100건). 고객 글이 들어 있어 사람 토큰만 본다."""
-    rows = state.manager.work_requests.list(status=status) if state.manager else []
+async def list_requests(
+    status: str | None = None, hidden: int = 0, _: str = Depends(require_human)
+) -> dict:
+    """접수된 고객 의뢰 (최근 것부터, 최대 100건). 고객 글이 들어 있어 사람 토큰만 본다.
+
+    기본은 숨긴(삭제한) 의뢰를 뺀다. `?hidden=1`이면 숨긴 것만 준다 (11/23)."""
+    wr = state.manager.work_requests if state.manager else None
+    rows = wr.list(status=status, hidden=bool(hidden)) if wr else []
     rows = [_public(r) for r in rows]
     tasks = [{"name": t.name, "label": t.label} for t in request_tasks.TASKS]
     return {"data": list(reversed(rows))[:100], "meta": {"tasks": tasks}}
@@ -425,6 +540,64 @@ async def get_request(request_id: str, _: str = Depends(require_human)) -> dict:
     if row is None:
         raise HTTPException(404, "없는 의뢰")
     return {"data": _public(row), "meta": {}}
+
+
+@app.post("/api/requests/{request_id}/hide")
+async def hide_request(request_id: str, who: str = Depends(require_human)) -> dict:
+    """의뢰 삭제 = 멈추고 숨김 (기록은 남고 되돌릴 수 있다). 사람 토큰만.
+
+    끝나지 않은 의뢰면 남은 단계를 "사람이 의뢰를 삭제함"으로 건너뛰고 의뢰는 rejected. 이미 부서에
+    맡긴 긴 작업은 취소하지 않고, 결과가 와도 다음 단계로 넘기지 않는다."""
+    runner = state.manager.request_runner if state.manager else None
+    if (runner.hide(request_id, by=who) if runner else "missing") == "missing":
+        raise HTTPException(404, "없는 의뢰")
+    return {"data": {"ok": True}, "meta": {}}
+
+
+@app.post("/api/requests/{request_id}/unhide")
+async def unhide_request(request_id: str, who: str = Depends(require_human)) -> dict:
+    """숨긴 의뢰를 되돌린다 (멈춘 단계는 그대로). 사람 토큰만."""
+    runner = state.manager.request_runner if state.manager else None
+    if (runner.unhide(request_id, by=who) if runner else "missing") == "missing":
+        raise HTTPException(404, "없는 의뢰")
+    return {"data": {"ok": True}, "meta": {}}
+
+
+class EditBody(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_TEXT)
+
+
+def edit_llm() -> Any:
+    """의뢰문을 다시 분류할 LLM (대화 접수와 같은 것). 테스트는 이 함수를 바꿔 끼운다."""
+    from ax_orchestrator.chat.turn import default_llm
+
+    return default_llm()
+
+
+@app.post("/api/requests/{request_id}/edit")
+async def edit_request(request_id: str, body: EditBody, who: str = Depends(require_human)) -> dict:
+    """의뢰문 수정 = 고쳐서 다시 접수. 새 의뢰를 먼저 만들고(대화 접수와 같은 함수), 성공하면 옛
+    의뢰를 멈추고 숨긴다. 새 접수에 실패하면 옛 의뢰는 그대로. 새 의뢰 번호를 돌려준다."""
+    manager = state.manager
+    if manager is None or manager.work_requests.get(request_id) is None:
+        raise HTTPException(404, "없는 의뢰")
+    llm = edit_llm()
+    if llm is None:
+        raise HTTPException(503, "LLM 설정이 없어 다시 접수하지 못했어요")
+    try:
+        outcome, new_id = await manager.request_runner.edit(
+            request_id, body.text, manager.request_intake, llm, by=who
+        )
+    except Exception as exc:  # noqa: BLE001 - 새 접수 실패: 옛 의뢰는 건드리지 않았다
+        log.warning("의뢰문 수정 실패 %s: %s", request_id, type(exc).__name__)
+        raise HTTPException(502, "새 의뢰를 접수하지 못했어요. 지금 의뢰는 그대로예요") from None
+    if outcome == "missing":
+        raise HTTPException(404, "없는 의뢰")
+    if outcome == "same":
+        raise HTTPException(422, "바뀐 내용이 없어요")
+    if outcome == "not_request":
+        raise HTTPException(422, "고친 글이 의뢰로 접수되지 않았어요. 지금 의뢰는 그대로예요")
+    return {"data": {"ok": True, "request_id": new_id, "replaces": request_id}, "meta": {}}
 
 
 class RerunBody(BaseModel):
@@ -444,8 +617,12 @@ async def rerun_request(
         raise HTTPException(422, "일 목록에 없는 일")
     if outcome == "busy":
         raise HTTPException(409, "지금 진행 중이라 바꿀 수 없음")
+    if outcome == "stopped":
+        raise HTTPException(
+            409, "삭제한 의뢰는 다시 돌릴 수 없어요. 의뢰문 수정으로 새로 접수해 주세요"
+        )
     return {"data": {"ok": True}, "meta": {}}
 
 
 # 총괄 자신의 `/a2a`·`/.well-known/agent-card.json`. 위의 경로가 먼저 맞고 나머지만 여기로 온다.
-app.mount("/", build_a2a_app(lambda: state.manager))
+app.mount("/", build_a2a_app(lambda: state.manager, state.ensure_manager))

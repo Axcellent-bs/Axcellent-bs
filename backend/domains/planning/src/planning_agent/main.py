@@ -70,7 +70,8 @@ app.include_router(create_chat_router(get_chat_service))
 
 
 async def _resync_on_start() -> None:
-    """켤 때 개발 서비스와 맞춘다. 상대가 아직 안 떴으면 못 보낸 것으로 남겨 다시 보낸다.
+    """켤 때 개발 서비스와 맞춘다. 개발이 뜰 때까지(최대 5분) 기다린 뒤, 받았다고 하지 않은
+    넘기기만 보낸다. 끝내 안 뜨면 못 보낸 것으로 남겨 간격을 늘려 다시 보낸다.
     마케팅에 보내다 끊긴 제안도 다시 보낸다 (응답이 없으면 자동 재전송). 둘 다 같은 멱등 키라
     여러 번 돌아도 상대 쪽에 늘지 않는다."""
     log = logging.getLogger("ax.planning")
@@ -79,7 +80,7 @@ async def _resync_on_start() -> None:
     except Exception:  # 켤 때 뒷일이라 서버를 멈추지 않는다
         log.exception("마케팅 전달 다시 보내기 실패")
     try:
-        await get_service().resync_peer()
+        await get_service().resync_peer(wait_peer=True)
     except Exception:
         log.exception("개발 서비스와 맞추기 실패")
 

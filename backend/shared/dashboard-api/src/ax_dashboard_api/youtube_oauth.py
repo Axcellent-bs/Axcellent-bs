@@ -19,8 +19,6 @@
 
 from __future__ import annotations
 
-import html
-import os
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -51,14 +49,7 @@ BACK = "/marketing/sns"
 CLIENT = lambda: httpx.AsyncClient(timeout=20)  # noqa: E731
 
 
-def _app_value(name: str) -> str:
-    """앱(AXcellent) 단위 값: 키 저장소 기본 tenant, 없으면 환경값."""
-    from ax_secret_store import get_secret
-
-    try:
-        return (get_secret(name) or os.getenv(name, "")).strip()
-    except Exception:  # noqa: BLE001
-        return os.getenv(name, "").strip()
+_app_value = oauth_link.app_value  # 앱(AXcellent) 단위 값: 키 저장소 기본 tenant, 없으면 환경값
 
 
 def _configured() -> tuple[str, str, str]:
@@ -105,16 +96,7 @@ def youtube_connect(authorization: str | None = Header(default=None)) -> dict:
 
 
 def _page(url: str, result: str) -> HTMLResponse:
-    """화면으로 돌아가는 작은 페이지. 주소는 이스케이프한다(코드 값이 HTML을 깨지 못하게)."""
-    safe = html.escape(url, quote=True)
-    body = (
-        '<!doctype html><meta charset="utf-8">'
-        f'<meta http-equiv="refresh" content="0;url={safe}">'
-        f'<p>유튜브 연결: {html.escape(result)}. <a href="{safe}">마케팅 화면으로 돌아가기</a></p>'
-    )
-    return HTMLResponse(
-        body, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
-    )
+    return oauth_link.back_page(url, result, "유튜브")
 
 
 def _back(result: str) -> HTMLResponse:

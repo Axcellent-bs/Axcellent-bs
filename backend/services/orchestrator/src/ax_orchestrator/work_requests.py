@@ -125,6 +125,11 @@ class WorkRequests:
         self._rows: dict[str, dict[str, Any]] = {}
         self._store = store
 
+    @property
+    def company_id(self) -> str | None:
+        """이 의뢰 기록의 회사(저장소 회사 칸). 저장소가 없으면 None (11/23)."""
+        return self._store.company_id if self._store is not None else None
+
     # ---- 저장 -----------------------------------------------------------------
     def restore(self) -> dict[str, int]:
         """저장된 의뢰를 올리고 열려 있던 것을 이어 갈 수 있게 정리한다.
@@ -184,6 +189,13 @@ class WorkRequests:
             "handoff_task_id": None,  # 사람 받은 요청에 올린 일 번호
             "carry": {},  # 다음 단계로 그대로 넘길 앞 단계 결과 (화면·조회에는 내지 않는다)
             "buyer_id": None,  # 의뢰자 계정에 연결된 구매자 번호 (대시보드가 로그인 세션에서 준 값)
+            # 11/23 사람이 의뢰를 삭제(멈추고 숨김)·의뢰문을 고쳐 다시 접수.
+            # 옛 기록에는 칸이 없다(.get으로 읽는다)
+            "stopped_at": None,  # 멈춘 시각: 이 뒤로 온 부서 결과는 다음 단계로 넘기지 않는다
+            "hidden_at": None,
+            "hidden_by": None,
+            "replaces": None,  # 이 의뢰가 고쳐 다시 접수한 옛 의뢰 번호
+            "replaced_by": None,  # 이 의뢰를 고쳐 다시 접수한 새 의뢰 번호
         }
         self._save(row)
         self._trim()
@@ -231,6 +243,18 @@ class WorkRequests:
         """의뢰자의 구매자 번호를 적는다. 환불·교환 접수가 이 값으로만 구매자를 정한다."""
         row = self._row(request_id)
         row["buyer_id"] = buyer_id
+        self._save(row)
+
+    def set_brand_character(self, request_id: str, record_id: str | None, by: str | None) -> None:
+        """홍보 영상 의뢰에 쓸 회사 대표 캐릭터(마케팅 제작 기록 CR-…)를 적는다.
+
+        None이면 캐릭터 없이 만든다.
+
+        값은 기록 번호뿐이다. 영상 준비 단계가 이 값을 마케팅 입력으로 넘긴다 (11/23)."""
+        row = self._row(request_id)
+        row["brand_character_record_id"] = record_id
+        what = f"회사 캐릭터 {record_id}로 만들기" if record_id else "캐릭터 없이 만들기"
+        row["log"].append({"at": now().isoformat(), "message": f"{what} ({by or '사람'})"})
         self._save(row)
 
     def set_carry(self, request_id: str, step_id: str, value: dict[str, Any] | None) -> None:
@@ -371,20 +395,68 @@ class WorkRequests:
         self._save(row)
         return copy.deepcopy(row)
 
+    # ---- 숨기기·고쳐 다시 접수 (11/23) ------------------------------------------------
+    def hide(self, request_id: str, by: str | None) -> dict[str, Any]:
+        """목록에서 숨긴다 (기록은 남는다). 이미 숨겼으면 처음 기록 그대로."""
+        row = self._row(request_id)
+        if not row.get("hidden_at"):
+            stamp = now().isoformat()
+            row["hidden_at"], row["hidden_by"] = stamp, by
+            who = by or "누군지 모름"
+            row["log"].append({"at": stamp, "message": f"사람이 의뢰를 숨겼다 ({who})"})
+            self._save(row)
+        return copy.deepcopy(row)
+
+    def mark_stopped(self, request_id: str) -> None:
+        """사람이 멈췄다고 적는다 (실행·긴 작업 결과가 다음 단계로 이어지지 않게)."""
+        row = self._row(request_id)
+        if not row.get("stopped_at"):
+            row["stopped_at"] = now().isoformat()
+            self._save(row)
+
+    def unhide(self, request_id: str, by: str | None) -> dict[str, Any]:
+        """숨김만 되돌린다 (멈춘 단계·상태는 그대로)."""
+        row = self._row(request_id)
+        if row.get("hidden_at"):
+            row["hidden_at"], row["hidden_by"] = None, None
+            who = by or "누군지 모름"
+            row["log"].append({"at": now().isoformat(), "message": f"숨긴 의뢰를 되돌렸다 ({who})"})
+            self._save(row)
+        return copy.deepcopy(row)
+
+    def link_replacement(self, old_id: str, new_id: str) -> None:
+        """의뢰문을 고쳐 다시 접수한 두 의뢰를 잇는다 (옛 것 `replaced_by` · 새 것 `replaces`)."""
+        old, new = self._row(old_id), self._row(new_id)
+        stamp = now().isoformat()
+        old["replaced_by"], new["replaces"] = new_id, old_id
+        moved = f"의뢰문을 고쳐 새 의뢰({new_id})로 다시 접수했다"
+        old["log"].append({"at": stamp, "message": moved})
+        new["log"].append({"at": stamp,
+                           "message": f"의뢰({old_id})의 의뢰문을 고쳐 다시 접수했다"})  # fmt: skip
+        self._save(old)
+        self._save(new)
+
     # ---- 읽기 ------------------------------------------------------------------
     def get(self, request_id: str) -> dict[str, Any] | None:
         row = self._rows.get(request_id)
         return copy.deepcopy(row) if row else None
 
     def list(
-        self, account: str | None = None, *, status: str | None = None
+        self,
+        account: str | None = None,
+        *,
+        status: str | None = None,
+        hidden: bool | None = None,
     ) -> list[dict[str, Any]]:
-        """받은 순서대로. `account`를 주면 그 의뢰자의 것만 (일반회원은 자기 의뢰만 본다)."""
+        """받은 순서대로. `account`를 주면 그 의뢰자의 것만 (일반회원은 자기 의뢰만 본다).
+
+        `hidden`: None이면 전부, False면 숨기지 않은 것만, True면 숨긴 것만."""
         rows = [
             r
             for r in self._rows.values()
             if (account is None or r["account"] == account)
             and (status is None or r["status"] == status)
+            and (hidden is None or bool(r.get("hidden_at")) == hidden)
         ]
         rows.sort(key=lambda r: (r["created_at"], r["request_id"]))
         return copy.deepcopy(rows)

@@ -36,6 +36,9 @@ COMPANY_AI_KEY_NAMES: tuple[str, ...] = (
     "MARKETING_YOUTUBE_REFRESH_TOKEN",
     # Higgsfield(영상) 계정 키 `<ID>:<SECRET>` — 회사에 없으면 설치 기본 키(11/23)
     "MARKETING_HIGGSFIELD_API_KEY",
+    # Higgsfield 계정 연결(원격 MCP + OAuth, 회사 구독 크레딧, 11/23): 회사 관리자가 동의해서 받은
+    # 갱신 토큰. 연결·갱신(토큰이 바뀔 때)은 기계가 `store_oauth_token`으로 넣는다
+    "MARKETING_HIGGSFIELD_MCP_REFRESH_TOKEN",
 )
 
 CompanyAiCoderMode = Literal["company", "separate"]

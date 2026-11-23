@@ -217,6 +217,15 @@ class IncidentStore:
     def from_env(cls, company_id: str | None = None) -> IncidentStore:
         return cls(os.getenv(DB_ENV) or MEMORY, company_id)
 
+    def company_ids(self) -> list[str]:
+        """이 파일에 기록이 있는 회사 ID들. 다시 켤 때 회사마다 매니저를 미리 만들려고 쓴다."""
+        found: set[str] = set()
+        with self._lock:
+            for table in _TABLES:
+                rows = self._db.execute(f"SELECT DISTINCT tenant_id FROM {table}")  # noqa: S608 - 상수 표 이름
+                found.update(str(row[0]) for row in rows)
+        return sorted(found)
+
     def save(self, inc: Incident) -> None:
         body = json.dumps(incident_to_dict(inc), ensure_ascii=False, default=str)
         stamp = now().isoformat()

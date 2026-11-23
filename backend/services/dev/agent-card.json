@@ -62,6 +62,18 @@
       "priority": "required"
     },
     {
+      "id": "verify_deploy_request",
+      "description": "infra deploy_version(B)의 교차검증. 요청 id(배포 기록 id + 고유 꼬리)의 배포 기록이 없으면 거절(deploy_not_found), approved 상태가 아니면 거절(deploy_not_approved), 승인자가 비었거나 다르면 거절(approver_mismatch), 서비스·버전이 다르면 거절(target_mismatch), 모두 같으면 승인(deploy_approved). 거절도 completed + outcome rejected_by_review. 입력은 계약 VerifyDeployRequestInput 또는 safety 교차검증 형식(execution_id, action=deploy_version, params{request_id·service·version·approved_by…})을 받는다. 입력을 못 읽으면 failed(invalid_input). 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#VerifyDeployRequestInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#VerifyDeployRequestOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "safety"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
       "id": "list_in_progress",
       "description": "담당자(owner_id = 명부 member_id)·영역(area = 명부 area)의 진행 중 항목을 돌려준다: deployment(dev에 머지됐지만 복구·확인이 끝나지 않은 PR), ticket(끝나지 않은 작업), pr(열린 PR). 담당자는 작업 owner, 영역은 PR 바뀐 경로·기획서 문단에서 코드로 정하고 명부 영역 값(payment·search·catalog·support-desk·infra-ops·inventory)만 쓴다. 명부에 없는 area 값이면 지어내지 않고 빈 목록+collected_at. 다른 담당자·영역 항목은 넣지 않는다. 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ListInProgressInput",
@@ -125,6 +137,19 @@
       ],
       "verifier": null,
       "priority": "required"
+    },
+    {
+      "id": "handoff_known",
+      "description": "넘기기 받았는지 묻기 (기획·개발 공통, 다시 켰을 때 맞추기). 보낸 쪽이 받았다고 기록한 넘기기의 멱등 키(start_dev·receive_dev_result·request_release_check 등)를 주면, 이 서비스가 반영한(중복 거르기 기록에 있는) 키만 돌려준다. 빠진 키는 보낸 쪽이 다시 보낸다(이 서비스가 상태를 잃었을 때). 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#HandoffKnownInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#HandoffKnownOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning"
+      ],
+      "verifier": null,
+      "priority": "required",
+      "handoff": false
     },
     {
       "id": "receive_release_order",

@@ -217,7 +217,12 @@ def test_dev_agent_card_format_and_served() -> None:
     card = load_card()
     assert (card.name, card.owner, card.url) == ("dev", "예진", "http://dev:8111/a2a")
     skills = {s.id: s for s in card.skills}
-    required = {"find_related_prs", "link_incident", "verify_rollback_target"}
+    required = {
+        "find_related_prs",
+        "link_incident",
+        "verify_rollback_target",
+        "verify_deploy_request",  # infra deploy_version(B) 교차검증 (#1617 사후 리뷰)
+    }
     hr_links = {"list_in_progress", "list_dev_outcomes", "verify_handover"}
     orchestrator_links = {"list_dev_progress"}  # 총괄의 "개발 진행 상황" (담당자 없이)
     chat = {f"dev_chat_{x}" for x in ("send", "list", "get", "close", "remove")}  # 직접 대화
@@ -227,7 +232,10 @@ def test_dev_agent_card_format_and_served() -> None:
         "receive_release_order",
         "receive_request_pause",
         "revert_merged_pr",
+        "handoff_known",  # 다시 켰을 때 맞추기: 기획이 넘긴 것을 받았는지 (read, 11/23)
     }
+    assert skills["handoff_known"].grade == "read"
+    assert skills["handoff_known"].allowed_requesters == ["planning"]
     assert skills["revert_merged_pr"].grade == "B"
     assert skills["revert_merged_pr"].allowed_requesters == ["infra"]
     for name in chat:
@@ -236,6 +244,8 @@ def test_dev_agent_card_format_and_served() -> None:
     assert skills["find_related_prs"].grade == "read"
     assert skills["link_incident"].grade == "A"
     assert skills["verify_rollback_target"].grade == "read"
+    assert skills["verify_deploy_request"].grade == "read"
+    assert skills["verify_deploy_request"].allowed_requesters == ["safety"]
     assert skills["list_in_progress"].grade == "read"
     assert skills["verify_handover"].grade == "read"
     assert skills["start_dev"].grade == "A"
