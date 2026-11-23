@@ -1,0 +1,4 @@
+{"data": [
+  {"id": "cl_02", "booking_code": "NB-20261111-0002", "requested_by": "guest", "reason": "비행기 시간이 안 맞아요", "days_before": 30, "fee_rate": 0, "fee": 0, "paid": 0, "refund": 0, "status": "rejected", "decided_at": "2026-11-12T01:00:00.000Z", "created_at": "2026-11-11T05:00:00.000Z", "updated_at": "2026-11-12T01:00:00.000Z"},
+  {"id": "cl_01", "booking_code": "NB-20261110-0001", "requested_by": "customer", "reason": "가족 일정이 바뀌어 못 가게 됐어요", "days_before": 27, "fee_rate": 0.1, "fee": 250000, "paid": 900000, "refund": 650000, "status": "requested", "decided_at": null, "created_at": "2026-11-23T01:00:00.000Z", "updated_at": "2026-11-23T01:00:00.000Z"}
+], "next_cursor": "MjAyNi0xMS0yM1QwMTowMDowMC4wMDBafGNsXzAx"}

@@ -60,7 +60,7 @@ _REQUEST_ID = re.compile(r"[A-Za-z0-9_.:-]{1,100}")
 
 logger = logging.getLogger("ax.site_adapter")
 
-Outcome = Literal["done", "rejected", "denied", "unknown"]
+Outcome = Literal["done", "rejected", "denied", "partial", "unknown"]
 
 
 class CalcError(Exception):
@@ -96,6 +96,8 @@ class Plan:
     headers: dict[str, str] = field(repr=False)
     ok: list[int]
     result: dict[str, str]
+    # "반영은 됐고 뒤따르는 일만 실패"를 뜻하는 고객사 오류 코드 (짝의 `partial_codes`)
+    partial_codes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -194,6 +196,7 @@ def plan(m: SiteMapping, wm: WriteMap, ctx: Context) -> Plan:
         headers=upstream.auth_headers(m.auth_header, m.auth_scheme, upstream.saved_token()),
         ok=list(wm.ok),
         result=dict(wm.result),
+        partial_codes=list(wm.partial_codes),
     )
 
 
@@ -226,12 +229,17 @@ async def send(p: Plan) -> Reply:
     return Reply(status, body, rid)
 
 
-def classify(reply: Reply, ok: list[int]) -> Outcome:
-    """직접 쓰기 결과 표. 짝의 `ok`가 아닌 2xx·3xx(리다이렉트)·429·5xx·응답 없음은 모름."""
+def classify(reply: Reply, ok: list[int], partial_codes: list[str] | None = None) -> Outcome:
+    """직접 쓰기 결과 표. 짝의 `ok`가 아닌 2xx·3xx(리다이렉트)·429·5xx·응답 없음은 모름.
+
+    짝의 `partial_codes`에 든 고객사 오류 코드는 `partial`(반영은 됐고 뒤따르는 일만 실패)이다.
+    """
     if reply.status is None:
         return "unknown"
     if reply.status in ok:
         return "done"
+    if partial_codes and site_error(reply.body)[0] in partial_codes:
+        return "partial"
     if reply.status in REJECT_CODES:
         return "rejected"
     if reply.status in DENY_CODES:

@@ -1,0 +1,31 @@
+{
+  "claims": {
+    "path": "/api/v1/cancellations",
+    "paging": {
+      "items_field": "data",
+      "next_field": "next_cursor",
+      "cursor_param": "cursor",
+      "since_param": "updated_since",
+      "limit_param": "limit",
+      "limit": 200
+    },
+    "fields": {
+      "claim_id": "id",
+      "order_id": "booking_code",
+      "status": "status",
+      "type": "const:cancel",
+      "reason": "const:other",
+      "description": "reason",
+      "buyer_id": "order.member_id",
+      "customer_name": "order.contact.name",
+      "created_at": "created_at"
+    },
+    "values": {
+      "status": {
+        "requested": "requested",
+        "done": "closed",
+        "rejected": "closed"
+      }
+    }
+  }
+}
