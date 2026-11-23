@@ -23,8 +23,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ax_agent_template.config import is_mock
-from ax_agent_template.llm import LLMClient, LLMResponseError, LLMSettings
-from support_agent import abuse_rules, guard
+from ax_agent_template.llm import LLMClient, LLMResponseError
+from support_agent import abuse_rules, guard, llm_settings
 from support_agent.abuse_rules import LEVEL_ORDER, AbuseLevel
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ def enabled() -> bool:
         return False
     if is_mock("support") and switch != "on":
         return False
-    settings = LLMSettings.from_env("support")
+    settings = llm_settings.settings()
     return bool(settings.model and settings.base_url)
 
 
@@ -73,7 +73,7 @@ def wanted(abuse_level: AbuseLevel, sentiment: str | None) -> bool:
 
 
 def _llm() -> LLMClient:
-    return LLMClient("support")
+    return LLMClient("support", settings=llm_settings.settings())
 
 
 def _numbers(text: str) -> set[str]:

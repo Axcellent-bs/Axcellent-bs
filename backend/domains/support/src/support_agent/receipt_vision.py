@@ -28,8 +28,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ax_agent_template.config import is_mock
-from ax_agent_template.llm import ImageInput, LLMClient, LLMSettings
-from support_agent import drafting, guard, receipts
+from ax_agent_template.llm import ImageInput, LLMClient
+from support_agent import drafting, guard, llm_settings, receipts
 
 logger = logging.getLogger(__name__)
 
@@ -160,13 +160,13 @@ def configured() -> bool:
     """
     if _switch() != "on":
         return False
-    settings = LLMSettings.from_env("support")
+    settings = llm_settings.settings()
     return bool(settings.model and settings.base_url)
 
 
 def _real_llm() -> LLMClient:
     """설정된 모델로 가는 실제 클라이언트. 목 모드의 `get_llm()`(가짜)이 아니다."""
-    return LLMClient("support")
+    return LLMClient("support", settings=llm_settings.settings())
 
 
 def connect() -> bool:

@@ -19,7 +19,7 @@ from typing import Any
 
 from ax_agent_template.config import is_mock
 from ax_agent_template.llm import LLMClient, LLMResponseError, MockLLMClient
-from support_agent import abuse_rules, categories, guard, kb, languages, privacy_rules
+from support_agent import abuse_rules, categories, guard, kb, languages, llm_settings, privacy_rules
 from support_agent.schemas import (
     STYLES,
     Analysis,
@@ -120,7 +120,7 @@ SPECULATIVE_QUERY_CHARS = 200
 
 
 def get_llm() -> LLMClient:
-    """목 모드(CI)는 `MockLLMClient`, 그 밖에는 설정된 모델로 `LLMClient("support")`다."""
+    """목 모드(CI)는 `MockLLMClient`, 그 밖에는 설정된 모델(회사 키가 있으면 회사 값)이다."""
     if is_mock("support"):
         return MockLLMClient(
             responses={
@@ -129,7 +129,7 @@ def get_llm() -> LLMClient:
                 Summary: _MOCK_SUMMARY,
             }
         )
-    return LLMClient("support")
+    return LLMClient("support", settings=llm_settings.settings())
 
 
 def clean_keywords(values: list[str]) -> list[str]:

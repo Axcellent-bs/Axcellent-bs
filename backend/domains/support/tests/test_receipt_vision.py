@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from ax_agent_template.llm import LLMInputError, MockLLMClient
+from ax_agent_template.llm import LLMInputError, LLMSettings, MockLLMClient
 from support_agent import claim_handlers, handlers, receipt_vision, receipts
 from support_agent.claims import ClaimStore
 from support_agent.main import app
@@ -265,9 +265,11 @@ def test_in_mock_mode_the_photo_goes_to_the_real_client_not_the_canned_mock(
     seen: list[str] = []
 
     class RealClient(MockLLMClient):
-        def __init__(self, dept: str) -> None:
+        def __init__(self, dept: str, settings: LLMSettings | None = None) -> None:
             super().__init__(responses={VisionReceipt: MATCHING})
             seen.append(dept)
+            # 회사 키가 없으면 서버 설정 그대로(여러 회사 6+)
+            assert settings == LLMSettings.from_env("support")
 
     monkeypatch.setattr(receipt_vision, "LLMClient", RealClient)
     assert receipt_vision.connect() is True
