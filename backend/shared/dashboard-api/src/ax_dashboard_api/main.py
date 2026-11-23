@@ -35,6 +35,7 @@ from ax_dashboard_api.routes import router
 from ax_dashboard_api.secret_routes import router as secret_router
 from ax_dashboard_api.site_adapter.router import router as site_adapter_router
 from ax_dashboard_api.site_adapter.setup import router as site_adapter_setup_router
+from ax_dashboard_api.youtube_oauth import router as youtube_oauth_router
 from ax_secret_store import startup_check
 
 DEFAULT_CORS_ORIGINS = "http://localhost:3001,http://127.0.0.1:3001"
@@ -147,6 +148,7 @@ app.include_router(accounts_router)
 # 로그인 전 화면이 읽는 공개 정보 (설치된 회사 이름만, 토큰 없이. auth.PUBLIC_ROUTES)
 app.include_router(public_info.router)
 app.include_router(instagram_radar_router)
+app.include_router(youtube_oauth_router)
 app.include_router(tool_connections.router)
 # 알림 받는 주소: 고객사 판매 서버가 회사 키로 이벤트를 보낸다 (사람 토큰 대신 회사 키)
 app.include_router(shop_events.router)

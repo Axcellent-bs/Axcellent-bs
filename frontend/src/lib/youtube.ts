@@ -74,7 +74,7 @@ export async function requestYoutubeUpload(recordId: string): Promise<YoutubeSta
 }
 
 export const YOUTUBE_ERROR_KO: Record<string, string> = {
-  youtube_not_connected: "AXcellent 유튜브 채널이 아직 연결되지 않았어요",
+  youtube_not_connected: "이 회사 유튜브 채널이 아직 연결되지 않았어요(SNS 계정 연결에서 연결)",
   video_not_ready: "올릴 영상(Higgsfield 영상이나 직접 올린 완성 영상)이 아직 없어요",
   draft_missing: "제목·설명 초안을 먼저 만들어 주세요",
   invalid_credentials: "유튜브 연결 키가 거절됐어요(다시 연결 필요)",

@@ -6,6 +6,7 @@ import { finance, type Review } from "@/lib/finance";
 import { holdKo } from "@/lib/marketingLive";
 import { BriefMediaMaker } from "./BriefMediaMaker";
 import { PublishControlCard } from "./PublishControlCard";
+import { SnsAccountsCard } from "./SnsAccountsCard";
 import { HiggsfieldStatusCard } from "./HiggsfieldStatusCard";
 import { YoutubeStatusCard } from "./YoutubeStatusCard";
 import { CharacterSheetMaker } from "./CharacterSheetMaker";
@@ -84,6 +85,7 @@ export function SnsMedia() {
         <button className="btn-ghost ml-auto text-xs" onClick={() => void load()} disabled={loading}>{loading ? "불러오는 중" : "새로고침"}</button>
       </header>
 
+      <SnsAccountsCard />
       <PublishControlCard />
 
       {/* 로그인한 회사의 연결 상태대로 보인다(회사마다 다른 키·채널, 11/23) */}

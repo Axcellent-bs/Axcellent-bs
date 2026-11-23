@@ -53,7 +53,7 @@ export function YoutubePanel({ recordId, youtube, hasVideo, hasFinal, onChanged 
   return (
     <section className="space-y-2 border-t border-ink-100 pt-3" aria-label="유튜브 올리기">
       <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-ink-700">
-        AXcellent 유튜브
+        회사 유튜브
         {status && <span className="chip bg-ink-50 text-ink-700">{STATUS_KO[status] ?? status}</span>}
         {youtube?.source === "ai" && <span className="chip bg-brand-50 text-brand-700">AI 초안</span>}
       </div>

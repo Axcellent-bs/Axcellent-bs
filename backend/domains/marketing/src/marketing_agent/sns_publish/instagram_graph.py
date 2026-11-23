@@ -78,6 +78,20 @@ class GraphConfigError(RuntimeError):
     """필수 설정이 비었다. 메시지에는 변수 **이름**만 담는다."""
 
 
+def _company_secret(name: str) -> str:
+    """로그인한 회사의 인스타 계정 값(키 저장소 tenant=회사 ID). env 모드는 환경변수와 같다.
+
+    회사마다 인스타 계정이 다르다(마케팅 › SNS·미디어 › SNS 계정 연결에서 회사 관리자가 넣는다).
+    """
+    from ax_agent_template import company_ai
+    from ax_secret_store import get_secret
+
+    try:
+        return (get_secret(name, tenant=company_ai.company_id()) or "").strip()
+    except Exception:  # noqa: BLE001 - 키 저장소 장애는 설정 없음으로 본다
+        return ""
+
+
 class GraphInstagramAdapter:
     name = "instagram"
 
@@ -107,8 +121,8 @@ class GraphInstagramAdapter:
     # ---- 설정 ----
     @classmethod
     def from_env(cls, client: httpx.AsyncClient | None = None) -> GraphInstagramAdapter:
-        token = (os.getenv(TOKEN_ENV) or "").strip()
-        user_id = (os.getenv(USER_ID_ENV) or "").strip()
+        token = _company_secret(TOKEN_ENV)
+        user_id = _company_secret(USER_ID_ENV)
         missing = [n for n, v in ((TOKEN_ENV, token), (USER_ID_ENV, user_id)) if not v]
         if missing:
             raise GraphConfigError(f"설정이 비어 있다: {', '.join(missing)}")
