@@ -35,7 +35,7 @@ from ax_agent_template.llm import (
 from ax_agent_template.server import error_result
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
 from ax_contracts.schemas.chat import ChatRemoveOutput
-from support_agent import chat, guard, persistence
+from support_agent import chat, guard, llm_settings, persistence
 from support_agent import handlers as h
 from support_agent.chat_schemas import (
     MAX_CONTEXT_CHARS,
@@ -89,7 +89,7 @@ class ChatSummary(BaseModel):
 
 
 def get_llm() -> LLMClient:
-    """목 모드(CI)는 `MockLLMClient`, 그 밖에는 설정된 모델로 `LLMClient("support")`다."""
+    """목 모드(CI)는 `MockLLMClient`, 그 밖에는 설정된 모델(회사 키가 있으면 회사 값)이다."""
     if is_mock("support"):
         return MockLLMClient(
             responses={
@@ -97,7 +97,7 @@ def get_llm() -> LLMClient:
                 ChatSummary: ChatSummary(summary="고객지원 현황을 물어보고 설명을 들었어요."),
             }
         )
-    return LLMClient("support")
+    return LLMClient("support", settings=llm_settings.settings())
 
 
 def _spawn(coro: Any) -> None:
