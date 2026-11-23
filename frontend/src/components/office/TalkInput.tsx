@@ -3,6 +3,7 @@ import { ACCEPT, makeCharacterSheet, shrinkImage } from "@/lib/characterSheet";
 import { TALK_KEYS, TALK_LABEL, type OfficeTalk } from "@/components/office/useOfficeTalk";
 import { ALL_ROOM } from "@/lib/agentChat";
 import { Link } from "@/lib/nav";
+import { commandHint, isClearCommand } from "@/lib/roomCleanup";
 
 // 부서 AI에게 직접 말 거는 입력창 (받는 곳 고르기 · @태그 · 안내는 ⓘ에 접음).
 // 받는 곳은 입력칸 왼쪽 드롭다운 하나(지금 고른 AI 이름이 보이고 키보드로 고른다). 예전 칩 11개(2줄)는 대화 칸 세로를 먹었다(11/20 1920×919).
@@ -27,8 +28,10 @@ export function parseTag(text: string): { key: string | null; bad: boolean; body
  * `where`: 놓인 화면. 오피스는 대화 기록으로 가는 링크를, 대화 기록은 직접 대화로 이어진다는 안내를 단다.
  * `room`: 말을 거는 방 (전체 대화방 ALL_ROOM 또는 장애·이슈 방 context_id). `roomName`이 있으면 장애 방 안내 문구
  */
-export function TalkInput({ talk, onSent, where, room = ALL_ROOM, roomName }: {
+export function TalkInput({ talk, onSent, where, room = ALL_ROOM, roomName, onClear }: {
   talk: OfficeTalk; onSent: () => void; where: "office" | "chat"; room?: string; roomName?: string;
+  /** 11/23 /clear: 이 방의 지금까지 대화를 내 화면에서 지운다(메시지로 보내지 않는다). 없으면 명령을 받지 않는다 */
+  onClear?: () => Promise<void>;
 }) {
   const [to, setTo] = useState<string>("data");
   const [text, setText] = useState("");
@@ -42,6 +45,7 @@ export function TalkInput({ talk, onSent, where, room = ALL_ROOM, roomName }: {
   }
   const chip = talk.chips.find((c) => c.key === to);
   const label = TALK_LABEL[to] ?? to;
+  const hint = commandHint(text);
   const pickImage = async (file: File | undefined) => {
     if (!file) return;
     try {
@@ -54,6 +58,11 @@ export function TalkInput({ talk, onSent, where, room = ALL_ROOM, roomName }: {
     }
   };
   const go = async () => {
+    if (onClear && isClearCommand(text)) { // /clear + Enter는 메시지로 보내지 않는다
+      setWarn(null);
+      try { await onClear(); setText(""); } catch (err) { setWarn(err instanceof Error ? err.message : "지우지 못했어요"); }
+      return;
+    }
     const image = to === "marketing" ? picked : null;
     const raw = text.trim() || (image ? "이 캐릭터로 이미지 시트 만들어 줘" : "");
     if (!raw) return;
@@ -119,8 +128,9 @@ export function TalkInput({ talk, onSent, where, room = ALL_ROOM, roomName }: {
           aria-label={`${label} AI에게 보낼 말`}
           placeholder={roomName ? `이 사건 방에서 ${label} AI에게 말 걸기 (@부서로도 고를 수 있어요)` : `${label} AI에게 물어보세요 (@부서로도 고를 수 있어요)`}
           className="field min-h-[44px] flex-1 resize-none text-sm" />
-        <button type="submit" className="btn-primary px-3 py-2 text-sm" disabled={(!text.trim() && !(to === "marketing" && picked)) || sheetBusy || talk.busy(to, room) || !!chip?.disabled}>{sheetBusy ? "시트 만드는 중…" : "보내기"}</button>
+        <button type="submit" className="btn-primary px-3 py-2 text-sm" disabled={(!text.trim() && !(to === "marketing" && picked)) || sheetBusy || (!(onClear && isClearCommand(text)) && (talk.busy(to, room) || !!chip?.disabled))}>{sheetBusy ? "시트 만드는 중…" : "보내기"}</button>
       </form>
+      {onClear && hint && <p role="status" className="rounded-lg bg-brand-50 px-2 py-1 text-xs text-brand-800"><b>{hint.split(" · ")[0]}</b> · {hint.split(" · ").slice(1).join(" · ")}</p>}
       {warn && <p role="alert" className="text-xs text-amber-800">{warn}</p>}
       {to === "dev" && <p className="text-[11px] text-ink-700">{DEV_NOTE}</p>}
       <details className="group text-[11px] text-ink-500">
