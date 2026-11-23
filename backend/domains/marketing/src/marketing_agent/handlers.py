@@ -59,6 +59,10 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeRecordGetOutput,
     CreativeRecordsListInput,
     CreativeRecordsListOutput,
+    CreativeThumbnailSelectInput,
+    CreativeThumbnailSelectOutput,
+    CreativeThumbnailsOutput,
+    CreativeThumbnailsRequestInput,
     CreativeVideoRequestInput,
     CreativeVideoRequestOutput,
     CreativeYoutubeDraftInput,
@@ -97,6 +101,7 @@ from marketing_agent import (
 from marketing_agent import character_sheet as _character_sheet
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
+from marketing_agent import creative_thumbnails as _thumbs
 from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import request_creative as _request_creative
 from marketing_agent import request_video_cover as _request_cover
@@ -833,6 +838,12 @@ async def creative_record_get(request: AgentRequest) -> AgentResult:
             await _youtube.check_upload(request.meta, data.record_id)
         except Exception:  # noqa: BLE001 - 진행 확인 실패는 읽기를 막지 않는다
             _render.logger.exception("제작 기록: 영상 승인 확인 실패")
+        try:  # 영상이 생겼으면 썸네일 후보 만들기를 사람 결정에 한 번 올리고, 승인됐으면 만든다
+            _thumbs.expire_stale(data.record_id)
+            await _thumbs.check(STATE.media_ledger, request.meta, data.record_id)
+            await _thumbs.request(STATE.media_ledger, request.meta, data.record_id, None, auto=True)
+        except Exception:  # noqa: BLE001 - 썸네일 확인 실패는 읽기를 막지 않는다
+            _thumbs.logger.exception("제작 기록: 썸네일 확인 실패")
     row = _creative.store().get(data.record_id)
     if row is None:
         return _result(
@@ -954,6 +965,59 @@ async def creative_video_request(request: AgentRequest) -> AgentResult:
         output=out.model_dump(mode="json"),
         evidence=_evidence(
             ["creative_video_request"], f"영상 요청 {data.record_id}: {video.get('status')}", []
+        ),
+    )
+
+
+def _thumb_failed(request: AgentRequest, error: _thumbs.ThumbError) -> AgentResult:
+    return _result(request, TaskStatus.FAILED, outcome=error.code, output={"message": error.code})
+
+
+async def creative_thumbnails_request(request: AgentRequest) -> AgentResult:
+    """제작 기록 영상 썸네일 후보 3장 만들기를 사람 결정(C generate_creative_thumbnails)에."""
+    data = _parse(request, CreativeThumbnailsRequestInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        thumbs = await _thumbs.request(
+            STATE.media_ledger,
+            request.meta,
+            data.record_id,
+            data.who,
+            regenerate=data.regenerate,
+        )
+    except _thumbs.ThumbError as error:
+        return _thumb_failed(request, error)
+    out = CreativeThumbnailsOutput(record_id=data.record_id, thumbnails=thumbs)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill], f"썸네일 후보 요청 {data.record_id}: {thumbs.get('status')}", []
+        ),
+    )
+
+
+async def creative_thumbnail_select(request: AgentRequest) -> AgentResult:
+    """제작 기록 썸네일 후보 중 하나를 고른다. 승인 대기면 그 승인을 무효로 한다(기록만 바꿈)."""
+    data = _parse(request, CreativeThumbnailSelectInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        picked = _thumbs.select(data.record_id, data.media_id, data.who)
+    except _thumbs.ThumbError as error:
+        return _thumb_failed(request, error)
+    out = CreativeThumbnailSelectOutput.model_validate(picked)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill],
+            f"제작 기록 썸네일 {data.record_id}: {data.media_id}"
+            + (f" (승인 무효: {', '.join(out.approvals_reset)})" if out.approvals_reset else ""),
+            [data.record_id],
         ),
     )
 
@@ -2286,6 +2350,8 @@ HANDLERS = {
     "youtube_video_stats": youtube_video_stats,
     "youtube_uploads_list": youtube_uploads_list,
     "creative_record_attach": creative_record_attach,
+    "creative_thumbnails_request": creative_thumbnails_request,
+    "creative_thumbnail_select": creative_thumbnail_select,
     "brand_characters_list": brand_characters_list,
     "brand_character_mark": brand_character_mark,
     "brand_character_unmark": brand_character_unmark,

@@ -1512,6 +1512,58 @@ async def marketing_creative_video(
     return ok(await marketing_client.creative_video_call(record_id, who))
 
 
+class CreativeThumbnailsBody(BaseModel):
+    # 후보가 이미 있으면 true일 때만 다시 만든다([다시 만들기])
+    regenerate: bool = False
+
+
+@router.post("/marketing/creative-records/{record_id}/thumbnails")
+async def marketing_creative_thumbnails(
+    body: CreativeThumbnailsBody,
+    request: Request,
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """영상 썸네일 후보 3장 만들기를 사람 결정(C generate_creative_thumbnails)에 올린다. 사람 토큰.
+
+    승인 전에는 Higgsfield를 부르지 않는다.
+    같은 주소에 GET은 없다(후보 그림은 `/thumbnails/{id}`)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.creative_thumbnails_call(record_id, body.regenerate, who))
+
+
+class CreativeThumbnailBody(BaseModel):
+    """썸네일 후보 중 하나(`render.thumbnails.candidates[].media_id`). 후보 밖 값은 422."""
+
+    media_id: str = Field(pattern=r"^thm_[0-9a-f]{12}$")
+
+
+@router.post("/marketing/creative-records/{record_id}/thumbnail")
+async def marketing_creative_thumbnail_select(
+    body: CreativeThumbnailBody,
+    request: Request,
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """제작 기록 썸네일을 고른다. 사람 토큰. 승인 대기 중에 바꾸면 그 승인은 무효다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "썸네일 고르기는 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.creative_thumbnail_select_call(record_id, body.media_id, who))
+
+
+@router.get("/marketing/creative-records/{record_id}/thumbnails/{media_id}")
+async def marketing_creative_thumbnail_image(
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+    media_id: str = Path(pattern=r"^thm_[0-9a-f]{12}$"),
+) -> FileResponse:
+    """썸네일 후보 그림(Higgsfield로 만든 AI 표시 포함 JPEG). 후보 기록과 같은 파일만."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    path = await marketing_client.creative_thumbnail_file(record_id, media_id)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
 class BrandCharacterMarkBody(BaseModel):
     # 사람이 "우리 회사가 쓸 권리가 있는 그림이에요"를 체크했는가. true가 아니면 422
     rights_confirmed: bool = False
