@@ -720,6 +720,25 @@ class DeletedProposal(DomainModel):
     deleted_at: UtcDatetime
 
 
+class HandoffFailure(DomainModel):
+    """자동으로 다시 보내지 않는 넘기기 (`base._send_one`, 11/23). `State`에 넣지 않고 상태 파일 옆
+    `<상태 파일>.handoff.json`에 둔다 (예전 빌드가 새 상태 파일을 그대로 읽게).
+
+    - refused: `invalid_input`·`rejected`처럼 받는 쪽이 답하고 거절. 같은 입력이면 다시 보내도 같다.
+      전에는 30초마다 끝없이 다시 보내 메신저에 같은 실패가 쌓였다. 받는 쪽을 고친 뒤 사람이
+      `resend_handoff` 액션으로 다시 보낸다. 다시 켰을 때 맞추기는 같은 입력이면 건너뛴다.
+    - handed: 받는 쪽이 꺼져 사람 할 일함으로 넘어감 (거절 아님). 다시 켰을 때 맞추기가 보낸다."""
+
+    kind: Literal["refused", "handed"] = "refused"
+    key: str  # 멱등 키 (start_dev_key·dev_result_key)
+    skill: str
+    context_id: str
+    reason: str  # 보낸 결과 한 줄 (예: 보내지 못함 (failed invalid_input))
+    at: UtcDatetime
+    fingerprint: str  # 입력 지문 (같은 입력이면 다시 켰을 때 맞추기가 건너뛴다)
+    payload: dict = Field(default_factory=dict)  # 사람이 다시 보낼 때 쓰는 입력
+
+
 class State(DomainModel):
     tenant_id: str = TENANT_ID_DEFAULT
     seq: int = 0  # 들어오고 나간 연동 건마다 1씩 (새로 받은 것 표시용)
