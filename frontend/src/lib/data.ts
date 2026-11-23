@@ -1969,6 +1969,16 @@ export interface TrendEvidenceItem {
   text: string;
   short: string;
 }
+/** 기획에 넘길 재료 한 칸 (해시태그·형식·관심 주제·글쓰기 …). 시간별 장면은 기획이 짠다 */
+export interface TrendReportMaterial {
+  /** 종류 id (hashtag · format · topic · caption …, 화면이 한국어 이름으로) */
+  kind: string;
+  text: string;
+  /** 코드가 만든 근거 문장 */
+  evidence?: string[];
+  /** evidence와 같은 순서. id = "<section>:<1-based row>" */
+  evidence_items?: TrendEvidenceItem[];
+}
 interface SectionHead {
   status: SectionStatus;
   reason: string | null;
@@ -1978,7 +1988,11 @@ export interface TrendReportSections {
   hashtags: SectionHead & { rows: TrendReportHashtagRow[]; account_names?: Record<string, string> };
   content: SectionHead & { posts: InstagramRadarPost[]; memes: TrendReportMeme[] };
   competitors: SectionHead & { rows: TrendReportCompetitorRow[]; accounts_failed: { account: string; reason: string }[] };
-  recommendation: SectionHead & { conclusion: string | null; beats: TrendReportBeat[]; music_note: string };
+  recommendation: SectionHead & {
+    conclusion: string | null; beats: TrendReportBeat[]; music_note: string;
+    /** 기획에 넘길 재료 (백엔드 feat/trend-report-materials 뒤. 옛 보고서·그 전에는 없음 → 화면은 콘티를 그린다) */
+    materials?: TrendReportMaterial[];
+  };
   /** #1540 주제 후보 (옛 저장본은 없거나 기본값 waiting · theme null) */
   theme?: TrendThemeSection;
 }
