@@ -125,6 +125,7 @@ from marketing_agent.media.config import MediaSettings
 from marketing_agent.media.ledger import MediaLedger
 from marketing_agent.media.prompts import PromptRejected
 from marketing_agent.notice import NoticeStore, make_draft
+from marketing_agent.notice_text import TEXT_MAX, write_notice_text
 from marketing_agent.outage_sns import (
     draft_outage_sns_post,
     list_outage_sns_drafts,
@@ -149,7 +150,7 @@ from marketing_agent.sns_publish.publisher import PUBLISHED_HOOKS, publish_sns
 from marketing_agent.state_db import StateDb
 
 SOURCE = "marketing"
-BANNER_TEXT_MAX = 200  # shop-api 배너 문구 상한
+BANNER_TEXT_MAX = TEXT_MAX["banner"]  # shop-api 배너 문구 상한(200자)
 RESOLVED_BANNER_HOURS_ENV = "MARKETING_RESOLVED_BANNER_HOURS"
 RESOLVED_BANNER_HOURS_DEFAULT = 24.0  # 정상화 배너는 게시 뒤 이 시간이 지나면 저절로 내려간다
 
@@ -221,6 +222,7 @@ class State:
                     "notice_id": n.notice_id,
                     "channel_code": n.channel_code,
                     "public_text": n.public_text,
+                    "source": n.source,
                     "valid_from": n.valid_from.isoformat() if n.valid_from else None,
                     "valid_to": n.valid_to.isoformat() if n.valid_to else None,
                 }
@@ -360,18 +362,47 @@ def _sns_published(row: Any, media_id: str | None, result: dict[str, Any]) -> No
     STATE.state_db.enqueue(envelope, "queued")
 
 
+# 공지 문안 LLM. 테스트는 이 값을 가짜 LLM을 돌려주는 함수로 바꾼다
+NOTICE_LLM: Any = None
+
+
+async def _notice_text(draft: NoticeDraft, data: DraftNoticeInput, context_id: str) -> NoticeDraft:
+    """초안 문안을 정한다. 같은 초안이 있으면 그대로, 같은 사실의 배너가 떠 있으면 그 문구로."""
+    from marketing_agent.chat import default_llm
+
+    saved = STATE.notices.get_draft(draft.draft_id)
+    if saved is not None:  # 같은 입력은 같은 초안이다(LLM을 다시 부르지 않는다)
+        return saved
+    live = STATE.notices.live_draft_for(draft)
+    if live is not None:  # 같은 문구의 배너를 같이 쓰는 규칙이 AI 문안에서도 돌게 한다
+        return draft.model_copy(
+            update={
+                "public_text": live.public_text,
+                "source": live.source,
+                "text_check": live.text_check,
+            }
+        )
+    return await write_notice_text(draft, data, NOTICE_LLM or default_llm, context_id)
+
+
 async def draft_notice(request: AgentRequest) -> AgentResult:
     data = _parse(request, DraftNoticeInput)
     if isinstance(data, AgentResult):
         return data
-    draft = make_draft(request.meta.context_id, data)
+    template = make_draft(request.meta.context_id, data)
+    draft = await _notice_text(template, data, request.meta.context_id)
     STATE.notices.save_draft(draft)
+    if draft.source == "ai":
+        what = f"{data.kind} 사실 필드로 AI 문안 생성, 검증 통과"
+    else:
+        reasons = ",".join(draft.text_check.reasons) if draft.text_check else "-"
+        what = f"{data.kind} 사실 필드로 고정 템플릿 문안 생성 (AI 문안 미사용: {reasons})"
     return _result(
         request,
         TaskStatus.COMPLETED,
         output=draft.model_dump(mode="json"),
-        evidence=_evidence(["draft_notice"], f"{data.kind} 사실 필드로 고정 템플릿 문안 생성"),
-        fallback=True,  # LLM 문안은 아직 연결하지 않았다(TODO). 고정 템플릿으로 대체
+        evidence=_evidence(["draft_notice"], what),
+        fallback=draft.source == "template",  # AI 문안이 없거나 검증에 실패해 템플릿으로 대체
     )
 
 
