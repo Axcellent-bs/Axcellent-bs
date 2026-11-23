@@ -96,6 +96,7 @@ from ax_contracts.schemas.idea import IdeaReportInput
 from ax_contracts.schemas.planning import AnswerPlanningQuestionInput
 from data_agent import catalog as metric_catalog
 from data_agent import (
+    company_scope,
     data_chat,
     idea_reports,
     llm_budget,
@@ -2445,3 +2446,9 @@ HANDLERS = {
     "trend_report_handoff": trend_report_handoff,
 }
 HANDLERS = {k: timed_handler(k, v) if k in TIMED_SKILLS else v for k, v in HANDLERS.items()}
+
+
+def scoped_handlers() -> dict[str, Any]:
+    """서버에 거는 핸들러 (여러 회사 1-5, 11/23): 요청 meta.tenant_id를 그 요청 동안의 회사로
+    정한다 (회사 칸 저장소가 `company_scope.active()`로 읽는다). HANDLERS 자체는 그대로 둔다."""
+    return {k: company_scope.scoped(v) for k, v in HANDLERS.items()}

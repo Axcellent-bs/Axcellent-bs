@@ -22,7 +22,7 @@ from data_agent import campaign_update, sales_reads
 from data_agent import catalog as metric_catalog
 from data_agent.clients.log_client import get_log_source
 from data_agent.connectors.shop_api import close_shared_client
-from data_agent.handlers import HANDLERS, get_sales_store
+from data_agent.handlers import get_sales_store, scoped_handlers
 from data_agent.monitor import run_snapshots_forever
 from data_agent.report_store import Snapshot, get_report_store
 from data_agent.skills.activity_report import build_day_snapshot
@@ -96,7 +96,7 @@ def build_app() -> FastAPI:
     시작할 때 업무 리포트 일간 저장 주기를 켠다(`DATA_REPORT_DB`가 있을 때만).
     """
     install_sqlite_timer()  # 트렌드 감지 탭 단계별 시간 로그의 sqlite 몫
-    app = create_agent_app(load_card(), HANDLERS)
+    app = create_agent_app(load_card(), scoped_handlers())  # 요청마다 그 회사 (1-5)
     template_lifespan = app.router.lifespan_context
 
     @contextlib.asynccontextmanager

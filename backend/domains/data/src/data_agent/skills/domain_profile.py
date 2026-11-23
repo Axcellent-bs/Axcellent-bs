@@ -43,6 +43,7 @@ from ax_contracts.schemas.data import (
     ProfileEvidence,
     SeedKeyword,
 )
+from data_agent import company_scope
 from data_agent.llm_budget import no_llm
 from data_agent.skills.code_version import source_hash
 from data_agent.skills.product_link import CatalogRead
@@ -127,17 +128,20 @@ def load_tenant(env: Mapping[str, str]) -> TenantProfile:
 
 
 class ProfileStore:
-    """해시(소개·카탈로그·규칙) → 프로필 JSON."""
+    """해시(회사·소개·카탈로그·규칙) → 프로필 JSON. 회사 칸(1-5): 그 회사 줄만 읽고 쓴다."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, company_id: str | None = None) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.company_id = company_scope.resolve(company_id)
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._lock = threading.Lock()
         with self._lock, self._conn:
             self._conn.execute(
                 "CREATE TABLE IF NOT EXISTS profiles (hash TEXT PRIMARY KEY,"
-                " created_at TEXT NOT NULL, output TEXT NOT NULL)"
+                " created_at TEXT NOT NULL, output TEXT NOT NULL,"
+                " tenant_id TEXT NOT NULL DEFAULT 'catbooks')"
             )
+            company_scope.ensure_tenant_column(self._conn, "profiles")
 
     def close(self) -> None:
         self._conn.close()
@@ -145,20 +149,26 @@ class ProfileStore:
     def get(self, key: str) -> DomainProfileOutput | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT output FROM profiles WHERE hash = ?", (key,)
+                "SELECT output FROM profiles WHERE hash = ? AND tenant_id = ?",
+                (key, self.company_id),
             ).fetchone()
         return DomainProfileOutput.model_validate_json(row[0]) if row else None
 
     def put(self, key: str, out: DomainProfileOutput, at: datetime) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO profiles VALUES (?,?,?)",
-                (key, at.isoformat(), out.model_dump_json()),
+                "INSERT OR REPLACE INTO profiles (hash, created_at, output, tenant_id)"
+                " VALUES (?,?,?,?)",
+                (key, at.isoformat(), out.model_dump_json(), self.company_id),
             )
 
 
-def profile_hash(tenant: TenantProfile, catalog: CatalogRead) -> str:
+def profile_hash(
+    tenant: TenantProfile, catalog: CatalogRead, company_id: str | None = None
+) -> str:
+    """회사 ID를 넣어 만든다 (1-5: 같은 소개·카탈로그라도 회사가 다르면 다른 키)."""
     parts = {
+        "company": company_scope.resolve(company_id),
         "about": tenant.about,
         "override": tenant.override,
         "products": sorted(
