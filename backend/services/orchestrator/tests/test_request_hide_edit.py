@@ -147,6 +147,23 @@ async def test_unhide_keeps_stopped_steps() -> None:
     assert row["steps"]["c"]["status"] == "skipped"
 
 
+@pytest.mark.asyncio
+async def test_a_deleted_request_cannot_be_rerun_even_after_unhide() -> None:
+    """삭제 → 되돌리기 → 일 다시 고르기: stopped로 막고 상태·단계·계획은 그대로."""
+    reqs, rid, fake, r = _waiting_on_human()
+    await r.run(rid)
+    r.hide(rid, by="준하")
+    r.unhide(rid, by="준하")
+    before = reqs.get(rid)
+    assert r.rerun(rid, "sales_analysis", by="준하") == "stopped"
+    await r.wait_idle()
+    row = reqs.get(rid)
+    assert row["status"] == "rejected" and row["task"] == before["task"]
+    assert row["plan"] == before["plan"] and row["steps"] == before["steps"]
+    assert {row["steps"][s]["status"] for s in ("c", "d")} == {"skipped"}
+    assert not row.get("corrections") and [c[0] for c in fake.calls] == ["data"]
+
+
 # ---------------------------------------------------------------- 의뢰문 수정
 
 
@@ -253,6 +270,24 @@ def test_list_hides_deleted_requests_by_default(client: Any) -> None:
     assert hidden[0]["hidden_by"] and hidden[0]["status"] == "rejected"
     assert client.post(f"/api/requests/{gone}/unhide", headers=HUMAN).status_code == 200
     assert len(client.get("/api/requests", headers=HUMAN).json()["data"]) == 2
+
+
+def test_rerun_api_refuses_a_deleted_request_with_409(client: Any) -> None:
+    rid = client.reqs.create("member", "홍보 영상 만들어 주세요")["request_id"]
+    assert client.post(f"/api/requests/{rid}/hide", headers=HUMAN).status_code == 200
+    assert client.post(f"/api/requests/{rid}/unhide", headers=HUMAN).status_code == 200
+    before = client.reqs.get(rid)
+    res = client.post(f"/api/requests/{rid}/rerun", json={"task": "sales_analysis"},
+                      headers=HUMAN)  # fmt: skip
+    assert res.status_code == 409
+    assert res.json()["detail"] == (
+        "삭제한 의뢰는 다시 돌릴 수 없어요. 의뢰문 수정으로 새로 접수해 주세요"
+    )
+    row = client.reqs.get(rid)
+    assert row["status"] == "rejected" and row["stopped_at"]
+    assert (row["task"], row["plan"], row["steps"]) == (
+        before["task"], before["plan"], before["steps"],
+    )  # fmt: skip
 
 
 def test_another_companys_request_is_404(client: Any) -> None:

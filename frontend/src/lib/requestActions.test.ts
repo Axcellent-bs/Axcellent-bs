@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ApiError } from "./apiError.ts";
 import { requestEditError } from "./requestCards.ts";
-import { EDIT_NOTE, deleteConfirm, editProblem, remainingSteps, type StepStatus, type WorkRequestRow } from "./workRequests.ts";
+import { EDIT_NOTE, canRerun, deleteConfirm, editProblem, remainingSteps, type StepStatus, type WorkRequestRow } from "./workRequests.ts";
 
 const step = (status: StepStatus) => ({
   status, attempts: 1, grade: null, note: "", reason_code: null, result_ref: null, review_id: null,
@@ -41,6 +41,16 @@ test("의뢰문 수정: 빈 글·너무 긴 글·같은 글(띄어쓰기만 다�
   assert.equal(editProblem(" 홍보  영상 만들어 주세요\n", original), "바뀐 내용이 없어요");
   assert.equal(editProblem("홍보 영상 30초로 만들어 주세요", original), null);
   assert.ok(EDIT_NOTE.startsWith("고친 글로 새 의뢰를 접수하고, 지금 의뢰는 멈추고 목록에서 숨겨요."));
+});
+
+test("[일 다시 고르기]: 삭제로 멈춘 의뢰(되돌린 의뢰 포함)에는 숨긴다", () => {
+  const stopped = row("rejected", { s1: "completed", s4: "skipped", s5: "skipped", s6: "skipped" });
+  assert.equal(canRerun(stopped), true); // 멈추지 않은 거절 의뢰는 그대로 다시 고를 수 있다
+  assert.equal(canRerun({ ...stopped, stopped_at: "2026-11-23T10:00:00+00:00" }), false);
+  // 숨긴 목록에서 되돌린 의뢰: 숨김은 풀렸어도 stopped_at은 남는다
+  assert.equal(canRerun({ ...stopped, stopped_at: "2026-11-23T10:00:00+00:00", hidden_at: null } as WorkRequestRow), false);
+  const busy = row("running", { s1: "running", s4: "pending", s5: "pending", s6: "pending" });
+  assert.equal(canRerun(busy), false);
 });
 
 test("실패 문구: 403·404·409는 결정 실패 문구 그대로, 422·502·503은 서버 문장", () => {

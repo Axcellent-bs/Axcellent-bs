@@ -511,6 +511,10 @@ async def rerun_request(
         raise HTTPException(422, "일 목록에 없는 일")
     if outcome == "busy":
         raise HTTPException(409, "지금 진행 중이라 바꿀 수 없음")
+    if outcome == "stopped":
+        raise HTTPException(
+            409, "삭제한 의뢰는 다시 돌릴 수 없어요. 의뢰문 수정으로 새로 접수해 주세요"
+        )
     return {"data": {"ok": True}, "meta": {}}
 
 

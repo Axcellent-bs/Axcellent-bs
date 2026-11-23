@@ -60,6 +60,8 @@ export interface WorkRequestRow {
   /** 11/23 사람이 삭제(멈추고 숨김)한 때·사람. 기본 목록에는 오지 않는다 (?hidden=1로만) */
   hidden_at?: string | null;
   hidden_by?: string | null;
+  /** 11/23 삭제로 멈춘 때. 되돌려 숨김을 풀어도 남고, 이 의뢰는 다시 돌릴 수 없다 (의뢰문 수정으로 새로 접수) */
+  stopped_at?: string | null;
   /** 의뢰문을 고쳐 다시 접수한 두 의뢰의 연결 */
   replaces?: string | null;
   replaced_by?: string | null;
@@ -124,9 +126,10 @@ export const STEP_STATUS: Record<StepStatus, Tone> = {
 export const canDecide = (s: WorkRequestStep) =>
   s.status === "waiting_human" && (s.reason_code === "human_check" || s.reason_code === "needs_approval");
 
-/** 다시 돌릴 수 있나: 부서가 일하는 중이거나 기다리는 단계가 있으면 안 된다 */
-export const canRerun = (r: WorkRequestRow) =>
-  !["running", "held", "waiting_async"].some((s) => Object.values(r.steps).some((x) => x.status === s));
+/** 다시 돌릴 수 있나: 부서가 일하는 중이거나 기다리는 단계가 있으면 안 된다.
+ *  삭제로 멈춘 의뢰(stopped_at, 숨긴 목록에서 되돌린 의뢰 포함)도 안 된다 (서버 409, 의뢰문 수정으로 새로 접수) */
+export const canRerun = (r: Pick<WorkRequestRow, "steps" | "stopped_at">) =>
+  !r.stopped_at && !["running", "held", "waiting_async"].some((s) => Object.values(r.steps).some((x) => x.status === s));
 
 /** 확신도를 "85%"로. 사람이 골랐거나 값이 없으면 null */
 export const confidenceText = (c: number | null | undefined) => (typeof c === "number" ? `${Math.round(c * 100)}%` : null);

@@ -766,14 +766,19 @@ class RequestRunner:
         return "ok"
 
     def rerun(self, request_id: str, task_name: str, by: str | None = None) -> str:
-        """사람이 일을 골라 의뢰를 다시 돌린다. 돌려주는 값: ok · missing · unknown_task · busy.
+        """사람이 일을 골라 의뢰를 다시 돌린다.
 
+        돌려주는 값: ok · missing · unknown_task · busy · stopped.
         계획과 단계 진행은 새로 시작한다(이전 선택은 기록에 남는다). 상태를 바꾸는 단계는 이번에도
         승인을 거친다. 부서에 보내는 중이거나 기다리는 단계가 있으면(`busy`) 바꾸지 않는다.
+        사람이 삭제해 멈춘 의뢰(`stopped_at`)는 되돌려 숨김을 풀었어도 다시 돌리지 않는다
+        (`stopped`). 고친 의뢰문으로 새로 접수하는 길(`edit`)만 있다.
         """
         row = self._requests.get(request_id)
         if row is None:
             return "missing"
+        if row.get("stopped_at"):
+            return "stopped"
         task = request_tasks.get(task_name)
         if task is None:
             return "unknown_task"
