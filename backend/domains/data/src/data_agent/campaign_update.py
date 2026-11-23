@@ -39,9 +39,9 @@ from typing import Any
 from pydantic import ValidationError
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, RequestMeta, TaskStatus
-from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from ax_contracts.schemas.data import CampaignResultOutput, CampaignSendStatus
 from ax_contracts.schemas.planning import InsightFact, ReceiveCampaignUpdateInput
+from data_agent import company_scope
 
 logger = logging.getLogger("ax.data.campaign_update")
 
@@ -208,6 +208,8 @@ class SendStore:
                 " failures INTEGER NOT NULL, fail_day TEXT, reason TEXT, context_id TEXT,"
                 " updated_at TEXT NOT NULL)"
             )
+            # 여러 회사 1-5 (11/23): 회사 칸 (옛 줄은 캣북스). 보내기 루프는 지금 회사 줄만
+            company_scope.ensure_tenant_column(self._conn, "sends")
 
     def close(self) -> None:
         self._conn.close()
@@ -215,8 +217,9 @@ class SendStore:
     def get(self, campaign_id: str) -> SendRow | None:
         with self._lock:
             row = self._conn.execute(
-                f"SELECT {', '.join(self.COLUMNS)} FROM sends WHERE campaign_id = ?",  # noqa: S608
-                (campaign_id,),
+                f"SELECT {', '.join(self.COLUMNS)} FROM sends"  # noqa: S608
+                " WHERE campaign_id = ? AND tenant_id = ?",
+                (campaign_id, company_scope.active()),
             ).fetchone()
         if row is None:
             return None
@@ -226,12 +229,12 @@ class SendStore:
 
     def sent_with_prefix(self, prefix: str) -> list[tuple[str, str | None, datetime | None]]:
         """보낸 줄 중 campaign_id가 prefix로 시작하는 것 (campaign_id, direction, sent_at).
-        최신순."""
+        최신순. 그 회사 것만 (1-5)."""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT campaign_id, direction, sent_at FROM sends WHERE state = 'sent'"
-                " AND substr(campaign_id, 1, ?) = ? ORDER BY sent_at DESC",
-                (len(prefix), prefix),
+                " AND tenant_id = ? AND substr(campaign_id, 1, ?) = ? ORDER BY sent_at DESC",
+                (company_scope.active(), len(prefix), prefix),
             ).fetchall()
         return [(c, d, datetime.fromisoformat(at) if at else None) for c, d, at in rows]
 
@@ -240,8 +243,9 @@ class SendStore:
         values[4] = row.sent_at.isoformat() if row.sent_at else None
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO sends VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (*values, datetime.now(UTC).isoformat()),
+                f"INSERT OR REPLACE INTO sends ({', '.join(self.COLUMNS)}, updated_at, tenant_id)"  # noqa: S608
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (*values, datetime.now(UTC).isoformat(), company_scope.active()),
             )
 
 
@@ -296,7 +300,7 @@ async def _deliver(
     meta = RequestMeta(
         context_id=row.context_id,
         token="internal:data",  # call_agent가 data 토큰으로 바꿔 보낸다
-        tenant_id=TENANT_ID_DEFAULT,
+        tenant_id=company_scope.meta_tenant(),  # 1-5: 지금 회사 (캣북스는 예전 값 그대로)
         deadline=datetime.now(UTC) + DEADLINE,
         idempotency_key=key,
         requester="data",

@@ -21,6 +21,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
+from data_agent import company_scope
+
 DB_ENV = "DATA_CHAT_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[4] / ".data" / "data_chat.db"  # backend/.data
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
@@ -84,6 +86,8 @@ class DataChatStore:
                 for col in _REMOVED_COLUMNS:
                     if col not in have:
                         self._conn.execute(f"ALTER TABLE data_chat_threads ADD COLUMN {col} TEXT")
+                # 여러 회사 1-5 (11/23): 회사 칸 (옛 줄은 캣북스). 목록·읽기·숨기기는 그 회사만
+                company_scope.ensure_tenant_column(self._conn, "data_chat_threads")
         except (sqlite3.Error, OSError) as error:
             raise ChatStorageError(f"대화 저장소를 열 수 없다: {type(error).__name__}") from error
         self.recover_orphans()
@@ -117,17 +121,27 @@ class DataChatStore:
         except sqlite3.Error as error:
             raise ChatStorageError(f"대화를 읽을 수 없다: {type(error).__name__}") from error
 
+    @staticmethod
+    def _mine(all_companies: bool = False) -> tuple[str, tuple[Any, ...]]:
+        """지금 요청의 회사 조건. all_companies는 오래된 대화 닫기·재시작 정리용."""
+        if all_companies:
+            return "1 = 1", ()
+        return "tenant_id = ?", (company_scope.active(),)
+
     def get(self, thread_id: str) -> dict[str, Any] | None:
+        where, args = self._mine()
         rows = self._query(
-            "SELECT * FROM data_chat_threads WHERE id = ? AND removed_at IS NULL", (thread_id,)
+            f"SELECT * FROM data_chat_threads WHERE id = ? AND removed_at IS NULL AND {where}",  # noqa: S608
+            (thread_id, *args),
         )
         return self._view(rows[0]) if rows else None
 
-    def list(self, limit: int = 100) -> list[dict[str, Any]]:
+    def list(self, limit: int = 100, *, all_companies: bool = False) -> list[dict[str, Any]]:
+        where, args = self._mine(all_companies)
         rows = self._query(
-            "SELECT * FROM data_chat_threads WHERE removed_at IS NULL"
+            f"SELECT * FROM data_chat_threads WHERE removed_at IS NULL AND {where}"  # noqa: S608
             " ORDER BY updated_at DESC, seq DESC LIMIT ?",
-            (limit,),
+            (*args, limit),
         )
         return [self._view(r) for r in rows]
 
@@ -142,10 +156,10 @@ class DataChatStore:
                 ).fetchone()
                 seq = int(row["n"]) + 1
                 self._conn.execute(
-                    "INSERT INTO data_chat_threads"
-                    "(seq, id, title, status, who, summary, messages, created_at, updated_at)"
-                    " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?)",
-                    (seq, f"datachat-{seq}", title, who, at, at),
+                    "INSERT INTO data_chat_threads (seq, id, title, status, who, summary,"
+                    " messages, created_at, updated_at, tenant_id)"
+                    " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?, ?)",
+                    (seq, f"datachat-{seq}", title, who, at, at, company_scope.active()),
                 )
         except sqlite3.Error as error:
             raise ChatStorageError(f"대화를 저장할 수 없다: {type(error).__name__}") from error
@@ -159,15 +173,18 @@ class DataChatStore:
                      "plan": None, "task_id": None, "card": card})  # fmt: skip
 
     def _update(
-        self, thread_id: str, mutate: Callable[[dict[str, Any], str], Status | None]
-    ) -> dict[str, Any] | None:
-        """대화 하나를 읽고 고쳐 쓴다(잠금 안에서 한 번에). 없으면 None."""
+        self, thread_id: str, mutate: Callable[[dict[str, Any], str], Status | None],
+        *, all_companies: bool = False,
+    ) -> dict[str, Any] | None:  # fmt: skip
+        """대화 하나를 읽고 고쳐 쓴다(잠금 안에서 한 번에, 그 회사 것만). 없으면 None."""
         at = self.now().isoformat()
+        where, args = self._mine(all_companies)
         try:
             with self._lock, self._conn:
                 row = self._conn.execute(
-                    "SELECT * FROM data_chat_threads WHERE id = ? AND removed_at IS NULL",
-                    (thread_id,),
+                    f"SELECT * FROM data_chat_threads WHERE id = ? AND removed_at IS NULL"  # noqa: S608
+                    f" AND {where}",
+                    (thread_id, *args),
                 ).fetchone()
                 if row is None:
                     return None
@@ -270,7 +287,7 @@ class DataChatStore:
         self._update(thread_id, mutate)
         return outcome
 
-    def close(self, thread_id: str) -> dict[str, Any] | None:
+    def close(self, thread_id: str, *, all_companies: bool = False) -> dict[str, Any] | None:
         """대화를 끝낸다. 요약이 비어 있으면 첫 질문 일부만 남긴다(지어내지 않는다)."""
 
         def mutate(th: dict[str, Any], at: str) -> Status | None:
@@ -280,19 +297,20 @@ class DataChatStore:
                 th["summary"] = self._first_question(th["messages"])
             return "closed"
 
-        return self._update(thread_id, mutate)
+        return self._update(thread_id, mutate, all_companies=all_companies)
 
     def hide(self, thread_id: str, by: str) -> bool:
-        """대화를 숨긴다(행은 지우지 않고 `removed_at`·`removed_by`만 적는다).
+        """대화를 숨긴다(행은 지우지 않고 `removed_at`·`removed_by`만 적는다). 그 회사 것만.
 
         숨겼으면 True. 없거나 이미 숨긴 대화면 False이고 먼저 적힌 기록은 그대로 둔다."""
         at = self.now().isoformat()
+        where, args = self._mine()
         try:
             with self._lock, self._conn:
                 cur = self._conn.execute(
                     "UPDATE data_chat_threads SET removed_at = ?, removed_by = ?"
-                    " WHERE id = ? AND removed_at IS NULL",
-                    (at, by, thread_id),
+                    f" WHERE id = ? AND removed_at IS NULL AND {where}",  # noqa: S608
+                    (at, by, thread_id, *args),
                 )
                 return cur.rowcount > 0
         except sqlite3.Error as error:
@@ -309,12 +327,12 @@ class DataChatStore:
         limit = self.now() - timedelta(minutes=minutes)
         stale = self.now() - timedelta(minutes=ANSWER_STALE_MINUTES)
         closed: list[str] = []
-        for th in self.list(limit=1000):
+        for th in self.list(limit=1000, all_companies=True):  # 모든 회사 대화 (주기 정리)
             moved = datetime.fromisoformat(th["updated_at"])
             if th["status"] == "answering" and moved < stale:
                 self._release(th["id"])
             elif th["status"] == "talking" and moved < limit:
-                self.close(th["id"])
+                self.close(th["id"], all_companies=True)
                 closed.append(th["id"])
         return closed
 
@@ -325,7 +343,7 @@ class DataChatStore:
             self._message(th["messages"], "assistant", RESTART_NOTICE, "error", at)
             return "talking"
 
-        self._update(thread_id, mutate)
+        self._update(thread_id, mutate, all_companies=True)
 
     def recover_orphans(self) -> None:
         """다시 시작하면 답을 만들던 일은 사라졌으니 `answering`을 풀어 준다."""

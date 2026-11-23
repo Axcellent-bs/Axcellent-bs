@@ -34,6 +34,7 @@ from ax_contracts.schemas.data import (
     TrendReportListItem,
 )
 from ax_contracts.schemas.event import TrendReportReadyData
+from data_agent import company_scope
 from data_agent import trend_report_hooks as hooks_mod
 from data_agent.skills import trend_report as tr
 from data_agent.skills import trend_report_brief as tb
@@ -57,8 +58,10 @@ LIVE = ("queued", "running")
 LIVE_SECTION = ("waiting", "running")
 
 
-def brief_hash(request: TrendReportInput) -> str:
-    raw = json.dumps(tb.normalized(request), ensure_ascii=False, sort_keys=True)
+def brief_hash(request: TrendReportInput, company_id: str | None = None) -> str:
+    """같은 의뢰 해시. 회사 ID를 넣는다 (1-5: 같은 의뢰문이라도 회사가 다르면 다른 해시)."""
+    body = {"company": company_scope.resolve(company_id), "brief": tb.normalized(request)}
+    raw = json.dumps(body, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
@@ -73,6 +76,7 @@ def ready_event(report: TrendReport, now: datetime) -> EventEnvelope:
         occurred_at=now,
         context_id=report.context_id,
         source="data",
+        tenant_id=company_scope.meta_tenant(),  # 1-5: 그 요청의 회사 (캣북스는 예전 값 그대로)
         idempotency_key=key,
         data=data.model_dump(mode="json"),
         untrusted={},
@@ -127,7 +131,12 @@ class TrendReportService:
     async def resume(self) -> None:
         """다시 켜진 뒤: 끝났는데(중단 포함) 완료를 못 받은 총괄 기다림에 완료 알림."""
         self._resumed = True
-        await self.hooks.resume(self.get)
+        await self.hooks.resume(self._get_any_company)
+
+    def _get_any_company(self, report_id: str) -> TrendReport | None:
+        """재시작 정리용: 회사를 보지 않고 읽는다 (기다리는 쪽은 모든 회사 것)."""
+        row = self.store.get(report_id, all_companies=True)
+        return TrendReport.model_validate(row["result"]) if row else None
 
     # ---------------------------------------------------------------- 의뢰 넣기·읽기
 

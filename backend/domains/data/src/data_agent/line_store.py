@@ -18,13 +18,19 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from data_agent import company_scope
+
 DB_ENV = "DATA_BRIEF_LINES_DB"
 KEEP_DAYS = 30  # 이보다 오래 안 쓴 문장은 지운다
 
 
 def line_key(kind: str, about: str, facts: Mapping[str, object]) -> str:
-    text = json.dumps({"kind": kind, "about": about, "facts": facts}, ensure_ascii=False,
-                      sort_keys=True, default=str)  # fmt: skip
+    """문장 키. 회사 ID를 넣는다 (여러 회사 1-5: 같은 근거라도 회사가 다르면 다른 키).
+    캣북스는 예전 키 그대로 (저장한 문장을 LLM으로 다시 만들지 않게)."""
+    body: dict[str, object] = {"kind": kind, "about": about, "facts": facts}
+    if (cid := company_scope.active()) != company_scope.CATBOOKS:
+        body["company"] = cid
+    text = json.dumps(body, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
@@ -42,12 +48,14 @@ class LineStore:
                     "CREATE TABLE IF NOT EXISTS lines (key TEXT PRIMARY KEY, line TEXT NOT NULL,"
                     " used_at TEXT NOT NULL)"
                 )
+                company_scope.ensure_tenant_column(self._conn, "lines")  # 1-5 회사 칸
 
     def get(self, key: str) -> str | None:
         with self._lock:
             if self._conn is None:
                 return self._mem.get(key)
-            row = self._conn.execute("SELECT line FROM lines WHERE key = ?", (key,)).fetchone()
+            row = self._conn.execute("SELECT line FROM lines WHERE key = ? AND tenant_id = ?",
+                                     (key, company_scope.active())).fetchone()  # fmt: skip
             if row is not None:
                 with self._conn:
                     self._conn.execute(
@@ -64,7 +72,8 @@ class LineStore:
             now = datetime.now(UTC)
             with self._conn:
                 self._conn.execute(
-                    "INSERT OR REPLACE INTO lines VALUES (?,?,?)", (key, line, now.isoformat())
+                    "INSERT OR REPLACE INTO lines (key, line, used_at, tenant_id) VALUES (?,?,?,?)",
+                    (key, line, now.isoformat(), company_scope.active()),
                 )
                 old = (now - timedelta(days=KEEP_DAYS)).isoformat()
                 self._conn.execute("DELETE FROM lines WHERE used_at < ?", (old,))
