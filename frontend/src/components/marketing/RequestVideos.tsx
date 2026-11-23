@@ -6,11 +6,13 @@ import { shortDateTime } from "@/lib/format";
 import { listRequestVideos, requestVideoPreviewUrl } from "@/lib/requestVideos";
 import { AI_LABEL_NOTE_KO, REQUEST_VIDEOS_PATH, VIDEOS_EMPTY_KO, VIDEO_NOT_FOUND_KO, canUploadToYoutube, durationKo, focusDraftId, requestFilterOf, sortForRequest, statusKo, videoPane, type RequestVideo } from "@/lib/requestVideoView";
 import { CoverPicker } from "./CoverPicker";
+import { InstagramPanel } from "./InstagramPanel";
 import { YoutubePanel } from "./YoutubePanel";
 
 // 제작 기록 › 의뢰로 만든 영상 (/marketing/records?view=videos). 총괄 홍보 영상 의뢰(wr_…)가 만든 reel 초안 중
 // AI 라벨을 입힌 영상을 본다. 영상마다 썸네일 후보 3장에서 하나를 고르고(시안 ③), 회사 유튜브에 올릴 수 있다
-// (AI 제목·설명 초안 → 사람 승인 C → 올리기). Instagram 게시·승인은 기획안 카드의 승인 패널에서 한다.
+// (AI 제목·설명 초안 → 사람 승인 C → 올리기). 11/23: 회사 인스타그램 릴스 칸도 같은 방식
+// (AI 캡션 초안 → 사람 승인 C publish_instagram_video → 게시물 주소). 기획안 Instagram 게시·승인은 기획안 카드의 승인 패널에서 한다.
 // ?request=wr_… 이면 그 의뢰 영상을 맨 앞에 두고, 그 카드로 한 번 스크롤해 테두리(accent)로 표시한다.
 
 function Player({ v }: { v: RequestVideo }) {
@@ -47,8 +49,11 @@ function Item({ v, focus, onChanged }: { v: RequestVideo; focus: boolean; onChan
       {pane.kind === "play" ? <Player v={v} /> : <p className="rounded-xl bg-ink-50 px-3 py-2 text-ink-700">{pane.text}</p>}
       {pane.kind === "play" && <CoverPicker video={v} onChanged={onChanged} />}
       {canUploadToYoutube(v)
-        ? <YoutubePanel requestVideoId={v.post_draft_id} youtube={v.youtube} onChanged={onChanged} />
-        : <p className="text-ink-500">AI 표시가 입혀진 뒤에 회사 유튜브에 올릴 수 있어요.</p>}
+        ? <>
+          <YoutubePanel requestVideoId={v.post_draft_id} youtube={v.youtube} onChanged={onChanged} />
+          <InstagramPanel requestVideoId={v.post_draft_id} instagram={v.instagram} onChanged={onChanged} />
+        </>
+        : <p className="text-ink-500">AI 표시가 입혀진 뒤에 회사 유튜브·인스타그램에 올릴 수 있어요.</p>}
     </li>
   );
 }

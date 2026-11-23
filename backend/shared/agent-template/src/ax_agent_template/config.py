@@ -11,7 +11,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from ax_agent_template.company_connection import ADAPTER_PATH, connection_file, shop_api_override
+from ax_agent_template import company_scope
+from ax_agent_template.company_connection import (
+    ADAPTER_PATH,
+    adapter_path,
+    connection_file,
+    shop_api_override,
+)
 from ax_agent_template.services import SERVICE_PORTS, department_of
 from ax_secret_store import get_secret
 
@@ -159,6 +165,12 @@ def agent_token(name: str) -> str:
     raise RuntimeError(f"{env_prefix(name)}_TOKEN이 설정되지 않았다 ({TOKENS_ENV}에도 없음)")
 
 
+def _other_company() -> str | None:
+    """지금 요청 회사가 캣북스가 아니면 그 회사 ID. 요청 밖·캣북스면 None."""
+    cid = company_scope.active()
+    return cid if cid and cid != company_scope.CATBOOKS else None
+
+
 def agent_url(target: str) -> str:
     """대상 에이전트의 기본 주소. `http`로 시작하면 그대로 쓴다.
 
@@ -169,7 +181,15 @@ def agent_url(target: str) -> str:
     if target.startswith("http"):
         return target.rstrip("/")
     if target == "shop-api" and (connected := shop_api_override()):
-        return connected  # 시스템 관리 > 회사 연결에서 정한 고객사 판매 서버 (company_connection)
+        # 시스템 관리 > 회사 연결에서 정한 고객사 판매 서버 (company_connection).
+        # 회사는 지금 요청 회사(`company_scope.active()`, 요청의 meta.tenant_id), 없으면 캣북스
+        return connected
+    if target == "shop-api" and (other := _other_company()):
+        # 캣북스가 아닌 회사인데 그 회사 연결이 없다:
+        # 캣북스 판매 서버(`AX_SHOP_API_URL`·기본 포트)로 빠지지 않고 그 회사 변환기 경로로 보낸다.
+        # 변환기는 503 NOT_CONFIGURED(연결 안 됨)로 답한다. 연결 기능이 꺼진 설치(연결 파일 없음)도
+        # 같다: 설치 값은 캣북스 것이라 다른 회사가 읽으면 안 된다(#1634 리뷰 1)
+        return agent_url("dashboard-api") + adapter_path(other)
     override = os.getenv(f"AX_{env_prefix(target)}_URL")
     if override:
         return override.rstrip("/")
@@ -182,3 +202,18 @@ def agent_url(target: str) -> str:
     if port is None:
         raise KeyError(f"알 수 없는 에이전트: {target}")
     return f"http://{target}:{port}"
+
+
+def shop_api_url(fallback: str) -> str:
+    """요청 회사의 판매 서버 주소. 판매 서버 주소를 스스로 정하는 도메인은 이것만 쓴다.
+
+    - 그 회사 연결이 있으면 그 주소(`shop_api_override`)
+    - 캣북스가 아닌 회사(`company_scope.active()`)면 그 회사 변환기 경로(`agent_url("shop-api")`).
+      `fallback`(설치 값 `AX_SHOP_API_URL`·기본 주소)으로 빠지지 않는다. 설치 값은 캣북스 것이다
+    - 캣북스·요청 밖이면 `fallback` (도메인이 예전에 쓰던 순서 그대로)
+    """
+    if connected := shop_api_override():
+        return connected
+    if _other_company():
+        return agent_url("shop-api")
+    return fallback

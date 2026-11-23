@@ -2,6 +2,8 @@
 
 캣북스 기본값은 없다. 회사를 연결하기 전에는 어느 회사도 아니다(`current()`가 None).
 고르는 순서: `AX_TENANT`(설치하는 사람이 정한 값) → 회사 연결 파일의 `tenant` → 없음.
+캣북스가 아닌 회사 요청(`company_scope.active()`)은 `AX_TENANT`·설치 기록을 건너뛰고
+그 회사 연결의 `tenant`만 본다(여러 회사 설계 6.2).
 
 `setting(이름)`은 run_all이 내보내던 회사 설정 환경변수와 같은 이름으로 값을 준다.
 환경변수를 정했으면 그것, 아니면 지금 회사 폴더 `tenant.toml`에서 찾는다(재시작 없이 따라감).
@@ -102,13 +104,17 @@ def is_tenant(name: str) -> bool:
 
 def current() -> str | None:
     """지금 회사 id. 연결 전·모르는 회사면 None."""
-    from ax_agent_template.company_connection import read_connection
+    from ax_agent_template.company_connection import company_of, read_connection
+    from ax_agent_template.company_scope import CATBOOKS
 
-    name = os.getenv(TENANT_ENV, "").strip()
+    catbooks = company_of() == CATBOOKS
+    # `AX_TENANT`·설치 기록은 설치 하나에 하나라 캣북스 것이다(`AX_SITE_API_TOKEN`과 같은 규칙).
+    # 다른 회사 요청(company_scope.active())은 그 회사 연결의 회사 설정만 본다(설정이 섞이지 않게)
+    name = os.getenv(TENANT_ENV, "").strip() if catbooks else ""
     if not name:
-        found = read_connection()
+        found = read_connection()  # 지금 요청 회사의 연결 (요청 밖이면 캣북스)
         name = (found.tenant or "") if found else ""
-    if not name:
+    if not name and catbooks:
         name = _remembered()
     return name if is_tenant(name) else None
 

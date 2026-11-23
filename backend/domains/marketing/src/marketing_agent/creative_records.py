@@ -74,6 +74,18 @@ CREATE TABLE IF NOT EXISTS marketing_request_video_youtube (
 )
 """
 
+# 의뢰로 만든 영상의 인스타그램 올리기 상태(2026-11-23). 유튜브 표와 같은 모양이다
+_REQUEST_INSTAGRAM_SCHEMA = """
+CREATE TABLE IF NOT EXISTS marketing_request_video_instagram (
+    post_draft_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    instagram TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (post_draft_id, tenant_id)
+)
+"""
+
 
 def clean_thumbnail(raw: Any) -> str | None:
     """JPEG base64 미리보기만 받는다. 크거나 깨졌으면 버린다(기록은 미리보기 없이 남긴다)."""
@@ -98,12 +110,15 @@ class CreativeRecords:
         with self._lock, self._conn:
             self._conn.execute(_SCHEMA)
             self._conn.execute(_REQUEST_YOUTUBE_SCHEMA)
+            self._conn.execute(_REQUEST_INSTAGRAM_SCHEMA)
             info = self._conn.execute("PRAGMA table_info(marketing_creative_records)")
             have = {r["name"] for r in info}
             if "render" not in have:  # 2026-11-20 Higgsfield 그림·영상 칸
                 self._conn.execute("ALTER TABLE marketing_creative_records ADD COLUMN render TEXT")
             if "brand" not in have:  # 2026-11-23 회사 대표 캐릭터 표시
                 self._conn.execute("ALTER TABLE marketing_creative_records ADD COLUMN brand TEXT")
+            if "script" not in have:  # 2026-11-23 영상 대본(시트 → 대본 → 스토리보드)
+                self._conn.execute("ALTER TABLE marketing_creative_records ADD COLUMN script TEXT")
             company_scope.ensure_tenant_column(
                 self._conn, "marketing_creative_records"
             )  # 옛 줄은 캣북스
@@ -155,6 +170,24 @@ class CreativeRecords:
             )
         return cur.rowcount == 1
 
+    def attach_script(self, record_id: str, script: dict[str, Any], story: str | None) -> bool:
+        """기록에 대본을 붙인다(다시 쓰거나 고치면 바꾼다). 줄거리를 주면 같이 남긴다.
+
+        스토리보드는 그대로 둔다(대본을 고친 뒤 스토리보드를 다시 만들면 새 대본을 따른다).
+        기록이 없으면 False."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE marketing_creative_records SET script = ?, story = COALESCE(?, story)"
+                " WHERE record_id = ? AND tenant_id = ?",
+                (
+                    json.dumps(script, ensure_ascii=False),
+                    story[:MAX_STORY] if story else None,
+                    record_id,
+                    self.company_id,
+                ),
+            )
+        return cur.rowcount == 1
+
     def list(self, limit: int = 50) -> list[dict[str, Any]]:
         """목록은 가볍게: 요약·미리보기·칸 수만."""
         with self._lock:
@@ -167,6 +200,7 @@ class CreativeRecords:
         for r in rows:
             sheet = json.loads(r["sheet"])
             board = json.loads(r["storyboard"]) if r["storyboard"] else None
+            script = _script(r)
             out.append(
                 {
                     "record_id": r["record_id"],
@@ -179,6 +213,8 @@ class CreativeRecords:
                     "shot_count": len(board.get("shots", [])) if board else 0,
                     "storyboard_at": r["storyboard_at"],
                     "render": _statuses(r["render"]),
+                    "script_scenes": len(script.get("scenes") or []) if script else 0,
+                    "script_at": script.get("at") if script else None,
                 }
             )
         return out
@@ -202,6 +238,7 @@ class CreativeRecords:
             "storyboard": json.loads(r["storyboard"]) if r["storyboard"] else None,
             "storyboard_at": r["storyboard_at"],
             "render": json.loads(r["render"]) if r["render"] else {},
+            "script": _script(r),
         }
 
     def get_render(self, record_id: str) -> dict[str, Any]:
@@ -359,6 +396,52 @@ class CreativeRecords:
                 (self.company_id, max(1, limit)),
             ).fetchall()
         return {r["post_draft_id"]: json.loads(r["youtube"]) for r in rows}
+
+    # ------------------------------------------------ 의뢰로 만든 영상의 인스타 상태
+    def get_request_instagram(self, post_draft_id: str) -> dict[str, Any]:
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT instagram FROM marketing_request_video_instagram"
+                " WHERE post_draft_id = ? AND tenant_id = ?",
+                (post_draft_id, self.company_id),
+            ).fetchone()
+        return json.loads(r["instagram"]) if r is not None else {}
+
+    def set_request_instagram(
+        self, post_draft_id: str, request_id: str, instagram: dict[str, Any]
+    ) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO marketing_request_video_instagram"
+                " (post_draft_id, tenant_id, request_id, instagram, updated_at)"
+                " VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT(post_draft_id, tenant_id)"
+                " DO UPDATE SET instagram = excluded.instagram, updated_at = excluded.updated_at",
+                (
+                    post_draft_id,
+                    self.company_id,
+                    request_id,
+                    json.dumps(instagram, ensure_ascii=False),
+                    now,
+                ),
+            )
+
+    def request_instagram_all(self, limit: int = KEEP) -> dict[str, dict[str, Any]]:
+        """이 회사의 의뢰 영상 인스타 상태 전부(post_draft_id → 상태), 최근 것부터."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT post_draft_id, instagram FROM marketing_request_video_instagram"
+                " WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT ?",
+                (self.company_id, max(1, limit)),
+            ).fetchall()
+        return {r["post_draft_id"]: json.loads(r["instagram"]) for r in rows}
+
+
+def _script(row: sqlite3.Row) -> dict[str, Any] | None:
+    """기록의 대본(옛 기록·대본 없는 기록은 None)."""
+    raw = row["script"] if "script" in row.keys() else None
+    return json.loads(raw) if raw else None
 
 
 def _statuses(raw: str | None) -> dict[str, str]:

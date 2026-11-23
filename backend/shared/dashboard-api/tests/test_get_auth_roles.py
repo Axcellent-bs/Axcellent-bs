@@ -35,6 +35,8 @@ ADMIN_ONLY_GETS = {
     "/api/dashboard/company-ai",
     # 회사 Higgsfield 계정 연결 상태(동의한 계정 이메일): 고객사 관리자만(연결·끊기와 같다)
     "/api/dashboard/marketing/higgsfield/connection",
+    # 회사 인스타 로그인 연결 상태(@username·만료일): 고객사 관리자만(연결·끊기와 같다)
+    "/api/dashboard/marketing/instagram/connection",
 }
 
 

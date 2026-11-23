@@ -31,9 +31,13 @@ from ax_dashboard_api.connection_keys import router as connection_keys_router
 from ax_dashboard_api.cost_limit_routes import router as cost_limit_router
 from ax_dashboard_api.envelope import SessionCompanyMiddleware, install_error_handlers, is_mock
 from ax_dashboard_api.higgsfield_mcp_oauth import router as higgsfield_mcp_router
+from ax_dashboard_api.instagram_oauth import refresh_interval as ig_refresh_interval
+from ax_dashboard_api.instagram_oauth import refresh_loop as ig_refresh_loop
+from ax_dashboard_api.instagram_oauth import router as instagram_oauth_router
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
 from ax_dashboard_api.routes import router
 from ax_dashboard_api.secret_routes import router as secret_router
+from ax_dashboard_api.site_adapter.company_route import CompanyRouteMiddleware
 from ax_dashboard_api.site_adapter.router import router as site_adapter_router
 from ax_dashboard_api.site_adapter.setup import router as site_adapter_setup_router
 from ax_dashboard_api.youtube_oauth import router as youtube_oauth_router
@@ -103,10 +107,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     detector = None
     if not is_mock() and change_detector.interval_seconds() > 0:
         detector = asyncio.create_task(change_detector.loop())
+    # 인스타 로그인 연결 토큰(60일) 자동 연장. MARKETING_IG_REFRESH_INTERVAL_SECONDS<=0이면 끈다
+    ig_refresh = None
+    if not is_mock() and ig_refresh_interval() > 0:
+        ig_refresh = asyncio.create_task(ig_refresh_loop())
     try:
         yield
     finally:
-        for running in (task, detector):
+        for running in (task, detector, ig_refresh):
             if running is not None:
                 running.cancel()
 
@@ -123,6 +131,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 install_error_handlers(app)
+# 회사 연결·변환기 저장소를 요청 회사로 고른다(변환기 경로의 회사, 화면은 세션 회사).
+# 세션 회사를 읽으므로 SessionCompanyMiddleware보다 먼저 더한다(나중에 더한 것이 바깥)
+app.add_middleware(CompanyRouteMiddleware)
 app.add_middleware(SessionCompanyMiddleware)  # 응답 meta.tenant_id가 세션 회사를 따른다
 app.include_router(router)
 # 영상 비용 상한·안전 정책 화면 (로그인 세션의 운영자·관리자, 변경은 limit_editor·policy_editor)
@@ -153,6 +164,7 @@ app.include_router(instagram_radar_router)
 app.include_router(youtube_oauth_router)
 # 회사 Higgsfield 계정 연결(원격 MCP + OAuth, 구독 크레딧). 콜백만 토큰 없이(auth.PUBLIC_ROUTES)
 app.include_router(higgsfield_mcp_router)
+app.include_router(instagram_oauth_router)
 app.include_router(tool_connections.router)
 # 알림 받는 주소: 고객사 판매 서버가 회사 키로 이벤트를 보낸다 (사람 토큰 대신 회사 키)
 app.include_router(shop_events.router)

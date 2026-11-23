@@ -931,3 +931,10 @@ base_grade = "A"
 action = "publish_youtube"
 owner = "marketing"
 base_grade = "C"
+
+# 제작 기록 영상·의뢰로 만든 영상을 회사 인스타그램에 릴스로 올리기(2026-11-23). 외부에 공개되고
+# 이 로그인 경로에는 삭제 API가 없어 늘 사람이 승인한다(C). 캡션·AI 라벨 영상 sha256이 바뀌면 새 승인
+[[actions]]
+action = "publish_instagram_video"
+owner = "marketing"
+base_grade = "C"

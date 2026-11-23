@@ -6,10 +6,15 @@ import { PromptBox } from "./PromptParts";
 import { SheetBoard } from "./SheetBoard";
 import { RenderPanel } from "./RenderPanel";
 import { StoryboardView } from "./StoryboardMaker";
+import { ScriptPanel } from "./ScriptPanel";
+import { DEFAULT_SCRIPT_SECONDS, SCRIPT_SECONDS, type CreativeScript, type ScriptSeconds } from "@/lib/creativeScript";
+import { writeScript } from "@/lib/creativeScriptApi";
 
 // 마케팅 › SNS·미디어 › 이미지 시트 · 스토리보드 만들기.
 // 캐릭터 이미지와 줄거리를 넣고 한 번 누르면 ① 이미지 시트(캐릭터 시트) 프롬프트를 만들고, 줄거리가 있으면
-// ② 그 시트의 캐릭터 고정 문장(consistency_en)을 넣어 장면 구도를 정한 스토리보드까지 이어서 만든다.
+// ② 영상 대본(장면별 시간·화면·대사·자막·끝 CTA, 11/23)을 쓰고 ③ 그 대본 장면을 따라 시트의 캐릭터 고정 문장
+// (consistency_en)을 넣어 장면 구도를 정한 스토리보드까지 이어서 만든다. 대본은 고쳐서 저장하거나 AI로 다시 쓸 수 있고,
+// 바꾼 뒤 [고친 대본으로 스토리보드 다시 만들기]를 누르면 새 대본을 따른다.
 // 그림체는 따로 고르지 않는다. 줄거리에 적으면 마케팅 AI가 읽어 쓴다.
 // 캐릭터 이미지 한 장(+ 선택 메모)을 올리면 마케팅 AI가 같은 캐릭터의 캐릭터 시트 이미지 프롬프트를 만든다.
 // 방향 7칸·표정 칸은 서버 코드가 넣는다. 이미지는 저장하지 않고, 이미지를 만들거나 게시하지 않는다.
@@ -61,10 +66,15 @@ export function CharacterSheetMaker() {
   const [note, setNote] = useState("");
   const [story, setStory] = useState("");
   const [shots, setShots] = useState<ShotCount>(12);
-  const [step, setStep] = useState<"sheet" | "board" | null>(null);
+  const [seconds, setSeconds] = useState<ScriptSeconds>(DEFAULT_SCRIPT_SECONDS);
+  const [step, setStep] = useState<"sheet" | "script" | "board" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CharacterSheetResult | null>(null);
+  const [script, setScript] = useState<CreativeScript | null>(null);
+  const [scriptFor, setScriptFor] = useState<string | null>(null); // 대본을 쓴 줄거리
+  const [scriptChanged, setScriptChanged] = useState(false); // 스토리보드 뒤에 대본을 고쳤다
   const [board, setBoard] = useState<StoryboardResult | null>(null);
+  const [boardRev, setBoardRev] = useState(0);
   const busy = step !== null;
 
   const pick = async (file: File | undefined) => {
@@ -74,6 +84,8 @@ export function CharacterSheetMaker() {
       const s = await shrinkImage(file);
       setPicked({ ...s, name: file.name });
       setResult(null);
+      setScript(null);
+      setScriptFor(null);
       setBoard(null);
     } catch (e) {
       setPicked(null);
@@ -81,37 +93,65 @@ export function CharacterSheetMaker() {
     }
   };
 
-  // ① 이미지 시트 → (줄거리가 있으면) ② 스토리보드. 같은 이미지·메모로 시트를 이미 만들었으면 ①을 건너뛴다
+  const drawBoard = async (sheet: CharacterSheetResult) => {
+    setStep("board");
+    setBoard(await makeStoryboard({ story, shots, character_en: sheet.consistency_en, record_id: sheet.record_id }));
+    setBoardRev((n) => n + 1);
+    setScriptChanged(false);
+  };
+
+  // ① 이미지 시트 → (줄거리가 있으면) ② 대본 → ③ 대본을 따른 스토리보드.
+  // 같은 이미지·메모로 시트를 이미 만들었으면 ①을, 같은 줄거리로 대본을 이미 썼으면 ②를 건너뛴다(고친 대본을 지키려고)
   const make = async () => {
     if (!picked) return;
     setError(null);
     setBoard(null);
     let sheet = result;
+    let what = "이미지 시트";
     try {
       if (!sheet) {
         setStep("sheet");
         sheet = await makeCharacterSheet({ media_type: picked.media_type, data_base64: picked.data_base64 }, note, picked.thumb_base64);
         setResult(sheet);
+        setScript(null);
+        setScriptFor(null);
       }
-      if (story.trim()) {
-        setStep("board");
-        setBoard(await makeStoryboard({ story, shots, character_en: sheet.consistency_en, record_id: sheet.record_id }));
+      const text = story.trim();
+      if (!text) return;
+      if (sheet.record_id && (!script || scriptFor !== text)) {
+        what = "대본";
+        setStep("script");
+        setScript(await writeScript(sheet.record_id, { story: text, scenes: shots, seconds }));
+        setScriptFor(text);
       }
+      what = "스토리보드";
+      await drawBoard(sheet);
     } catch (e) {
-      const what = sheet ? "스토리보드" : "이미지 시트";
       setError(e instanceof Error ? e.message : `${what}를 만들지 못했어요`);
     } finally {
       setStep(null);
     }
   };
 
+  const redraw = async () => {
+    if (!result) return;
+    setError(null);
+    try {
+      await drawBoard(result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "스토리보드를 만들지 못했어요");
+    } finally {
+      setStep(null);
+    }
+  };
+
   const hasStory = story.trim().length > 0;
-  const label = hasStory ? (result ? "스토리보드 만들기" : "이미지 시트 + 스토리보드 만들기") : "이미지 시트 만들기";
+  const label = hasStory ? (result ? "대본 + 스토리보드 만들기" : "이미지 시트 + 대본 + 스토리보드 만들기") : "이미지 시트 만들기";
   return (
     <section className="card space-y-4 p-6" aria-labelledby="character-sheet-title">
       <div>
         <h2 id="character-sheet-title" className="text-lg font-semibold">이미지 시트 · 스토리보드 만들기</h2>
-        <p className="mt-1 text-xs text-ink-500">캐릭터 그림·사진 한 장과 줄거리를 넣으면 같은 캐릭터의 방향·표정·포즈·색 팔레트가 든 이미지 시트를 만들고, 그 캐릭터로 칸마다 샷 크기·카메라 앵글·화면 배치를 정한 스토리보드까지 이어서 만들어요. 그림체는 줄거리에 적어 주세요. 줄거리를 비우면 이미지 시트만 만들어요. 올린 이미지는 저장하지 않고, 지금은 이미지가 아니라 프롬프트를 만들어요.</p>
+        <p className="mt-1 text-xs text-ink-500">캐릭터 그림·사진 한 장과 줄거리를 넣으면 같은 캐릭터의 방향·표정·포즈·색 팔레트가 든 이미지 시트를 만들고, 줄거리로 영상 대본(장면별 시간·화면·대사·자막)을 쓰고, 그 대본 장면을 따라 칸마다 샷 크기·카메라 앵글·화면 배치를 정한 스토리보드까지 이어서 만들어요. 그림체는 줄거리에 적어 주세요. 줄거리를 비우면 이미지 시트만 만들어요. 올린 이미지는 저장하지 않고, 지금은 이미지가 아니라 프롬프트를 만들어요.</p>
       </div>
       <div className="flex flex-wrap items-start gap-4">
         <div className="flex h-32 w-32 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-surface ring-1 ring-ink-100">
@@ -139,6 +179,13 @@ export function CharacterSheetMaker() {
                 <button key={n} type="button" aria-pressed={shots === n} onClick={() => setShots(n)} className={shots === n ? "btn-primary text-xs" : "btn-ghost text-xs"}>{n}칸</button>
               ))}
             </fieldset>
+            <fieldset className="flex items-center gap-1" disabled={!hasStory}>
+              <legend className="sr-only">영상 길이</legend>
+              <span className="mr-1 text-xs font-medium text-ink-700">길이</span>
+              {SCRIPT_SECONDS.map((n) => (
+                <button key={n} type="button" aria-pressed={seconds === n} onClick={() => setSeconds(n)} className={seconds === n ? "btn-primary text-xs" : "btn-ghost text-xs"}>{n}초</button>
+              ))}
+            </fieldset>
             <button type="button" className="btn-primary ml-auto" disabled={!picked || busy} onClick={() => void make()}>{busy ? "만드는 중…" : label}</button>
           </div>
         </div>
@@ -148,13 +195,14 @@ export function CharacterSheetMaker() {
         {busy && (
           <ol className="flex flex-wrap gap-2 text-xs" aria-label="진행 단계">
             <li className={`chip ${step === "sheet" ? "bg-brand-50 text-brand-700" : "bg-ink-50 text-ink-500"}`}>1. 이미지 시트 {step === "sheet" ? "만드는 중" : "완료"}</li>
-            {hasStory && <li className={`chip ${step === "board" ? "bg-brand-50 text-brand-700" : "bg-ink-50 text-ink-500"}`}>2. 스토리보드 {step === "board" ? "만드는 중" : "대기"}</li>}
+            {hasStory && <li className={`chip ${step === "script" ? "bg-brand-50 text-brand-700" : "bg-ink-50 text-ink-500"}`}>2. 대본 {step === "script" ? "쓰는 중" : step === "board" ? "완료" : "대기"}</li>}
+            {hasStory && <li className={`chip ${step === "board" ? "bg-brand-50 text-brand-700" : "bg-ink-50 text-ink-500"}`}>3. 스토리보드 {step === "board" ? "만드는 중" : "대기"}</li>}
           </ol>
         )}
         {error && <p className="text-sm text-accent" role="alert">{error}</p>}
         {result && (
-          <details open={!board}>
-            <summary className="cursor-pointer text-sm font-semibold text-ink-900">이미지 시트</summary>
+          <details open={!board && !script}>
+            <summary className="cursor-pointer text-sm font-semibold text-ink-900">1. 이미지 시트</summary>
             <div className="space-y-4 pt-3">
               <SheetBoard r={result} thumb={picked?.preview} />
               <details>
@@ -164,13 +212,25 @@ export function CharacterSheetMaker() {
             </div>
           </details>
         )}
+        {script && result?.record_id && (
+          <details open>
+            <summary className="cursor-pointer text-sm font-semibold text-ink-900">2. 대본</summary>
+            <div className="space-y-2 pt-3">
+              <ScriptPanel recordId={result.record_id} script={script} story={story} scenes={shots}
+                onChange={(next) => { setScript(next); setScriptFor(story.trim()); setScriptChanged(Boolean(board)); }} />
+              {scriptChanged && !busy && (
+                <button type="button" className="btn-primary text-xs" onClick={() => void redraw()}>고친 대본으로 스토리보드 다시 만들기</button>
+              )}
+            </div>
+          </details>
+        )}
         {board && (
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-ink-900">스토리보드</h3>
+            <h3 className="text-sm font-semibold text-ink-900">{script ? "3. " : ""}스토리보드</h3>
             <StoryboardView r={board} />
           </div>
         )}
-        {result?.record_id && !busy && <RenderPanel key={`${result.record_id}:${board ? 1 : 0}`} recordId={result.record_id} />}
+        {result?.record_id && !busy && <RenderPanel key={`${result.record_id}:${boardRev}`} recordId={result.record_id} />}
         {result?.record_id && (
           <p className="text-xs text-ink-500">제작 기록 <Link className="underline" to={`/marketing/records?id=${result.record_id}`}>{result.record_id}</Link>에 남겼어요.</p>
         )}
