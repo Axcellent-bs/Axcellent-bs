@@ -282,3 +282,14 @@ def test_upload_refuses_a_changed_file_and_a_held_gate(env: dict[str, Any]) -> N
     with pytest.raises(rr.RenderError, match="gate_rejected"):
         _run(lambda: rr.attach_upload(META, rid, "sheet_image", "sheet.png", sha, 16, None, None))
     assert "sheet_image" not in env["store"].get(rid)["render"]
+
+
+def test_storyboard_video_prompt_is_the_same_sentence_the_screen_copies() -> None:
+    """화면 [영상 프롬프트 복사](frontend/src/lib/higgsfieldWeb.test.ts)와 같은 문장이어야 한다."""
+    base = (
+        "Animate this storyboard as one continuous short film, panel by panel in order, "
+        "keeping the same characters, outfits and art style."
+    )
+    assert rr.storyboard_video_prompt("flat pastel 2D") == f"{base} flat pastel 2D"
+    assert rr.storyboard_video_prompt(None) == base
+    assert rr.storyboard_video_prompt("") == base

@@ -2127,6 +2127,7 @@ async def start_campaign_skill(request: AgentRequest) -> AgentResult:
         brief_product_ids=product_ids,
         brief_content=content,
         on_started=STATE.campaigns.track,
+        started_status=STATE.campaigns.status,
     )
 
 

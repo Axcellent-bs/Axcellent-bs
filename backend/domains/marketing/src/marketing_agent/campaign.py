@@ -43,6 +43,11 @@
   `campaign_auto.py`가 종료일이 지난 뒤 이 모듈의 `record_campaign_result`로 결과를 재무에 자동으로
   보낸다. 재무는 같은 campaign_id를 덮어쓰고 같은 내용이면 `already_recorded`로 돌려주므로 되풀이
   전송은 안전하다. 사람이 이미 결과를 저장했으면(`on_recorded`) 자동 전송은 사람 값을 덮지 않는다.
+- 같은 번호 다시 시작 금지(11/23): 받은 기획안으로 시작하면 번호가 `cmp_<proposal_id>`로 정해져
+  광고 숫자와 묶인다. 그래서 같은 번호를 두 번 시작할 수 있으면 자동 전달 대장(`track`은 이미 있으면
+  그대로 둔다)과 재무 기록이 앞 캠페인과 섞인다. 대장(`started_status`)에 그 번호가 있으면 상태와
+  상관없이(진행 중·결과 저장됨·취소 모두) 재무·관문을 부르지 않고 `already_started`로 거절한다.
+  대장을 읽지 못하면 겹치는지 알 수 없어 `campaign_ledger_unavailable`로 멈춘다(fail-closed).
 - 쿠폰 지급(`issue_coupon`)은 이 흐름과 별개다. 재무는 쿠폰을 판단하지 않는다.
 - 재무에 닿지 못하면 승인으로 보지 않는다(fail-closed): 시작은 실행하지 않고 멈춘다.
 """
@@ -339,13 +344,50 @@ def missing_video_fields(
     return [name for name, value in names if value is None]
 
 
+def _already_started(
+    request: AgentRequest,
+    data: StartCampaignInput,
+    started_status: Callable[[str], str | None],
+) -> AgentResult | None:
+    """대장에 같은 번호가 있으면 거절 결과, 없으면 None. 대장을 못 읽으면 멈춘다."""
+    try:
+        status = started_status(data.campaign_id)
+    except Exception as exc:  # noqa: BLE001 - 대장을 못 읽으면 겹치는지 몰라 시작하지 않는다
+        _log.warning("캠페인 %s 대장을 읽지 못함: %s", data.campaign_id, type(exc).__name__)
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="campaign_ledger_unavailable",
+            output={"message": "캠페인 대장을 읽지 못해 같은 번호가 이미 있는지 알 수 없다."},
+        )
+    if status is None:
+        return None
+    return _result(
+        request,
+        TaskStatus.FAILED,
+        outcome="already_started",
+        output={
+            "campaign_id": data.campaign_id,
+            "status": status,
+            "message": (
+                f"캠페인 번호 {data.campaign_id}는 이미 시작한 적이 있다(지금 상태 {status})."
+                " 기획안 하나로는 캠페인을 한 번만 시작한다."
+            ),
+        },
+    )
+
+
 async def start_campaign(
     request: AgentRequest,
     brief_product_ids: Callable[[str], list[str]] | None = None,
     brief_content: BriefContent | None = None,
     on_started: Callable[[StartedCampaign], None] | None = None,
+    started_status: Callable[[str], str | None] | None = None,
 ) -> AgentResult:
     """캠페인 시작: 재무 의견을 받고 안전 관문을 거친다.
+
+    `started_status`는 자동 전달 대장에서 그 번호의 상태를 읽는 함수다(없으면 None). 이미 있으면
+    `already_started`로 거절한다(모듈 설명의 '같은 번호 다시 시작 금지').
 
     `brief_product_ids`는 요청에 상품이 없을 때 받아 둔 기획안에서 그 캠페인의 상품 ID를 꺼내는
     함수다(기획안의 `product_ids`). 요청이 상품을 직접 주면 그것을 쓴다.
@@ -358,6 +400,8 @@ async def start_campaign(
         data = StartCampaignInput.model_validate(request.input)
     except ValidationError as error:
         return _invalid(request, error)
+    if started_status is not None and (refused := _already_started(request, data, started_status)):
+        return refused
 
     product_ids = list(data.product_ids)
     if not product_ids and brief_product_ids is not None:

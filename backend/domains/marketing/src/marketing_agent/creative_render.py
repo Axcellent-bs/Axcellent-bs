@@ -731,13 +731,21 @@ async def check_video(ledger: MediaLedger, meta: RequestMeta, record_id: str) ->
     _set(record_id, "video", status="rejected", error=f"gate_{decision.status}")
 
 
-def _video_prompt(rec: dict[str, Any]) -> str:
-    board = rec.get("storyboard") or {}
+def storyboard_video_prompt(style_en: str | None) -> str:
+    """스토리보드 영상 프롬프트(스토리보드 그림을 시작 이미지로 쓴다).
+
+    화면의 [영상 프롬프트 복사 + Higgsfield 열기]가 같은 문장을 만든다
+    (`frontend/src/lib/higgsfieldWeb.ts`의 `storyboardVideoPrompt`). 바꾸면 둘 다 바꾼다.
+    """
     return (
         "Animate this storyboard as one continuous short film, panel by panel in order, "
         "keeping the same characters, outfits and art style. "
-        f"{board.get('style_en') or ''}"
+        f"{style_en or ''}"
     ).strip()
+
+
+def _video_prompt(rec: dict[str, Any]) -> str:
+    return storyboard_video_prompt((rec.get("storyboard") or {}).get("style_en"))
 
 
 def _video_mcp_params(rec: dict[str, Any], seconds: int) -> dict[str, Any]:

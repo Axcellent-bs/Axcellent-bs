@@ -930,7 +930,8 @@ async def decide_org_change(change_id: str, body: OrgChangeDecisionBody) -> dict
 
 # ---------------------------------------------------------------- 캠페인 (사람 토큰 필요)
 class CampaignStartBody(BaseModel):
-    campaign_id: str = Field(pattern=r"^cmp_[A-Za-z0-9_-]{1,40}$")
+    # 받은 기획안으로 시작하면 cmp_<proposal_id>(제안 번호 64자까지)라 64자까지 받는다
+    campaign_id: str = Field(pattern=r"^cmp_[A-Za-z0-9_-]{1,64}$")
     campaign_name: str = Field(min_length=1, max_length=100)
     channel: str = Field(min_length=1, max_length=50)
     budget_krw: int = Field(gt=0)
