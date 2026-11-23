@@ -11,7 +11,7 @@ import { dataAi, type RequestVideoPerformance } from "@/lib/data";
 import { planDocPath } from "@/lib/planDoc";
 import { planId } from "@/lib/format";
 import { STALE_HOURS, staleHours } from "@/lib/officeRequests";
-import { keyEvidence, reportHash, sortBeats } from "@/lib/trendReportView";
+import { keyEvidence, recommendationItems, reportHash } from "@/lib/trendReportView";
 import type { TrendReportDoneCard } from "@/lib/planningData";
 import type { TrendReport as Report } from "@/lib/data";
 import { DoneCard, ProgressCard } from "@/components/office/ChatCards";
@@ -52,7 +52,7 @@ function ReportCell({ reportId }: { reportId: string }) {
   if (done) return <DoneCard card={done} />;
   const finish = (r: Report) => setDone({
     kind: "trend_report_done", report_id: r.report_id, status: r.status, summary_line: r.summary_line,
-    top_evidence: keyEvidence(sortBeats(r.sections.recommendation.beats)).map((k) => k.short),
+    top_evidence: keyEvidence(recommendationItems(r.sections.recommendation)).map((k) => k.short),
     report_path: `/data/trend${reportHash(r.report_id)}`,
   });
   return <ProgressCard card={{ kind: "trend_report_progress", report_id: reportId }} onDone={finish} />;
@@ -137,8 +137,8 @@ function PlanCell({ card }: { card: PlanCardView }) {
       <h4 className="text-[12.5px] font-semibold text-ink-900">{card.head}</h4>
       {card.line && <p className="line-clamp-2 break-words text-[12.5px] text-ink-700">{card.line}</p>}
       <div className="flex flex-wrap gap-1.5 pt-0.5">
-        <button type="button" className="btn-primary px-2.5 py-1 text-xs" onClick={() => navigate(card.openPath)}>기획서 열기</button>
-        <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => navigate(card.printPath)}>PDF로 저장</button>
+        <button type="button" className="btn-primary btn-card" onClick={() => navigate(card.openPath)}>기획서 열기</button>
+        <button type="button" className="btn-ghost btn-card" onClick={() => navigate(card.printPath)}>PDF로 저장</button>
       </div>
     </section>
   );
@@ -204,17 +204,17 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                 </p>
                 {s.muted && <p className="text-xs text-ink-500">{s.muted}</p>}
                 {videoLink && s.skill === "generate_media" && (
-                  <button type="button" className="btn-ghost mt-1 px-2.5 py-1 text-xs" onClick={() => navigate(videoLink)}>영상 열기</button>
+                  <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(videoLink)}>영상 열기</button>
                 )}
                 {report && <ReportCell reportId={report} />}
                 {isInsight && plan && <PlanCell card={plan} />}
                 {isInsight && proposal && !plan && (
-                  <button type="button" className="btn-ghost mt-1 px-2.5 py-1 text-xs" onClick={() => navigate(planDocPath({ id: proposal, request: row.request_id }))}>기획 제안 열기</button>
+                  <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(planDocPath({ id: proposal, request: row.request_id }))}>기획 제안 열기</button>
                 )}
                 {s.decide && !decided.has(s.stepId) && (
                   <span className="mt-1 flex flex-wrap gap-1.5">
-                    <button type="button" className="btn-primary px-2.5 py-1 text-xs" disabled={deciding !== null} onClick={() => decide(s.stepId, true)}>{s.decide.approve}</button>
-                    <button type="button" className="btn-ghost px-2.5 py-1 text-xs" disabled={deciding !== null} onClick={() => decide(s.stepId, false)}>{s.decide.stop}</button>
+                    <button type="button" className="btn-primary btn-card" disabled={deciding !== null} onClick={() => decide(s.stepId, true)}>{s.decide.approve}</button>
+                    <button type="button" className="btn-ghost btn-card" disabled={deciding !== null} onClick={() => decide(s.stepId, false)}>{s.decide.stop}</button>
                   </span>
                 )}
                 {s.decide && failed[s.stepId] && <p role="alert" className="mt-1 text-xs text-red-700">{failed[s.stepId]}</p>}

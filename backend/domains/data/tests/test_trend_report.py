@@ -60,16 +60,13 @@ class FakeLLM:
         if schema.__name__ == "_Extracted":
             return schema.model_validate(self.extract)
         ids = [k.removeprefix("근거_") for k in (untrusted or {}) if k.startswith("근거_")]
+        # 11/23: 추천은 콘티(beats) 대신 기획에 넘길 재료(materials). 기본 답은 숫자·시간 말 없이
+        words = {"hashtag": "해시태그를 쓴다", "format": "릴스 형식으로", "topic": "리필 주제로",
+                 "writing": "첫 줄을 질문으로"}  # fmt: skip
         answer = self.recommend or {
-            "conclusion": "질문형 첫 줄로 리필 장면을 보여 주는 릴스",
-            "beats": [{"slot": s, "text": f"{s} 칸 장면", "evidence": ids[:1]}
-                      for s in ("0-3", "3-15", "15-25", "25-30")],
+            "conclusion": "질문형 첫 줄로 리필을 보여 주는 릴스",
+            "materials": [{"kind": k, "text": t, "evidence": ids[:1]} for k, t in words.items()],
         }  # fmt: skip
-        # 칸 text에 slot(숫자)이 들어가면 버려지므로 기본 답은 숫자 없는 글자로
-        if self.recommend is None:
-            words = {"0-3": "훅", "3-15": "전환", "15-25": "증거", "25-30": "마무리"}
-            for b in answer["beats"]:
-                b["text"] = f"{words[b['slot']]} 장면"
         return schema.model_validate(answer)
 
 
@@ -439,20 +436,22 @@ def test_recommendation_keeps_only_valid_ids_and_digit_free_lines(tmp_path: Path
     report = _filled(tmp_path)
     catalog = tr.evidence_catalog(report)
     good = next(k for k in catalog if k.startswith("hashtag:"))
-    llm = FakeLLM(recommend={"conclusion": "조회수 3배를 노린다", "beats": [
-        {"slot": "0-3", "text": "질문 자막으로 시작", "evidence": [f"근거_{good}", "없는:9"]},
-        {"slot": "3-15", "text": "리필 장면", "evidence": ["없는:1"]},
-        {"slot": "15-25", "text": "후기 2개 보여 주기", "evidence": [good]},
-        {"slot": "0-3", "text": "겹친 칸", "evidence": [good]},
-        {"slot": "40-50", "text": "틀린 칸", "evidence": [good]},
+    llm = FakeLLM(recommend={"conclusion": "조회수 3배를 노린다", "materials": [
+        {"kind": "hashtag", "text": "해시태그를 앞에 쓴다", "evidence": [f"근거_{good}", "없는:9"]},
+        {"kind": "format", "text": "릴스로", "evidence": ["없는:1"]},
+        {"kind": "topic", "text": "후기 2개 보여 주기", "evidence": [good]},
+        {"kind": "hashtag", "text": "겹친 종류", "evidence": [good]},
+        {"kind": "scene", "text": "틀린 종류", "evidence": [good]},
     ]})  # fmt: skip
     section, calls, limits = asyncio.run(tr.recommendation_section(report, llm))
     assert calls == 1
     assert section.conclusion is None  # 숫자 든 결론은 버림
-    assert [b.slot for b in section.beats] == ["0-3"]
-    assert section.beats[0].evidence == [catalog[good][0]]  # 근거 문장은 코드가 붙임
+    assert [m.kind for m in section.materials] == ["hashtag"]
+    assert section.materials[0].evidence == [catalog[good][0]]  # 근거 문장은 코드가 붙임
+    assert section.beats == []  # 새 보고서는 콘티를 만들지 않는다
     assert section.music_note == tr.MUSIC_NOTE
-    assert section.status == "known"
+    # 11/23: 결론이 없으면 재료가 있어도 unknown (예전에는 콘티만 있어도 known)
+    assert section.status == "unknown"
     assert any("없는 근거 id" in line for line in limits)
     # LLM에는 숫자 없는 말만
     sent = llm.calls[0][1]
@@ -486,7 +485,8 @@ def test_full_report_uses_at_most_two_llm_calls(tmp_path: Path) -> None:
     assert report.status == "done", report.model_dump()
     assert len(llm.calls) == 2 and report.calls.llm == 2
     assert report.calls.instagram == 34 and report.calls.naver == 6
-    assert report.summary_line and report.sections.recommendation.beats
+    assert report.summary_line and report.sections.recommendation.materials
+    assert report.sections.recommendation.beats == []
     content = report.sections.content
     assert len(content.posts) == tr.MAX_POSTS and content.posts[0].standout
     assert [m.name for m in content.memes] == ["#오늘의루틴"]  # 광고 재료 ok만
@@ -966,9 +966,9 @@ def test_evidence_short_and_items_and_limit_groups(tmp_path: Path) -> None:
     catalog = tr.evidence_catalog(report)
     assert catalog and all(len(short) <= tr.SHORT_MAX for _, _, short in catalog.values())
     assert tr.short_of("가" * 40) == "가" * 29 + "…"
-    beats = report.sections.recommendation.beats
-    assert beats and all([e.text for e in b.evidence_items] == b.evidence for b in beats)
-    assert all(e.id in catalog for b in beats for e in b.evidence_items)
+    materials = report.sections.recommendation.materials  # 11/23: 콘티 대신 재료
+    assert materials and all([e.text for e in m.evidence_items] == m.evidence for m in materials)
+    assert all(e.id in catalog for m in materials for e in m.evidence_items)
     groups = report.limit_groups
     assert groups.method == list(tr.METHOD_LIMITS)
     assert groups.cannot_see == list(tr.CANNOT_SEE_LIMITS)

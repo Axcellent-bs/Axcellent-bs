@@ -9,6 +9,7 @@ import { ADMIN_HOME, canOpen, homeOf, useSession } from '@/demo/session'
 import { useCompany, useCompanyLoaded } from '@/demo/company'
 import Setup from '@/demo/Setup'
 import CatalogHome from '@/demo/CatalogHome'
+import { PrivacyPage, TermsPage } from '@/demo/PolicyPages'
 import OperatorLogin from '@/control/OperatorLogin'
 import { useHumanTokenSet } from '@/lib/useHumanTokenSet'
 
@@ -52,6 +53,9 @@ export function App() {
       {/* 로그인 전에도 여는 메인: 서비스 제품군 카탈로그 */}
       <Route path="/" element={<CatalogHome />} />
       <Route path="/login" element={<LoginPage />} />
+      {/* 공개 문서: 개인정보처리방침·약관(구글 OAuth 앱 게시에 필요) */}
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/plans" element={<PlanPurchase />} />
       {/* 관리자(회사 계정) 가입: 운영자에게 받은 키 → 관리자 계정 → 회사 정보 */}
