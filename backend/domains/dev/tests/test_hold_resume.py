@@ -436,8 +436,12 @@ def _repo_press(client: TestClient, path: str, body: dict) -> None:
     assert res.status_code != 200  # 관문 보류
 
 
-def test_repo_revert_two_holds_approved_open_one_revert_pr(service: DevService, adapter) -> None:
-    """같은 PR 되돌리기를 두 번 눌러 보류가 둘 → 둘 다 승인해도 되돌리기 PR은 하나."""
+def test_repo_revert_pressed_twice_makes_one_hold_and_one_revert_pr(
+    service: DevService, adapter
+) -> None:
+    """같은 PR 되돌리기를 두 번 눌러도 (연결, PR)마다 같은 키 → 보류 건 하나 (머지와 같다).
+    전에는 누를 때마다 새 키라 보류가 둘 생겼다. 승인하면 되돌리기 PR은 하나, 그 뒤 다시 눌러도
+    (같은 키라 이전 승인 재생) 새로 열지 않고 409 REVERT_EXISTS."""
     opened = run(adapter.open_change("gen/pay", "요율", "", files={BANNER: "rate = 0\n"}))
     run(adapter.merge_change(opened.number, "squash"))
     gate = KeyGate("repo_revert_pr")
@@ -445,13 +449,13 @@ def test_repo_revert_two_holds_approved_open_one_revert_pr(service: DevService, 
     client = TestClient(app)
     _repo_press(client, f"{opened.number}/revert", {})
     _repo_press(client, f"{opened.number}/revert", {"title": "되돌림"})
-    first, second = gate.reviews.values()
-    assert len(gate.reviews) == 2  # 누를 때마다 새 키
-    for rid in (first, second):
-        gate.approve(rid)
-    a, b = run(_decide(service, first)), run(_decide(service, second))
+    (rid,) = gate.reviews.values()
+    assert len(service.holds.pending()) == 1
+    gate.approve(rid)
+    a = run(_decide(service, rid))
     assert a.status == "done", a.reason
-    assert b.status == "skipped" and "이미 있다" in (b.reason or "")
+    again = client.post(f"/api/planning/repo/prs/{opened.number}/revert", json={})
+    assert (again.status_code, again.json()["error"]["code"]) == (409, "REVERT_EXISTS")
     assert len([w for w in adapter.writes if w[0] == "revert_change"]) == 1
 
 

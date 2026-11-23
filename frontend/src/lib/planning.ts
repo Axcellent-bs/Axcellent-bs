@@ -10,6 +10,7 @@ import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import { isNginxBlocked, NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from '@/lib/apiError'
 import { tokenFree } from '@/lib/apiDirect'
 import { sessionAuth } from '@/lib/humanToken'
+import { getSession } from '@/lib/humanSession'
 import { actorAccount } from '@/lib/actor'
 import { auditOf, paramLines, routeAction, routeWhyOf, tokenFor } from '@/lib/devView'
 import { type Action, type FillPreview, type Activity, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
@@ -250,7 +251,7 @@ export interface NotionHit { id: string; title: string; url: string; edited: str
 export const planningApi = (base: string) => ({
   state: () => call<Json>(base, '/state'),
   reviewQueue: () => call<QueueItem[]>(base, '/review-queue'),
-  action: (a: Action) => call<Json>(base, '/actions', post(a, tokenFor(a))),
+  action: (a: Action) => call<Json>(base, '/actions', post(a, tokenFor(a, getSession() !== null))),
   eventsUrl: () => `${base}/api/planning/events`,
 })
 

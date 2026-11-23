@@ -41,7 +41,14 @@ from ax_workflow.autocheck import (
     pr_check,
     pr_wait_state,
 )
-from ax_workflow.base import _TICKET_KINDS, AGENT_NAME, DEV_ACTIONS, TEAM_LEAD, PlanningCore
+from ax_workflow.base import (
+    _TICKET_KINDS,
+    AGENT_NAME,
+    DEV_ACTIONS,
+    TEAM_LEAD,
+    PlanningCore,
+    action_name,
+)
 from ax_workflow.clock import KST, Clock
 from ax_workflow.core import (
     ActionError,
@@ -761,6 +768,10 @@ class DevService(PlanningCore):
             if self._real_coding():
                 # 실제 레포에 올릴 때: 작업마다 코딩 작업을 만든다 (회사 설정대로 서버 AI·내 Claude)
                 await self._queue_coding(s, sp, req, todo)
+            elif not template_config.is_mock(AGENT_NAME):
+                # 실제 모드인데 형상관리 연결이 없다: 시연용 PR(지어낸 줄 수·검수 결과)을 만들지
+                # 않는다. 레포를 연결하면 다음 진행 때 코딩 작업으로 간다
+                continue
             elif sp.auto and req and req.auto and req.auto.ok:
                 # planning이 넘긴 간단 요청: 원래 간단 요청 경로대로 PR·머지까지 한 번에
                 await self._auto_build(s, req, sp, todo[0])
@@ -774,6 +785,8 @@ class DevService(PlanningCore):
                 continue
             if task is not None and task.coding is not None:
                 continue  # 코딩 작업 PR은 개발 AI가 고치고 다시 리뷰한다 (coder)
+            if not template_config.is_mock(AGENT_NAME):
+                continue  # 재검수 "통과"를 지어내지 않는다 (시연용 PR은 목 모드에서만)
             if p.reviews and p.reviews[-1] == "불일치" and p.reviews.count("불일치") < 2:
                 await self._review_pr(s, p.id)
                 return True
@@ -1284,14 +1297,18 @@ class DevService(PlanningCore):
         self._spawn_coder(task_id)
         return result
 
-    async def hand_to_subscription(self, task_id: str) -> ActionResult:
+    async def hand_to_subscription(
+        self, task_id: str, assignee: str | None = None
+    ) -> ActionResult:
         """사람이 '내 Claude로 넘기기': 멈춘 서버 AI 작업을 개발자 Claude 대기열에 올린다
         (서버 AI로 넘기기의 반대). 서버 AI 예산·체험 한도를 다 썼을 때 이어 가는 길이다.
 
         실패·사람 확인·중단으로 멈췄고 열린 PR이 없는 작업만. 회사 설정이 서버 AI만(`agent`)이어도
         된다: 예산을 다 쓰면 새 작업도 내 Claude로 가기 때문이다 (`coding_choice`와 같게).
         다시 시도와 같은 관문(dev_task_retry)을 지난다 (코드를 안 바꿔 A). 확인은 잠금 안에서
-        다시 한다 (그 사이 다시 시도·자동 다시 하기가 작업을 띄웠으면 거절)."""
+        다시 한다 (그 사이 다시 시도·자동 다시 하기가 작업을 띄웠으면 거절).
+
+        `assignee`: 맡길 사람 (세션 모드면 누른 계정 `acct:<ID>`). 그 사람의 Claude만 가져간다."""
         self._check_to_subscription(self.state, task_id)
 
         async def run(s: State) -> ActionResult:
@@ -1312,7 +1329,7 @@ class DevService(PlanningCore):
             x.coding = CodingRun(
                 status="queued", updated_at=self.clock(), connection=old.connection,
                 llm_calls=old.llm_calls, llm_tokens=old.llm_tokens, mode="subscription",
-                picked=list(old.picked), text_warnings=warns,
+                picked=list(old.picked), text_warnings=warns, assignee=assignee,
                 text_ok_by=old.text_ok_by if set(warns) <= set(old.text_warnings) else None,
             )  # fmt: skip
             x.state = "진행 중"
@@ -3997,7 +4014,19 @@ class DevService(PlanningCore):
         )
 
     async def dispatch(self, action: dict) -> ActionResult:
-        """화면 액션. 사람 머지가 형상관리에서 실패하면 기록을 남긴 뒤 이유와 함께 오류로 답한다."""
+        """화면 액션. 사람 머지가 형상관리에서 실패하면 기록을 남긴 뒤 이유와 함께 오류로 답한다.
+
+        시연용 PR 만들기·재검수(`generate_prs`·`review_pr`)는 줄 수·검수 결과를 지어내므로
+        목 모드(시험 전용)에서만 받는다. 실제 모드는 코딩 작업(coder·내 Claude)이 PR을 만든다."""
+        kind = action.get("type") if isinstance(action, dict) else None
+        if (
+            isinstance(kind, str)
+            and action_name(kind) in SIMULATED_PR_ACTIONS
+            and not template_config.is_mock(AGENT_NAME)
+        ):
+            raise ActionError(
+                "SIMULATOR_DISABLED", "시연용 PR 만들기·재검수는 목 모드에서만 받는다"
+            )
         result = await super().dispatch(action)
         if result.outcome == "merge_failed":
             out = result.output or {}
@@ -4338,7 +4367,9 @@ class DevService(PlanningCore):
         )
         # 제안마다 다른 키 (같은 L0->L1 승급이 다음에 또 와도 지난 승인을 재생하지 않게)
         ctx = f"auto_policy:{pol.proposal.at.isoformat()}"
-        with hold_resume.recipe("policy_promote", frm=pol.level, to=to):
+        # 보류되면 승인 뒤 이어서 할 때도 누른 사람을 남기게 그 이름을 재료에 적는다
+        actor = current_actor()
+        with hold_resume.recipe("policy_promote", frm=pol.level, to=to, actor=actor):
             await self._execute(
                 "auto_policy_update",
                 ctx,
@@ -4354,7 +4385,8 @@ class DevService(PlanningCore):
                 "planning",
                 "자동 범위 승급 승인",
                 "사람",
-                f"팀장 {TEAM_LEAD}이 L{pol.level} → L{to} 승인 (사람 클릭)",
+                # 세션 모드면 로그인한 관리자 (session_operator), 아니면 예전처럼 팀장(목)
+                f"팀장 {current_actor() or TEAM_LEAD}이 L{pol.level} → L{to} 승인 (사람 클릭)",
             )
         )
         s.activity.append(
@@ -4419,13 +4451,15 @@ class DevService(PlanningCore):
         if pol.proposal is None:
             return
         t = self.clock()
-        pol.log.append(
-            AutoLog(at=t, text=f"L{pol.proposal.to} 승급 보류 (연속 건수 다시 셈)", by="사람")
-        )
+        who = current_actor()  # 세션 모드면 보류를 누른 관리자
+        text = f"L{pol.proposal.to} 승급 보류 (연속 건수 다시 셈)" + (f" · {who}" if who else "")
+        pol.log.append(AutoLog(at=t, text=text, by="사람"))
         pol.streak = 0
         pol.proposal = None
 
 
+# 지어낸 PR 기록을 만드는 화면 액션 (목 모드에서만, DevService.dispatch)
+SIMULATED_PR_ACTIONS = frozenset({"generate_prs", "review_pr"})
 PAUSE = "사람이 요청 중단"  # 요청 중단으로 멈춘 코딩 작업의 오류 줄 앞머리
 RELEASE_CHECK = "request_release_check"  # dev → planning 배포 전 대조
 TRIAL_TOKENS = 1_000_000  # 서버 AI 체험 한도 기본값 (PLANNING_TRIAL_TOKENS)
