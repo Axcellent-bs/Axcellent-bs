@@ -278,6 +278,14 @@ export function videoView(hasKey: boolean, enabled: boolean): { tone: Tone; labe
   return enabled ? { tone: "ok", label: "켜짐" } : { tone: "off", label: "꺼짐" };
 }
 
+/** 유튜브 동의에서 돌아온 주소의 `#` 뒤(youtube_code·youtube_state). 둘 다 있어야 마치기를 부른다 */
+export function readYoutubeReturn(hash: string): { code: string; state: string } | null {
+  const p = new URLSearchParams(hash.replace(/^#/, ""));
+  const code = p.get("youtube_code") ?? "";
+  const state = p.get("youtube_state") ?? "";
+  return code && state && code.length <= 2000 && state.length <= 2000 ? { code, state } : null;
+}
+
 export const keyHintKo = (hint: string) => (hint ? `••••${hint}` : "—");
 export const KEY_LABEL: Record<KeyName, string> = {
   LLM_API_KEY: "회사 AI 키", DEV_CODER_LLM_API_KEY: "코딩 에이전트 키", MARKETING_VIDEO_API_KEY: "영상 생성 키",
