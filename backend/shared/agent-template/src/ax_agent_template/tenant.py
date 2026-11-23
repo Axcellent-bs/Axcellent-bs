@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tomllib
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -179,6 +181,76 @@ def setting(env_name: str) -> str:
     per_head = finance.get("per_head_monthly") if isinstance(finance, dict) else None
     ok = isinstance(per_head, int) and not isinstance(per_head, bool) and per_head >= 0
     return str(per_head) if ok else ""
+
+
+# ---------------------------------------------------------------- 영상 브랜드 (주인공·배경·화풍)
+# 회사 설정 `tenant.toml [brand]` (모두 선택). 기획 영상 제작안·마케팅 영상 프롬프트가 쓴다.
+# 칸마다 길이 상한(영문 120자·한글 60자)과 금칙(글자 요청·실존 인물·브랜드·숫자·광고·주입어,
+# 마케팅 scene_templates.toml과 같은 목록)을 보고, 걸리거나 없으면 그 칸만 기본값을 쓴다.
+BRAND_DEFAULTS: dict[str, str] = {
+    "character_en": "original illustrated characters, not real people",
+    "character_ko": "원본 일러스트 캐릭터",
+    "setting_en": "a setting that fits the company's products",
+    "setting_ko": "회사 상품에 어울리는 배경",
+    "style_en": "flat illustration style",
+}
+_BRAND_MAX = {"en": 120, "ko": 60}
+_BRAND_WORDS = (
+    # 글자 요청
+    "text", "word", "words", "letter", "letters", "caption", "title", "slogan", "headline",
+    "logo", "watermark", "sign", "signage", "writing", "written", "saying", "says", "typography",
+    "subtitle", "subtitles", "글자", "문구", "텍스트", "자막", "제목", "로고", "간판", "워터마크",
+    "슬로건",
+    # 실존 인물
+    "celebrity", "famous", "lookalike", "look-alike", "portrait of", "real person", "politician",
+    "actor", "actress", "idol", "influencer",
+    "닮은", "유명인", "연예인", "정치인", "실존", "아이돌",
+    # 실제 브랜드
+    "nike", "adidas", "apple", "google", "samsung", "disney", "pixar", "ghibli", "marvel",
+    "starbucks", "coca-cola", "netflix", "youtube", "instagram", "tiktok", "kakao", "naver",
+    "yes24", "kyobo", "aladin", "harry potter", "삼성", "애플", "디즈니", "지브리", "카카오",
+    "네이버", "교보", "알라딘", "스타벅스", "해리포터", "유튜브", "인스타그램", "틱톡",
+    # 광고(과장·단정)
+    "best", "no.1", "number one", "guaranteed", "guarantee", "cure", "free", "cheapest", "only",
+    "최고", "1위", "최저가", "무조건", "보장", "완치", "유일", "최초", "공짜", "특효",
+    # 주입
+    "ignore", "instruction", "instructions", "system", "prompt", "assistant", "override",
+    "jailbreak", "무시", "지시", "명령", "시스템", "프롬프트", "어시스턴트",
+)  # fmt: skip
+_BRAND_TEXT = re.compile(r"[A-Za-z가-힣 ,'-]+")
+
+
+def _brand_ok(key: str, value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = unicodedata.normalize("NFKC", value).strip()
+    if not text or len(text) > _BRAND_MAX[key.rsplit("_", 1)[1]]:
+        return False
+    if not _BRAND_TEXT.fullmatch(text):  # 숫자·주소·기호는 받지 않는다
+        return False
+    low = text.lower()
+    for w in _BRAND_WORDS:
+        if w.isascii():
+            if re.search(rf"(?<![a-z]){re.escape(w)}(?![a-z])", low):
+                return False
+        elif w in low:
+            return False
+    return True
+
+
+def brand() -> dict[str, str]:
+    """지금 회사의 영상 브랜드 5칸(character_en·character_ko·setting_en·setting_ko·style_en).
+
+    회사가 없거나 `[brand]`가 없거나 칸이 금칙·길이에 걸리면 그 칸은 `BRAND_DEFAULTS`."""
+    name = current()
+    raw = (_read(tenants_dir() / name) or {}) if name else {}
+    given = raw.get("brand")
+    given = given if isinstance(given, dict) else {}
+    out = {}
+    for key, default in BRAND_DEFAULTS.items():
+        value = given.get(key)
+        out[key] = " ".join(str(value).split()) if _brand_ok(key, value) else default
+    return out
 
 
 # ---------------------------------------------------------------- 인스타 레이더 계정

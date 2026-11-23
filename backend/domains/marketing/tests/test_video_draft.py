@@ -23,9 +23,9 @@ PLAN = {
     "duration_s": 15,
     "aspect": "9:16",
     "script": "고양이가 서점을 거닐며 그림책을 꺼낸다. 마지막에 책을 펼친다.",
-    "scenes": [
-        {"n": 1, "start_s": 0, "end_s": 15, "visual": "서점", "caption": "", "prompt": "cat"}
-    ],
+    # 11/22: 장면 프롬프트가 있으면 plan_story_video 경로다(test_plan_driven_video.py).
+    # 이 파일은 장면이 없을 때의 예전 템플릿(cat_bookstore_video) 경로를 본다
+    "scenes": [],
     "style": "flat illustration",
     "negative": "No text",
     "written_by": "rule",
