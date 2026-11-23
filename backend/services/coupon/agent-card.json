@@ -161,6 +161,42 @@
       "priority": "recommended"
     },
     {
+      "id": "creative_youtube_draft",
+      "description": "제작 기록(input.record_id: CR-…)의 영상으로 AXcellent 유튜브에 올릴 제목·설명·태그 초안을 AI가 쓴다(LLM이 없으면 고정 문구). regenerate=true면 다시 쓰고, title·description·tags·privacy(private·unlisted·public, 기본 unlisted)·part(video·final_video)를 주면 사람이 고친 값으로 저장한다. 설명 끝 AI 생성 표시는 지우지 않는다. 기록 render.youtube(status=draft)에 남기고 올리지는 않는다. 거절 outcome: not_found·already_requested.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeYoutubeDraftInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeYoutubeOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "creative_youtube_request",
+      "description": "초안대로 유튜브 올리기를 사람 승인(C publish_youtube)에 올린다. 보류되면 render.youtube.status=awaiting_approval·review_id, 승인 뒤 기록을 읽을 때(creative_record_get) 같은 키로 다시 물어 executed면 YouTube Data API로 올리고 video_id·url을 남긴다(합성 미디어 표시). 거절 outcome: not_found·draft_missing·video_not_ready·youtube_not_connected.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeYoutubeRequestInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeYoutubeOutput",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "youtube_status",
+      "description": "AXcellent 유튜브 채널 연결 상태(read): missing_keys·invalid_credentials·ok(채널 이름)·error. 60초 캐시. 키 값은 돌려주지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#YoutubeStatusInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#YoutubeStatusOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "creative_video_request",
       "description": "제작 기록(input.record_id: CR-…)의 스토리보드 그림을 시작 이미지로 Higgsfield 영상 만들기를 사람 승인(C generate_creative_video)에 올린다. 영상 월 사용량 예산을 먼저 예약하고, 보류되면 render.video.status=awaiting_approval·review_id를 남긴다. 승인 뒤 기록을 읽을 때(creative_record_get) 같은 키로 관문을 다시 물어 executed면 만들고 파일을 저장한다. 거절 outcome: not_found·board_image_not_ready·model_not_configured·higgsfield_key_missing·quota_exceeded·quota_not_configured·storage_error·in_progress.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeVideoRequestInput",

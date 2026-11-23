@@ -171,8 +171,10 @@ def _write(path: Path, rows: list[dict[str, Any]]) -> None:
     os.replace(tmp, path)
 
 
-def _new_row(name: str, email: str, role: str, password: str) -> dict[str, Any]:
-    return {
+def _new_row(
+    name: str, email: str, role: str, password: str, company_id: str | None = None
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
         "id": "acc-" + secrets.token_hex(6),
         "name": name,
         "email": _norm_email(email),
@@ -180,6 +182,14 @@ def _new_row(name: str, email: str, role: str, password: str) -> dict[str, Any]:
         "password_hash": hash_password(password),
         "created_at": _now(),
     }
+    if role in CUSTOMER_ROLES:
+        # 만든(초대한) 회사에 소속시킨다. 회사를 모르면 설치 기본 회사. 운영자는 소속 없음.
+        target = company_list.canonical_company_id(company_id) or company_list.default_company_id()
+        if (
+            target != TENANT_ID_CATBOOKS
+        ):  # 칸이 없으면 옛 규칙대로 캣북스로 읽으니 파일 모양을 그대로 둔다
+            row["memberships"] = [{"company_id": target, "role": role}]
+    return row
 
 
 def _bootstrap(path: Path, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -264,20 +274,28 @@ def _issue_for(row: dict[str, Any]) -> tuple[str, int, list[Membership]]:
     return token, exp, memberships
 
 
-def _sync_catbooks_membership(row: dict[str, Any], new_role: str) -> None:
-    """계정 역할이 고객사 역할로 바뀌면, 적어 둔 캣북스 소속의 역할도 같이 바꾼다(1단계).
+def _sync_company_membership(
+    row: dict[str, Any], new_role: str, company_id: str | None = None
+) -> None:
+    """계정 역할이 고객사 역할로 바뀌면, 적어 둔 해당 회사 소속의 역할도 같이 바꾼다.
 
-    소속 칸이 없는 계정은 역할에서 읽으므로 손대지 않는다.
+    company_id가 없으면 설치 기본 회사. 소속 칸이 없는 계정은 역할에서 읽으므로 손대지 않는다.
     """
     stored = row.get("memberships")
     if new_role not in CUSTOMER_ROLES or not isinstance(stored, list):
         return
+    target = company_list.canonical_company_id(company_id) or company_list.default_company_id()
     for item in stored:
         if (
             isinstance(item, dict)
-            and company_list.canonical_company_id(item.get("company_id")) == TENANT_ID_CATBOOKS
+            and company_list.canonical_company_id(item.get("company_id")) == target
         ):
             item["role"] = new_role
+
+
+def _sync_catbooks_membership(row: dict[str, Any], new_role: str) -> None:
+    """옛 이름(호환용). 캣북스 소속의 역할을 맞춘다."""
+    _sync_company_membership(row, new_role, TENANT_ID_CATBOOKS)
 
 
 def _buyer_id_of(row: dict[str, Any]) -> str | None:
@@ -537,7 +555,7 @@ def create_account(body: AccountIn, authorization: str | None = Header(None)) ->
         rows = _bootstrap(path, _read(path))
         if any(r.get("email") == email for r in rows):
             raise ApiError(409, "EMAIL_TAKEN", "이미 있는 이메일이에요")
-        row = _new_row(body.name.strip(), email, body.role, body.password)
+        row = _new_row(body.name.strip(), email, body.role, body.password, human.company_id)
         rows.append(row)
         _write(path, rows)
     logger.info("계정을 만들었다: %s(%s) by %s", email, body.role, human.name)
@@ -703,7 +721,7 @@ def update_account(
             _check_role_change(human, row, patch["role"], rows)
             row["role"] = patch["role"]
             if role_changed:
-                _sync_catbooks_membership(row, patch["role"])
+                _sync_company_membership(row, patch["role"], human.company_id)
         if "name" in patch:
             name = patch["name"].strip()
             if not name:

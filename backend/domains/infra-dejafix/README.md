@@ -18,7 +18,7 @@
 - 배포 이력 미리 받기(`deploy_poll.py`): 실제 모드에서 켤 때와 `INFRA_DEPLOY_POLL_SECONDS`(기본 120초)마다 연결된 배포 도구의 최근 실행 20개를 받아, 그 서비스의 시연 이력(`deployments.json`)을 도구의 **성공한** 실행으로 바꾼다. 진단은 받아 둔 이력을 바로 쓴다. 받기 실패·보관함이 깨지거나 사라짐은 로그만 남기고 이전 이력을 쓴다. 연결이 있는 서비스의 시연 이력은 첫 받기 전에도 쓰지 않는다(그동안 그 서비스는 원인 후보 없음). 도구 실행은 서비스 전체 배포라 시연 이력에서 그 서비스가 가진 구성요소를 모두 단다(구성요소를 모르는 서비스는 구성요소 진단의 후보가 아님)
   - 버전 표시: Jenkins는 버전 매개변수 값. GitHub Actions 실행 목록에는 디스패치 입력이 없어 실행 제목(`display_title`)의 버전(`v2.4.1` 꼴) → 없으면 커밋 앞 7자리. 워크플로에 `run-name: Deploy ${{ inputs.version }}`을 두면 정확하다
   - 우리가 롤백으로 띄운 실행은 남긴 기록(실행 id를 알면 그 id만, 모르거나 Jenkins 대기열 id면 같은 버전·기록 시각 뒤)과 맞춰 디스패치한 버전과 롤백 표시를 붙이고, 원인 후보로 보지 않는다
-- 장애 감시(`dejafix_watch.py`): `INFRA_DEJAFIX_URL`(DejaFix 읽기 전용 프록시 주소)이 있으면 `INFRA_DEJAFIX_POLL_SECONDS`(기본 30초)마다 DejaFix `GET /api/incidents?status=problem`을 읽는다. `component` 태그가 붙은 장애만 총괄에 `infra.anomaly_detected`로 알린다(`metric` 태그 → `metric_code`, 없으면 `zabbix_problem`). 태그가 없는 PC·호스트 장애는 DejaFix만 맡는다. 같은 장애는 한 번만 보낸다. Zabbix 쪽에서 감시 트리거에 `component=<부위>` 태그를 달아야 한다(DJF-02). `INFRA_DEJAFIX_COMPONENTS`(쉼표 구분, 예: `payment`)를 주면 그 부위만 보낸다. Zabbix 기본 Windows·Linux 템플릿이 PC 트리거에도 `component=memory`·`cpu` 태그를 달기 때문에, 시연처럼 결제 장애만 받을 때는 `payment`로 둔다(비우면 모든 부위)
+- 장애 감시(`dejafix_watch.py`): `INFRA_DEJAFIX_URL`(DejaFix 읽기 전용 프록시 주소)이 있으면 `INFRA_DEJAFIX_POLL_SECONDS`(기본 30초)마다 DejaFix `GET /api/incidents?status=problem`을 읽는다. `component` 태그가 붙은 장애만 총괄에 `infra.anomaly_detected`로 알린다(`metric` 태그 → `metric_code`, 없으면 `zabbix_problem`). 태그가 없는 PC·호스트 장애는 DejaFix만 맡는다. 같은 장애는 한 번만 보낸다. 보낸 장애가 조회가 성공한 회차에서 연속 두 번 목록에서 빠지고 DejaFix 상세(`GET /api/incidents/{id}`)가 `problem`이 아니면 `infra.recovered`를 한 번 보낸다(`recovered_at`은 DejaFix `resolved_at`). Zabbix 쪽에서 감시 트리거에 `component=<부위>` 태그를 달아야 한다(DJF-02). `INFRA_DEJAFIX_COMPONENTS`(쉼표 구분, 예: `payment`)를 주면 그 부위만 보낸다. Zabbix 기본 Windows·Linux 템플릿이 PC 트리거에도 `component=memory`·`cpu` 태그를 달기 때문에, 시연처럼 결제 장애만 받을 때는 `payment`로 둔다(비우면 모든 부위)
 - 복구 확인(`verify_recovery`): 30초 간격 최대 5회(`INFRA_RECOVERY_ATTEMPTS`·`INFRA_RECOVERY_INTERVAL_S`). 인프라 지표(shop-api 장애 상태)와 업무 지표(data `anomaly_detection`: `payment_fail_rate`·`order_fail_count`)가 둘 다 정상이어야 `recovered`. 업무 지표를 못 받으면(`null`) 복구로 보지 않는다. 마감(`deadline`) 전에 멈춘다
 
 코드 구성 (`src/infra_agent/`):
@@ -33,7 +33,7 @@
 | `clients.py` | shop-api·data 호출 (URL이 없으면 목) |
 | `runtime.py` | 프로세스 메모리 상태 (진단 결과, 실행한 롤백) |
 | `handlers.py` | A2A skill 3개 |
-| `dejafix_watch.py` | DejaFix 현재 장애 → 총괄 `infra.anomaly_detected` |
+| `dejafix_watch.py` | DejaFix 현재 장애 → 총괄 `infra.anomaly_detected`, 풀리면 `infra.recovered` |
 | `chat/` | 인프라 AI 직접 대화. 근거(`facts.py`)에 DejaFix 현재 장애(`dejafix_problems`)도 넣는다 |
 
 ## 2. 실행 방법

@@ -33,8 +33,8 @@ def seen(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
 
     def handle(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        if request.url.path == "/api/shop/admin/orchestrator/departments":
-            return httpx.Response(200, json={"data": [{"name": "infra"}], "meta": {"mock": False}})
+        if request.url.path == "/api/shop/admin/marketing/briefs":
+            return httpx.Response(200, json={"data": [{"name": "brief"}], "meta": {"mock": False}})
         return httpx.Response(200, json={"data": {"path": request.url.path}, "meta": {}})
 
     monkeypatch.setattr(shop_relay, "TRANSPORT", httpx.MockTransport(handle))
@@ -53,8 +53,6 @@ def _fail_with(monkeypatch: pytest.MonkeyPatch, handler) -> None:  # noqa: ANN00
 @pytest.mark.parametrize(
     ("path", "upstream"),
     [
-        ("/orchestrator/incidents", "/api/shop/admin/orchestrator/incidents"),
-        ("/orchestrator/departments", "/api/shop/admin/orchestrator/departments"),
         ("/marketing/briefs", "/api/shop/admin/marketing/briefs"),
         ("/marketing/outage-sns-drafts", "/api/shop/admin/marketing/outage-sns-drafts"),
         ("/banners", "/api/shop/banners"),
@@ -75,8 +73,8 @@ def test_each_route_reads_its_fixed_upstream_path_with_the_server_token(
 
 
 def test_upstream_meta_is_kept(seen, client) -> None:
-    body = client.get("/api/dashboard/shop/orchestrator/departments").json()
-    assert body["data"] == [{"name": "infra"}]
+    body = client.get("/api/dashboard/shop/marketing/briefs").json()
+    assert body["data"] == [{"name": "brief"}]
     assert body["meta"]["mock"] is False
 
 
@@ -96,6 +94,9 @@ def test_list_queries_are_validated_and_forwarded(seen, client) -> None:
         "/api/dashboard/shop/admin/faults",
         "/api/dashboard/shop/api/shop/orders",
         "/api/dashboard/shop/orchestrator/incidents/ctx-1",
+        # 11/23: 총괄 사건·부서는 화면이 총괄을 직접 읽어서 이 중계에서 뺐다
+        "/api/dashboard/shop/orchestrator/incidents",
+        "/api/dashboard/shop/orchestrator/departments",
         "/api/dashboard/shop/../../api/shop/admin/inquiries",
     ],
 )
@@ -168,7 +169,7 @@ def test_upstream_errors_are_mapped(
         monkeypatch,
         lambda _: httpx.Response(upstream_status, json={"error": {"code": "X", "message": "비밀"}}),
     )
-    res = client.get("/api/dashboard/shop/orchestrator/incidents")
+    res = client.get("/api/dashboard/shop/banners")
     assert res.status_code == status
     assert res.json()["error"]["code"] == code
     assert "비밀" not in res.json()["error"]["message"]
@@ -181,7 +182,7 @@ def test_upstream_relay_failures_keep_status_and_message(seen, client, monkeypat
             504, json={"error": {"code": "ORCHESTRATOR_TIMEOUT", "message": "총괄이 늦어요"}}
         ),
     )
-    res = client.get("/api/dashboard/shop/orchestrator/incidents")
+    res = client.get("/api/dashboard/shop/banners")
     assert res.status_code == 504
     assert res.json()["error"] == {"code": "UPSTREAM_RELAY", "message": "총괄이 늦어요"}
 

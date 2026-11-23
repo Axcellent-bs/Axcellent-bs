@@ -135,3 +135,13 @@ def test_issue_refuses_a_broken_company() -> None:
 def test_shared_tokens_have_no_company() -> None:
     human = ha.find_human("s3cret", shared_tokens={"s3cret": "공용"})
     assert human is not None and (human.company_id, human.company_role) == (None, None)
+
+
+def test_legacy_company_env_and_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ha.LEGACY_COMPANY_ENV, raising=False)
+    monkeypatch.delenv("AX_DEFAULT_COMPANY", raising=False)
+    assert ha.legacy_company_id() == "catbooks"  # 아무 것도 안 정하면 옛 동작 그대로
+    monkeypatch.setenv("AX_DEFAULT_COMPANY", "nubi")
+    assert ha.legacy_company_id() == "nubi"
+    monkeypatch.setenv(ha.LEGACY_COMPANY_ENV, "shop-demo")
+    assert ha.legacy_company_id() == "catbooks"

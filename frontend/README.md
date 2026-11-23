@@ -152,6 +152,7 @@ cd backend && bash scripts/run_web.sh   # http://localhost:3090
 | 총괄 켜짐/꺼짐 칩 | `GET /orch/health` | 총괄 orchestrator 8000 `/health` |
 | 장애 사건 목록 | `GET /orch/api/incidents` | 총괄 8000 `/api/incidents` |
 | 고른 사건 상세 | `GET /orch/api/incidents/{context_id}` | 총괄 8000 `/api/incidents/{context_id}` |
+| 부서별 호출 현황(총괄 AI가 부서를 부른 실측) | `GET /orch/api/departments` | 총괄 8000 `/api/departments` (11/23부터 캣북스를 거치지 않고 직접 읽어요) |
 | 데이터 AI 켜짐/꺼짐 칩 | `GET /data-a2a/health` | 데이터 AI data 8106 `/health` |
 | 운영 지표 (`/data/ops`) | `POST /data-a2a/a2a` (skill `kpi_summary`, 토큰 `VITE_DATA_A2A_TOKEN`) | 데이터 AI 8106 `/a2a` |
 | 트렌드&콘텐츠 (`/data/trend`) | `POST /data-a2a/a2a` (skill `trend_scan`, 입력 비우면 회사 기본 키워드) | 데이터 AI 8106 `/a2a` → 네이버 검색어 트렌드 |

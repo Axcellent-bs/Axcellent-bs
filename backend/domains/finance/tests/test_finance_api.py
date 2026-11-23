@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from ax_agent_template import events
+from ax_agent_template import events, human_auth
 from ax_contracts.schemas import ExecuteDecision, HoldReason
 from finance_agent import finance_api, handlers
 from finance_agent.main import app
@@ -343,12 +343,24 @@ def test_closing_confirm_records_person(client: TestClient) -> None:
 
 def test_configured_human_tokens(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SAFETY_HUMAN_TOKENS", "byunghwan:s3cret")
+    shared = {"Authorization": "Bearer s3cret"}
+    items = client.get("/api/finance/reconciliation").json()["data"]["items"]
+    url = f"/api/finance/reconciliation/{items[0]['payment_id']}/note"
+    noted = client.post(url, json={"note": "확인"}, headers=shared)
+    assert noted.status_code == 200  # 설정한 사람 토큰은 다른 사람 결정에는 그대로 쓴다
+    # 확정은 로그인 세션만(11/23): 공용·설정 토큰으로는 401
+    refused = client.post(
+        "/api/finance/closing/confirm", json={"date": "2026-10-22"}, headers=shared
+    )
+    assert refused.status_code == 401 and "공용" in refused.json()["error"]["message"]
+    monkeypatch.setenv("AX_SESSION_SECRET", "s" * 40)
+    token, _ = human_auth.issue_session(account_id="acc-9", name="병환", role="admin")
     ok = client.post(
         "/api/finance/closing/confirm",
         json={"date": "2026-10-22"},
-        headers={"Authorization": "Bearer s3cret"},
+        headers={"Authorization": f"Bearer {token}"},
     )
-    assert ok.json()["data"]["confirmed_by"] == "byunghwan"
+    assert ok.json()["data"]["confirmed_by"] == "병환"
     monkeypatch.delenv("AGENT_TEMPLATE_MOCK")  # 목 모드가 아니면 human:<이름>은 받지 않는다
     monkeypatch.delenv("FINANCE_MOCK", raising=False)  # CI는 FINANCE_MOCK=1도 켠다
     refused = client.post(

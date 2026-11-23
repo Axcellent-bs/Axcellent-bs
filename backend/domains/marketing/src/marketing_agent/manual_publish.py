@@ -263,6 +263,7 @@ async def complete_manual_publish(request: AgentRequest, *, from_decision: Any) 
         )
         if not won:  # 다른 요청이 먼저 닫았다
             return _failed(request, "already_published")
+        await publisher.after_published(row.idempotency_key)  # 의뢰 영상이면 성과 측정 등록
         closed = publisher.store().get(row.idempotency_key) or fresh
     except pend.PendingStorageError:
         return _failed(request, "storage_error")

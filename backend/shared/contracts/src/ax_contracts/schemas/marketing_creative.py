@@ -99,3 +99,45 @@ class CreativeRecordAttachOutput(AxModel):
     record_id: str = Field(pattern=RECORD_ID_PATTERN)
     part: str
     item: dict[str, Any]  # render.<part>
+
+
+# ---- 유튜브 올리기 (2026-11-23). 상태는 기록의 render.youtube
+CREATIVE_YOUTUBE_DRAFT_SKILL = "creative_youtube_draft"
+CREATIVE_YOUTUBE_REQUEST_SKILL = "creative_youtube_request"
+YOUTUBE_STATUS_SKILL = "youtube_status"
+
+
+class CreativeYoutubeDraftInput(AxModel):
+    """AI 초안 만들기(처음·`regenerate`)나 사람이 고친 값 저장. 비운 칸은 그대로 둔다."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    regenerate: bool = False
+    title: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=5000)
+    tags: list[str] | None = Field(default=None, max_length=15)
+    privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
+    part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+
+
+class CreativeYoutubeRequestInput(AxModel):
+    """초안대로 유튜브에 올리기를 사람 승인(C `publish_youtube`)에 올린다."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    who: str | None = Field(default=None, max_length=80)
+
+
+class CreativeYoutubeOutput(AxModel):
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    youtube: dict[str, Any]  # render.youtube
+
+
+class YoutubeStatusInput(AxModel):
+    """입력 없음(지금 회사의 채널 연결 상태를 본다)."""
+
+
+class YoutubeStatusOutput(AxModel):
+    """채널 연결: missing_keys · invalid_credentials · ok · error. 키 값은 없다."""
+
+    connection: str
+    channel: str | None = None
+    checked_at: str

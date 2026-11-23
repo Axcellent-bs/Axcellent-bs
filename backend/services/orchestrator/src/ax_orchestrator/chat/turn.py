@@ -27,8 +27,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from ax_agent_template import company_ai
 from ax_agent_template import config as template_config
-from ax_agent_template.llm import LLMClient, LLMSettings
+from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas.orchestrator_chat import (
     ORCHESTRATOR_CHAT_MESSAGE_MAX as CHAT_MESSAGE_MAX,
 )
@@ -85,7 +86,7 @@ def default_llm() -> LLMClient | None:
     """목 모드거나 총괄 LLM 설정(`ORCHESTRATOR_LLM_*` → `LLM_*`)이 없으면 None (보내기는 거절)."""
     if template_config.is_mock("orchestrator"):
         return None
-    settings = LLMSettings.from_env("orchestrator")
+    settings = company_ai.settings_for("orchestrator")  # 회사 키가 있으면 회사 값(11/23)
     if not (settings.model and settings.base_url):
         return None
     return LLMClient("orchestrator", settings=settings)

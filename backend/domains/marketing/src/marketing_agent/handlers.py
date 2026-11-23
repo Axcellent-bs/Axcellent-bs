@@ -16,7 +16,6 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from ax_agent_template.events import publish
 from ax_agent_template.execute import execute
 from ax_agent_template.logging import log_event
 from ax_contracts.schemas import (
@@ -30,6 +29,7 @@ from ax_contracts.schemas import (
     HoldReason,
     InputReason,
     NoticePublishedData,
+    SnsPostPublishedData,
     TaskStatus,
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
@@ -43,6 +43,10 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeRecordsListOutput,
     CreativeVideoRequestInput,
     CreativeVideoRequestOutput,
+    CreativeYoutubeDraftInput,
+    CreativeYoutubeOutput,
+    CreativeYoutubeRequestInput,
+    YoutubeStatusOutput,
 )
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import (
@@ -55,6 +59,7 @@ from marketing_agent import (
     request_video,
     secret_requests,
     shop_client,
+    state_db,
     video_draft,
     video_providers,
 )
@@ -63,6 +68,7 @@ from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import storyboard as _storyboard
+from marketing_agent import youtube as _youtube
 from marketing_agent.brief_handoff import (
     AUTO,
     DRAFT_MEDIA_KIND,
@@ -132,7 +138,8 @@ from marketing_agent.schemas import (
 )
 from marketing_agent.sns import SnsStore, check_sns_post, draft_sns_post
 from marketing_agent.sns_prepare import prepare_sns_post_from_media
-from marketing_agent.sns_publish.publisher import publish_sns
+from marketing_agent.sns_publish.publisher import PUBLISHED_HOOKS, publish_sns
+from marketing_agent.state_db import StateDb
 
 SOURCE = "marketing"
 BANNER_TEXT_MAX = 200  # shop-api 배너 문구 상한
@@ -152,8 +159,10 @@ def resolved_banner_hours() -> float:
 
 class State:
     def __init__(self) -> None:
-        self.notices = NoticeStore()
-        self.coupons = CouponLedger()
+        # 공지·쿠폰 기록과 못 보낸 이벤트(outbox)는 MARKETING_STATE_DB에 남는다(없으면 메모리)
+        self.state_db = StateDb()
+        self.notices = NoticeStore(db=self.state_db)
+        self.coupons = CouponLedger(db=self.state_db)
         self.briefs = BriefStore()
         self.campaigns = CampaignTracker()  # 시작된 캠페인 대장(자동 결과 전달)
         self.sns = SnsStore()
@@ -216,6 +225,9 @@ class State:
 STATE = State()
 # 재무가 취소를 받으면 자동 결과 전달 대장에서도 뺀다(campaign_cancel.CANCEL_HOOKS)
 CANCEL_HOOKS.append(lambda campaign_id: STATE.campaigns.mark_canceled(campaign_id))
+# SNS 게시가 끝나면 sns.post_published 이벤트를 outbox에 쌓는다
+# (_sns_published는 아래에 정의, 부를 때 찾는다)
+PUBLISHED_HOOKS.append(lambda row, media_id, result: _sns_published(row, media_id, result))
 
 
 def reset_state() -> None:
@@ -306,15 +318,37 @@ async def _emit(request: AgentRequest, event_type: EventType, data: BaseModel, k
         idempotency_key=key,
         data=data.model_dump(mode="json"),
     )
-    try:
-        await publish(envelope)
-    except NotImplementedError:  # Redis 연동 전(TODO)
+    # 버스(Redis)가 없거나 끊겼으면 outbox에 쌓고 주기적으로 다시 보낸다(최소 한 번 전달)
+    if not await state_db.emit(STATE.state_db, envelope):
         log_event(
             request.meta.context_id,
             request.meta.tenant_id,
-            "event_publish_skipped",
+            "event_queued",
             {"type": event_type.value},
         )
+
+
+def _sns_published(row: Any, media_id: str | None, result: dict[str, Any]) -> None:
+    """SNS 게시가 끝나면 `sns.post_published`를 outbox에 쌓는다(주기적으로 버스에 보낸다)."""
+    key = f"sns_published:{row.idempotency_key}"
+    data = SnsPostPublishedData(
+        post_draft_id=row.post_draft_id,
+        manual=bool(result.get("manual")),
+        media_id=media_id,
+        permalink=result.get("permalink"),
+        published_at=result.get("published_at"),
+    )
+    envelope = EventEnvelope(
+        event_id=_event_id(key),
+        type=EventType.SNS_POST_PUBLISHED,
+        occurred_at=_now(),
+        tenant_id=row.tenant_id,
+        context_id=row.context_id or None,
+        source=SOURCE,
+        idempotency_key=key,
+        data=data.model_dump(mode="json"),
+    )
+    STATE.state_db.enqueue(envelope, "queued")
 
 
 async def draft_notice(request: AgentRequest) -> AgentResult:
@@ -727,6 +761,8 @@ async def creative_record_get(request: AgentRequest) -> AgentResult:
         try:
             _render.expire_stale(data.record_id)
             await _render.check_video(STATE.media_ledger, request.meta, data.record_id)
+            _youtube.expire_stale(data.record_id)
+            await _youtube.check_upload(request.meta, data.record_id)
         except Exception:  # noqa: BLE001 - 진행 확인 실패는 읽기를 막지 않는다
             _render.logger.exception("제작 기록: 영상 승인 확인 실패")
     row = _creative.store().get(data.record_id)
@@ -813,6 +849,78 @@ async def creative_record_attach(request: AgentRequest) -> AgentResult:
         evidence=_evidence(
             ["creative_record_attach"], f"파일 붙임 {data.record_id} {data.part}", []
         ),
+    )
+
+
+# 유튜브 초안(read: 기록에 초안만 남긴다). 테스트는 이 값을 가짜 LLM 함수로 바꾼다
+YOUTUBE_LLM: Any = None
+
+
+def _youtube_failed(request: AgentRequest, error: Exception) -> AgentResult:
+    return _result(request, TaskStatus.FAILED, outcome=str(error), output={"message": str(error)})
+
+
+async def creative_youtube_draft(request: AgentRequest) -> AgentResult:
+    """AI가 유튜브 제목·설명·태그 초안을 쓰거나 사람이 고친 값을 저장한다(올리지는 않는다)."""
+    from marketing_agent.chat import default_llm
+
+    data = _parse(request, CreativeYoutubeDraftInput)
+    if isinstance(data, AgentResult):
+        return data
+    edits = data.model_dump(include={"title", "description", "tags", "privacy", "part"})
+    try:
+        youtube = await _youtube.write_draft(
+            data.record_id,
+            YOUTUBE_LLM or default_llm,
+            request.meta.context_id,
+            edits=edits,
+            regenerate=data.regenerate,
+        )
+    except _youtube.YoutubeError as error:
+        return _youtube_failed(request, error)
+    out = CreativeYoutubeOutput(record_id=data.record_id, youtube=youtube)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["creative_youtube_draft"],
+            f"유튜브 초안 {data.record_id} ({youtube.get('source')})",
+            [],
+        ),
+    )
+
+
+async def creative_youtube_request(request: AgentRequest) -> AgentResult:
+    """초안대로 유튜브에 올리기를 사람 승인(C publish_youtube)에 올린다. 승인 뒤에만 올린다."""
+    data = _parse(request, CreativeYoutubeRequestInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        youtube = await _youtube.request_upload(request.meta, data.record_id, data.who)
+    except _youtube.YoutubeError as error:
+        return _youtube_failed(request, error)
+    out = CreativeYoutubeOutput(record_id=data.record_id, youtube=youtube)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["creative_youtube_request"],
+            f"유튜브 올리기 요청 {data.record_id}: {youtube.get('status')}",
+            [],
+        ),
+    )
+
+
+async def youtube_status(request: AgentRequest) -> AgentResult:
+    """AXcellent 유튜브 채널 연결 상태(read). 키 값은 돌려주지 않는다."""
+    out = YoutubeStatusOutput(**await _youtube.status())
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["youtube_status"], f"유튜브 연결 {out.connection}", []),
     )
 
 
@@ -1711,6 +1819,9 @@ HANDLERS = {
     "creative_records_list": creative_records_list,
     "creative_record_get": creative_record_get,
     "creative_video_request": creative_video_request,
+    "creative_youtube_draft": creative_youtube_draft,
+    "creative_youtube_request": creative_youtube_request,
+    "youtube_status": youtube_status,
     "creative_record_attach": creative_record_attach,
     "receive_campaign_brief": receive_campaign_brief,
     "list_campaign_briefs": list_campaign_briefs,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CancelConfirm } from "./CancelConfirm";
 import { shortDateTime } from "@/lib/format";
 import { actorText } from "@/lib/actor";
 import { finance, humanTokenSet, krw, plainText, signedKrw, type ClosingPeriod, type ClosingReport } from "@/lib/finance";
@@ -132,6 +133,11 @@ export function ClosingSection({ tick, onChanged, focus }: {
                         <p className="text-emerald-800">{r.snapshot_at ? "이 기간의 결산은 확정됐습니다. 표의 숫자는 확정할 때 저장한 값입니다." : "이 기간의 결산은 확정됐습니다. 예전 확정이라 숫자가 저장되지 않아 지금 장부로 계산한 값입니다."}</p>
                       )}
                       {(r.close_warnings ?? []).map((w) => <p key={w.code} className="text-ink-700">확정할 때 경고: {w.message}</p>)}
+                      <CancelConfirm what={r.period === "day" ? `${r.date} 하루 결산` : `${toMonth(r.date)} 한 달 결산`} onCancel={async (why) => {
+                        const next = await finance.cancelClosing(r.period, r.date, why);
+                        res.set(() => next);
+                        onChanged();
+                      }} />
                       {(r.drift ?? []).length > 0 && (
                         <div className="rounded-xl bg-amber-50 px-3 py-2 text-amber-900">
                           <p className="font-medium">확정 뒤 장부 숫자가 달라졌습니다. 확정 숫자는 그대로 두고, 차이는 발생한 기간에 조정하세요.</p>

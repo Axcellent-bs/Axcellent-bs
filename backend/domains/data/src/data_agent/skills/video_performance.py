@@ -9,7 +9,10 @@
 - 배수: 같은 카테고리·형식 숏츠 조회 중앙값(숏츠 통계 저장분) 대비는 모든 시점, 목표 참고값(그
   인사이트의 target_views_reference) 대비는 목표 참고값이 정의된 시점(`TARGET_AT`, 7일)에만.
   숫자는 모두 facts에, 시점마다 화면 한 줄(`line`)
-- 인스타그램·틱톡: 읽는 길이 없어 unknown + "연결 대기"와 필요한 것
+- 인스타그램(11/23): 데이터 인스타 토큰이 있으면 회사 설정 [instagram] publish_username 계정을
+  business_discovery로 시점마다 한 번 읽어 잰다 (`instagram_video`). 토큰이 없으면 예전처럼
+  연결 대기
+- 틱톡: 읽는 길이 없어 unknown + "연결 대기"와 필요한 것
 - 시험 영상(test)은 화면·브리프 집계(성과 모으기)에서 뺀다
 - 성과 모으기는 시점(1일·3일·7일)마다 따로: 그 시점을 잰 영상만 넣고, 측정 중·놓침은 빠진 수로
   센다. n이 3보다 작으면 low_sample
@@ -160,6 +163,13 @@ class VideoStore:
                 "CREATE TABLE IF NOT EXISTS points (key TEXT NOT NULL, checkpoint TEXT NOT NULL,"
                 " measured_at TEXT NOT NULL, views INTEGER, likes INTEGER, comments INTEGER,"
                 " PRIMARY KEY (key, checkpoint));"
+                # 인스타 (11/23): 시점마다 그때 잰 우리 릴스 조회 중앙값(이 영상 빼고)과 표본 수
+                "CREATE TABLE IF NOT EXISTS ig_baselines (key TEXT NOT NULL,"
+                " checkpoint TEXT NOT NULL, median REAL, n INTEGER NOT NULL,"
+                " PRIMARY KEY (key, checkpoint));"
+                # 인스타: 영상마다 마지막으로 못 잰 이유 (못 찾음·프로페셔널 계정 아님)
+                "CREATE TABLE IF NOT EXISTS ig_notes (key TEXT PRIMARY KEY, reason TEXT NOT NULL,"
+                " at TEXT NOT NULL);"
             )
             cols = [r[1] for r in self._conn.execute("PRAGMA table_info(videos)")]
             for col in ("promo_id", "coupon_id"):  # v4 칸: 예전 파일이면 끝에 더한다
@@ -241,6 +251,48 @@ class VideoStore:
                 "INSERT OR IGNORE INTO points VALUES (?,?,?,?,?,?)",
                 (key, p.checkpoint, p.measured_at.isoformat(), p.views, p.likes, p.comments),
             )
+
+    def set_published(self, key: str, at: datetime) -> None:
+        """게시 시각이 비어 있을 때만 채운다 (인스타는 측정 때 게시물 timestamp로)."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE videos SET published_at = ? WHERE key = ? AND published_at IS NULL",
+                (_iso(at), key),
+            )
+
+    def save_baseline(
+        self, key: str, checkpoint: VideoCheckpointName, median: float | None, n: int
+    ) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO ig_baselines VALUES (?,?,?,?)", (key, checkpoint, median, n)
+            )
+
+    def baselines(self, key: str) -> dict[VideoCheckpointName, tuple[float | None, int]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT checkpoint, median, n FROM ig_baselines WHERE key = ?", (key,)
+            ).fetchall()
+        return {_checkpoint(c): (m, n) for c, m, n in rows}
+
+    def set_note(self, key: str, reason: str | None, at: datetime | None = None) -> None:
+        with self._lock, self._conn:
+            if reason is None:
+                self._conn.execute("DELETE FROM ig_notes WHERE key = ?", (key,))
+            else:
+                when = (at or datetime.now(UTC)).isoformat()
+                self._conn.execute("INSERT OR REPLACE INTO ig_notes VALUES (?,?,?)",
+                                   (key, reason, when))  # fmt: skip
+
+    def note(self, key: str) -> str | None:
+        got = self.note_at(key)
+        return got[0] if got else None
+
+    def note_at(self, key: str) -> tuple[str, datetime] | None:
+        with self._lock:
+            row = self._conn.execute("SELECT reason, at FROM ig_notes WHERE key = ?",
+                                     (key,)).fetchone()  # fmt: skip
+        return (row[0], datetime.fromisoformat(row[1])) if row else None
 
 
 def _iso(at: datetime | None) -> str | None:
@@ -527,10 +579,12 @@ async def video_performance(
     shorts: ShortsStatsOutput | None = None,
     store: VideoStore | None = None,
     now: datetime | None = None,
+    instagram: Any = None,
 ) -> PerformanceResult:
     """영상 성과. video_url이 있으면 등록(추적)하고, 지금 잴 시점이 있으면 잰다.
 
     list_all이면 등록된 영상 전부를 저장분으로만 보여 준다 (새로 재지 않음, 성과 탭).
+    인스타 영상은 `instagram`(Instagram Graph 커넥터)으로 우리 게시 계정을 한 번 읽어 잰다.
     """
     now = now or datetime.now(UTC)
     own = store is None
@@ -551,6 +605,12 @@ async def video_performance(
             n, problems = await measure_due(store, youtube, now)
             if n:
                 queries.append(f"youtube videos.list video_performance points={n}")
+        elif video.platform == "instagram":
+            from data_agent.skills import instagram_video
+
+            n, problems = await instagram_video.measure_due(store, instagram, env, now)
+            if n:
+                queries.append(f"instagram business_discovery video_performance points={n}")
         everyone = describe_all(store, env, now, shorts)
         this = next(o for o in everyone if o.video_id == video.video_id
                     and o.platform == video.platform)  # fmt: skip
@@ -572,6 +632,7 @@ def describe(
     insights: dict[str, tuple[TrendInsight | None, str]],
 ) -> VideoPerformanceOutput:  # fmt: skip
     """영상 하나: 시점 값, 시간 맞춤 비교, 판정, 신호, 예상치, facts (문장은 describe_all에서)."""
+    from data_agent.skills import instagram_video
     from data_agent.skills import video_factors as vf
 
     out = VideoPerformanceOutput(
@@ -583,6 +644,11 @@ def describe(
         sales_measurable=bool(video.promo_id or video.coupon_id),
         sales_reason=None if video.promo_id or video.coupon_id else SALES_UNMEASURABLE,
     )  # fmt: skip
+    if video.platform == "instagram" and instagram_video.connected(env):
+        instagram_video.describe(out, video, store, env, now)
+        vf.assess(out, None)
+        instagram_video.finish_lines(out)  # assess가 숏츠 문장으로 덮은 줄을 인스타 문장으로
+        return out
     if video.platform != "youtube":
         out.reason = f"{WAITING}: {video.platform} 성과를 읽는 연결이 아직 없음"
         out.needs = list(NEEDS[video.platform])

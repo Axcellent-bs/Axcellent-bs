@@ -490,8 +490,8 @@ def _verify(amount: int, params: dict) -> dict:
     return client.post("/a2a", json=_body("verify_campaign_budget", data, "mock:safety")).json()
 
 
-def test_old_gate_verification_never_blocks_and_carries_the_opinion() -> None:
-    """관문은 더 부르지 않지만, 예전 skill이 불려도 막지 않고 재무 의견만 돌려준다."""
+def test_old_gate_verification_never_approves_and_carries_the_opinion() -> None:
+    """관문은 더 부르지 않는다. 예전 skill이 불려도 통과(approved) 없이 재무 의견만 준다."""
     _sender(state())
     state().cash_override = 10_000_000
     params = {"campaign_id": "new", "campaign_name": "n", "channel": "릴스"}
@@ -509,9 +509,10 @@ def test_old_gate_verification_never_blocks_and_carries_the_opinion() -> None:
     client = TestClient(app)
     client.post("/a2a", json=_body("review_campaign_budget", _ask(100_000), "mock:marketing"))
     within = _verify(50_000, params)["output"]
-    assert (within["decision"], within["opinion"]) == ("approved", "recommend")
+    assert (within["decision"], within["opinion"]) == ("advisory", "recommend")
+    assert within.get("approved") is not True  # 관문이 approved로 읽을 칸이 없다
     over = _verify(100_000, params)["output"]
-    assert (over["decision"], over["reason_code"]) == ("approved", "finance_advisory_only")
+    assert (over["decision"], over["reason_code"]) == ("advisory", "finance_advisory_only")
     assert (over["opinion"], over["suggested_krw"]) == ("reduce", 50_000)
     assert _verify(1000, {"campaign_id": "x"})["output"]["reason_code"] == "invalid_params"
 

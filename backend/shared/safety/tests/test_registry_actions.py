@@ -175,6 +175,13 @@ async def test_receive_campaign_brief_refuses_other_requesters(
 
 
 @pytest.mark.asyncio
+async def test_publish_youtube_always_needs_a_human(gate: Gate, act) -> None:
+    """유튜브 올리기는 공개되고 되돌리기 어려워 늘 사람 결정(C)이다."""
+    decision = await gate.execute(act("publish_youtube", "marketing", "yt-1"))
+    assert (decision.grade, decision.status) == ("C", "held")
+
+
+@pytest.mark.asyncio
 async def test_confirm_spec_rules(gate: Gate, act) -> None:
     clean = dict(open_questions=0, warnings=0, basis_count=2, irreversible_count=0)
     ok = await gate.execute(act("confirm_spec", "planning", "spec-ok", **clean))
@@ -217,9 +224,7 @@ async def test_merge_pr_rules(gate: Gate, verifier: Any, act) -> None:
         "pr_linked_incident": {"linked_incident_count": 1},
         "merge_irreversible": {"irreversible_count": 1},
     }.items():
-        decision = await gate.execute(
-            act("merge_pr", "dev", f"merge-{key}", **{**clean, **bad})
-        )
+        decision = await gate.execute(act("merge_pr", "dev", f"merge-{key}", **{**clean, **bad}))
         assert decision.status == "held"
         review = gate.store.get_review(decision.review_id or "")
         assert [hit["key"] for hit in review.report["rules"]] == [key]  # type: ignore[union-attr]
@@ -648,9 +653,7 @@ async def test_rollback_all_clear_goes_to_b_verification(
         act("rollback_deployment", "infra", "rb-clear", **_ROLLBACK_OK)
     )
     assert (decision.grade, decision.status) == ("B", "executed")
-    assert [(t.verifier, t.skill) for t in verifier.tasks] == [
-        ("dev", "verify_rollback_target")
-    ]
+    assert [(t.verifier, t.skill) for t in verifier.tasks] == [("dev", "verify_rollback_target")]
 
 
 @pytest.mark.parametrize(
@@ -669,9 +672,7 @@ async def test_rollback_at_or_below_threshold_stays_b(
     decision = await rollback_gate.execute(act("rollback_deployment", "infra", key, **params))
     assert (decision.grade, decision.status) == ("B", "executed")
     assert decision.hold_reason is None
-    assert [(t.verifier, t.skill) for t in verifier.tasks] == [
-        ("dev", "verify_rollback_target")
-    ]
+    assert [(t.verifier, t.skill) for t in verifier.tasks] == [("dev", "verify_rollback_target")]
 
 
 @pytest.mark.asyncio

@@ -40,8 +40,8 @@
 | 5 | `GET /dashboard-api/api/dashboard/office-room` | dashboard-api | 세션 | 읽기 | 4초 폴링(단톡방) |
 | 6 | `GET /dashboard-api/api/dashboard/handoffs?status=open` | dashboard-api | 세션 | 읽기 | 사이드바 숫자, 30초 |
 | 6 | `GET /planning-api/api/planning/state`, `GET /dev-api/api/planning/state` | 기획(8101)·개발(8111) | 없음 | 읽기 | 사이드바 숫자, 30초마다 각 1회. state 전체라 응답이 크다 |
-| 6 | `GET /dashboard-api/api/dashboard/shop/orchestrator/incidents` | dashboard-api 중계 | 세션 | 읽기 | 사이드바 총괄 승인 대기 숫자, 30초 |
-| 7 | `GET /dashboard-api/api/dashboard/shop/orchestrator/departments`, `.../shop/banners`, `.../shop/faults` | dashboard-api 중계 | 세션 | 읽기 | 대화방·마케팅 화면에서 필요할 때 |
+| 6 | `GET /orch/api/incidents` | 총괄 | 없음 | 읽기 | 사이드바 총괄 승인 대기 숫자, 30초 (4번과 같은 경로. 11/23부터 캣북스 경유 중계를 쓰지 않는다) |
+| 7 | `GET /dashboard-api/api/dashboard/shop/banners`, `.../shop/faults` | dashboard-api 중계 | 세션 | 읽기 | 대화방·마케팅 화면에서 필요할 때 |
 
 폴링이 3~4초 간격이라 요청 수의 대부분은 4번 묶음이 만든다. 직접 호스트의 이득도 여기서 가장 크다(Cloudflare 경유 왕복을 건너뜀).
 
@@ -87,7 +87,7 @@ location ~ ^/dashboard-api/api/dashboard/(auth/me|communications|office-room|han
     proxy_pass http://<dashboard-api 업스트림>;
     include snippets/api-direct-proxy.conf;
 }
-location ~ ^/dashboard-api/api/dashboard/shop/(orchestrator/incidents|orchestrator/departments|banners|faults)$ {
+location ~ ^/dashboard-api/api/dashboard/shop/(banners|faults)$ {
     limit_except GET HEAD OPTIONS { deny all; }
     include snippets/api-direct-cors.conf;
     rewrite ^/dashboard-api/(.*)$ /$1 break;

@@ -70,6 +70,36 @@ def test_catalog_env_picks_the_file(monkeypatch) -> None:
     assert catalog.current().id == "catbooks"
 
 
+def _no_company_env(monkeypatch) -> None:
+    monkeypatch.delenv(catalog.CATALOG_ENV, raising=False)
+    monkeypatch.delenv("AX_TENANT", raising=False)
+    monkeypatch.delenv("AX_DEFAULT_COMPANY", raising=False)
+    monkeypatch.setattr(catalog, "tenant_setting", lambda name: None)
+    monkeypatch.setattr(catalog, "_loaded", {})
+
+
+def test_catalog_fallback_without_any_setting_is_legacy_catbooks(monkeypatch) -> None:
+    _no_company_env(monkeypatch)
+    monkeypatch.setattr(catalog, "default_company_id", lambda: "catbooks")
+    assert catalog.current().id == "catbooks"
+
+
+def test_catalog_fallback_follows_ax_tenant_then_default_company(monkeypatch) -> None:
+    _no_company_env(monkeypatch)
+    monkeypatch.setattr(catalog, "default_company_id", lambda: "nubi")
+    assert catalog.current().id == "nubi"
+    monkeypatch.setattr(catalog, "_loaded", {})
+    monkeypatch.setenv("AX_TENANT", "studyon")
+    assert catalog.current().id == "studyon"
+
+
+def test_catalog_fallback_for_unknown_company_is_a_clear_error(monkeypatch) -> None:
+    _no_company_env(monkeypatch)
+    monkeypatch.setattr(catalog, "default_company_id", lambda: "nosuchco")
+    with pytest.raises(ValueError, match="nosuchco"):
+        catalog.current()
+
+
 def test_subject_particle_follows_the_last_syllable() -> None:
     assert catalog.with_subject("주문") == "주문이"
     assert catalog.with_subject("출고") == "출고가"

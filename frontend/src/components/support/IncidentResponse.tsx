@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "@/components/finance/bits";
 import { Link } from "@/lib/nav";
-import { adminRelay, relayEnabled, stepStatus, type Incident } from "@/lib/adminRelay";
+import { stepStatus, type Incident } from "@/lib/adminRelay";
+import { orchestrator } from "@/lib/orchestrator";
 import { incidentTitle, skillKo, stepLabel } from "@/lib/agentChat";
 import { shortDateTime } from "@/lib/format";
 import { support, type ExecutionRow } from "@/lib/support";
@@ -132,7 +133,7 @@ function Detail({ incident, tick }: { incident: Incident; tick: number }) {
 }
 
 export function IncidentResponse({ tick }: { tick: number }) {
-  const list = useResource("support-incident-list", async () => ({ data: (await adminRelay.incidents()).data, meta: { mock: false } }), tick);
+  const list = useResource("support-incident-list", async () => ({ data: (await orchestrator.incidents()).data, meta: { mock: false } }), tick);
   const [picked, setPicked] = useState<string | null>(null);
   const incidents = useMemo(
     () => [...(list.env?.data ?? [])].sort((a, b) => Date.parse(b.opened_at ?? "") - Date.parse(a.opened_at ?? "")),
@@ -141,7 +142,6 @@ export function IncidentResponse({ tick }: { tick: number }) {
   // 기본은 가장 최근의 결제 사건, 없으면 가장 최근 사건
   const current = incidents.find((i) => i.context_id === picked) ?? incidents.find((i) => i.component === "payment") ?? incidents[0];
 
-  if (!relayEnabled) return <Panel id="incident-response" title="사건 대응 기록"><Empty>총괄 AI 읽기 연결이 꺼져 있어 사건을 불러올 수 없습니다.</Empty></Panel>;
   const tools = incidents.length > 1 && current ? (
     <select className="field py-1 text-xs" value={current.context_id} onChange={(e) => setPicked(e.target.value)} aria-label="사건 고르기">
       {incidents.map((i) => <option key={i.context_id} value={i.context_id}>{shortDateTime(i.opened_at)} · {incidentTitle(i)}</option>)}

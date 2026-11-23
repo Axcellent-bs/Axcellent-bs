@@ -129,6 +129,9 @@ export interface PlanLookup {
   title: string;
   idea: string;
   videoPlan?: Pick<VideoPlanView, "concept" | "durationS" | "aspect" | "scenes">;
+  /** 기획이 받은 성과 (receive_campaign_update result) · 그 캠페인 번호 (의뢰 영상이면 wr_…) */
+  result?: { direction: string; summary?: string };
+  campaign?: string;
 }
 
 export interface PlanCardView {
@@ -156,6 +159,109 @@ export function planCard(p: PlanLookup): PlanCardView {
 /** 기획 기록을 다시 읽어도 되나: 처음이거나 마지막 읽기에서 1분이 지났을 때만 */
 export const PLAN_LOOKUP_MIN_MS = 60_000;
 export const planLookupDue = (lastAt: number | null, now: number) => lastAt === null || now - lastAt >= PLAN_LOOKUP_MIN_MS;
+
+// ---- 의뢰 영상 성과 (데이터 video_performance campaign_id = 의뢰 번호) · 기획 결과 받기 (11/23)
+// 영상 제작(generate_media)이 끝난 의뢰만 1분에 한 번까지 읽는다 (planLookupDue와 같은 간격).
+// 등록 안 됐으면(영상 id 없음) 아무 줄도 더하지 않는다
+
+const CP_NAME: Record<string, string> = { "1h": "1시간", "1d": "1일", "3d": "3일", "7d": "7일" };
+const CP_ORDER = ["1h", "1d", "3d", "7d"] as const;
+export const SALES_UNMEASURED = "매출은 프로모션 링크가 없어 측정 불가";
+
+/** 영상 제작 단계가 끝났나 (성과를 읽을 때) */
+export function madeVideo(r: Pick<WorkRequestRow, "plan" | "steps">): boolean {
+  const p = r.plan.find((x) => x.skill === "generate_media");
+  return !!(p && r.steps[p.step_id]?.status === "completed");
+}
+
+export interface PerfCheckpointLike {
+  checkpoint: string;
+  status: "known" | "unknown";
+  reason?: string | null;
+  due_at?: string | null;
+  views?: number | null;
+  likes?: number | null;
+  peer_ratio?: number | null;
+}
+export interface PerfLike {
+  status: "known" | "unknown";
+  reason?: string | null;
+  video_id?: string | null;
+  platform?: string | null;
+  published_at?: string | null;
+  checkpoints: PerfCheckpointLike[];
+  peer_basis?: string | null;
+}
+export interface PerfCell { name: string; main: string; sub: string | null; wait: boolean }
+export interface PerfStepView {
+  chip: { label: string; tone: string };
+  cells: PerfCell[];
+  /** "인스타 @계정 릴스 · 공식 API · 매출은 프로모션 링크가 없어 측정 불가" */
+  source: string;
+  /** 아무 시점도 못 쟀을 때의 서버 이유 (게시 계정 없음·못 찾음 등). 재는 중이면 null */
+  note: string | null;
+  /** 7일을 쟀거나 놓쳤다 (기획에 결과를 보낼 차례) */
+  done: boolean;
+}
+
+const n = (v: number) => v.toLocaleString("ko-KR");
+
+/** "11/29" (한국 날짜) */
+function kstDay(iso: string): string {
+  const t = new Date(new Date(iso).getTime() + 9 * 3600_000);
+  return `${t.getUTCMonth() + 1}/${t.getUTCDate()}`;
+}
+
+function cellOf(c: PerfCheckpointLike | undefined, name: string, lowSample: boolean): PerfCell {
+  if (c && c.status === "known" && typeof c.views === "number") {
+    const main = `조회 ${n(c.views)}` + (typeof c.likes === "number" ? ` · 좋아요 ${n(c.likes)}` : "");
+    const sub = typeof c.peer_ratio === "number" ? `우리 릴스 중앙값의 ${c.peer_ratio.toFixed(1)}배` : lowSample ? "비교 표본 적음" : null;
+    return { name, main, sub, wait: false };
+  }
+  const why = (c?.reason ?? "").trim();
+  if (why.startsWith("놓침")) return { name, main: "놓침", sub: null, wait: true };
+  if (c?.due_at && (!why || why.startsWith("측정 중"))) return { name, main: `${kstDay(c.due_at)} 잼`, sub: null, wait: true };
+  return { name, main: "측정 중", sub: null, wait: true };
+}
+
+/** 성과 측정 단계 칸. 등록 안 됐으면(영상 id 없음) null */
+export function perfStep(out: PerfLike | null | undefined, now: number): PerfStepView | null {
+  if (!out || !out.video_id) return null;
+  const by = new Map(out.checkpoints.map((c) => [c.checkpoint, c]));
+  const lowSample = /low_sample/.test(out.peer_basis ?? "");
+  const cells = CP_ORDER.map((k) => cellOf(by.get(k), CP_NAME[k], lowSample));
+  const known = out.checkpoints.filter((c) => c.status === "known");
+  const seven = by.get("7d");
+  const done = seven?.status === "known" || (seven?.reason ?? "").startsWith("놓침");
+  let chip: PerfStepView["chip"];
+  if (done) chip = { label: "측정 끝", tone: "bg-emerald-50 text-emerald-800" };
+  else if (!known.length && out.status === "unknown" && out.reason && !out.reason.startsWith("측정 중")) chip = { label: "확인 필요", tone: "bg-amber-50 text-amber-800" };
+  else if (out.published_at) {
+    const days = Math.max(1, Math.ceil((now - new Date(out.published_at).getTime()) / 86_400_000));
+    chip = { label: `${days}일째`, tone: "bg-sky-50 text-sky-800" };
+  } else chip = { label: "측정 준비", tone: "bg-sky-50 text-sky-800" };
+  const account = /@[A-Za-z0-9._]+/.exec(out.peer_basis ?? "")?.[0];
+  const where = out.platform === "instagram" ? `인스타 ${account ? `${account} ` : ""}릴스` : (out.platform ?? "영상");
+  const note = !known.length && out.reason && !out.reason.startsWith("측정 중") ? out.reason : null;
+  return { chip, cells, source: `${where} · 공식 API · ${SALES_UNMEASURED}`, note, done };
+}
+
+export interface ResultStepView { chip: { label: string; tone: string }; line: string }
+
+/** 기획 결과 받기 줄: 이 의뢰(handoff.campaign)로 결과를 받은 제안이면 "제안 N · 늘었음", 아니면 7일 뒤 대기 */
+export function resultStep(
+  requestId: string,
+  proposal: { id: string; spec?: string; campaign?: string; result?: { direction: string; summary?: string } } | null | undefined,
+  perf: PerfStepView,
+): ResultStepView {
+  if (proposal?.result && proposal.campaign === requestId) {
+    const head = `${planId(proposal.id)} · ${proposal.result.direction}`;
+    return { chip: { label: "결과 받음", tone: "bg-emerald-50 text-emerald-800" }, line: proposal.result.summary ? `${head} · ${proposal.result.summary}` : head };
+  }
+  return perf.done
+    ? { chip: { label: "보내는 중", tone: "bg-sky-50 text-sky-800" }, line: "7일 성과를 기획 제안에 보내는 중이에요" }
+    : { chip: { label: "7일 뒤", tone: "bg-ink-100 text-ink-700" }, line: "7일을 재면 기획 제안에 결과를 보내요 · 다음 분석 의뢰의 \"지난번 결과\"에 들어가요" };
+}
 
 // ---- 버튼 실패 문구 (사람 확인 결정 · 다시 돌리기)
 // 11/20 15:21: decideRequestStep이 nginx 403으로 실패했는데 `.catch(() => {})`로 넘겨 버튼이 먹통처럼 보였다

@@ -15,10 +15,13 @@
 from __future__ import annotations
 
 import asyncio
-import itertools
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 from ax_contracts.schemas import AgentResult
+
+if TYPE_CHECKING:
+    from marketing_agent.state_db import StateDb
 
 
 def total_value(count: int, unit_value: int) -> int:
@@ -29,20 +32,46 @@ class SequenceGap(Exception):
     """기다리는 번호보다 앞선 `sequence`가 들어왔다."""
 
 
+_SEP = "\x1f"  # 저장 키: context_id + 구분자 + sequence
+
+
 class CouponLedger:
-    def __init__(self) -> None:
-        self._counter = itertools.count(1)
+    """`db`(`StateDb`)를 주면 지급 결과·번호 소비·쿠폰 번호를 저장하고 켤 때 다시 읽는다.
+
+    서버를 다시 켜도 같은 키·같은 번호 재요청이 새 쿠폰을 만들지 않는다(2026-11-23).
+    """
+
+    def __init__(self, db: StateDb | None = None) -> None:
+        self._db = db
+        self._next = 1
         self._by_key: dict[str, AgentResult] = {}
         # context → sequence → 저장한 결과(저장하지 않는 건은 None). 번호를 소비했다는 기록이다
         self._consumed: dict[str, dict[int, AgentResult | None]] = defaultdict(dict)
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._load()
+
+    def _load(self) -> None:
+        if self._db is None:
+            return
+        for key, raw in self._db.all("coupon_by_key"):
+            self._by_key[key] = AgentResult.model_validate(raw)
+        for key, raw in self._db.all("coupon_consumed"):
+            context_id, _, sequence = key.rpartition(_SEP)
+            result = AgentResult.model_validate(raw) if raw is not None else None
+            self._consumed[context_id][int(sequence)] = result
+        counter = dict(self._db.all("coupon_counter")).get("next")
+        self._next = int(counter) if counter else 1
 
     def lock(self, context_id: str) -> asyncio.Lock:
         """같은 사건의 보상 요청은 한 건씩만 처리하기 위한 잠금."""
         return self._locks[context_id]
 
     def new_coupon_id(self) -> str:
-        return f"cpn_{next(self._counter):04d}"
+        coupon_id = f"cpn_{self._next:04d}"
+        self._next += 1
+        if self._db is not None:
+            self._db.put("coupon_counter", "next", self._next)
+        return coupon_id
 
     def issued_count(self) -> int:
         """지급을 마친(저장된) 쿠폰 건수. 구매자 정보는 돌려주지 않는다."""
@@ -70,7 +99,16 @@ class CouponLedger:
         cache: bool,
     ) -> None:
         """결과를 남긴다. `cache`가 거짓이면 번호만 소비하고 결과는 저장하지 않는다."""
-        if cache:
-            self._by_key.setdefault(idempotency_key, result)  # 처음 저장한 결과가 기준이다
+        if cache and idempotency_key not in self._by_key:  # 처음 저장한 결과가 기준이다
+            self._by_key[idempotency_key] = result
+            if self._db is not None:
+                self._db.put("coupon_by_key", idempotency_key, result.model_dump(mode="json"))
         if sequence is not None:
-            self._consumed[context_id][sequence] = result if cache else None
+            stored = result if cache else None
+            self._consumed[context_id][sequence] = stored
+            if self._db is not None:
+                self._db.put(
+                    "coupon_consumed",
+                    f"{context_id}{_SEP}{sequence}",
+                    stored.model_dump(mode="json") if stored is not None else None,
+                )

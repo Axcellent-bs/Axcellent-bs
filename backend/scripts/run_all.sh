@@ -231,6 +231,8 @@ export MARKETING_SNS_DRAFT_DB="$PWD/$DATA/marketing_sns_drafts.db"
 export MARKETING_CHAT_DB="$PWD/$DATA/marketing_chat.db"
 # 이미지 시트·스토리보드 제작 기록(마케팅 › 제작 기록)
 export MARKETING_CREATIVE_DB="$PWD/$DATA/marketing_creative.db"
+# marketing: 공지 게시 목록·쿠폰 중복 방지 기록과 못 보낸 이벤트(outbox). 다시 켜도 남게 (11/23)
+export MARKETING_STATE_DB="$PWD/$DATA/marketing_state.db"
 # 인프라 AI 직접 대화 저장 (incident)
 export INFRA_CHAT_DB="$PWD/$DATA/infra_chat.db"
 # 기획·개발은 실제 시각으로 (기본은 10-22에서 1분씩 가는 시연 시계라 총괄이 사건 구간으로 묻는
@@ -389,6 +391,32 @@ if [ ! -e "$PWD/$DATA/.marketing-company-backup-done" ]; then
     else
       rm -f "$_bk"
       echo "경고: 마케팅 회사 칸을 붙이기 전 백업을 만들지 못했습니다 ($_bk). 다음에 켤 때 다시 시도합니다" >&2
+    fi
+  fi
+fi
+# data 회사 칸(여러 회사 1-5 ①, 회사 키워드로 만드는 것): data DB 7개는 켤 때 tenant_id 칸이 붙거나 표를 다시 만들어
+# 키에 회사가 들어간다(옛 줄은 catbooks). 마케팅과 같은 방식으로 한 번만
+# .data/backup-before-data-company-keywords-<시각>.tgz로 백업한다 (umask 077, 표식 .data/.data-company-keywords-backup-done).
+# 회사 연결 파일 옆 instagram_radar_auto.json도 회사 폴더로 옮겨지니 아직 안 옮겼으면 같이 묶는다
+if [ ! -e "$PWD/$DATA/.data-company-keywords-backup-done" ]; then
+  _dk_db=""
+  for _f in keyword_pool.db today_board.db domain_profile.db subtopics.db source_plan.db source_probe.db       topic_categories.db; do
+    [ -e "$PWD/$DATA/$_f" ] && _dk_db="$_dk_db $_f"
+  done
+  if [ -e "$PWD/$DATA/instagram_radar_auto.json" ] && [ ! -e "$AX_COMPANIES_DIR/catbooks/instagram_radar_auto.json" ]; then
+    _dk_db="$_dk_db instagram_radar_auto.json"
+  fi
+  if [ -z "$_dk_db" ]; then
+    : > "$PWD/$DATA/.data-company-keywords-backup-done"
+  else
+    _bk="$PWD/$DATA/backup-before-data-company-keywords-$(date +%Y%m%d%H%M%S).tgz"
+    # shellcheck disable=SC2086
+    if ( umask 077; tar czf "$_bk" -C "$PWD/$DATA" $_dk_db ); then
+      echo "data 회사 칸(키워드)을 붙이기 전 백업: $_bk ($_dk_db )"
+      : > "$PWD/$DATA/.data-company-keywords-backup-done"
+    else
+      rm -f "$_bk"
+      echo "경고: data 회사 칸(키워드)을 붙이기 전 백업을 만들지 못했습니다 ($_bk). 다음에 켤 때 다시 시도합니다" >&2
     fi
   fi
 fi

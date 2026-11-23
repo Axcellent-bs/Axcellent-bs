@@ -2634,6 +2634,23 @@ export interface CampaignResultOutput {
 }
 export type CampaignResultView = "planning" | "marketing" | "finance";
 
+/** 의뢰 영상 하나 (video_performance campaign_id 응답, 카드가 쓰는 칸만). 인스타는 peer_ratio = 우리 릴스 중앙값 대비 */
+export interface RequestVideoPerformance {
+  status: "known" | "unknown";
+  reason?: string | null;
+  platform?: string | null;
+  video_id?: string | null;
+  video_url?: string | null;
+  campaign_id?: string | null;
+  proposal_id?: string | null;
+  published_at?: string | null;
+  tracking?: boolean;
+  checkpoints: (VideoCheckpoint & { peer_ratio?: number | null; line?: string | null })[];
+  peer_median_views?: number | null;
+  /** "@계정 최근 릴스 N개 조회 중앙값 …" · "표본 적음(low_sample): …" */
+  peer_basis?: string | null;
+  limits: string[];
+}
 export interface VideoPerformanceListOutput {
   status: "known" | "unknown";
   reason?: string | null;
@@ -2773,6 +2790,9 @@ export const dataAi = {
   /** 게시 영상 성과 전부 (성과 탭). 저장분만 읽고 새로 재지 않는다 (수집기가 1시간마다 잰다) */
   videoPerformance: () =>
     askData<VideoPerformanceListOutput>("video_performance", "영상 성과", { list_all: true }, TREND_DEADLINE_MS),
+  /** 의뢰 영상 하나의 성과 (campaign_id = 의뢰 번호 wr_…). 등록 안 됐으면 status unknown + "등록된 영상이 없음" */
+  requestVideoPerformance: (requestId: string) =>
+    askData<RequestVideoPerformance>("video_performance", "의뢰 영상 성과", { campaign_id: requestId }, DEADLINE_MS),
   /** 캠페인 성과 결과 1건. view = 부서별 묶음 (재무 = 연결·매출·알림). 매출은 캠페인 효과 계산 그대로 + 판정 */
   campaignResult: (campaignId: string, view: CampaignResultView = "finance") =>
     askData<CampaignResultOutput>("campaign_result", "캠페인 성과 결과", { campaign_id: campaignId, view }, CAMPAIGN_DEADLINE_MS),

@@ -55,6 +55,22 @@ def human_from_authorization(authorization: str | None) -> str:
     return human.name
 
 
+def session_human_from_authorization(authorization: str | None) -> str:
+    """확정·확정 취소용 사람 이름. 로그인 세션 토큰(`axs1.`)만 받는다(2026-11-23).
+
+    공용 사람 토큰은 화면 모두가 같이 써서 누가 확정했는지 남지 않으므로 받지 않는다.
+    목 모드(시험 전용)의 `human:<이름>`만 예외다.
+    실제 서버는 목 스위치가 켜져 있으면 시작을 거부한다.
+    """
+    token = bearer(authorization)
+    if not token:
+        raise PermissionError("로그인 세션이 필요하다 (로그인한 뒤 다시 시도)")
+    mock_human = is_mock("finance") and token.startswith("human:")
+    if not (human_auth.is_session_token(token) or mock_human):
+        raise PermissionError("확정·확정 취소는 로그인한 계정으로만 할 수 있다 (공용 토큰 불가)")
+    return human_from_authorization(authorization)
+
+
 SHARED_HUMAN = "공용"  # 모든 화면이 같이 쓰는 사람 토큰의 이름
 ACTOR_HEADER = "X-Ax-Actor-Name"
 ACTOR_NAME_MAX = 40

@@ -79,7 +79,6 @@ READS = [
     "/office-room",
     "/settlements",
     "/shop/faults",
-    "/shop/orchestrator/incidents",
     "/shop/banners",
     "/tool-connections",
     "/connection-keys",

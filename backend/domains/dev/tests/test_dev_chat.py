@@ -832,3 +832,20 @@ def test_pick_files_list_for_a_stuck_task(service: PlanningService, adapter) -> 
         rows = c.get(f"/api/planning/dev-tasks/{task_id}/files").json()["data"]
         assert BANNER in rows["files"] and not any("node_modules" in p for p in rows["files"])
         assert c.get("/api/planning/dev-tasks/T-X/files").status_code == 404
+
+
+def test_handoff_sends_chat_mode_and_owner(service: PlanningService, adapter) -> None:
+    """기획에 넘길 때 대화의 코딩 방식(mode)과 대화를 연 계정(requested_by)을 같이 보낸다.
+
+    계정이 없는 대화는 requested_by를 보내지 않는다 (사람 토큰 이름으로 채우지 않는다)."""
+    dev_chat.set_llm(ChatLLM([START, START]))
+    with TestClient(app) as c:
+        _post(c, message="배너 문구 바꿔 줘", mode="subscription", account="u1")
+        _post(c, thread_id="chat-1", message="진행해", account="u1")
+        _post(c, message="배너 문구 바꿔 줘")
+        _post(c, thread_id="chat-2", message="진행해")
+    assert service.chat_of("chat-1").account == "u1"
+    assert service.chat_of("chat-2").account is None
+    mine, anon = adapter.tickets.got
+    assert (mine.input["mode"], mine.input["requested_by"]) == ("subscription", "u1")
+    assert anon.input["mode"] == "agent" and "requested_by" not in anon.input

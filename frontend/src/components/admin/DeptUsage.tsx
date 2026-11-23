@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useVisibleInterval } from "@/lib/visibleInterval";
 import {
-  GRADE, UNKNOWN, adminRelay, clock, deptKo, millis, rate, relayEnabled, relayError,
+  GRADE, UNKNOWN, clock, deptKo, millis, rate, relayError,
   type Department, type DepartmentsMeta, type UsageBucket,
 } from "@/lib/adminRelay";
+import { orchestrator } from "@/lib/orchestrator";
 
 // 대시보드의 「부서별 호출 현황」. 총괄이 부서를 몇 번, 얼마나 잘 불렀는지 총괄이 센 실측으로 보여 준다.
 // 값이 없으면 0이나 빈칸이 아니라 "확인할 수 없음"으로 적는다. 읽기 전용이다.
@@ -117,16 +118,14 @@ export function DeptUsage() {
   const [showAll, setShowAll] = useState(false);
 
   const load = useCallback(async () => {
-    if (!relayEnabled) return;
     try {
-      const { data, meta: m } = await adminRelay.departments();
+      const { data, meta: m } = await orchestrator.departments();
       setDepts(data); setMeta(m); setError(null);
     } catch (e) { setError(relayError(e as { status?: number; message: string })); }
   }, []);
   useEffect(() => { void load(); }, [load]);
   useVisibleInterval(load, POLL_MS, { immediate: false }); // 다른 탭을 보는 동안은 쉬고, 앞 요청이 오는 중이면 건너뛴다
 
-  if (!relayEnabled) return null;
   const windowMin = meta.window_seconds ? Math.round(meta.window_seconds / 60) : null;
   // 부서 카드를 모두 읽었고 모두 호출 0건이면(카드를 못 읽은 부서가 있으면 숨기지 않는다) 빈 카드 9장 대신 한 줄로 접는다(호출이 하나라도 있으면 카드로 보인다)
   const quiet = !!depts?.length && depts.every((d) => d.available && d.usage.calls === 0);

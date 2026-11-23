@@ -46,6 +46,8 @@ class EventType(StrEnum):
     TREND_REPORT_READY = "data.trend_report_ready"
     # 인프라(DejaFix 어댑터)
     INFRA_ANOMALY_DETECTED = "infra.anomaly_detected"
+    # DejaFix에서 장애가 풀림 (infra가 보낸 장애가 현재 장애 목록에서 빠짐). 2026-11-23 추가
+    INFRA_RECOVERED = "infra.recovered"
     # 재무: 더 이상 발행하지 않는다 (재무 감사를 없앴다). 값은 계약 호환으로만 남긴다
     FINANCE_ANOMALY_DETECTED = "finance.anomaly_detected"
     # 통합 에이전트
@@ -55,6 +57,8 @@ class EventType(StrEnum):
     NOTICE_PUBLISHED = "notice.published"
     CAMPAIGN_CREATED = "campaign.created"
     COUPON_ISSUED = "coupon.issued"
+    # SNS 게시가 끝남(자동 게시·사람이 올린 수동 게시 모두). 2026-11-23 추가
+    SNS_POST_PUBLISHED = "sns.post_published"
     # 안전 레이어
     SAFETY_ACTION_EXECUTED = "safety.action_executed"
     SAFETY_ACTION_HELD = "safety.action_held"
@@ -229,6 +233,11 @@ class InfraAnomalyData(AxModel):
     threshold: float | None = None
     detected_at: UtcDatetime
     source_ref: str | None = None
+    # `infra.recovered`에만 (2026-11-23 추가). 장애 신호와 같은 `component`·`source_ref`를 싣는다.
+    # 어떻게 정상으로 돌아왔는지: `ShopDegradedData.recovery`와 같은 값. 모르면 비운다
+    recovery: Literal["fault_released", "metrics_normal"] | None = None
+    # DejaFix가 알려 준 장애 해소 시각 (감시가 알아챈 시각이 아님). 모르면 비운다
+    recovered_at: UtcDatetime | None = None
 
 
 class IncidentData(AxModel):
@@ -249,6 +258,17 @@ class NoticePublishedData(AxModel):
     notice_id: str
     channel_code: str
     context_id: str
+
+
+class SnsPostPublishedData(AxModel):
+    """`sns.post_published`. 게시물 본문·사진은 넣지 않는다(초안 번호와 게시 결과 사실만)."""
+
+    post_draft_id: str
+    platform: str = "instagram"
+    manual: bool = False  # 자동 게시가 꺼진 동안 사람이 올리고 기록한 게시
+    media_id: str | None = None
+    permalink: str | None = None
+    published_at: str | None = None  # ISO 8601
 
 
 class Promise(AxModel):
@@ -500,11 +520,13 @@ EVENT_DATA_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.PRODUCT_CREATED: ProductCreatedData,
     EventType.METRIC_ANOMALY: MetricAnomalyData,
     EventType.INFRA_ANOMALY_DETECTED: InfraAnomalyData,
+    EventType.INFRA_RECOVERED: InfraAnomalyData,
     EventType.INCIDENT_OPENED: IncidentData,
     EventType.INCIDENT_RESOLVED: IncidentData,
     EventType.NOTICE_PUBLISHED: NoticePublishedData,
     EventType.CAMPAIGN_CREATED: CampaignCreatedData,
     EventType.COUPON_ISSUED: CouponIssuedData,
+    EventType.SNS_POST_PUBLISHED: SnsPostPublishedData,
     EventType.SAFETY_ACTION_EXECUTED: SafetyActionExecutedData,
     EventType.SAFETY_ACTION_HELD: SafetyActionHeldData,
     EventType.SAFETY_REVIEW_DECIDED: SafetyReviewDecidedData,

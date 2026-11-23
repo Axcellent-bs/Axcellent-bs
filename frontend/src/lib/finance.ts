@@ -697,9 +697,12 @@ export const finance = {
   // 재무팀 5개 모듈
   overview: () => fin<Envelope<FinanceOverview>>("/api/finance/overview"),
   closing: (period: ClosingPeriod, date?: string | null) => fin<Envelope<ClosingReport>>(`/api/finance/closing${query({ period, date })}`),
-  /** 결산 확정. 사람 토큰만 받는다 */
+  /** 결산 확정. 로그인 세션 토큰만 받는다(공용 토큰 불가) */
   confirmClosing: (period: ClosingPeriod, date: string) =>
     fin<Envelope<ClosingReport>>("/api/finance/closing/confirm", { method: "POST", body: { period, date }, human: true }),
+  /** 잘못한 결산 확정 취소. 이유 필수, 기록은 남는다. 로그인 세션 토큰만 */
+  cancelClosing: (period: ClosingPeriod, date: string, reason: string) =>
+    fin<Envelope<ClosingReport>>("/api/finance/closing/cancel", { method: "POST", body: { period, date, reason }, human: true }),
   // 일치·정산 전까지 다 받으면 십수만 건이라 화면에서 고른 상태만 받는다
   reconciliation: (date?: string | null, statuses?: ReconStatus[]) =>
     fin<Envelope<Reconciliation>>(`/api/finance/reconciliation${query({ date, status: statuses?.length ? statuses.join(",") : null })}`),
@@ -754,6 +757,9 @@ export const finance = {
   /** 사람이 놓치기 쉬운 재무 패턴과 근거 */
   insights: () => fin<Envelope<FinanceInsight[]>>("/api/finance/insights"),
   confirmVat: (date: string) => fin<Envelope<VatPack>>("/api/finance/tax/vat/confirm", { method: "POST", body: { date }, human: true }),
+  /** 잘못한 부가세 확정 취소. 이유 필수. 로그인 세션 토큰만 */
+  cancelVat: (date: string, reason: string) =>
+    fin<Envelope<VatPack>>("/api/finance/tax/vat/cancel", { method: "POST", body: { date, reason }, human: true }),
   adjustClosing: (date: string, reason: string, signature: string) =>
     fin<Envelope<ClosingReport>>("/api/finance/closing/adjust", { method: "POST", body: { date, reason, signature }, human: true }),
   otherPnl: (month: string) => fin<Envelope<OtherPnlView>>(`/api/finance/other-pnl${query({ month })}`),
@@ -967,7 +973,7 @@ export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", SETTLEMENT
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
-  publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", generate_creative_video: "스토리보드 영상 만들기", start_campaign: "캠페인 집행", set_publish_control: "Instagram 자동 게시 다시 켜기",
+  publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", generate_creative_video: "스토리보드 영상 만들기", publish_youtube: "유튜브에 영상 올리기", start_campaign: "캠페인 집행", set_publish_control: "Instagram 자동 게시 다시 켜기",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기", merge_pr: "코드 변경 합치기", repo_revert_pr: "코드 변경 되돌리기", auto_policy_update: "자동 머지 기준 바꾸기",
   approve_data_deletion: "데이터 삭제 승인", purge_expired_inquiries: "기한 지난 문의 지우기", purge_expired_claims: "기한 지난 클레임 지우기",
 };

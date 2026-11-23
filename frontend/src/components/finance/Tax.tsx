@@ -3,6 +3,7 @@ import { actorText } from "@/lib/actor";
 import { finance, humanTokenSet, krw, type FinanceRule } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
 import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
+import { CancelConfirm } from "./CancelConfirm";
 
 // ⑤ 세무 지원: 부가세 신고 보조 집계, 판매자별 판매 명세(부가가치세법 제75조 초안), 법인세 참고 추정,
 // 세무사에게 넘길 자동으로 만든 파일, 회계 기준 확인 목록.
@@ -53,7 +54,10 @@ export function TaxSection({ tick }: { tick: number }) {
                 <button className="btn-ghost" onClick={() => setQuarterDate(previousQuarter(p.from))}>앞 분기 보기</button>
                 {quarterDate && <button className="btn-ghost" onClick={() => setQuarterDate(null)}>이번 분기로</button>}
                 {p.filing_status === "confirmed"
-                  ? <Chip label={`숫자 확정 · ${actorText(p.confirmed_by_label, p.confirmed_by, "")}`} tone={TONE.ok} />
+                  ? <>
+                      <Chip label={`숫자 확정 · ${actorText(p.confirmed_by_label, p.confirmed_by, "")}`} tone={TONE.ok} />
+                      <CancelConfirm what={`${p.quarter} 부가세 숫자`} onCancel={async (why) => { await finance.cancelVat(p.to, why); setOwn((n) => n + 1); }} />
+                    </>
                   : <button className="btn-primary" disabled={!humanTokenSet || confirming || p.closable === false} onClick={() => confirmVat(p.to)}>이 분기 숫자 확정</button>}
                 {p.closable === false && <span className="text-sm text-ink-500">분기가 끝난 뒤 확정할 수 있습니다.</span>}
               </div>

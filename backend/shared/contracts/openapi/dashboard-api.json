@@ -9294,48 +9294,6 @@
         "summary": "Marketing Outage Sns Drafts"
       }
     },
-    "/api/dashboard/shop/orchestrator/departments": {
-      "get": {
-        "description": "부서 카드·사용량 (판매 서버 총괄 읽기 중계).",
-        "operationId": "orchestrator_departments_api_dashboard_shop_orchestrator_departments_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Orchestrator Departments Api Dashboard Shop Orchestrator Departments Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Orchestrator Departments"
-      }
-    },
-    "/api/dashboard/shop/orchestrator/incidents": {
-      "get": {
-        "description": "총괄 사건 목록 (판매 서버 총괄 읽기 중계).",
-        "operationId": "orchestrator_incidents_api_dashboard_shop_orchestrator_incidents_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Orchestrator Incidents Api Dashboard Shop Orchestrator Incidents Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Orchestrator Incidents"
-      }
-    },
     "/api/dashboard/support-chat": {
       "get": {
         "operationId": "support_chat_list_api_dashboard_support_chat_get",

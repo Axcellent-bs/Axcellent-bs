@@ -435,3 +435,25 @@ def test_revert_merged_pr() -> None:
     assert held.revert_pr_number is None
     with pytest.raises(ValidationError):
         RevertMergedPrOutput.model_validate({"revert_pr_number": 43, "merged": True, "status": "x"})
+
+
+def test_new_optional_fields_default_to_none() -> None:
+    """11/23 추가 필드: 없어도 예전 입력 그대로 받고, 있으면 그 값을 쓴다."""
+    import pytest
+    from pydantic import ValidationError
+
+    from ax_contracts.schemas import RevertMergedPrInput
+
+    rv = {"connection_id": "c1", "pr_number": 7, "reason": "결제 오류"}
+    assert RevertMergedPrInput.model_validate(rv).review_id is None
+    assert RevertMergedPrInput.model_validate({**rv, "review_id": "rev_1"}).review_id == "rev_1"
+    link = {"incident_context_id": "ctx_inc_1", "pr_numbers": [42]}
+    assert LinkIncidentInput.model_validate(link).connection_id is None
+    assert LinkIncidentInput.model_validate({**link, "connection_id": "c1"}).connection_id == "c1"
+    ask = {"title": "t", "evidence": "e"}
+    plain = CreateTicketInput.model_validate(ask)
+    assert (plain.mode, plain.requested_by) == (None, None)
+    full = CreateTicketInput.model_validate({**ask, "mode": "agent", "requested_by": "acc_1"})
+    assert (full.mode, full.requested_by) == ("agent", "acc_1")
+    with pytest.raises(ValidationError):
+        CreateTicketInput.model_validate({**ask, "mode": "phone"})

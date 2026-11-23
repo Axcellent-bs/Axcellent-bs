@@ -85,6 +85,14 @@ async function financeCall(method: string, path: string, body: Record<string, un
     if (o) o.todo = o.todo.filter((t) => !(t.kind === "closing_confirm" && t.action?.date === date));
     return target;
   }
+  if (path === "/api/finance/closing/cancel") {
+    const date = String(body.date ?? "");
+    const target = [`/api/finance/closing?period=${body.period}&date=${date}`, `/api/finance/closing?period=${body.period}`]
+      .map((p) => store[p]).find((b) => (b?.data as ClosingReport | undefined)?.date === date);
+    if (!target) throw new ExampleMissing("예시 데이터에는 이 날짜 결산이 없습니다.");
+    Object.assign(target.data as ClosingReport, { status: "draft", confirmed_by: null, confirmed_at: null });
+    return target;
+  }
   const recon = /^\/api\/finance\/reconciliation\/([^/]+)\/note$/.exec(path);
   if (recon) {
     const id = decodeURIComponent(recon[1]);

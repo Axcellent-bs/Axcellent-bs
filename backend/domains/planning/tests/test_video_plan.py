@@ -106,7 +106,7 @@ def test_llm_plan_keeps_code_timing_and_data_block() -> None:
     plan = asyncio.run(vp.write(llm, _prop(), "ctx"))
     assert plan.written_by == "llm" and plan.concept == "밤 10분 독서 습관"
     assert [(s.start_s, s.end_s) for s in plan.scenes] == [(0, 5), (5, 12), (12, 23), (23, 30)]
-    assert plan.style == vp.STYLE and plan.negative == vp.NEGATIVE
+    assert plan.style == vp.style() and plan.negative == vp.NEGATIVE  # 11/22: 회사 [brand]로
     sent = llm.calls[0]
     assert sent.index("독서 검색이 평균의 1.6배") > sent.index("영상 길이 30초")  # 데이터 블록 안
 

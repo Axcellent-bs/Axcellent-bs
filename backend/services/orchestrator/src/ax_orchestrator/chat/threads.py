@@ -18,6 +18,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from ax_orchestrator import company_scope
+
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
 SUMMARY_CHARS = 200
 IDLE_CLOSE_MINUTES = 30  # 이 시간 동안 아무 말이 없으면 자동으로 끝낸다
@@ -39,7 +41,8 @@ CREATE TABLE IF NOT EXISTS orchestrator_chat_threads (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   removed_at TEXT,
-  removed_by TEXT
+  removed_by TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'catbooks'
 )
 """
 # 숨김 처리(지우지 않고 `removed_at`·`removed_by`만 남긴다)를 더하기 전에 만든 DB에 붙일 컬럼
@@ -52,8 +55,14 @@ def _now() -> datetime:
 
 
 class ChatStore:
-    def __init__(self, path: str = "", clock: Callable[[], datetime] = _now) -> None:
+    def __init__(
+        self,
+        path: str = "",
+        clock: Callable[[], datetime] = _now,
+        company_id: str | None = None,
+    ) -> None:
         self.clock = clock
+        self.company_id = company_scope.scope_id(company_id)  # 회사 칸(여러 회사 1-6)
         self._lock = threading.RLock()
         self._db = sqlite3.connect(path or ":memory:", check_same_thread=False)
         self._db.row_factory = sqlite3.Row
@@ -66,6 +75,9 @@ class ChatStore:
                     self._db.execute(
                         f"ALTER TABLE orchestrator_chat_threads ADD COLUMN {column} TEXT"
                     )
+            company_scope.ensure_tenant_column(
+                self._db, "orchestrator_chat_threads"
+            )  # 옛 줄은 캣북스
             self._db.commit()
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
@@ -90,15 +102,16 @@ class ChatStore:
 
     def get(self, thread_id: str) -> dict[str, Any] | None:
         rows = self._rows(
-            f"SELECT * FROM orchestrator_chat_threads WHERE id = ? AND {_LIVE}", (thread_id,)
+            f"SELECT * FROM orchestrator_chat_threads WHERE id = ? AND tenant_id = ? AND {_LIVE}",
+            (thread_id, self.company_id),
         )
         return self._view(rows[0]) if rows else None
 
     def list_all(self, limit: int = 100) -> list[dict[str, Any]]:
         rows = self._rows(
-            f"SELECT * FROM orchestrator_chat_threads WHERE {_LIVE}"
+            f"SELECT * FROM orchestrator_chat_threads WHERE tenant_id = ? AND {_LIVE}"
             " ORDER BY updated_at DESC, seq DESC LIMIT ?",
-            (limit,),
+            (self.company_id, limit),
         )
         return [self._view(r) for r in rows]
 
@@ -112,9 +125,10 @@ class ChatStore:
             thread_id = f"orchchat-{seq}"
             self._db.execute(
                 "INSERT INTO orchestrator_chat_threads"
-                "(id, seq, title, status, who, summary, messages, created_at, updated_at)"
-                " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?)",
-                (thread_id, seq, title, who, now, now),
+                "(id, seq, title, status, who, summary, messages, created_at, updated_at,"
+                " tenant_id)"
+                " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?, ?)",
+                (thread_id, seq, title, who, now, now, self.company_id),
             )
             self._db.commit()
         return self.get(thread_id) or {}
@@ -137,13 +151,14 @@ class ChatStore:
                 return th
             self._db.execute(
                 "UPDATE orchestrator_chat_threads SET status = ?, messages = ?, summary = ?,"
-                " updated_at = ? WHERE id = ?",
+                " updated_at = ? WHERE id = ? AND tenant_id = ?",
                 (
                     status,
                     json.dumps(msgs[-MAX_MESSAGES:], ensure_ascii=False),
                     (summary if summary is not None else th["summary"])[:SUMMARY_CHARS],
                     now,
                     thread_id,
+                    self.company_id,
                 ),
             )
             self._db.commit()
@@ -215,8 +230,8 @@ class ChatStore:
         with self._lock:
             cur = self._db.execute(
                 "UPDATE orchestrator_chat_threads SET removed_at = ?, removed_by = ?"
-                f" WHERE id = ? AND {_LIVE}",
-                (self.clock().isoformat(), by, thread_id),
+                f" WHERE id = ? AND tenant_id = ? AND {_LIVE}",
+                (self.clock().isoformat(), by, thread_id, self.company_id),
             )
             self._db.commit()
             return cur.rowcount > 0
@@ -231,8 +246,8 @@ class ChatStore:
         cut = (self.clock() - timedelta(minutes=minutes)).isoformat()
         rows = self._rows(
             "SELECT id FROM orchestrator_chat_threads"
-            f" WHERE status = 'talking' AND updated_at < ? AND {_LIVE}",
-            (cut,),
+            f" WHERE status = 'talking' AND updated_at < ? AND tenant_id = ? AND {_LIVE}",
+            (cut, self.company_id),
         )
         for r in rows:
             self.close(r["id"])
@@ -241,7 +256,9 @@ class ChatStore:
     def recover_orphans(self) -> list[str]:
         """켤 때: 답을 만들던 중에 서버가 꺼진 대화는 안내 한 줄을 붙여 `talking`으로 돌린다."""
         rows = self._rows(
-            f"SELECT id FROM orchestrator_chat_threads WHERE status = 'answering' AND {_LIVE}"
+            "SELECT id FROM orchestrator_chat_threads"
+            f" WHERE status = 'answering' AND tenant_id = ? AND {_LIVE}",
+            (self.company_id,),
         )
         for r in rows:
             self.finish_turn(r["id"], INTERRUPTED, kind="error")

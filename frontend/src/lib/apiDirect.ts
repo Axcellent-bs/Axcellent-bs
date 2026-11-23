@@ -39,7 +39,7 @@ export const DIRECT_ROUTES: readonly DirectRoute[] = [
   { service: "dashboard", auth: "none", path: /^\/api\/dashboard\/auth\/(status|company)$/ },
   { service: "dashboard", auth: "session", path: /^\/api\/dashboard\/auth\/me$/ },
   { service: "dashboard", auth: "session", path: /^\/api\/dashboard\/(communications|office-room|handoffs|connection-keys|company-connection)$/ },
-  { service: "dashboard", auth: "session", path: /^\/api\/dashboard\/shop\/(orchestrator\/incidents|orchestrator\/departments|banners|faults)$/ },
+  { service: "dashboard", auth: "session", path: /^\/api\/dashboard\/shop\/(banners|faults)$/ },
   // 총괄·안전 관문: 이 읽기는 서버가 토큰을 보지 않는다
   { service: "orch", auth: "none", path: /^\/api\/incidents$/ },
   { service: "safety", auth: "none", path: /^\/api\/safety\/executions$/ },

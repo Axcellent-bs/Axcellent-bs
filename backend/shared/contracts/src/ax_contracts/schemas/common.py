@@ -3,7 +3,10 @@
 - `AxModel`: 계약 모델의 기반 클래스. 정의하지 않은 필드가 들어오면 거부한다
   (`allowedRequesters` 같은 camelCase 오타를 잡기 위해서다).
 - `UtcDatetime`: 시간은 항상 UTC. 시간대가 없는 값은 거부하고, 다른 시간대는 UTC로 바꾼다.
-- `TENANT_ID_DEFAULT`: 고객사 ID 기본값 (`shop-demo`).
+- `TENANT_ID_DEFAULT`: 고객사 ID 기본값 (`shop-demo`). **옛 호환 상수(deprecated).**
+  계약 모델의 필드 기본값과 OpenAPI 스냅샷을 그대로 두려고 남긴다. 새 코드는 쓰지 말고
+  `ax_agent_template.companies.default_company_id()`를 쓴다
+  (contracts는 아래층이라 agent-template을 가져올 수 없다).
 - `TenantId`: 회사 ID 형식 (여러 회사 설계 1-1, 2026-11-20). 회사 ID는 기존 `tenant_id` 칸의 값이다.
   영어 소문자·숫자·`-`, 3~40자. 별칭(`shop-demo`)은 정식 id(`catbooks`)로 바꿔 담는다.
   기존 `tenant_id` 칸들은 `str` 그대로 두고, 새 계약에만 쓴다.
@@ -16,13 +19,15 @@ from typing import Annotated
 
 from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, StringConstraints
 
+# 옛 호환(deprecated): 새 코드는 default_company_id()를 쓴다. 값·이름은 계약 규칙상 바꾸지 않는다
 TENANT_ID_DEFAULT = "shop-demo"
 
 # 회사 ID 값 규칙. 회사 설정 폴더 id·키 저장소 tenant와 같은 값으로 맞춘다
 TENANT_ID_PATTERN = r"^[a-z0-9-]{3,40}$"
-# 캣북스의 정식 회사 ID (예진 결정 11/20)
+# 캣북스의 정식 회사 ID (예진 결정 11/20).
+# 옛 호환(deprecated): 기본 회사는 default_company_id()가 정한다
 TENANT_ID_CATBOOKS = "catbooks"
-# 별칭 → 정식 id. 저장할 때는 늘 정식 id로 쓰고, 읽을 때만 별칭을 받는다
+# 별칭 → 정식 id (옛 호환). 저장할 때는 늘 정식 id로 쓰고, 읽을 때만 별칭을 받는다
 TENANT_ID_ALIASES: dict[str, str] = {TENANT_ID_DEFAULT: TENANT_ID_CATBOOKS}
 
 

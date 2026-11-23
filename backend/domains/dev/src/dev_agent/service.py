@@ -125,6 +125,16 @@ def _fmt(at: datetime) -> str:
     return at.astimezone(UTC).strftime("%m-%d %H:%M UTC")
 
 
+def _real_connection(cid: str | None) -> str | None:
+    """연결을 안 고르고 올린 PR(None·"default")은 `vcs_bridge.active(None)`처럼 첫 연결로 본다.
+
+    "default"라는 이름의 실제 연결이 있으면 그대로 둔다."""
+    if cid not in (None, vcs.OVERRIDE_ID) or vcs.find_connection(vcs.OVERRIDE_ID) is not None:
+        return cid
+    rows = vcs.routing_connections()
+    return rows[0].id if rows else cid
+
+
 def _text_warnings(s: State, x: Task) -> list[str]:
     """작업 글 경고 (work_queue). 순환 import를 피해 안에서 부른다."""
     from dev_agent import work_queue
@@ -2394,8 +2404,11 @@ class DevService(PlanningCore):
         pr_numbers: list[int],
         follow_up_title: str | None,
         idempotency_key: str,
+        connection_id: str | None = None,
     ) -> ActionResult:
-        """사건을 PR·문단에 연결 (A). 같은 idempotency_key의 두 번째 요청은 이전 결과를 돌려준다."""
+        """사건을 PR·문단에 연결 (A). 같은 idempotency_key의 두 번째 요청은 이전 결과를 돌려준다.
+
+        `connection_id`가 있으면 `pr_numbers`는 그 연결의 레포 PR 번호라 그 연결에서만 찾는다."""
         cached = self._idempotent.get(idempotency_key)
         if cached is not None:
             return ActionResult(changed=False, outcome=cached.outcome, output=dict(cached.output))
@@ -2404,7 +2417,7 @@ class DevService(PlanningCore):
             t = self.clock()
             prs: list[PR] = []
             for n in dict.fromkeys(pr_numbers):
-                pr = next((p for p in s.prs if p.number == n), None)
+                pr = next((p for p in s.prs if self._pr_is(s, p, n, connection_id)), None)
                 if pr:
                     prs.append(pr)
             ctx = incident_context_id
@@ -2437,7 +2450,9 @@ class DevService(PlanningCore):
                 )
             )
             s.activity.extend(linked["demote_acts"])
-            missing = [n for n in pr_numbers if not any(p.number == n for p in prs)]
+            missing = [
+                n for n in pr_numbers if not any(self._pr_is(s, p, n, connection_id) for p in prs)
+            ]
             return ActionResult(
                 outcome="linked_duplicate" if linked["duplicate"] else None,
                 output={
@@ -2452,6 +2467,18 @@ class DevService(PlanningCore):
         self._idempotent[idempotency_key] = result
         self._save()  # 중복 거르기 기록도 바로 남긴다 (재시작 뒤 같은 요청을 다시 처리하지 않게)
         return result
+
+    def _pr_is(self, s: State, p: PR, number: int, connection_id: str | None) -> bool:
+        """link_incident의 PR 찾기. 연결이 없으면 서비스 PR 번호, 있으면 그 연결의 레포 번호."""
+        if connection_id is None:
+            return p.number == number
+        if p.vcs_number != number:
+            return False
+        task = next((t for t in s.tasks if t.id == p.task), None)
+        cid = (p.target.connection_id if p.target else None) or (
+            task.coding.connection if task is not None and task.coding is not None else None
+        )
+        return _real_connection(cid) == _real_connection(connection_id)
 
     async def start_dev(
         self,
