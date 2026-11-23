@@ -34,3 +34,8 @@ approved = ["naver_shopping"]
 [finance]
 # 팀 예산 = 그달 1일 팀 인원 × 인당 월 단가(원). 재무 AI가 계산하고 재무 담당이 승인한다
 per_head_monthly = 100000
+
+# 인스타 게시 계정 (data 의뢰 영상 성과: business_discovery로 이 계정의 최근 50개에서 우리 게시물을 찾는다).
+# 값은 사람이 넣는다 (@ 없이 아이디). 없으면 의뢰 영상 성과는 "회사 설정에 게시 계정 아이디가 없음"
+# [instagram]
+# publish_username = ""
