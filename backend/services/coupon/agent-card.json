@@ -113,6 +113,30 @@
       "priority": "recommended"
     },
     {
+      "id": "creative_script",
+      "description": "제작 기록(input.record_id: CR-…)의 이미지 시트 캐릭터(summary_ko·consistency_en)와 줄거리(untrusted.story, 비우면 기록의 줄거리), 장면 수(input.scenes 1~12, 기본 6), 전체 길이(input.seconds, 기본 30초)로 영상 대본을 쓴다: 제목, 전체 길이, 장면별 번호·시작/끝 초·화면 설명·말하는 사람·대사/내레이션·자막, 끝 CTA. 장면 시간은 코드가 나눈다. 줄거리에 없는 숫자(가격·할인·%·수치)가 든 문장은 코드가 빼고 dropped_ko에 남긴다. LLM 설정이 없거나 LLM이 실패하면 줄거리 문장을 장면에 나눈 단순 대본(source=rule)을 만든다. 기록의 script 칸에 남긴다(기록 관리만, 외부 호출·비용 없음). 거절 outcome: not_found·no_story·invalid_input.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_script.py#CreativeScriptInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_script.py#CreativeScriptOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "creative_script_save",
+      "description": "사람이 고친 대본(input.title_ko·scenes·cta_ko, input.who는 dashboard-api가 사람 토큰에서 채움)을 제작 기록(input.record_id)의 script 칸에 저장한다(source=human). 장면 번호는 1부터 다시 매기고 고친 글은 그대로 둔다. 기록 관리만 한다(외부 호출·비용 없음). 거절 outcome: not_found·invalid_input.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_script.py#CreativeScriptSaveInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_script.py#CreativeScriptOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "higgsfield_status",
       "description": "Higgsfield 키(MARKETING_HIGGSFIELD_API_KEY)가 설정돼 있는지, 있으면 Higgsfield에 없는 요청 번호의 상태 조회를 한 번 보내 키가 받아들여지는지(ok·invalid_key·unreachable·not_configured) 돌려준다. 이미지 모델 경로 설정값(MARKETING_HIGGSFIELD_IMAGE_MODEL)도 보여 준다. 키 값은 내지 않고, 이미지를 만들지 않고 크레딧을 쓰지 않는다. 결과는 20초 동안 기억한다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_higgsfield.py#HiggsfieldStatusInput",

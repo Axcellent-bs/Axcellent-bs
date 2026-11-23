@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { useAuthedMedia } from "@/lib/authedMedia";
 import { HIGGSFIELD_URL, acceptFor, isVideoPart, pickDropped, storyboardVideoPrompt, uploadProblem } from "@/lib/higgsfieldWeb";
 import { YoutubePanel } from "./YoutubePanel";
+import type { StoryboardResult } from "@/lib/storyboard";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
@@ -126,8 +127,9 @@ function Picture({ recordId, part, info, label, onChanged, onError }: { recordId
 }
 
 /** Higgsfield 웹 구독(Ultra)으로 만들기: 영상 요청과 같은 프롬프트를 복사하고 새 탭으로 Higgsfield를 연다(API 키 없음) */
-function HiggsfieldWeb({ styleEn }: { styleEn?: string | null }) {
-  const prompt = storyboardVideoPrompt(styleEn);
+function HiggsfieldWeb({ board }: { board: StoryboardResult }) {
+  // 대본을 따라 만든 스토리보드면 장면 흐름·대사 요지·자막·CTA까지(영상 요청과 같은 문장)
+  const prompt = storyboardVideoPrompt(board.style_en, board.script_used ? board.shots : null, board.cta_ko);
   const [copy, setCopy] = useState<"idle" | "ok" | "failed">("idle");
   const go = async () => {
     // 복사를 먼저 한다(새 탭이 먼저 뜨면 이 화면이 포커스를 잃어 복사가 실패한다). 실패해도 새 탭은 연다
@@ -213,7 +215,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
           </button>
         )}
         {!canAsk && !video?.status && render.board_image?.status !== "done" && <p className="text-xs text-ink-500">스토리보드 그림이 끝나면 영상을 요청할 수 있어요.</p>}
-        {rec?.storyboard && <HiggsfieldWeb styleEn={rec.storyboard.style_en} />}
+        {rec?.storyboard && <HiggsfieldWeb board={rec.storyboard} />}
       </div>
       <div className="border-t border-ink-100 pt-3">
         <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError} />

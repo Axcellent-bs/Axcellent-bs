@@ -3,17 +3,19 @@ import { Link } from "react-router";
 import { SheetBoard } from "@/components/marketing/SheetBoard";
 import { StoryboardView } from "@/components/marketing/StoryboardMaker";
 import { RenderPanel } from "@/components/marketing/RenderPanel";
+import { ScriptPanel } from "@/components/marketing/ScriptPanel";
 import { getCreativeRecord, thumbSrc, type CreativeRecord } from "@/lib/creativeRecords";
 import type { CreativeCard } from "@/lib/planningData";
 
 // 마케팅 1:1 대화(DirectChat)의 이미지 시트·스토리보드 카드.
 // - 사람이 올린 말(role=attached): 올린 캐릭터의 작은 미리보기와 기록 번호
-// - 마케팅 답(role=result): 이미지 시트 배치판 + (있으면) 스토리보드 칸 + 제작 기록 링크
+// - 마케팅 답(role=result): 이미지 시트 배치판 + (있으면) 대본(접기, 읽기만) + 스토리보드 칸 + 제작 기록 링크
+//   대본을 고치려면 제작 기록 상세에서 한다(11/23)
 // 기록은 GET /marketing/creative-records/{id}로 읽는다. 같은 기록·같은 상태는 한 번만 읽는다.
 
 const cache = new Map<string, Promise<CreativeRecord>>();
 const load = (card: CreativeCard) => {
-  const key = `${card.record_id}:${card.has_storyboard ? 1 : 0}`;
+  const key = `${card.record_id}:${card.has_storyboard ? 1 : 0}:${card.has_script ? 1 : 0}`;
   let p = cache.get(key);
   if (!p) {
     p = getCreativeRecord(card.record_id);
@@ -45,10 +47,16 @@ export function CreativeChatCard({ card }: { card: CreativeCard }) {
   if (!rec) return <p className="mt-1 animate-pulse text-xs text-ink-500">이미지 시트를 불러오는 중…</p>;
   return (
     <div className="mt-2 w-full max-w-3xl space-y-3">
-      <details open={!rec.storyboard}>
+      <details open={!rec.storyboard && !rec.script}>
         <summary className="cursor-pointer text-xs font-medium text-ink-700">이미지 시트</summary>
         <div className="pt-2"><SheetBoard r={rec.sheet} thumb={thumbSrc(rec.thumbnail_base64)} /></div>
       </details>
+      {rec.script && (
+        <details>
+          <summary className="cursor-pointer text-xs font-medium text-ink-700">대본 · {rec.script.scenes.length}장면 {rec.script.total_seconds}초</summary>
+          <div className="pt-2"><ScriptPanel recordId={card.record_id} script={rec.script} editable={false} /></div>
+        </details>
+      )}
       {rec.storyboard && (
         <div className="space-y-2">
           <p className="text-xs font-medium text-ink-700">스토리보드</p>

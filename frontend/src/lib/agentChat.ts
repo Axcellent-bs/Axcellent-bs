@@ -216,7 +216,7 @@ export type ChatItem =
       /** 총괄 말풍선 아래 붙일 고객 의뢰 진행 카드의 의뢰 번호 (wr_…, 그 방에서 처음 나온 줄에만) */
       requestCard?: string
       /** 마케팅 대화의 이미지 시트·스토리보드 카드(올린 캐릭터·결과) */
-      creative?: { kind: "creative"; record_id: string; role: "attached" | "result"; has_storyboard: boolean }
+      creative?: { kind: "creative"; record_id: string; role: "attached" | "result"; has_storyboard: boolean; has_script?: boolean }
       /** 받는 쪽 원래 이름(공통 로그 to_agent). AI 오피스가 부서끼리 걸어가는 데 쓴다 */
       toKey?: string
       /** 안전 관문 execution_id (실행 기록·공통 로그 줄). 안전 확인 줄 합치기(lib/safetyFold.ts)가 묶는 기준 */

@@ -12,12 +12,59 @@ export const HIGGSFIELD_URL = "https://higgsfield.ai/";
  * 스토리보드 영상 프롬프트. 마케팅 `creative_render.storyboard_video_prompt`(영상 만들기 요청이
  * Higgsfield API에 보내는 문장)와 같다. 바꾸면 둘 다 바꾼다(양쪽 테스트가 같은 문장을 본다)
  */
-export function storyboardVideoPrompt(styleEn: string | null | undefined): string {
-  return (
+export function storyboardVideoPrompt(
+  styleEn: string | null | undefined,
+  shots?: readonly ScriptShot[] | null,
+  cta?: string | null,
+): string {
+  const base = (
     "Animate this storyboard as one continuous short film, panel by panel in order, "
     + "keeping the same characters, outfits and art style. "
     + (styleEn ?? "")
-  ).trim();
+  ).trim().slice(0, VIDEO_PROMPT_MAX);
+  const flow = scriptFlow(shots, cta, VIDEO_PROMPT_MAX - base.length - 1);
+  return flow ? `${base} ${flow}`.slice(0, VIDEO_PROMPT_MAX) : base;
+}
+
+/** 키 길·MCP 길이 영상 프롬프트를 자르는 길이(마케팅 `creative_render.VIDEO_PROMPT_MAX`) */
+export const VIDEO_PROMPT_MAX = 2000;
+const SCRIPT_HEAD = "Follow this script panel by panel:";
+
+/** 대본을 따라 만든 스토리보드 칸(시간·대사·자막이 있다) */
+export interface ScriptShot {
+  no: number;
+  scene_ko?: string | null;
+  start_s?: number | null;
+  end_s?: number | null;
+  speaker_ko?: string | null;
+  line_ko?: string | null;
+  caption_ko?: string | null;
+}
+
+const one = (t: unknown) => String(t ?? "").split(/\s+/).filter(Boolean).join(" ");
+
+/** 초 표기(마케팅 `_secs`와 같게): 소수 한 자리 반올림, 정수면 소수점 없이 */
+export const secs = (x: number | null | undefined) => String(Math.floor(Number(x ?? 0) * 10 + 0.5) / 10);
+
+function sceneLine(s: ScriptShot): string {
+  let line = `Scene ${s.no} (${secs(s.start_s)}-${secs(s.end_s)}s): ${one(s.scene_ko)}`;
+  const said = one(s.line_ko);
+  if (said) {
+    const who = one(s.speaker_ko);
+    line += ` / ${who ? `${who}: ` : "narration: "}"${said}"`;
+  }
+  const caption = one(s.caption_ko);
+  if (caption) line += ` / on-screen text "${caption}"`;
+  return `${line}.`;
+}
+
+/** 장면 흐름·대사 요지·자막. 장면마다 같은 몫까지만 쓰고 끝 CTA는 늘 남긴다(마케팅 `script_flow`) */
+export function scriptFlow(shots: readonly ScriptShot[] | null | undefined, cta: string | null | undefined, room: number): string {
+  const rows = (shots ?? []).filter((s) => s.start_s !== null && s.start_s !== undefined);
+  if (rows.length === 0) return "";
+  const tail = one(cta) ? ` End with the call to action "${one(cta).slice(0, 100)}".` : "";
+  const share = Math.max(0, Math.floor((room - SCRIPT_HEAD.length - tail.length) / rows.length) - 1);
+  return `${SCRIPT_HEAD} ${rows.map((s) => sceneLine(s).slice(0, share)).join(" ")}${tail}`;
 }
 
 const MB = 1024 * 1024;

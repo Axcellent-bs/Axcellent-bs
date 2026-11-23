@@ -3,6 +3,7 @@ import { failureError } from "./apiError";
 import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import type { CharacterSheetResult } from "./characterSheet";
 import type { StoryboardResult } from "./storyboard";
+import type { CreativeScript } from "./creativeScript";
 
 // 마케팅 › 제작 기록. 이미지 시트를 만들 때마다 남은 기록과 이어 만든 스토리보드를 읽는다.
 // dashboard-api GET /marketing/creative-records(목록) · /marketing/creative-records/{id}(상세)
@@ -20,6 +21,9 @@ export interface CreativeRecordSummary {
   storyboard_at?: string | null;
   /** 단계별 Higgsfield 상태(sheet_image·board_image·video) */
   render?: Record<string, string>;
+  /** 대본 장면 수(없으면 0)·저장 시각(11/23) */
+  script_scenes?: number;
+  script_at?: string | null;
 }
 
 export type RenderPartKey = "sheet_image" | "board_image" | "video" | "final_video";
@@ -49,6 +53,8 @@ export interface CreativeRecord {
   sheet: CharacterSheetResult;
   storyboard?: StoryboardResult | null;
   storyboard_at?: string | null;
+  /** 영상 대본(11/23). 옛 기록은 없다 */
+  script?: CreativeScript | null;
   /** Higgsfield 그림·영상 */
   render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState };
 }

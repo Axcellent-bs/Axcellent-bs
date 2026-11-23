@@ -8,9 +8,12 @@ import { StoryboardView } from "./StoryboardMaker";
 import { PromptBox } from "./PromptParts";
 import { RenderPanel } from "./RenderPanel";
 import { RequestVideos } from "./RequestVideos";
+import { ScriptPanel } from "./ScriptPanel";
+import { nearestCount, stageChips } from "@/lib/creativeScript";
 
 // 마케팅 › 제작 기록 (/marketing/records). 탭 두 개:
-// - 이미지 시트 · 스토리보드: SNS·미디어 탭에서 만든 이미지 시트와 이어 만든 스토리보드를 기록마다 다시 본다.
+// - 이미지 시트 · 스토리보드: SNS·미디어 탭에서 만든 이미지 시트와 이어 만든 대본·스토리보드를 기록마다 다시 본다.
+//   상세의 대본은 고쳐서 저장하거나 AI로 다시 쓸 수 있다(11/23). 목록에는 단계 칩(대본·스토리보드)
 //   목록을 누르면 ?id=CR-… 로 상세가 열린다(상세의 RenderPanel에서 영상·유튜브 올리기)
 // - 의뢰로 만든 영상(?view=videos): 총괄 홍보 영상 의뢰(wr_…)가 만든 AI 표시 영상. 영상마다 유튜브 올리기(사람 승인).
 //   ?request=wr_… 로 들어오면 이 탭을 열고 그 의뢰 영상을 맨 앞에 둔다(11/23, SNS·미디어에서 옮겨 옴)
@@ -32,7 +35,7 @@ function Detail({ id }: { id: string }) {
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <Link to="/marketing/records" className="btn-ghost text-xs">‹ 기록 목록</Link>
         <h2 className="text-lg font-semibold tabular-nums">{rec.record_id}</h2>
-        <span className="text-xs text-ink-500">{shortDateTime(rec.created_at)} 이미지 시트{rec.storyboard_at ? ` · ${shortDateTime(rec.storyboard_at)} 스토리보드` : ""}</span>
+        <span className="text-xs text-ink-500">{shortDateTime(rec.created_at)} 이미지 시트{rec.script?.at ? ` · ${shortDateTime(rec.script.at)} 대본` : ""}{rec.storyboard_at ? ` · ${shortDateTime(rec.storyboard_at)} 스토리보드` : ""}</span>
       </div>
       {(rec.note || rec.story) && (
         <dl className="grid gap-x-4 gap-y-1 text-sm md:grid-cols-[6rem_1fr]">
@@ -52,6 +55,15 @@ function Detail({ id }: { id: string }) {
           </div>
         </details>
       </section>
+      <details className="space-y-3" open>
+        <summary className="cursor-pointer text-sm font-semibold text-ink-900">대본</summary>
+        <div className="pt-3">
+          {rec.script
+            ? <ScriptPanel recordId={rec.record_id} script={rec.script} scenes={nearestCount(rec.script.scenes.length)} onChange={(script) => setRec({ ...rec, script })} />
+            : <p className="text-sm text-ink-500">이 기록에는 대본이 없어요. SNS·미디어에서 줄거리를 넣고 만들면 대본이 먼저 생기고 스토리보드가 그 장면을 따라요.</p>}
+          {rec.script && rec.storyboard && !rec.storyboard.script_used && <p className="mt-2 text-xs text-ink-500">지금 스토리보드는 대본 없이 줄거리로 만든 것이에요.</p>}
+        </div>
+      </details>
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-ink-900">스토리보드</h3>
         {rec.storyboard ? <StoryboardView r={rec.storyboard} /> : <p className="text-sm text-ink-500">이 기록에는 스토리보드가 없어요. SNS·미디어에서 줄거리를 넣고 다시 만들면 붙어요.</p>}
@@ -73,7 +85,9 @@ function Row({ r }: { r: CreativeRecordSummary }) {
           <span className="block truncate text-xs text-ink-500">{r.story ?? r.note ?? r.summary_ko}</span>
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1 text-xs">
-          <span className={`chip ${r.shot_count ? "bg-brand-50 text-brand-700" : "bg-ink-50 text-ink-500"}`}>{r.shot_count ? `스토리보드 ${r.shot_count}칸` : "시트만"}</span>
+          <span className="flex gap-1">
+            {stageChips(r).map((c) => <span key={c} className={`chip ${c === "시트만" ? "bg-ink-50 text-ink-500" : "bg-brand-50 text-brand-700"}`}>{c}</span>)}
+          </span>
           <span className="tabular-nums text-ink-500">{shortDateTime(r.created_at)}</span>
         </span>
       </Link>

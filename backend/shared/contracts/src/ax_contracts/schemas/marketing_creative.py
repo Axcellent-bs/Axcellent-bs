@@ -33,6 +33,9 @@ class CreativeRecordSummary(AxModel):
     shot_count: int = 0
     storyboard_at: str | None = None
     render: dict[str, str] = Field(default_factory=dict)  # 단계별 상태(Higgsfield 그림·영상)
+    # 대본(11/23, 추가): 장면 수(없으면 0)와 저장 시각
+    script_scenes: int = 0
+    script_at: str | None = None
 
 
 class CreativeRecordsListOutput(AxModel):
@@ -53,6 +56,8 @@ class CreativeRecordGetOutput(AxModel):
     sheet: dict[str, Any]  # CharacterSheetPromptOutput 모양
     storyboard: dict[str, Any] | None = None  # StoryboardPromptOutput 모양
     storyboard_at: str | None = None
+    # 대본(11/23, 추가). CreativeScript 모양(marketing_script.py). 옛 기록은 None
+    script: dict[str, Any] | None = None
     # Higgsfield 그림·영상:
     # {sheet_image|board_image|video: {status, error, asset, sha256, review_id, at}}
     render: dict[str, Any] = Field(default_factory=dict)
