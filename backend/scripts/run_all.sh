@@ -286,7 +286,7 @@ export ORCHESTRATOR_DB="$PWD/$DATA/orchestrator.db"
 # 기본은 회사 폴더의 finance_state.json·finance_exports/·finance_chat.db (여러 회사 1-6).
 # FINANCE_STATE_FILE·FINANCE_EXPORT_DIR·FINANCE_CHAT_DB를 정했으면(셸·.env) 그 경로
 # 판매자 정산 묶음 기록(고객지원, settlement). 다시 켜도 이어진다. 처음 한 번 재무 기록의 묶음을 가져온다
-export SUPPORT_SETTLEMENT_FILE="$PWD/$DATA/support_settlement.json"
+# 기본은 회사 폴더의 support_settlement.json (여러 회사 1단계). SUPPORT_SETTLEMENT_FILE을 정했으면(셸·.env) 그 경로
 # SUPPORT_SETTLEMENT_IMPORT_FILE(재무 기록에서 처음 한 번 가져오기)은 아래 .env를 읽은 뒤 재무 기록 자리로 정한다
 # 고객지원 AI가 지급일이 된 주의 정산 지급 승인을 스스로 요청한다(10분마다 확인). 승인은 고객지원 담당
 export SUPPORT_SETTLEMENT_AUTO_REQUEST="${SUPPORT_SETTLEMENT_AUTO_REQUEST:-on}"
@@ -334,12 +334,15 @@ off|0|false|no)
   export PLANNING_VCS_STORE="${PLANNING_VCS_STORE:-$PWD/$DATA/vcs_connections.json}"
   export FINANCE_STATE_FILE="${FINANCE_STATE_FILE:-$PWD/$DATA/finance_state.json}"
   export FINANCE_EXPORT_DIR="${FINANCE_EXPORT_DIR:-$PWD/$DATA/finance_exports}"
+  # 고객지원 정산 묶음 기록도 예전 기본 자리로 (비어 있으면 회사 폴더 값으로 되살린다)
+  export SUPPORT_SETTLEMENT_FILE="${SUPPORT_SETTLEMENT_FILE:-$PWD/$DATA/support_settlement.json}"
   ;;
 *)
   _old=""
   for _f in company_connection.json company_connection.json.history.jsonl tool_connections.json \
     tool_connections.json.history.jsonl enabled_services.json site_adapter cost_policy.json \
-    cost_policy.json.history.jsonl vcs_connections.json planning_chat.db notion_token.json     finance_state.json finance_exports finance_chat.db; do
+    cost_policy.json.history.jsonl vcs_connections.json planning_chat.db notion_token.json     finance_state.json finance_exports finance_chat.db \
+    support_settlement.json; do
     if [ -e "$PWD/$DATA/$_f" ] && [ ! -e "$AX_COMPANIES_DIR/catbooks/$_f" ]; then _old="$_old $_f"; fi
   done
   if [ -n "$_old" ]; then

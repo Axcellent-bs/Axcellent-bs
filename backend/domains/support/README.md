@@ -199,7 +199,8 @@ ax-contracts, ax-agent-template
 - 요청을 막는 경우: 기간이 아직 끝나지 않은 주(`period_not_closed`), 판매 서버 주문 일부를 못 읽음(`orders_partial`, 조회는 보여 준다), 보류 없이 줄 판매자 없음(`nothing_to_settle`). 확정 매출 없이 환불만 있는 판매자는 정산금 0원 이하라 보류(`negative_payout`)
 - 안전 장치 보류 기한: `confirm_settlement`만 24시간(안전 장치 기준표 v11 `[review_timeout_by_action]`). 다른 액션은 그대로
 - 요청 중인 묶음은 읽을 때마다 안전 장치 보류 건 상태를 다시 읽는다. 안전 장치가 그 보류 건을 모르면(404, 재시작으로 보류 큐가 비워짐) 먼저 실행 기록(`/api/safety/executions`)을 보고 같은 주의 `confirm_settlement`가 실행됐으면 approved, 없을 때만 `rejected`(`closed_reason: review_missing`)로 바꿔 다시 요청할 수 있게 한다. 실행 기록을 못 읽으면 요청 중으로 둔다. 승인된 묶음은 되돌리지 않는다. 다시 요청하기 전에도 실행 기록을 한 번 더 봐서 두 번 요청하지 않는다
-- 묶음 기록은 `SUPPORT_SETTLEMENT_FILE`(JSON)에 남는다. 이 파일이 없고 `SUPPORT_SETTLEMENT_IMPORT_FILE`(재무 `finance_state.json`)이 있으면 처음 한 번 재무가 남긴 묶음 기록을 가져온다(`run_all.sh`가 둘 다 설정)
+- 묶음 기록은 JSON 하나에 남는다. `SUPPORT_SETTLEMENT_FILE`을 정했으면 그 경로, 안 정했고 회사 폴더를 켰으면(`AX_COMPANIES_DIR`) `<회사 폴더>/catbooks/support_settlement.json`(여러 회사 1단계). 옛 자리(`.data/support_settlement.json`)에 있으면 처음 읽을 때 회사 폴더로 옮기고 옛 것은 `.moved`로 남긴다. `AX_COMPANY_FOLDERS=off`면 `run_all.sh`가 옛 경로를 정하고, 비어 있으면 회사 폴더 값으로 되살린다
+- 이 파일이 없고 `SUPPORT_SETTLEMENT_IMPORT_FILE`(재무 `finance_state.json`)이 있으면 처음 한 번 재무가 남긴 묶음 기록을 가져온다(`run_all.sh`가 재무 기록 자리로 설정)
 - 실제 송금은 하지 않는다. 승인 = 지급 기록이다
 
 ## 직접 대화 (`chat.py`, `chat_handlers.py`) — 예진님 요청 2026-11-05

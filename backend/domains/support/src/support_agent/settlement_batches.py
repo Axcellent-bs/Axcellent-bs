@@ -10,7 +10,13 @@
     본다. 실행됐으면 approved, 기록도 없을 때만 rejected(`closed_reason: review_missing`).
     `review_missing` 뒤 다시 요청하기 전에도 실행 기록을 한 번 더 본다(두 번 요청하지 않게)
   - 승인된(approved) 묶음은 404가 나도 되돌리지 않는다. 연결 실패·5xx는 그대로 둔다
-- 묶음 기록은 `SUPPORT_SETTLEMENT_FILE`(JSON)에 남긴다. 비우면 메모리에만 둔다(테스트)
+- 묶음 기록은 JSON 하나에 남긴다. 자리(여러 회사 설계 1단계, 2026-11-23):
+  `SUPPORT_SETTLEMENT_FILE`을 정했으면 그 경로 → 안 정했고 회사 폴더를 켰으면
+  (`AX_COMPANIES_DIR`) `<회사 폴더>/catbooks/support_settlement.json` → 둘 다 없으면 메모리에만
+  둔다(테스트·단독 실행). 회사 폴더를 쓸 때 옛 자리(`<회사 폴더의 부모>/support_settlement.json`)에
+  파일이 있으면 처음 읽을 때 옮기고 옛 것은 `.moved`로 남긴다(`company_files.company_file`).
+  `AX_COMPANY_FOLDERS=off`로 옛 경로를 정해 켜면 그 경로가 비어 있을 때 회사 폴더 값으로
+  되살린다(`company_files.restore_old`)
 - 옮기기(2026-11-12): 이 파일이 아직 없고 `SUPPORT_SETTLEMENT_IMPORT_FILE`(재무가 쓰던
   `finance_state.json`)이 있으면, 처음 한 번 거기 남은 묶음 기록(`records.batches`)을 가져온다.
   이미 승인된 주를 잊고 다시 지급을 요청하지 않게 한다
@@ -27,12 +33,14 @@ from typing import Any
 
 import httpx
 
+from ax_agent_template import company_files
 from ax_agent_template.config import agent_url
 from support_agent import settlement_config as sc
 
 logger = logging.getLogger("ax.support.settlement_batches")
 
 ENV_FILE = "SUPPORT_SETTLEMENT_FILE"
+FILE_NAME = "support_settlement.json"
 ENV_IMPORT = "SUPPORT_SETTLEMENT_IMPORT_FILE"
 REVIEW_CHECK_SECONDS = 3.0
 STATUS_OF_DECISION = {"held": "requested", "verifying": "requested", "executed": "approved"}
@@ -79,10 +87,28 @@ def imported_batches(path: Path) -> dict[str, dict[str, Any]]:
     return {str(k): dict(v) for k, v in (batches or {}).items() if isinstance(v, dict)}
 
 
-def build_store() -> BatchStore:
+def store_path() -> Path | None:
+    """`SUPPORT_SETTLEMENT_FILE` → 회사 폴더(`<회사 폴더>/catbooks/<FILE_NAME>`) → None."""
     raw = os.getenv(ENV_FILE, "").strip()
+    if raw:
+        path = Path(raw)
+        # 회사 폴더를 껐을 때(run_all.sh가 옛 경로를 정한다) 옛 경로가 비어 있으면
+        # 회사 폴더 값으로 되살린다
+        company_files.restore_old(FILE_NAME, target=path)
+        return path
+    if not company_files.folders_on():
+        return None
+    path = company_files.company_file(FILE_NAME)
+    folder = path.parent
+    if not folder.exists():
+        folder.parent.mkdir(mode=company_files.DIR_MODE, parents=True, exist_ok=True)
+        folder.mkdir(mode=company_files.DIR_MODE, exist_ok=True)
+    return path
+
+
+def build_store() -> BatchStore:
     source = os.getenv(ENV_IMPORT, "").strip()
-    return BatchStore(Path(raw) if raw else None, Path(source) if source else None)
+    return BatchStore(store_path(), Path(source) if source else None)
 
 
 STORE = build_store()
