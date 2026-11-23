@@ -68,6 +68,8 @@ class ToolRun:
     # 버전이 진짜 버전이 아니라 커밋 앞자리·실행 번호다 (GitHub 실행 제목에 버전이 없음).
     # 이 값을 다시 배포 입력으로 보내지 않는다
     version_from_sha: bool = False
+    # 실행이 끝났나 (GitHub `status == completed`, Jenkins `result`가 있음). 모르면 None
+    finished: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -255,6 +257,7 @@ def _actions_run(raw: Any) -> ToolRun | None:
         actor=actor if isinstance(actor, str) else None,
         url=url if isinstance(url, str) else None,
         run_id=str(raw["id"]),
+        finished=done,
     )
 
 
@@ -383,7 +386,11 @@ class GithubActionsTool:
             if ref is not None:
                 return ref
             since = _server_time(res) - DISPATCH_SKEW
-            found = await self._find_dispatched(client, base, headers, branch, since)
+            # 같은 버전 실행만 우리 것으로 본다 (그 사이 다른 사람이 띄운 실행을 고르지 않게).
+            # 제목에 버전이 없는 워크플로면 실행 id를 비워 둔다 (도구에서 확인)
+            found = await self._find_dispatched(
+                client, base, headers, branch, since, version=version
+            )
         return RunRef(
             tool=self.tool,
             run_id=found.run_id if found else None,
@@ -521,6 +528,23 @@ class JenkinsTool:
     def describe(self, version: str) -> str:
         return f"Jenkins에서 {self.job} 작업을 {self.version_param}={version}으로 다시 실행"
 
+    async def resolve_run(self, run_id: str) -> str | None:
+        """대기열 id(`queue-N`) → 빌드 번호 (`/queue/item/N/api/json`의 `executable.number`).
+
+        아직 빌드가 시작되지 않았거나 읽지 못하면 None. 대기열 id가 아니면 그대로 돌려준다."""
+        m = re.fullmatch(r"queue-(\d+)", run_id)
+        if m is None:
+            return run_id
+        _, auth = await self._prepare()
+        where = "GET /queue/item/{id}/api/json"
+        async with self._client() as client:
+            res = await _send(
+                client, "GET", f"{self.url}/queue/item/{m.group(1)}/api/json", where, auth=auth
+            )
+        executable = _json(res, where).get("executable")
+        number = executable.get("number") if isinstance(executable, dict) else None
+        return str(number) if isinstance(number, int) else None
+
     async def _prepare(self) -> tuple[str, httpx.BasicAuth]:
         if not self.job or not _job_path(self.job):
             raise ToolConnectionError("config", f"'{self._conn.name}': 작업 이름이 없다")
@@ -573,6 +597,7 @@ class JenkinsTool:
                     actor=_jenkins_actor(build),
                     url=url if isinstance(url, str) else None,
                     run_id=str(build["number"]),
+                    finished=build.get("result") is not None,
                 )
             )
         return runs

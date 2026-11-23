@@ -34,7 +34,7 @@ from ax_workflow.auth import (
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import dump
 from dev_agent import coder, dev_chat, llm_key, scope, vcs, vcs_bridge
-from dev_agent.deploy import DeployError
+from dev_agent.deploy import DeployError, service_version
 from dev_agent.deploy_store import get_deploy_store
 from dev_agent.repo_api import add_repo_routes
 from dev_agent.vcs import inventory
@@ -255,7 +255,18 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         return row
 
     def _deploy_err(exc: DeployError) -> JSONResponse:
-        status = {"NOT_FOUND": 404, "NOT_REQUESTED": 409, "NOT_DEPLOYED": 409}.get(exc.code, 400)
+        status = {
+            "NOT_FOUND": 404,
+            "NOT_REQUESTED": 409,
+            "NOT_DEPLOYED": 409,
+            "NOT_DISPATCHED": 409,
+            "NO_RUN_ID": 409,
+            "NOT_AVAILABLE": 503,
+            "STATUS_UNAVAILABLE": 502,
+            "ALREADY_SENT": 409,
+            "NO_DEPLOY_TOOL": 409,
+            "TOOLS_UNAVAILABLE": 503,
+        }.get(exc.code, 400)
         return _err(status, exc.code, exc.message)
 
     @router.get("/deployments")
@@ -273,7 +284,12 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
 
     @router.post("/deployments", response_model=None, dependencies=CALLER)
     async def post_deployment(request: Request) -> dict | JSONResponse:
-        """배포 요청 `{pr_numbers: [28], env: "dev"|"prod"}`. prod·보호 경로면 `requested`."""
+        """배포 요청 `{pr_numbers: [28], env: "dev"|"prod", version?: "shop-api v2.4.2"}`.
+
+        prod·보호 경로면 `requested`, 아니면 `ready`. 어느 쪽도 저절로 보내지 않는다
+        (배포 실행은 사람이 승인·'배포 실행'을 눌러야 한다).
+        `version`이 없으면 PR의 배포 버전을 쓴다. `version`을 직접 주면 사람 토큰만 받고,
+        그 서비스에 배포 도구가 연결돼 있어야 한다 (infra `deploy_tool_services`)."""
         svc = get_service()
         body = await _body(request)
         if body is None:
@@ -288,13 +304,35 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _err(400, "INVALID_DEPLOY", "pr_numbers는 PR 번호(정수) 목록이어야 한다")
         if env not in ("dev", "prod"):
             return _err(400, "INVALID_DEPLOY", "env는 dev 또는 prod")
+        version = body.get("version")
+        if version is not None:
+            # 배포 버전을 직접 정하는 것은 사람만 (AI가 임의 버전을 운영 배포 도구에 올리지 않게)
+            check_human(request.headers.get("authorization"))
+            pair = service_version(version) if isinstance(version, str) else None
+            if pair is None:
+                return _err(
+                    400,
+                    "INVALID_DEPLOY",
+                    'version은 "서비스 버전" 형식, 각각 120자 이하 (예: shop-api v2.4.2)',
+                )
+            try:
+                services = await get_deploy_store().tool_services(svc)
+            except DeployError as exc:
+                return _deploy_err(exc)
+            if pair[0] not in services:
+                return _err(
+                    409,
+                    "NO_DEPLOY_TOOL",
+                    f"{pair[0]}에 배포 도구가 연결되지 않았어요 — 도구 연결에서 설정",
+                )
+            version = f"{pair[0]} {pair[1]}"
         try:
-            dep = await get_deploy_store().request(svc, nums, env)
+            dep = await get_deploy_store().request(svc, nums, env, version=version)
         except DeployError as exc:
             return _deploy_err(exc)
         except GateRefused as exc:
             return _gate_err(exc)
-        return _ok(_deploy_row(dep.id), svc, needs_approval=dep.status == "requested")
+        return _ok(_deploy_row(dep.id), svc, needs_approval=dep.status in ("requested", "ready"))
 
     @router.post("/deployments/{dep_id}/approve", response_model=None, dependencies=HUMAN)
     async def post_approve_deployment(dep_id: str, request: Request) -> dict | JSONResponse:
@@ -319,6 +357,39 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
         except GateRefused as exc:
             return _gate_err(exc)
         return _ok(_deploy_row(dep.id), svc)
+
+    @router.post("/deployments/{dep_id}/dispatch", response_model=None, dependencies=HUMAN)
+    async def post_dispatch_deployment(dep_id: str, request: Request) -> dict | JSONResponse:
+        """'배포 실행' 버튼 (사람만). 승인 대기(`requested`·`ready`)면 그 사람의 승인으로 기록하고,
+        승인했지만 보내지 않은 배포(`not_sent`)면 한 번 보낸다. 이미 보냈으면 409 `ALREADY_SENT`.
+        사람 이름 규칙은 승인 버튼과 같다 (세션 모드면 로그인 세션 계정만)."""
+        session_who = session_decider(request.headers.get("authorization"))
+        svc = get_service()
+        if get_deploy_store().get(dep_id) is None:
+            return _err(404, "NOT_FOUND", f"배포 {dep_id}가 없다")
+        body = await _body(request) or {}
+        who = session_who or body.get("approved_by")
+        who = who.strip()[:APPROVER_MAX] if isinstance(who, str) else ""
+        if not who:
+            return _err(400, "APPROVER_REQUIRED", "approved_by(누른 사람 이름)가 필요하다")
+        try:
+            dep = await get_deploy_store().send(svc, dep_id, who)
+        except DeployError as exc:
+            return _deploy_err(exc)
+        except GateRefused as exc:
+            return _gate_err(exc)
+        return _ok(_deploy_row(dep.id), svc)
+
+    @router.post("/deployments/{dep_id}/refresh", response_model=None, dependencies=HUMAN)
+    async def post_deployment_refresh(dep_id: str) -> dict | JSONResponse:
+        """배포 도구 실행 상태 다시 읽기 (infra deploy_run_status, read). 도구에서 끝났으면
+        `running` → `succeeded`·`failed`."""
+        svc = get_service()
+        try:
+            await get_deploy_store().refresh(svc, dep_id)
+        except DeployError as exc:
+            return _deploy_err(exc)
+        return _ok(_deploy_row(dep_id), svc)
 
     @router.post("/deployments/{dep_id}/check", response_model=None, dependencies=HUMAN)
     async def post_deployment_check(dep_id: str, request: Request) -> dict | JSONResponse:

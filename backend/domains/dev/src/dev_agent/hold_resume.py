@@ -510,7 +510,35 @@ async def _policy_demote(svc: DevService, row: HeldAction) -> str:
     return f"자동 처리 범위 L{frm} → L{to} 축소함"
 
 
+async def _deploy_dispatch(svc: DevService, row: HeldAction) -> str:
+    """infra `deploy_version`(배포 실행)이 관문에서 보류됐던 배포.
+
+    같은 요청 id로 한 번 다시 보낸다 (infra 관문이 승인된 판정을 돌려준다)."""
+    from dev_agent.deploy_store import get_deploy_store
+
+    store = get_deploy_store()
+    dep_id = str(row.args["dep_id"])
+    dep = store.get(dep_id)
+    if dep is None:
+        raise Stale(f"배포 {dep_id}가 없다")
+    if dep.run is None or dep.run.state != "held" or dep.run.review_id != row.review_id:
+        state = dep.run.state if dep.run else "보내기 전"
+        raise Stale(f"배포 {dep_id}가 이미 보류 상태가 아니다 ({state})")
+    done = await store.dispatch(svc, dep_id, resume=True)
+    run = done.run
+    if run is not None and run.state == "dispatched":
+        return f"배포 {dep_id} 보냄 → {run.tool} 실행 {run.run_id or '번호 모름'}"
+    if run is not None and run.state == "held":
+        return f"배포 {dep_id} 다시 보류"
+    if run is not None and run.state in ("unknown", "handed"):
+        # 보냈지만 결과를 모르거나 사람 할 일함으로 넘어갔다: 못 보냄이 아니다
+        return f"배포 {dep_id} {run.reason or run.state}"
+    reason = (run.reason if run else None) or "결과 없음"
+    raise ActionError("DEPLOY_FAILED", f"배포 {dep_id} 못 보냄: {reason}")
+
+
 RESUMERS: dict[str, Resumer] = {
+    "deploy_dispatch": _deploy_dispatch,
     "coding_pr": _coding_pr,
     "merge_pr": _merge_pr,
     "repo_write": _repo_write,

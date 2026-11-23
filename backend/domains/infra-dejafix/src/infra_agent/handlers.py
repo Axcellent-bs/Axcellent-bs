@@ -33,6 +33,7 @@ from ax_contracts.schemas.infra import (
     VerifyRecoveryOutput,
 )
 from infra_agent import deploy_tools
+from infra_agent.deploy_run import HANDLERS as DEPLOY_HANDLERS
 from infra_agent.deploy_tools import DeployTool
 from infra_agent.deployments import SHOP_PAYMENT_CONFIG, Deployment
 from infra_agent.diagnosis import (
@@ -778,6 +779,7 @@ async def verify_recovery(request: AgentRequest) -> AgentResult:
 
 
 HANDLERS = {
+    **DEPLOY_HANDLERS,
     "diagnose_incident": diagnose_incident,
     "rollback_deployment": rollback_deployment,
     "verify_recovery": verify_recovery,

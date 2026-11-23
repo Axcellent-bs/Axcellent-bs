@@ -158,8 +158,10 @@ def test_actions_redeploy_posts_dispatch_with_input() -> None:
                 200,
                 json={
                     "workflow_runs": [
-                        _run(9, "Deploy", "d" * 40, created_at="2026-11-16T02:00:01Z"),
-                        _run(8, "Deploy", "e" * 40, created_at="2026-11-16T01:00:00Z"),
+                        # 같은 때 다른 사람이 띄운 다른 버전 실행은 고르지 않는다
+                        _run(10, "Deploy v9.9.9", "f" * 40, created_at="2026-11-16T02:00:00Z"),
+                        _run(9, "Deploy v2.4.0", "d" * 40, created_at="2026-11-16T02:00:01Z"),
+                        _run(8, "Deploy v2.4.0", "e" * 40, created_at="2026-11-16T01:00:00Z"),
                     ]
                 },
             )
@@ -173,6 +175,36 @@ def test_actions_redeploy_posts_dispatch_with_input() -> None:
     assert (ref.tool, ref.run_id) == ("github_actions", "9")
     assert ref.url == "https://github.com/acme/shop/actions/runs/9"
     assert "acme/shop" in tool.describe("v2.4.0") and "v2.4.0" in tool.describe("v2.4.0")
+
+
+def test_actions_redeploy_without_version_in_title_leaves_run_unknown() -> None:
+    """제목에 버전이 없는 실행은 우리 것인지 몰라 고르지 않는다 (실행 id를 비움, 디스패치는 됨)."""
+    posted: list[dict[str, Any]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path.endswith("/access_tokens"):
+            return _token_response()
+        if path == "/repos/acme/shop":
+            return httpx.Response(200, json={"default_branch": "release"})
+        if path.endswith("/dispatches"):
+            posted.append(json.loads(req.content))
+            return httpx.Response(204, headers={"Date": "Mon, 16 Nov 2026 02:00:00 GMT"})
+        if path.endswith("/runs"):
+            return httpx.Response(
+                200,
+                json={
+                    "workflow_runs": [
+                        _run(9, "Deploy", "d" * 40, created_at="2026-11-16T02:00:01Z")
+                    ]
+                },
+            )
+        raise AssertionError(path)
+
+    tool = GithubActionsTool(ACTIONS, APP, transport=httpx.MockTransport(handler), sleep=_no_sleep)
+    ref = asyncio.run(tool.redeploy("v2.4.0"))
+    assert len(posted) == 1
+    assert (ref.run_id, ref.url) == (None, None)
 
 
 def test_jenkins_recent_reads_param() -> None:
@@ -225,6 +257,24 @@ def test_jenkins_recent_reads_param() -> None:
     assert runs[0].at == datetime(2026, 11, 16, 1, 1, tzinfo=UTC)
     assert runs[0].actor == "bob"
     assert runs[0].url == f"{JENKINS}/job/shop-deploy/42/"
+
+
+def test_jenkins_resolves_queue_item_to_build_number() -> None:
+    answers = {
+        "57": {"executable": {"number": 43, "url": f"{JENKINS}/job/shop-deploy/43/"}},
+        "58": {},
+    }
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.method == "GET"
+        n = req.url.path.split("/")[3]
+        assert req.url.path == f"/queue/item/{n}/api/json"
+        return httpx.Response(200, json=answers[n])
+
+    tool = JenkinsTool(JENKINS_CONN, transport=httpx.MockTransport(handler))
+    assert asyncio.run(tool.resolve_run("queue-57")) == "43"
+    assert asyncio.run(tool.resolve_run("queue-58")) is None  # 아직 빌드가 시작되지 않음
+    assert asyncio.run(tool.resolve_run("44")) == "44"  # 이미 빌드 번호
 
 
 def test_jenkins_redeploy_encodes_version() -> None:

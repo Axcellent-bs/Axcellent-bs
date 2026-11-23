@@ -20,6 +20,7 @@ _ACTION = {
     "code_write": "코드 쓰기",
     "repo_revert_pr": "되돌리기 PR 열기",
     "auto_policy_update": "자동 처리 범위 바꾸기",
+    "deploy_version": "배포 실행",
 }
 _DECISION = {"held": "보류", "rejected": "거절", "expired": "만료"}
 

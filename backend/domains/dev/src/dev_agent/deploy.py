@@ -7,13 +7,19 @@
   B/C는 safety 기준표(thresholds.toml rollback_*)와 같은 기준으로 미리 계산해 보여 준다.
   판정은 safety가 다시 한다. 값이 없거나 정수가 아니면 C (fail-closed).
 - 롤백 실행은 infra가 한다. 이 모듈은 제안만 만든다.
-- 배포 실행기(배포 도구 연결)가 아직 없다. 그래서 요청·승인한 배포는 `approved`(실행 안 함)로
-  남기고 `succeeded`(배포됨)로 바꾸지 않는다. `succeeded`는 실행기가 실제로 배포했을 때만 쓴다
-  (지금은 목 시드 DEP-1뿐).
+- 배포 실행은 infra `deploy_version`(도구 연결의 배포 도구: GitHub Actions·Jenkins)이 한다.
+  도구 연결의 배포 도구는 서비스마다 하나이고 환경 구분이 없어 운영 배포로 본다. 그래서 실제 실행은
+  늘 사람이 눌러야 한다: 승인 이유(prod·보호 경로)가 없는 배포도 `ready`(사람이 눌러야 함)로 두고
+  자동으로 보내지 않는다. 사람이 승인(`approved`)한 배포를 한 번만 보내고 결과를 `run`(DeployRun)에
+  남긴다 (`deploy_store`).
+  도구가 띄웠으면 `running`, 도구에서 끝난 것을 읽으면 `succeeded`·`failed`.
+  못 띄웠으면(도구 미연결·관문 보류·거절·도구 오류) `approved`(실행 안 함) + 이유로 남는다.
+  `succeeded`는 도구가 실제로 끝냈다고 읽었을 때만 쓴다 (목 시드 DEP-1은 테스트 전용).
 """
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any, Literal
@@ -26,10 +32,37 @@ from ax_workflow.models import PR, DomainModel
 
 DeployEnv = Literal["dev", "prod"]
 # approved: 배포 허가됨(사람 승인 또는 승인 불필요). 배포 도구가 없어 실제 배포는 하지 않았다
-DeployStatus = Literal["requested", "approved", "running", "succeeded", "failed", "rolled_back"]
+# ready: 승인 이유(prod·보호 경로)는 없지만 배포 실행은 사람이 눌러야 한다 (운영 배포 도구)
+DeployStatus = Literal[
+    "requested", "ready", "approved", "running", "succeeded", "failed", "rolled_back"
+]
 # 실행되지 않은 배포. 배포 후 확인을 하지 않는다 (없는 배포의 "정상"을 만들지 않는다)
-NOT_DEPLOYED: tuple[str, ...] = ("requested", "approved", "running")
+NOT_DEPLOYED: tuple[str, ...] = ("requested", "ready", "approved", "running")
+READY_NOTE = "배포 실행은 사람이 눌러야 해요"
 NO_EXECUTOR_NOTE = "배포 도구 미연결 — 실제 배포는 안 함"
+# 배포 실행 기록 상태 (infra deploy_version 호출)
+# sending: 보내는 중(파일에 먼저 남김) · dispatched: 도구가 띄움 · no_tool: 그 서비스 배포 도구 없음
+# held: 안전 확인에서 사람 승인 대기 · rejected: 관문 거절 · failed: 못 띄움(도구 오류·닿지 못함 등)
+# unknown: 보냈지만 결과를 모름(시간 초과·재시작) → 다시 보내지 않고 사람이 도구에서 확인
+# handed: 인프라 AI가 꺼져 사람 할 일함으로 넘어감 · not_sent: 승인했지만 보내지 않음(다시 켬 등)
+DispatchState = Literal[
+    "sending",
+    "dispatched",
+    "no_tool",
+    "held",
+    "rejected",
+    "failed",
+    "unknown",
+    "handed",
+    "not_sent",
+]
+RunStatus = Literal["dispatched", "running", "succeeded", "failed", "unknown"]
+NO_TOOL_NOTE = "배포 도구가 연결되지 않았어요 — 도구 연결에서 설정 (실제 배포는 안 함)"
+UNKNOWN_NOTE = "배포가 시작됐을 수 있어요 — 배포 도구에서 먼저 확인 (다시 보내지 않음)"
+HANDED_NOTE = "사람 할 일함으로 넘어감 — 사람이 실행"
+NOT_SENT_NOTE = "승인했지만 배포 도구로 보내지 않았어요 — 사람이 '배포 실행'을 눌러야 해요"
+# 서비스·버전 한도 (infra DeployVersionInput과 같다)
+NAME_MAX = 120
 Verdict = Literal["ok", "watch", "suspect"]
 SignalKind = Literal["incident", "anomaly", "unavailable"]
 # unavailable 신호의 이유: 연결이 없음 · 읽다가 오류
@@ -70,6 +103,34 @@ class Deployment(DomainModel):
     # 배포 실행기가 실제로 배포했나. 실행기가 없으면 늘 False (status도 succeeded가 되지 않는다)
     executed: bool = False
     note: str | None = None  # 실행하지 않은 이유 등 사람이 읽는 한 줄
+    # 배포 실행 기록 (infra deploy_version). 보내기 전이면 None
+    run: DeployRun | None = None
+    # 고유 꼬리 (uuid 8자리). 저장소를 비워 DEP 번호가 다시 쓰여도 관문·infra 멱등 키가 겹치지 않게
+    uid: str = ""
+
+
+def request_id(dep: Deployment) -> str:
+    """infra에 보내는 배포 요청 id ("DEP-3.1a2b3c4d")."""
+    return f"{dep.id}.{dep.uid}" if dep.uid else dep.id
+
+
+class DeployRun(DomainModel):
+    """infra `deploy_version`으로 보낸 배포 실행 한 번 (한 배포에 하나뿐: 다시 보내지 않는다)."""
+
+    state: DispatchState
+    service: str | None = None
+    version: str | None = None
+    tool: str | None = None  # "github_actions" | "jenkins"
+    run_id: str | None = None
+    url: str | None = None
+    run_status: RunStatus | None = None  # 도구에서 읽은 실행 상태 (dispatched 뒤)
+    code: str | None = None  # 실패 종류 (infra outcome 등)
+    reason: str | None = None  # 사람이 읽는 한 줄
+    review_id: str | None = None  # 관문 보류 건 (안전 확인에서 승인하면 이어서 보낸다)
+    request_id: str | None = None  # infra에 보낸 요청 id (배포 id + 고유 꼬리)
+    resolving: bool = False  # Jenkins 대기열이라 아직 빌드 번호를 모름 (도구에서 확인 중)
+    at: UtcDatetime
+    checked_at: UtcDatetime | None = None
 
 
 class Signal(DomainModel):
@@ -128,9 +189,9 @@ def approval_reasons(env: str, paths: Iterable[str]) -> tuple[list[str], list[st
 def build_deployment(
     seq: int, prs: list[PR], env: DeployEnv, at: datetime, version: str | None = None
 ) -> Deployment:
-    """머지된 PR로 배포 기록을 만든다. 승인 이유가 있으면 `requested`, 없으면 `approved`.
+    """머지된 PR로 배포 기록을 만든다. 승인 이유가 있으면 `requested`, 없으면 `ready`.
 
-    배포 실행기가 없으니 어느 쪽도 `succeeded`(배포됨)로 두지 않는다.
+    어느 쪽도 자동으로 보내지 않는다 (배포 실행은 사람이 누른다).
     """
     if not prs:
         raise DeployError("INVALID_DEPLOY", "배포할 PR이 없다")
@@ -150,12 +211,21 @@ def build_deployment(
         version=version,
         env=env,
         at=at,
-        status="requested" if reasons else "approved",
+        status="requested" if reasons else "ready",
         changed_paths=paths,
         approval_reasons=reasons,
         protected_paths=protected,
-        note=None if reasons else NO_EXECUTOR_NOTE,
+        note=None if reasons else READY_NOTE,
+        uid=uuid.uuid4().hex[:8],
     )
+
+
+def service_version(version: str | None) -> tuple[str, str] | None:
+    """배포 버전 "shop-api v2.4.1" → ("shop-api", "v2.4.1"). 꼴이 다르면 None (지어내지 않는다)."""
+    parts = (version or "").split()
+    if len(parts) != 2 or any(len(p) > NAME_MAX for p in parts):
+        return None
+    return parts[0], parts[1]
 
 
 def deploy_params(dep: Deployment) -> dict[str, Any]:

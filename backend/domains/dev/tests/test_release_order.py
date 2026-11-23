@@ -38,7 +38,9 @@ def test_simple_request_asks_release_check_and_records_approved_deploy() -> None
     assert any("배포 지시 받음 (기획 AI, dev" in t and "배포 요청 DEP-" in t for t in texts)
     pr = w.dev.state.prs[-1]
     mine = [d for d in get_deploy_store().deployments if pr.number in d.pr_numbers]
-    assert mine and mine[-1].status == "approved" and mine[-1].executed is False  # 배포 도구 없음
+    # 저절로 보내지 않는다: 배포 실행은 사람이 누른다 (운영 배포 도구)
+    assert mine and mine[-1].status == "ready" and mine[-1].executed is False
+    assert mine[-1].run is None
 
     w.run(w.dev.tick())  # 같은 PR 묶음이면 다시 묻지 않는다
     assert w.skills().count("request_release_check") == 1

@@ -257,6 +257,9 @@ const TAB_KEY = 'ax.connections.item'
 const readTab = (): PanelItem => {
   // 노션 계정 연결에서 돌아오면(?notion=…) 노션 항목을 연다
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('notion')) return 'notion'
+  // 다른 화면에서 항목을 골라 들어오면(?item=deploy 등) 그 항목을 연다
+  const asked = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('item') : null
+  if (asked && (PANEL_IDS as string[]).includes(asked)) return asked as PanelItem
   try {
     const v = localStorage.getItem(TAB_KEY) as PanelItem | null
     return v && PANEL_IDS.includes(v) ? v : 'repos'
