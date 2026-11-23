@@ -145,13 +145,14 @@ export interface PlanCardView {
   printPath: string;
 }
 
-export function planCard(p: PlanLookup): PlanCardView {
+/** request: 이 카드의 의뢰 번호. 열기 주소에 ?request=로 붙어 기획 화면 아래에서 사람 확인을 할 수 있다 */
+export function planCard(p: PlanLookup, request?: string | null): PlanCardView {
   const v = p.videoPlan;
   return {
     chip: planId(p.spec || p.id),
     head: v ? videoPlanSummary(v) : "기획 제안",
     line: (v ? v.concept : p.idea) || p.title,
-    openPath: planDocPath({ id: p.id, spec: p.spec }),
+    openPath: planDocPath({ id: p.id, spec: p.spec, request }),
     printPath: planDocPath({ id: p.id, spec: p.spec }, true),
   };
 }
