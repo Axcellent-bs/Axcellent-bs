@@ -433,6 +433,8 @@ SERVICES: tuple[Service, ...] = (
             "link_incident",
             "revert_merged_pr",
             "verify_rollback_target",
+            # infra deploy_version(B) 교차검증 (safety → dev)
+            "verify_deploy_request",
             "list_in_progress",
             "list_dev_progress",
             "list_dev_outcomes",

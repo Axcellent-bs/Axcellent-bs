@@ -510,14 +510,18 @@ action = "release_fault"
 owner = "infra"
 base_grade = "A"
 
-# 배포 실행 (#1615): dev 배포 기록을 사람이 승인·실행하면 dev가 부른다. 고객이 도구 연결에서 정한
-# 배포 도구(GitHub Actions·Jenkins)로 버전을 띄운다. 사람 승인은 dev(approve·dispatch, 세션 모드면
-# 로그인한 사람)가 강제하고 infra도 승인한 사람이 없으면 거절하므로 관문은 다시 묻지 않는다 (A)
+# 배포 실행 (#1615): dev 배포 기록을 사람이 승인·실행하면 dev가 infra를 A2A로 부르고, infra가
+# execute(deploy_version)를 요청한다(요청자 = infra). 고객이 도구 연결에서 정한 배포 도구(GitHub Actions·
+# Jenkins)로 운영 배포가 나간다. dev 토큰을 가진 코드가 approved_by 이름만 채워도 나가지 않게
+# rollback_deployment처럼 B + dev 교차검증으로 둔다 (#1617 사후 리뷰): dev verify_deploy_request가
+# 배포 기록 DEP-n이 실제로 approved이고 승인자·서비스·버전이 요청과 같은지 코드로 확인한다.
+# 검증자 거절은 바로 rejected(배포가 안 나갈 뿐 계속되는 피해가 없다), 무응답·오류는 사람 보류
 [[actions]]
 action = "deploy_version"
 owner = "infra"
-requesters = ["dev"]
-base_grade = "A"
+base_grade = "B"
+verifier = "dev"
+verify_skill = "verify_deploy_request"
 
 # 재무 화면에서 사람이 정한 개선 요청을 기획 create_ticket으로 보내기. 돈은 움직이지 않고 기획에 요청 한 건이
 # 생길 뿐이다(고객지원 request_change와 같은 A). 요청자는 사람 토큰을 받은 재무 화면 API다
