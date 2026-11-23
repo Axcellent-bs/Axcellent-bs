@@ -10,6 +10,7 @@ from ax_contracts.schemas.planning import (
     LinkIncidentOutput,
     VerifyRollbackTargetOutput,
 )
+from ax_workflow.models import RepoTarget
 from ax_workflow_testing import plan
 from dev_agent.main import app
 from planning_agent.domain.models import Incident
@@ -157,6 +158,75 @@ def test_link_incident_on_auto_pr_shrinks_auto_scope(service, a2a_body) -> None:
     assert pol.history[-1].result == "장애 연결"
     assert pol.log[-1].by == "자동"
     assert service.state.activity[-1].point == "auto_policy.updated"
+
+
+def _repo_pr28(service, connection_id: str = "c1", number: int = 501) -> None:
+    """PR #28을 연결 레포 PR(번호 `number`)로 올린 것처럼 만든다."""
+    pr = next(p for p in service.state.prs if p.number == 28)
+    pr.vcs_number = number
+    pr.target = RepoTarget(
+        connection_id=connection_id, repo="org/shop", status="approved", confidence="high"
+    )
+
+
+def test_link_incident_with_connection_looks_up_repo_numbers(service, a2a_body) -> None:
+    """connection_id가 오면 그 연결의 레포 PR 번호로만 찾는다. 서비스 PR 번호(28)는 missing."""
+    _repo_pr28(service)
+    payload = {
+        "incident_context_id": "ctx_inc_0002",
+        "pr_numbers": [501, 28],
+        "connection_id": "c1",
+    }
+    result = _call(
+        a2a_body("link_incident", payload, idempotency_key="ctx_inc_0002:link_incident:c1")
+    )
+    assert result["status"] == "completed", result
+    assert LinkIncidentOutput.model_validate(result["output"]).linked_paras == ["SPEC-5:R3"]
+    refs = result["evidence"]["ref_ids"]
+    assert "pr:501" in refs and "pr:28" not in refs
+    assert "#28" in result["evidence"]["data_summary"]  # 확인할 수 없음: PR #28
+    assert "c1" in result["evidence"]["queries"][0]
+
+
+def test_link_incident_other_connection_reports_missing(service, a2a_body) -> None:
+    _repo_pr28(service, connection_id="c1")
+    payload = {"incident_context_id": "ctx_inc_0002", "pr_numbers": [501], "connection_id": "c2"}
+    result = _call(
+        a2a_body("link_incident", payload, idempotency_key="ctx_inc_0002:link_incident:c2")
+    )
+    assert result["status"] == "completed", result
+    assert result["output"]["linked_paras"] == []
+    assert "#501" in result["evidence"]["data_summary"]
+
+
+def test_link_incident_default_target_resolves_to_first_connection(
+    service, a2a_body, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """연결을 안 고르고 올린 PR(target "default")은 실제로 올라간 첫 연결로 보고 맞춘다."""
+    from dev_agent import vcs
+
+    _repo_pr28(service, connection_id=vcs.OVERRIDE_ID)
+    first = vcs.Connection(id="c1", kind="github", repo="org/shop", source="screen")
+    monkeypatch.setattr(vcs, "routing_connections", lambda: [first])
+    payload = {"incident_context_id": "ctx_inc_0002", "pr_numbers": [501], "connection_id": "c1"}
+    result = _call(
+        a2a_body("link_incident", payload, idempotency_key="ctx_inc_0002:link_incident:dflt")
+    )
+    assert result["status"] == "completed", result
+    assert result["output"]["linked_paras"] == ["SPEC-5:R3"]
+    assert "pr:501" in result["evidence"]["ref_ids"]
+
+
+def test_link_incident_without_connection_keeps_service_numbers(service, a2a_body) -> None:
+    """connection_id가 없으면 예전처럼 서비스 PR 번호로 찾는다 (레포 번호 501은 missing)."""
+    _repo_pr28(service)
+    payload = {"incident_context_id": "ctx_inc_0002", "pr_numbers": [28, 501]}
+    result = _call(
+        a2a_body("link_incident", payload, idempotency_key="ctx_inc_0002:link_incident:none")
+    )
+    assert result["output"]["linked_paras"] == ["SPEC-5:R3"]
+    assert "pr:28" in result["evidence"]["ref_ids"]
+    assert "#501" in result["evidence"]["data_summary"]
 
 
 # ---- verify_rollback_target

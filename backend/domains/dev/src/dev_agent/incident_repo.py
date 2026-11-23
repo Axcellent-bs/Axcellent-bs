@@ -225,6 +225,7 @@ async def _record(
     pr_number: int,
     out: RevertMergedPrOutput,
     rev: Change | None,
+    review_id: str | None = None,
 ) -> RevertMergedPrOutput:
     """되돌리기 결과를 아는 사건에 남긴다. 되돌리기는 이미 외부에서 한 일이라
     기록이 어떤 이유로 실패해도 결과는 그대로 돌려준다 (로그만 남김)."""
@@ -238,6 +239,7 @@ async def _record(
             status=out.status,
             url=rev.url if rev is not None else None,
             at=svc.clock(),
+            review_id=review_id,
         )
 
         async def put(s: State) -> None:
@@ -260,8 +262,11 @@ async def revert_merged(
     pr_number: int,
     reason: str,
     incident_context_id: str | None = None,
+    review_id: str | None = None,
 ) -> RevertMergedPrOutput:
     """병합된 PR을 되돌리는 PR을 열고 머지까지 간다. 관문이 막으면 `held`.
+
+    `review_id`(되돌리기를 정당화한 교차검증)는 사건의 되돌리기 기록에 남긴다.
 
     `ActionError`: 모르는 연결(NOT_FOUND)·읽기 전용(READ_ONLY)·병합 안 된 PR(NOT_MERGED).
     형상관리 오류는 `VcsError`로 그대로 던진다."""
@@ -274,7 +279,7 @@ async def revert_merged(
     ctx = incident_context_id or context_id
     why = " ".join(reason.split())[:200]
     out, rev = await _revert(svc, adapter, ctx, key, connection_id, pr_number, why, requester)
-    return await _record(svc, ctx, connection_id, pr_number, out, rev)
+    return await _record(svc, ctx, connection_id, pr_number, out, rev, review_id)
 
 
 async def _revert(

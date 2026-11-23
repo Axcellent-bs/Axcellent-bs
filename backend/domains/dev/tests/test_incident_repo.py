@@ -285,3 +285,38 @@ def test_revert_result_kept_when_recording_fails(repo, monkeypatch: pytest.Monke
         )
     )
     assert out.status == "merged" and out.revert_pr_number is not None
+
+
+def test_revert_records_review_id_when_given(service, repo, a2a_body) -> None:
+    """교차검증 결과 ID(review_id)가 오면 사건 되돌리기 기록과 근거에 남고, 없으면 비운다."""
+    n = _bad_merge(repo)
+    ask = {
+        "connection_id": CID,
+        "pr_number": n,
+        "reason": "결제 오류",
+        "incident_context_id": "ctx_inc_0001",
+        "review_id": "rev_77",
+    }
+    result = _call(a2a_body("revert_merged_pr", ask, idempotency_key="rv-1"))
+    assert result["status"] == "completed", result
+    assert "review:rev_77" in result["evidence"]["ref_ids"]
+    inc = next(i for i in service.state.incidents if i.context_id == "ctx_inc_0001")
+    assert inc.revert is not None and inc.revert.review_id == "rev_77"
+
+
+def test_revert_without_review_id_keeps_old_record(repo) -> None:
+    n = _bad_merge(repo)
+    svc = DevService(gate=Gate())
+    run(
+        incident_repo.revert_merged(
+            svc,
+            context_id="ctx_req_1",
+            requester="infra",
+            connection_id=CID,
+            pr_number=n,
+            reason="결제 오류",
+            incident_context_id="ctx_inc_0001",
+        )
+    )
+    inc = next(i for i in svc.state.incidents if i.context_id == "ctx_inc_0001")
+    assert inc.revert is not None and inc.revert.review_id is None

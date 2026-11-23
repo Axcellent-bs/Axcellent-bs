@@ -138,6 +138,7 @@ async def revert_merged_pr(request: AgentRequest) -> AgentResult:
             pr_number=inp.pr_number,
             reason=inp.reason,
             incident_context_id=inp.incident_context_id,
+            review_id=inp.review_id,
         )
     except ActionError as exc:
         return AgentResult(
@@ -160,8 +161,10 @@ async def revert_merged_pr(request: AgentRequest) -> AgentResult:
         "auto_merge_scheduled": f"{key} 되돌리기 PR {rev} 자동 머지 예약 (CI 대기)",
         "held": f"{key} 되돌리기 보류 (PR {rev}) → 사람 확인",
     }[out.status]
-    refs = [f"pr:{inp.pr_number}"] + (
-        [f"pr:{out.revert_pr_number}"] if out.revert_pr_number else []
+    refs = (
+        [f"pr:{inp.pr_number}"]
+        + ([f"pr:{out.revert_pr_number}"] if out.revert_pr_number else [])
+        + ([f"review:{inp.review_id}"] if inp.review_id else [])
     )
     held = out.status == "held"
     return AgentResult(
@@ -195,6 +198,7 @@ async def link_incident(request: AgentRequest) -> AgentResult:
             pr_numbers=inp.pr_numbers,
             follow_up_title=inp.follow_up_title,
             idempotency_key=request.meta.idempotency_key,
+            connection_id=inp.connection_id,
         )
     except GateRefused as exc:
         return AgentResult(
@@ -221,7 +225,12 @@ async def link_incident(request: AgentRequest) -> AgentResult:
         outcome=result.outcome,
         output=out.model_dump(mode="json"),
         evidence=Evidence(
-            queries=[f"prs WHERE number IN {sorted(set(inp.pr_numbers))}"],
+            queries=[
+                f"prs WHERE connection = '{inp.connection_id}' "
+                f"AND repo_number IN {sorted(set(inp.pr_numbers))}"
+                if inp.connection_id
+                else f"prs WHERE number IN {sorted(set(inp.pr_numbers))}"
+            ],
             data_summary=summary,
             ref_ids=[f"pr:{n}" for n in inp.pr_numbers if n not in missing]
             + [f"para:{p}" for p in out.linked_paras]

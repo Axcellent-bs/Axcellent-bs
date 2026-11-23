@@ -204,3 +204,33 @@ def test_create_ticket_separate_is_not_linked_to_a_same_request(service, a2a_bod
     assert first["output"]["context_id"] != second["output"]["context_id"]
     # 시드 REQ-12(같은 제목)에도 묶이지 않는다
     assert next(r for r in service.state.requests if r.id == "REQ-12").state == "기획 중"
+
+
+@pytest.mark.role("planning")
+def test_create_ticket_stores_mode_and_requested_by(service, a2a_body) -> None:
+    """mode·requested_by가 오면 요청 기록에 저장하고, 없으면 비운다 (판정에 쓰지 않는다)."""
+    payload = {
+        "title": TITLE,
+        "evidence": "개발 AI 대화 chat-1",
+        "mode": "subscription",
+        "requested_by": "acc_dev1",
+    }
+    result = _call(
+        a2a_body(
+            "create_ticket", payload, token="mock:dev", context_id="ctx_x", idempotency_key="m1"
+        )
+    )
+    assert result["status"] == "completed", result
+    rid = result["output"]["request_id"]
+    req = next(r for r in service.state.requests if r.id == rid)
+    assert (req.mode, req.requested_by) == ("subscription", "acc_dev1")
+
+    plain = _ticket(a2a_body, "다른 제목: 주문 내역 정렬이 뒤집힌다", key="m2")
+    req2 = next(r for r in service.state.requests if r.id == plain["output"]["request_id"])
+    assert (req2.mode, req2.requested_by) == (None, None)
+    bad = _call(
+        a2a_body(
+            "create_ticket", {**payload, "mode": "phone"}, token="mock:dev", idempotency_key="m3"
+        )
+    )
+    assert bad["status"] == "failed"

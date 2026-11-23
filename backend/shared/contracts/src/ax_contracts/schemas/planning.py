@@ -43,6 +43,9 @@ class LinkIncidentInput(AxModel):
     incident_context_id: str
     pr_numbers: list[int]
     follow_up_title: str | None = None  # 있으면 재발 방지 요청을 등록한다
+    # `pr_numbers`가 속한 연결 레포 (`RelatedPr.connection_id`). 있으면 그 연결의 레포 PR 번호로만
+    # 찾고(거기 없는 번호는 missing), 없으면 예전처럼 개발 서비스 PR 번호로 찾는다
+    connection_id: str | None = None
 
 
 class LinkIncidentOutput(AxModel):
@@ -76,6 +79,9 @@ class RevertMergedPrInput(AxModel):
     pr_number: int = Field(gt=0)
     reason: str = Field(min_length=1)
     incident_context_id: str | None = None
+    # 되돌리기를 정당화한 교차검증 결과 ID.
+    # 있으면 사건의 되돌리기 기록과 근거(`review:<id>`)에 남긴다
+    review_id: str | None = None
 
 
 class RevertMergedPrOutput(AxModel):
@@ -243,6 +249,11 @@ class CreateTicketInput(AxModel):
     # True면 비슷한 요청이 있어도 묶지 않고 따로 받는다 (11/13). 사람이 화면에서 한 건씩 정해 보낸
     # 요청(재무 개선 요청 등)이 남의 요청에 붙지 않게 한다. 비슷한 요청 표시(제안)는 그대로 한다
     separate: bool = False
+    # 요청을 어떻게 만들었나: 개발 AI 대화의 코딩 방식과 같은 값 (`DevChatSendInput.mode`).
+    # agent = 서버 AI · subscription = 개발자 본인 Claude. 모르면 비운다. 저장만 하고 판정에 안 쓴다
+    mode: Literal["agent", "subscription"] | None = None
+    # 요청한 사람(계정 id, 없으면 사람 토큰 이름). 부서·서비스가 아니라 사람이다. 저장만 한다
+    requested_by: str | None = None
 
 
 class CreateTicketOutput(AxModel):

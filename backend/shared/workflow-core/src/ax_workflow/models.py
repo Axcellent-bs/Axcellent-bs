@@ -114,6 +114,10 @@ class Request(DomainModel):
     paused: bool = False
     # 요청 부서가 따로 받기를 원함 (create_ticket `separate`). 비슷한 요청이 있어도 묶지 않는다
     separate: bool = False
+    # create_ticket `mode`(agent·subscription)·`requested_by`(요청한 사람).
+    # 저장만 하고 판정에 안 쓴다
+    mode: Literal["agent", "subscription"] | None = None
+    requested_by: str | None = None
 
 
 class ParaWarn(DomainModel):
@@ -423,6 +427,7 @@ class IncidentRevert(DomainModel):
     status: Literal["merged", "auto_merge_scheduled", "held"]
     url: str | None = None  # 되돌리기 PR 주소 (형상관리가 주면)
     at: UtcDatetime
+    review_id: str | None = None  # 되돌리기를 정당화한 교차검증 결과 ID (요청이 주면)
 
 
 class Incident(DomainModel):
