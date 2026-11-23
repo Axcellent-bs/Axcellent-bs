@@ -27,6 +27,20 @@
 
 저장은 SQLite 파일 하나다. 위치는 `AX_OFFICE_ROOM_DB`이고, 비어 있으면 프로세스 메모리
 (`:memory:`)에 둔다(다시 켜면 사라진다).
+
+11/23 대화방 정리 (회사 칸 `tenant_id`, 요청 회사 = 로그인 세션의 회사, 세션이 없으면 캣북스):
+- 장애·이슈 방 삭제 = 모두에게 숨김(`hidden_rooms`). 기록은 남고 되돌릴 수 있다. 장애 대응 탭·총괄
+  기록은 그대로이고 대화 기록의 방 목록에서만 빠진다.
+  - `POST /office-room/{room_id}/hide`: room_id는 `ctx_inc_`로 시작해야 한다(아니면 422).
+    총괄 `GET /api/incidents/{room_id}`로 상태를 확인한다. 로그인한 사람의 Authorization 헤더만
+    그대로 넘겨 총괄이 같은 회사 기록을 본다(토큰은 로그·오류·응답에 넣지 않고, 다른 서비스로
+    넘기지 않는다). 해결됨이면 숨기고, open·degraded는 409, 총괄 404(우리 회사 사건이 아님·없는
+    방)는 404 그대로, 401·403·5xx·시간 초과는 확인하지 못한 것이라 막는다(503, fail-closed).
+  - `POST /office-room/{room_id}/unhide`: 되돌리기. `GET /office-room/hidden`: 숨긴 방 목록
+- `/clear` = 나만 지우기(`room_clears`). 그 방에서 지금까지의 대화를 내 화면에서만 뺀다
+  (서버 기록·다른 사람 화면은 그대로). 사람(사람 토큰 이름)마다 방마다 한 줄이다.
+  - `POST /office-room/{room_id}/clear`, `POST /office-room/{room_id}/clear/undo`,
+    `GET /office-room/clears`(내 것만)
 """
 
 from __future__ import annotations
@@ -40,9 +54,10 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, Field
 
-from ax_dashboard_api import chat_remove
+from ax_agent_template.company_scope import scope_id
+from ax_dashboard_api import chat_remove, relay
 from ax_dashboard_api.auth import human_from_authorization, require_human
-from ax_dashboard_api.envelope import ApiError, ok
+from ax_dashboard_api.envelope import ApiError, ok, session_company
 
 DB_ENV = "AX_OFFICE_ROOM_DB"
 DEFAULT_HOURS = 24
@@ -80,7 +95,27 @@ CREATE TABLE IF NOT EXISTS office_threads (
     PRIMARY KEY (agent, thread_id)
 );
 CREATE INDEX IF NOT EXISTS idx_office_threads_updated ON office_threads (updated_at);
+CREATE TABLE IF NOT EXISTS hidden_rooms (
+    room_id     TEXT NOT NULL,
+    tenant_id   TEXT NOT NULL DEFAULT 'catbooks',
+    hidden_by   TEXT NOT NULL,
+    hidden_at   TEXT NOT NULL,
+    restored_at TEXT,
+    PRIMARY KEY (room_id, tenant_id)
+);
+CREATE TABLE IF NOT EXISTS room_clears (
+    room_id    TEXT NOT NULL,
+    tenant_id  TEXT NOT NULL DEFAULT 'catbooks',
+    who        TEXT NOT NULL,
+    cleared_at TEXT,
+    PRIMARY KEY (room_id, tenant_id, who)
+);
 """
+INCIDENT_ROOM_PREFIX = "ctx_inc_"  # 장애·이슈 방(총괄 사건 context_id)
+OPEN_INCIDENT = frozenset({"open", "degraded"})  # 진행 중: 숨길 수 없다
+RESOLVED_INCIDENT = "resolved"
+RUNNING_TEXT = "진행 중인 장애 방은 삭제할 수 없어요"
+UNCHECKED_TEXT = "장애 상태를 확인하지 못해 삭제하지 않았어요"
 # room_id 칸이 생기기 전 파일에도 칸을 붙인 뒤 만든다
 _ROOM_INDEX = "CREATE INDEX IF NOT EXISTS idx_office_threads_room ON office_threads (room_id)"
 # 예전 파일에 없을 수 있는 칸: 칸 이름 → 붙일 정의.
@@ -207,6 +242,63 @@ class OfficeRoomStore:
                 ).rowcount
                 for agent, thread_id in keys
             )
+
+    # ---- 장애·이슈 방 숨김 (모두에게, 회사별) -------------------------------------------
+    def hide_room(self, room: str, tenant: str, by: str, now: datetime) -> dict[str, Any]:
+        """숨긴다. 이미 숨겼으면 그대로, 되돌렸던 방이면 다시 숨긴다(숨긴 사람·때를 새로 적는다)."""
+        at = now.isoformat()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO hidden_rooms (room_id, tenant_id, hidden_by, hidden_at)"
+                " VALUES (?,?,?,?)"
+                " ON CONFLICT (room_id, tenant_id) DO UPDATE SET hidden_by = excluded.hidden_by,"
+                " hidden_at = excluded.hidden_at, restored_at = NULL"
+                " WHERE hidden_rooms.restored_at IS NOT NULL",
+                (room, tenant, by, at),
+            )
+            row = self._conn.execute(
+                "SELECT * FROM hidden_rooms WHERE room_id = ? AND tenant_id = ?", (room, tenant)
+            ).fetchone()
+        return dict(row)
+
+    def unhide_room(self, room: str, tenant: str, now: datetime) -> bool:
+        """되돌린다(줄은 남기고 restored_at을 적는다). 숨긴 방이 아니면 False."""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE hidden_rooms SET restored_at = ?"
+                " WHERE room_id = ? AND tenant_id = ? AND restored_at IS NULL",
+                (now.isoformat(), room, tenant),
+            )
+        return cur.rowcount == 1
+
+    def hidden_rooms(self, tenant: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT room_id, hidden_by, hidden_at FROM hidden_rooms"
+                " WHERE tenant_id = ? AND restored_at IS NULL ORDER BY hidden_at DESC",
+                (tenant,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---- /clear (나만 지우기) -------------------------------------------------------
+    def set_clear(self, room: str, tenant: str, who: str, at: datetime | None) -> None:
+        """그 사람의 그 방 지운 시각. None이면 되돌리기(줄은 남기고 시각만 비운다)."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO room_clears (room_id, tenant_id, who, cleared_at) VALUES (?,?,?,?)"
+                " ON CONFLICT (room_id, tenant_id, who)"
+                " DO UPDATE SET cleared_at = excluded.cleared_at",
+                (room, tenant, who, at.isoformat() if at else None),
+            )
+
+    def clears(self, tenant: str, who: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT room_id, cleared_at FROM room_clears"
+                " WHERE tenant_id = ? AND who = ? AND cleared_at IS NOT NULL ORDER BY room_id",
+                (tenant, who),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
 
 _store: OfficeRoomStore | None = None
@@ -354,3 +446,99 @@ async def remove_office_room(
             "departments": results,
         }
     )
+
+
+# ---------------------------------------------------------------- 11/23 대화방 정리
+def request_company() -> str:
+    """이 요청의 회사: 로그인 세션의 회사(세션이 없으면 캣북스). 총괄도 같은 세션 토큰으로 회사를
+    정하므로(`bind_company`) 총괄이 본 회사와 여기 적는 회사가 같다."""
+    return scope_id(session_company())
+
+
+async def _incident_status(room_id: str, authorization: str | None) -> str:
+    """총괄에 사건 상태를 묻는다. 로그인한 사람의 Authorization 헤더만 그대로 넘긴다.
+
+    404는 그대로(우리 회사 사건이 아니거나 없는 방), 그 밖에 확인하지 못하면 503(막는다)."""
+    headers = {"Authorization": authorization} if authorization else None
+    try:
+        data = await relay._get("orchestrator", f"/api/incidents/{room_id}", headers=headers)  # noqa: SLF001
+    except ApiError as exc:
+        if exc.status_code == 404:
+            raise ApiError(404, "NOT_FOUND", "없는 장애 방이에요") from None
+        raise ApiError(503, "INCIDENT_UNCHECKED", UNCHECKED_TEXT) from None
+    status = data.get("status") if isinstance(data, dict) else None
+    if not isinstance(status, str):
+        raise ApiError(503, "INCIDENT_UNCHECKED", UNCHECKED_TEXT)
+    return status
+
+
+def _incident_room(room_id: str) -> str:
+    if not room_id.startswith(INCIDENT_ROOM_PREFIX):
+        raise ApiError(422, "NOT_INCIDENT_ROOM", "장애·이슈 방만 삭제할 수 있어요")
+    return room_id
+
+
+@router.post("/office-room/{room_id}/hide")
+async def hide_incident_room(
+    request: Request, room_id: str = Path(min_length=1, max_length=64)
+) -> dict[str, Any]:
+    """장애·이슈 방을 모두의 방 목록에서 숨긴다(해결된 사건만, 기록은 남고 되돌릴 수 있다)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    room = _incident_room(room_id)
+    status = await _incident_status(room, request.headers.get("authorization"))
+    if status in OPEN_INCIDENT:
+        raise ApiError(409, "INCIDENT_RUNNING", RUNNING_TEXT)
+    if status != RESOLVED_INCIDENT:
+        raise ApiError(503, "INCIDENT_UNCHECKED", UNCHECKED_TEXT)
+    return ok(get_store().hide_room(room, request_company(), who, _now()))
+
+
+@router.post("/office-room/{room_id}/unhide")
+def unhide_incident_room(
+    request: Request, room_id: str = Path(min_length=1, max_length=64)
+) -> dict[str, Any]:
+    """숨긴 장애·이슈 방을 되돌린다. 이 회사에서 숨긴 방이 아니면 404."""
+    human_from_authorization(request.headers.get("authorization"))
+    room = _incident_room(room_id)
+    if not get_store().unhide_room(room, request_company(), _now()):
+        raise ApiError(404, "NOT_FOUND", "숨긴 방이 아니에요")
+    return ok({"room_id": room, "restored": True})
+
+
+@router.get("/office-room/hidden")
+def list_hidden_rooms(request: Request) -> dict[str, Any]:
+    """이 회사에서 숨긴 장애·이슈 방 (최근에 숨긴 것부터). 사람 토큰 필요."""
+    human_from_authorization(request.headers.get("authorization"))
+    rows = get_store().hidden_rooms(request_company())
+    return ok(rows, total=len(rows))
+
+
+@router.post("/office-room/{room_id}/clear")
+def clear_room(
+    request: Request, room_id: str = Path(min_length=1, max_length=64)
+) -> dict[str, Any]:
+    """/clear: 이 방의 지금까지 대화를 내 화면에서 지운다(지금 시각을 적는다).
+
+    서버 기록·다른 사람 화면은 그대로다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    at = _now()
+    get_store().set_clear(room_id, request_company(), who, at)
+    return ok({"room_id": room_id, "cleared_at": at.isoformat()})
+
+
+@router.post("/office-room/{room_id}/clear/undo")
+def undo_clear_room(
+    request: Request, room_id: str = Path(min_length=1, max_length=64)
+) -> dict[str, Any]:
+    """/clear 되돌리기: 지운 대화를 내 화면에 다시 보인다."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    get_store().set_clear(room_id, request_company(), who, None)
+    return ok({"room_id": room_id, "cleared_at": None})
+
+
+@router.get("/office-room/clears")
+def list_room_clears(request: Request) -> dict[str, Any]:
+    """내가 /clear 한 방과 시각 (내 것만, 이 회사만)."""
+    who = human_from_authorization(request.headers.get("authorization"))
+    rows = get_store().clears(request_company(), who)
+    return ok(rows, total=len(rows))

@@ -3,7 +3,7 @@ import { ALL_ROOM, messageCount, timelineLanes, type ChatItem, type OrchIncident
 import { matchRoom, roomPeople, roomTime, type ChatRoom } from "@/lib/chatRooms";
 import { Link, useRouter, useSearchParams } from "@/lib/nav";
 import { DIRECT_AGENTS, DIRECT_PREFIX, DirectChat, directAgentOf } from "@/components/office/DirectChat";
-import { Avatar, MessengerLog, PinNotice, StatusChip, TypingLines, WorkLogBar } from "@/components/office/Messenger";
+import { Avatar, ClearDivider, MessengerLog, PinNotice, StatusChip, TypingLines, WorkLogBar } from "@/components/office/Messenger";
 import { useQuietLog } from "@/components/office/useQuietLog";
 import { RequestHandoffCard } from "@/components/office/RequestHandoffCard";
 import { TalkInput } from "@/components/office/TalkInput";
@@ -13,7 +13,9 @@ import { shopFaults, type FaultState } from "@/lib/shopFaults";
 import { humanizePlanIds } from "@/lib/format";
 import { RoomMenu, type MenuItem } from "@/components/office/RoomMenu";
 import { useHiddenRooms } from "@/components/office/useHiddenRooms";
-import { useRoomRemoval, type RowKind } from "@/components/office/useRoomRemoval";
+import { useRoomRemoval, type RoomInfo, type RowKind } from "@/components/office/useRoomRemoval";
+import { hiddenRows } from "@/lib/roomCleanup";
+import type { ToastApi } from "@/components/office/useToast";
 import { useToast } from "@/components/office/useToast";
 import { useScrollAnchor } from "@/components/office/useScrollAnchor";
 import { markSeen } from "@/lib/chatView";
@@ -106,8 +108,8 @@ interface RowActions {
   isHidden: (id: string) => boolean;
   hide: (id: string) => void;
   unhide: (id: string) => void;
-  /** ⋯ 메뉴의 지우기 항목 */
-  removeItems: (kind: RowKind, title: string, agentKey?: string) => MenuItem[];
+  /** ⋯ 메뉴의 지우기 항목 (장애 방은 사건 상태로 삭제 가능 여부를 정한다) */
+  removeItems: (kind: RowKind, title: string, agentKey?: string, room?: RoomInfo) => MenuItem[];
   refreshMine: () => void;
 }
 
@@ -118,7 +120,7 @@ function RoomRow({ id, on, avatar, title, status, preview, time, unread, act, ki
   const pane = act.paneOf(id);
   const menu: MenuItem[] = [
     { key: "hide", label: "목록에서 숨기기", sub: "내 브라우저에서만 · 기록은 그대로", onSelect: () => act.hide(id) },
-    ...act.removeItems(kind, title, agentKey),
+    ...act.removeItems(kind, title, agentKey, kind === "incident" ? { id, status } : undefined),
   ];
   const canAdd = !dim && act.canAdd(id);
   const onDrag = (e: DragEvent<HTMLLIElement>) => { e.dataTransfer.setData(DRAG_TYPE, id); e.dataTransfer.effectAllowed = "move"; };
@@ -155,13 +157,40 @@ function RoomRow({ id, on, avatar, title, status, preview, time, unread, act, ki
   );
 }
 
-function RoomList({ all, incidents, unseen, act, focusedRoom, narrow }: {
-  all: ChatRoom; incidents: ChatRoom[]; unseen: Record<string, number>; act: RowActions; focusedRoom: string | null; narrow: boolean;
+/** 서버가 숨긴(모두에게) 장애·이슈 방 한 줄: 흐리게 + [되돌리기] (11/23) */
+function ServerHiddenRow({ room, onRestore, toast }: { room: ChatRoom; onRestore: (id: string) => Promise<void>; toast: ToastApi }) {
+  const [busy, setBusy] = useState(false);
+  const restore = () => {
+    setBusy(true);
+    onRestore(room.id)
+      .then(() => toast.show(`"${room.title}" 방을 되돌렸어요`))
+      .catch((e: unknown) => toast.show(e instanceof Error && e.message ? e.message : "되돌리지 못했어요", { ms: 6000 }))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <li className="relative flex items-center gap-2.5 px-3 py-2.5 opacity-50">
+      <RoomAvatar room={room} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-semibold text-ink-900">{room.title}</span>
+        <span className="block truncate text-xs text-ink-500">모두에게 숨긴 방</span>
+      </span>
+      <button type="button" onClick={restore} disabled={busy} aria-label={`${room.title} 되돌리기`}
+        className="btn-ghost shrink-0 bg-surface px-2 py-0.5 text-[11px]">되돌리기</button>
+    </li>
+  );
+}
+
+function RoomList({ all, incidents, serverHidden, onRestore, toast, unseen, act, focusedRoom, narrow }: {
+  all: ChatRoom; incidents: ChatRoom[]; serverHidden: ChatRoom[]; onRestore: (id: string) => Promise<void>; toast: ToastApi;
+  unseen: Record<string, number>; act: RowActions; focusedRoom: string | null; narrow: boolean;
 }) {
   const [q, setQ] = useState("");
   const [showHidden, setShowHidden] = useState(false);
-  // 숨긴 방은 평소엔 빼고, "숨긴 방 보기"를 켜면 흐리게 같이 보인다 (검색은 그대로 적용)
-  const hiddenIds = [all.id, ...incidents.map((r) => r.id), ...DIRECT_AGENTS.map((a) => DIRECT_PREFIX + a.key)].filter(act.isHidden);
+  // 숨긴 방은 평소엔 빼고, "숨긴 방 보기"를 켜면 흐리게 같이 보인다 (검색은 그대로 적용).
+  // 서버 숨김(모두에게, [되돌리기])과 내 브라우저 숨김([다시 보이기])을 함께 센다
+  const localHidden = [all.id, ...incidents.map((r) => r.id), ...DIRECT_AGENTS.map((a) => DIRECT_PREFIX + a.key)].filter(act.isHidden);
+  const hiddenIds = hiddenRows(serverHidden.map((r) => r.id), localHidden).map((r) => r.id);
+  const shownServerHidden = showHidden ? serverHidden.filter((r) => matchRoom(q, r.title, r.longTitle)) : [];
   const visibleRoom = (id: string) => showHidden || !act.isHidden(id);
   const shownIncidents = incidents.filter((r) => matchRoom(q, r.title, r.longTitle) && visibleRoom(r.id));
   const shownDirect = DIRECT_AGENTS.filter((a) => matchRoom(q, a.name) && visibleRoom(DIRECT_PREFIX + a.key));
@@ -179,12 +208,13 @@ function RoomList({ all, incidents, unseen, act, focusedRoom, narrow }: {
           </ul>
         )}
         <h2 className="px-4 pb-1 pt-3 text-[11px] font-semibold text-ink-500">장애·이슈 방</h2>
-        {shownIncidents.length === 0 ? <p className="px-4 py-1 text-xs text-ink-500">{q ? "찾는 방이 없어요" : "아직 장애·이슈 방이 없어요"}</p> : (
+        {shownIncidents.length === 0 && shownServerHidden.length === 0 ? <p className="px-4 py-1 text-xs text-ink-500">{q ? "찾는 방이 없어요" : "아직 장애·이슈 방이 없어요"}</p> : (
           <ul>
             {shownIncidents.map((r) => (
               <RoomRow key={r.id} id={r.id} on={focusedRoom === r.id} avatar={<RoomAvatar room={r} />} title={r.title}
                 status={r.status} preview={r.preview} time={roomTime(r.lastAt)} unread={unseen[r.id]} act={act} kind="incident" dim={act.isHidden(r.id)} />
             ))}
+            {shownServerHidden.map((r) => <ServerHiddenRow key={r.id} room={r} onRestore={onRestore} toast={toast} />)}
           </ul>
         )}
         <h2 className="px-4 pb-1 pt-3 text-[11px] font-semibold text-ink-500">1:1 대화 · <span aria-hidden="true">🔒</span> 나만 보임</h2>
@@ -290,7 +320,9 @@ function RoomPane(p: PaneProps) {
   const roomInfo: ChatRoom | undefined = room === ALL_ROOM ? all : incidentRooms.find((r) => r.id === room);
   // 작업 기록 줄(AI끼리 주고받은 호출 기록, lib/commFilter.ts chatLane)은 기본으로 접고 맨 아래 한 줄로 센다. 토글은 방과 상관없이 하나
   const [showLog, setShowLog] = useQuietLog();
-  const allItems = useMemo(() => data.items[room] ?? [], [data.items, room]);
+  // 11/23 /clear: 내가 지운 시각 앞은 내 화면에서 뺀 대화(data.shown)를 그린다. 원래 기록은 data.items(AI 오피스 그림용)
+  const allItems = useMemo(() => data.shown[room] ?? [], [data.shown, room]);
+  const clearedAt = data.clears[room];
   const lanes = useMemo(() => timelineLanes(allItems), [allItems]);
   const items = showLog ? allItems : lanes.chat;
   const isAll = room === ALL_ROOM;
@@ -412,8 +444,9 @@ function RoomPane(p: PaneProps) {
       {head}
       {inc && <PinNotice inc={inc} />}
       <div ref={scroller} onScroll={onScroll} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-4">
+        {clearedAt && <ClearDivider clearedAt={clearedAt} onUndo={() => data.cleanup.undoClear(room)} />}
         {shown.length === 0 && !typing ? (
-          <EmptyState orchConn={orchConn} known={isAll || !!inc} />
+          clearedAt ? null : <EmptyState orchConn={orchConn} known={isAll || !!inc} />
         ) : (
           <>
             <CommNote conn={commConn} truncated={commTruncated} />
@@ -425,7 +458,7 @@ function RoomPane(p: PaneProps) {
       </div>
       <WorkLogBar logCount={lanes.logCount} failCount={lanes.failCount} show={showLog} onToggle={() => setShowLog(!showLog)} />
       <TypingLines names={answering} />
-      {talkable && <TalkInput talk={talk} onSent={() => toBottom(true)} where="chat" room={room} roomName={inc ? title : undefined} />}
+      {talkable && <TalkInput talk={talk} onSent={() => toBottom(true)} where="chat" room={room} roomName={inc ? title : undefined} onClear={() => data.cleanup.clear(room)} />}
       {fresh > 0 && (
         <button onClick={() => toBottom(true)}
           className="btn-primary absolute bottom-24 left-1/2 -translate-x-1/2 shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500">
@@ -506,7 +539,23 @@ export default function AgentChat() {
   const hidden = useHiddenRooms();
   const toast = useToast();
   const [gen, setGen] = useState(0); // 1:1 기록을 지우면 열린 1:1 칸을 새로 읽는다
-  const removal = useRoomRemoval({ toast, onAllRemoved: () => { void data.refresh(); }, onDirectRemoved: () => setGen((g) => g + 1) });
+  // 11/23 장애·이슈 방 삭제(모두에게 숨김): 지금 열린 방이면 그 칸을 닫는다(칸이 다 닫히면 전체 대화방)
+  const hideIncident = useCallback(async (id: string) => {
+    await data.cleanup.hide(id);
+    setRooms((cur) => { const next = cur.filter((r) => r !== id); return next.length ? next : [ALL_ROOM]; });
+  }, [data.cleanup]);
+  const removal = useRoomRemoval({ toast, onAllRemoved: () => { void data.refresh(); }, onDirectRemoved: () => setGen((g) => g + 1), onHideIncident: hideIncident });
+  // 다른 사람이 숨긴 장애 방이 열려 있으면 그 칸도 닫는다
+  const serverHiddenKey = data.hiddenIncidentRooms.map((r) => r.id).join(",");
+  useEffect(() => {
+    if (!serverHiddenKey) return;
+    const gone = new Set(serverHiddenKey.split(","));
+    setRooms((cur) => {
+      if (!cur.some((r) => gone.has(r))) return cur;
+      const next = cur.filter((r) => !gone.has(r));
+      return next.length ? next : [ALL_ROOM];
+    });
+  }, [serverHiddenKey]);
   const hideRoom = (id: string) => {
     hidden.hide(id);
     setRooms((cur) => cur.filter((r) => r !== id));
@@ -613,7 +662,8 @@ export default function AgentChat() {
       <div className="chat-round flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <div className={`flex min-h-0 shrink-0 flex-col gap-2 ${shownCount >= 3 ? "lg:w-64" : "lg:w-80"}`}>
           <RequestHandoffCard compact layout="sidebar" />
-          <RoomList all={all} incidents={incidentRooms} unseen={data.unseen} act={act} focusedRoom={focusedRoom} narrow={shownCount >= 3} />
+          <RoomList all={all} incidents={incidentRooms} serverHidden={data.hiddenIncidentRooms} onRestore={data.cleanup.unhide} toast={toast}
+            unseen={data.unseen} act={act} focusedRoom={focusedRoom} narrow={shownCount >= 3} />
         </div>
         <div className={`grid min-h-0 min-w-0 flex-1 gap-3 ${cols}`}>
           {Array.from({ length: shownCount }, (_, i) => {

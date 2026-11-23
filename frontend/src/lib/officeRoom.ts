@@ -80,6 +80,37 @@ export class RoomRemoveError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
+// ---- 대화방 정리 (11/23): 장애·이슈 방 숨김(모두에게) · /clear(나만). 사람 토큰, 로그인한 회사 것만
+
+async function post(path: string): Promise<unknown> {
+  const res = await fetch(`${URL}/${path}`, { method: "POST", cache: "no-store", headers: headers() });
+  const body = (await res.json().catch(() => null)) as { data?: unknown; error?: { code?: string; message?: string } } | null;
+  if (!res.ok || !body) throw new OfficeRoomError(body?.error?.message ?? `단톡방 목록 서버 응답 ${res.status}`, res.status, body?.error?.code ?? null);
+  return body.data;
+}
+
+/** 장애·이슈 방을 모두의 방 목록에서 숨긴다(해결된 사건만, 진행 중 409·확인 못 함 503) */
+export const hideIncidentRoom = (roomId: string) => post(`${encodeURIComponent(roomId)}/hide`);
+export const unhideIncidentRoom = (roomId: string) => post(`${encodeURIComponent(roomId)}/unhide`);
+/** 이 회사에서 숨긴 장애·이슈 방 id */
+export async function listHiddenRooms(): Promise<string[]> {
+  const data = await call(undefined, "/hidden");
+  return Array.isArray(data) ? data.map((x) => (x as { room_id?: unknown }).room_id).filter((x): x is string => typeof x === "string") : [];
+}
+/** /clear: 이 방의 지금까지 대화를 내 화면에서 지운다 / 되돌리기 */
+export const clearRoom = (roomId: string) => post(`${encodeURIComponent(roomId)}/clear`);
+export const undoClearRoom = (roomId: string) => post(`${encodeURIComponent(roomId)}/clear/undo`);
+/** 내가 /clear 한 방과 시각 */
+export async function listRoomClears(): Promise<{ room_id: string; cleared_at: string | null }[]> {
+  const data = await call(undefined, "/clears");
+  return Array.isArray(data)
+    ? data.flatMap((x) => {
+        const r = x as { room_id?: unknown; cleared_at?: unknown };
+        return typeof r.room_id === "string" ? [{ room_id: r.room_id, cleared_at: typeof r.cleared_at === "string" ? r.cleared_at : null }] : [];
+      })
+    : [];
+}
+
 /** 서버가 받는 가장 긴 기간(시간). dashboard-api office_room.MAX_HOURS */
 export const OFFICE_ROOM_MAX_HOURS = 168;
 
