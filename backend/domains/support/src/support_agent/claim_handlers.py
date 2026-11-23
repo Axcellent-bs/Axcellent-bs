@@ -646,14 +646,16 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
                 )
             )
             continue
+        shop_refund: dict[str, Any] | None = None
         if claim.payment_id and shop_client.order_source() == "shop-api":
             # 같은 키로 다시 불러도 shop-api가 이전 환불을 돌려주므로 실패했다면 다시 처리하면 된다
             try:
-                await shop_client.refund(
+                shop_refund = await shop_client.refund(
                     claim.payment_id,
                     claim.expected_refund,
                     meta.idempotency_key or "",
                     claim.context_id,
+                    cancel_order=claim.type == "cancel",  # 배송 전 취소면 주문도 취소한다
                 )
             except shop_client.ShopError as exc:
                 held += 1
@@ -676,6 +678,10 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
                 continue
         claim.refund_paid = claim.expected_refund
         claim.processed_at = now_iso()
+        order_detail: dict[str, Any] = {}
+        if shop_refund is not None and "order_cancelled" in shop_refund:
+            # 판매 서버가 주문도 취소했는지 (취소 클레임만 true가 될 수 있다)
+            order_detail["order_cancelled"] = bool(shop_refund["order_cancelled"])
         CLAIMS.set_status(
             claim,
             "completed",
@@ -685,6 +691,7 @@ async def process_claim_queue(request: AgentRequest) -> AgentResult:
             compensation=0,
             execution=decision.execution_id,
             requested_by=parsed.requested_by,
+            **order_detail,
         )
         await _record_activity(
             request, claim, "claim_paid", amount=claim.refund_paid, requested_by=parsed.requested_by
