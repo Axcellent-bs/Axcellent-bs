@@ -167,6 +167,38 @@ export function planCard(p: PlanLookup, request?: string | null): PlanCardView {
 export const PLAN_LOOKUP_MIN_MS = 60_000;
 export const planLookupDue = (lastAt: number | null, now: number) => lastAt === null || now - lastAt >= PLAN_LOOKUP_MIN_MS;
 
+// 11/23 기획서가 늦게·안 뜨는 문제: 카드가 먼저 뜰 때 읽은 목록에 새 제안이 없으면 1분 제한 때문에 계속 비어 있었다.
+// - 기획 단계 결과(result_ref)가 PROP-…인데 기억해 둔 목록에 없으면 1분 제한 없이 바로 다시 읽는다(같은 번호는 10초에 한 번까지)
+// - receive_insight가 끝났는데 제안을 못 찾았으면 15초 간격으로 최대 8번 다시 읽는다(카드가 사라지면 멈춤)
+export const PLAN_REFETCH_MIN_MS = 10_000;
+export const PLAN_RETRY_MS = 15_000;
+export const PLAN_RETRY_MAX = 8;
+
+/** 기획 단계(receive_insight)가 끝나 결과 번호가 PROP-…면 그 번호, 아니면 null */
+function planResultRef(r: Pick<WorkRequestRow, "plan" | "steps">): string | null {
+  const p = r.plan.find((x) => x.skill === "receive_insight");
+  const s = p ? r.steps[p.step_id] : undefined;
+  return s?.status === "completed" && s.result_ref && /^PROP-/.test(s.result_ref) ? s.result_ref : null;
+}
+
+/** 1분 제한을 무시하고 기획 목록을 다시 읽을까: 결과 번호(PROP-)가 목록에 없고, 그 번호로 10초 안에 읽은 적이 없을 때 */
+export function needPlanRefetch(
+  r: Pick<WorkRequestRow, "plan" | "steps">,
+  list: readonly { id: string }[] | null | undefined,
+  lastAskedAt: number | null,
+  now: number,
+): boolean {
+  const id = planResultRef(r);
+  if (!id || list?.some((p) => p.id === id)) return false;
+  return lastAskedAt === null || now - lastAskedAt >= PLAN_REFETCH_MIN_MS;
+}
+
+/** 기획 단계가 끝났고 그 제안이 목록에 있나 (없으면 15초 간격 다시 읽기를 이어 간다) */
+export function planFound(r: Pick<WorkRequestRow, "plan" | "steps">, list: readonly { id: string; insightId?: string }[] | null | undefined): boolean {
+  const id = proposalOfRequest(r, list as { id: string; insightId?: string }[] | null | undefined);
+  return !!id && !!list?.some((p) => p.id === id);
+}
+
 // ---- 의뢰 영상 성과 (데이터 video_performance campaign_id = 의뢰 번호) · 기획 결과 받기 (11/23)
 // 영상 제작(generate_media)이 끝난 의뢰만 1분에 한 번까지 읽는다 (planLookupDue와 같은 간격).
 // 등록 안 됐으면(영상 id 없음) 아무 줄도 더하지 않는다
