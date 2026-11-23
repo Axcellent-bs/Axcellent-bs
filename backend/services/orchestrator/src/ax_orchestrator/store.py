@@ -20,10 +20,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ax_orchestrator import company_scope
 from ax_orchestrator.models import Incident, StepRun, now
 
 DB_ENV = "ORCHESTRATOR_DB"
 MEMORY = ":memory:"
+_TABLES = ("incidents", "seen_events", "finance_opinions", "agent_diagnoses", "work_requests")
 
 log = logging.getLogger("orchestrator.store")
 
@@ -33,26 +35,31 @@ CREATE TABLE IF NOT EXISTS incidents (
     status     TEXT NOT NULL,
     opened_at  TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    body       TEXT NOT NULL
+    body       TEXT NOT NULL,
+    tenant_id  TEXT NOT NULL DEFAULT 'catbooks'
 );
 CREATE TABLE IF NOT EXISTS seen_events (
     event_id TEXT PRIMARY KEY,
-    seen_at  TEXT NOT NULL
+    seen_at  TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'catbooks'
 );
 CREATE TABLE IF NOT EXISTS finance_opinions (
     opinion_id  TEXT PRIMARY KEY,
     received_at TEXT NOT NULL,
-    body        TEXT NOT NULL
+    body        TEXT NOT NULL,
+    tenant_id   TEXT NOT NULL DEFAULT 'catbooks'
 );
 CREATE TABLE IF NOT EXISTS agent_diagnoses (
     request_id  TEXT PRIMARY KEY,
     received_at TEXT NOT NULL,
-    body        TEXT NOT NULL
+    body        TEXT NOT NULL,
+    tenant_id   TEXT NOT NULL DEFAULT 'catbooks'
 );
 CREATE TABLE IF NOT EXISTS work_requests (
     request_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
-    body       TEXT NOT NULL
+    body       TEXT NOT NULL,
+    tenant_id  TEXT NOT NULL DEFAULT 'catbooks'
 );
 """
 
@@ -192,8 +199,9 @@ def incident_from_dict(raw: dict[str, Any]) -> Incident:
 class IncidentStore:
     """이벤트와 처리한 `event_id`를 SQLite에 둔다. 한 연결을 잠금으로 나눠 쓴다."""
 
-    def __init__(self, path: str = MEMORY) -> None:
+    def __init__(self, path: str = MEMORY, company_id: str | None = None) -> None:
         self.path = path
+        self.company_id = company_scope.scope_id(company_id)  # 회사 칸(여러 회사 1-6)
         if path != MEMORY:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
@@ -201,22 +209,32 @@ class IncidentStore:
         if path != MEMORY:
             self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(_SCHEMA)
+        for table in _TABLES:
+            company_scope.ensure_tenant_column(self._db, table)  # 옛 줄은 캣북스
         self._db.commit()
 
     @classmethod
-    def from_env(cls) -> IncidentStore:
-        return cls(os.getenv(DB_ENV) or MEMORY)
+    def from_env(cls, company_id: str | None = None) -> IncidentStore:
+        return cls(os.getenv(DB_ENV) or MEMORY, company_id)
 
     def save(self, inc: Incident) -> None:
         body = json.dumps(incident_to_dict(inc), ensure_ascii=False, default=str)
         stamp = now().isoformat()
         with self._lock:
             self._db.execute(
-                "INSERT INTO incidents (context_id, status, opened_at, updated_at, body)"
-                " VALUES (?, ?, ?, ?, ?)"
+                "INSERT INTO incidents (context_id, status, opened_at, updated_at, body, tenant_id)"
+                " VALUES (?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(context_id) DO UPDATE SET"
-                " status = excluded.status, updated_at = excluded.updated_at, body = excluded.body",
-                (inc.context_id, inc.status, inc.opened_at.isoformat(), stamp, body),
+                " status = excluded.status, updated_at = excluded.updated_at, body = excluded.body"
+                " WHERE incidents.tenant_id = excluded.tenant_id",  # 다른 회사 줄은 덮지 않는다
+                (
+                    inc.context_id,
+                    inc.status,
+                    inc.opened_at.isoformat(),
+                    stamp,
+                    body,
+                    self.company_id,
+                ),
             )
             self._db.commit()
 
@@ -224,7 +242,9 @@ class IncidentStore:
         """열린 순서대로 돌려준다. 읽지 못하는 줄은 건너뛰고 경고만 남긴다."""
         with self._lock:
             rows = self._db.execute(
-                "SELECT context_id, body FROM incidents ORDER BY opened_at, context_id"
+                "SELECT context_id, body FROM incidents WHERE tenant_id = ?"
+                " ORDER BY opened_at, context_id",
+                (self.company_id,),
             ).fetchall()
         found: list[Incident] = []
         for context_id, body in rows:
@@ -238,15 +258,17 @@ class IncidentStore:
         """처리한 `event_id`로 적는다. 처음 적으면 True, 이미 있으면 False."""
         with self._lock:
             cur = self._db.execute(
-                "INSERT OR IGNORE INTO seen_events (event_id, seen_at) VALUES (?, ?)",
-                (event_id, now().isoformat()),
+                "INSERT OR IGNORE INTO seen_events (event_id, seen_at, tenant_id) VALUES (?, ?, ?)",
+                (event_id, now().isoformat(), self.company_id),
             )
             self._db.commit()
             return cur.rowcount == 1
 
     def seen_ids(self) -> set[str]:
         with self._lock:
-            rows = self._db.execute("SELECT event_id FROM seen_events").fetchall()
+            rows = self._db.execute(
+                "SELECT event_id FROM seen_events WHERE tenant_id = ?", (self.company_id,)
+            ).fetchall()
         return {row[0] for row in rows}
 
     def save_opinion(self, opinion_id: str, received_at: str, row: dict[str, Any]) -> None:
@@ -254,9 +276,9 @@ class IncidentStore:
         body = json.dumps(row, ensure_ascii=False, default=str)
         with self._lock:
             self._db.execute(
-                "INSERT OR IGNORE INTO finance_opinions (opinion_id, received_at, body)"
-                " VALUES (?, ?, ?)",
-                (opinion_id, received_at, body),
+                "INSERT OR IGNORE INTO finance_opinions"
+                " (opinion_id, received_at, body, tenant_id) VALUES (?, ?, ?, ?)",
+                (opinion_id, received_at, body, self.company_id),
             )
             self._db.commit()
 
@@ -265,20 +287,26 @@ class IncidentStore:
         body = json.dumps(row, ensure_ascii=False, default=str)
         with self._lock:
             self._db.execute(
-                "UPDATE finance_opinions SET body = ? WHERE opinion_id = ?", (body, opinion_id)
+                "UPDATE finance_opinions SET body = ? WHERE opinion_id = ? AND tenant_id = ?",
+                (body, opinion_id, self.company_id),
             )
             self._db.commit()
 
     def drop_opinion(self, opinion_id: str) -> None:
         with self._lock:
-            self._db.execute("DELETE FROM finance_opinions WHERE opinion_id = ?", (opinion_id,))
+            self._db.execute(
+                "DELETE FROM finance_opinions WHERE opinion_id = ? AND tenant_id = ?",
+                (opinion_id, self.company_id),
+            )
             self._db.commit()
 
     def load_opinions(self) -> list[dict[str, Any]]:
         """받은 순서대로. 읽지 못하는 줄은 건너뛴다."""
         with self._lock:
             rows = self._db.execute(
-                "SELECT opinion_id, body FROM finance_opinions ORDER BY received_at, rowid"
+                "SELECT opinion_id, body FROM finance_opinions WHERE tenant_id = ?"
+                " ORDER BY received_at, rowid",
+                (self.company_id,),
             ).fetchall()
         found: list[dict[str, Any]] = []
         for opinion_id, body in rows:
@@ -296,22 +324,31 @@ class IncidentStore:
         body = json.dumps(row, ensure_ascii=False, default=str)
         with self._lock:
             self._db.execute(
-                "INSERT OR REPLACE INTO agent_diagnoses (request_id, received_at, body)"
-                " VALUES (?, ?, ?)",
-                (request_id, received_at, body),
+                "INSERT INTO agent_diagnoses (request_id, received_at, body, tenant_id)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(request_id) DO UPDATE SET"
+                " received_at = excluded.received_at, body = excluded.body"
+                # 다른 회사 줄은 덮지 않는다
+                " WHERE agent_diagnoses.tenant_id = excluded.tenant_id",
+                (request_id, received_at, body, self.company_id),
             )
             self._db.commit()
 
     def drop_diagnosis(self, request_id: str) -> None:
         with self._lock:
-            self._db.execute("DELETE FROM agent_diagnoses WHERE request_id = ?", (request_id,))
+            self._db.execute(
+                "DELETE FROM agent_diagnoses WHERE request_id = ? AND tenant_id = ?",
+                (request_id, self.company_id),
+            )
             self._db.commit()
 
     def load_diagnoses(self) -> list[dict[str, Any]]:
         """받은 순서대로. 읽지 못하는 줄은 건너뛴다."""
         with self._lock:
             rows = self._db.execute(
-                "SELECT request_id, body FROM agent_diagnoses ORDER BY received_at, rowid"
+                "SELECT request_id, body FROM agent_diagnoses WHERE tenant_id = ?"
+                " ORDER BY received_at, rowid",
+                (self.company_id,),
             ).fetchall()
         found: list[dict[str, Any]] = []
         for request_id, body in rows:
@@ -329,22 +366,29 @@ class IncidentStore:
         body = json.dumps(row, ensure_ascii=False, default=str)
         with self._lock:
             self._db.execute(
-                "INSERT INTO work_requests (request_id, created_at, body) VALUES (?, ?, ?)"
-                " ON CONFLICT(request_id) DO UPDATE SET body = excluded.body",
-                (request_id, created_at, body),
+                "INSERT INTO work_requests (request_id, created_at, body, tenant_id)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(request_id) DO UPDATE SET body = excluded.body"
+                " WHERE work_requests.tenant_id = excluded.tenant_id",  # 다른 회사 줄은 덮지 않는다
+                (request_id, created_at, body, self.company_id),
             )
             self._db.commit()
 
     def drop_request(self, request_id: str) -> None:
         with self._lock:
-            self._db.execute("DELETE FROM work_requests WHERE request_id = ?", (request_id,))
+            self._db.execute(
+                "DELETE FROM work_requests WHERE request_id = ? AND tenant_id = ?",
+                (request_id, self.company_id),
+            )
             self._db.commit()
 
     def load_requests(self) -> list[dict[str, Any]]:
         """받은 순서대로. 읽지 못하는 줄은 건너뛴다."""
         with self._lock:
             rows = self._db.execute(
-                "SELECT request_id, body FROM work_requests ORDER BY created_at, rowid"
+                "SELECT request_id, body FROM work_requests WHERE tenant_id = ?"
+                " ORDER BY created_at, rowid",
+                (self.company_id,),
             ).fetchall()
         found: list[dict[str, Any]] = []
         for request_id, body in rows:
