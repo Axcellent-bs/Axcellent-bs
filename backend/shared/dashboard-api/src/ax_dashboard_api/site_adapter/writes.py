@@ -34,8 +34,9 @@ context_id·확인한 safety `execution_id`(돈이 걸린 동작)·고객사 메
 `x-request-id`·오류 코드. 본문 원문·멱등 키 원문·고객사 키·사이트 오류 문구는 남기지 않는다.
 
 직접 쓰기 켜기: `<변환기 폴더>/direct_writes.json` `{"enabled": ["inquiry_answer", ...]}`.
-없으면 모두 꺼짐. 지금은 읽기만 한다(켜는 화면은 W4). 돈이 걸린 동작은 관문 확인을 지난
-쓰기(`execution_id` 있음)에서만 켜진 것으로 본다.
+없으면 모두 꺼짐. 회사 연결 화면(W4, `write_setup.py`)이 동작별로 켜고 끈다(`set_direct_write`,
+누가 언제 바꿨는지 `changes`). 돈이 걸린 동작은 관문 확인을 지난 쓰기(`execution_id` 있음)에서만
+켜진 것으로 본다.
 """
 
 from __future__ import annotations
@@ -185,6 +186,100 @@ def direct_write_on(action: WriteAction, execution_id: str | None = None) -> boo
         return False
     enabled = raw.get("enabled") if isinstance(raw, dict) else None
     return isinstance(enabled, list) and action in enabled
+
+
+MAX_SWITCH_CHANGES = 50
+
+
+def _read_switch(folder: Path) -> dict[str, Any]:
+    try:
+        raw = json.loads((folder / SWITCH_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def enabled_actions() -> list[str]:
+    """회사 연결에서 직접 쓰기를 켠 동작 (파일 값 그대로, 돈이 걸린 동작의 관문 조건은 빼고)."""
+    enabled = _read_switch(adapter_dir()).get("enabled")
+    return [str(a) for a in enabled] if isinstance(enabled, list) else []
+
+
+def set_direct_write(action: WriteAction, on: bool, by: str) -> list[str]:
+    """동작 하나의 직접 쓰기를 켜거나 끈다(W4 화면). 누가 언제 바꿨는지 `changes`에 남긴다.
+
+    다른 동작의 켜짐은 그대로 둔다. 켠 동작 목록을 돌려준다.
+    """
+    folder = adapter_dir()
+    with _locked(folder):
+        raw = _read_switch(folder)
+        enabled = [str(a) for a in raw.get("enabled", []) if isinstance(a, str)]
+        if on and action not in enabled:
+            enabled.append(action)
+        if not on:
+            enabled = [a for a in enabled if a != action]
+        changes = raw.get("changes")
+        changes = [c for c in changes if isinstance(c, dict)] if isinstance(changes, list) else []
+        changes.append({"at": _now(), "by": by, "action": action, "on": on})
+        out = {"enabled": enabled, "changes": changes[-MAX_SWITCH_CHANGES:]}
+        tmp = folder / (SWITCH_FILE + ".tmp")
+        tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, folder / SWITCH_FILE)
+    logger.info("사이트 직접 쓰기 %s: action=%s (by %s)", "켬" if on else "끔", action, by)
+    return enabled
+
+
+def clear_denied(action: WriteAction, by: str) -> dict[str, str]:
+    """키에 쓰기 권한 없음 표시를 푼다(키를 바꾼 뒤, W4 화면). 남은 표시를 돌려준다.
+
+    다음 쓰기가 다시 401·403을 받으면 다시 표시된다(`direct.mark_denied`).
+    """
+    folder = adapter_dir()
+    with _locked(folder):  # mark_denied와 같은 잠금 안에서 바꾼다
+        actions = direct.denied_actions()
+        if action in actions:
+            del actions[action]
+            folder.mkdir(parents=True, exist_ok=True)
+            tmp = folder / (direct.DENIED_FILE + ".tmp")
+            tmp.write_text(json.dumps({"actions": actions}, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, folder / direct.DENIED_FILE)
+    logger.info("키 쓰기 권한 없음 표시 풂: action=%s (by %s)", action, by)
+    return actions
+
+
+RECENT_LIMIT = 50
+# 최근 사이트 쓰기에 내보내는 칸 (W4). 본문 원문·멱등 키(지문 포함)·고객사 키·context_id·
+# safety 실행 id·응답 본문은 내보내지 않는다
+RECENT_FIELDS = (
+    "at",
+    "finished_at",
+    "service",
+    "action",
+    "status",
+    "reason",
+    "site_method",
+    "site_path",
+    "site_status",
+    "site_code",
+    "handoff_task_id",
+)
+
+
+def recent(limit: int = RECENT_LIMIT) -> list[dict[str, Any]]:
+    """쓰기 장부의 최근 줄 (새것 먼저). 화면용 칸만, `applied`는 응답의 그 값만 옮긴다."""
+    rows: list[dict[str, Any]] = []
+    for entry in read_ledger().values():
+        if not isinstance(entry, dict):
+            continue
+        row = {name: entry.get(name) for name in RECENT_FIELDS}
+        response = entry.get("response")
+        applied = response.get("applied") if isinstance(response, dict) else None
+        row["applied"] = applied if applied in ("site", "pending_human") else None
+        reason = entry.get("reason")
+        row["reason_text"] = REASONS.get(reason) if isinstance(reason, str) else None
+        rows.append(row)
+    rows.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
+    return rows[:limit]
 
 
 def route(action: WriteAction, execution_id: str | None = None) -> str:

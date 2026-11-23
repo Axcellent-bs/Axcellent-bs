@@ -480,6 +480,17 @@ def test_6_member_cannot_reach_admin_screens_or_switch_the_company(
         client.post(f"{API}/site-adapter/propose", json={"base_url": SHOP}, headers=m),
         client.put(f"{API}/site-adapter", json={}, headers=m),
         client.post(f"{API}/site-adapter/save", json={}, headers=m),
+        # 회사 연결 › 사이트 쓰기 (W4)
+        client.post(f"{API}/site-adapter/writes/map", json={"action": "refund"}, headers=m),
+        client.post(f"{API}/site-adapter/inboxes/map", json={"inbox": "claims"}, headers=m),
+        client.post(
+            f"{API}/site-adapter/writes/switch",
+            json={"action": "refund", "on": True, "confirm_money": True},
+            headers=m,
+        ),
+        client.post(
+            f"{API}/site-adapter/writes/denied/clear", json={"action": "refund"}, headers=m
+        ),
     ]
     for res in tried:
         assert res.status_code in (403, 404), (res.request.method, res.request.url, res.text)

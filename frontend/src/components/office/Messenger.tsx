@@ -2,6 +2,7 @@ import { Fragment, useState, type ReactNode } from "react";
 import { HandoffLine, PlanCard } from "@/components/office/DevCards";
 import { RequestProgressCard } from "@/components/office/RequestProgressCard";
 import { CreativeChatCard } from "@/components/office/CreativeChatCard";
+import { ChatCardView } from "@/components/office/ChatCards";
 import { TALK_LABEL, proceed, type OfficeTalk } from "@/components/office/useOfficeTalk";
 import { INCIDENT_STATUS_KO, type ChatItem, type OrchIncident, type Tone } from "@/lib/agentChat";
 import { clock, detectorName, impactOf, num, rootCauseOf } from "@/lib/data";
@@ -156,6 +157,8 @@ function Bubble({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: Off
       )}
       {m.handoff && <HandoffLine requestId={m.handoff.requestId} />}
       {m.creative && <CreativeChatCard card={m.creative} />}
+      {/* 11/23 데이터분석 분석 의뢰·보고서 카드: 1:1(DirectChat)과 같은 ChatCardView (같은 메시지 id라 [의뢰 넣기] 상태가 같다) */}
+      {m.chatCard && <ChatCardView card={m.chatCard.card} messageId={m.chatCard.messageId} threadId={m.chatCard.threadId} />}
     </div>
   );
 }

@@ -30,6 +30,28 @@ export function refusedForThisPerson(e: unknown): boolean {
   return status === 401 || status === 403;
 }
 
+/**
+ * 로그인 전 공개 정보(세션이 없어 늘 캣북스)를 화면 회사로 써도 되나.
+ * 이 사람 토큰으로 키 목록을 읽었거나(`keysRead`), 로그인한 사람의 응답을 아직 기다리는 중(`waiting`)이면 쓰지 않는다.
+ * 기다리는 중에 공개 정보를 쓰면 다른 회사 관리자 화면에 캣북스 이름이 잠깐 보인다(설계 6.2, 사후 리뷰 11/23).
+ */
+export function publicFallbackOk(keysRead: boolean, waiting: boolean): boolean {
+  return !keysRead && !waiting;
+}
+
+/**
+ * 세션마다 읽기 차례. 로그인한 사람이 바뀌면 `next()`로 차례를 올리고, 지난 차례에 보낸 요청의 응답은
+ * `isCurrent()`가 false라 버린다(앞 사람 회사 정보가 늦게 도착해 새 사람 화면에 덮이지 않게).
+ */
+export function readTurns() {
+  let turn = 0;
+  return {
+    current: () => turn,
+    next: () => ++turn,
+    isCurrent: (t: number) => t === turn,
+  };
+}
+
 /** 화면이 쓰는 연결 회사: 연결 키로 연결한 회사 → 사이트 연결 회사 → 로그인 전 공개 정보 순서 */
 export function pickCompany<T>(keyed: T | null, site: T | null, pub: T | null): T | null {
   return keyed ?? site ?? pub;

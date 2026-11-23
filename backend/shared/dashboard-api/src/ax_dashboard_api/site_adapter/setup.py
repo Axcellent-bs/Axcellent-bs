@@ -4,7 +4,9 @@
 - `POST /api/dashboard/site-adapter/propose`: 주소·키로 둘러보기. `openapi.json`의 목록 경로와,
   주문·상품 경로를 주면 첫 쪽을 읽어 짝을 제안한다(저장하지 않음)
 - `PUT  /api/dashboard/site-adapter`: 짝을 받아 첫 쪽을 실제로 바꿔 보고, 통과하면
-  짝 파일·키 파일을 쓰고 회사 연결을 `kind=adapter`로 저장한다
+  짝 파일·키 파일을 쓰고 회사 연결을 `kind=adapter`로 저장한다. 보낸 짝에 없는 쓰기 짝
+  (`writes`)·받은함 짝(`inboxes`)은 저장된 값을 그대로 둔다(W4, `keep_extras`)
+- 쓰기 짝·받은함 짝·동작별 직접 쓰기·최근 사이트 쓰기는 `write_setup.py`
 
 쓰기(POST·PUT)는 사람 토큰만 되고, 로그인 세션이면 운영자·관리자만(`EDITORS`).
 주소 정책은 회사 연결과 같다(`check_host`).
@@ -82,6 +84,8 @@ class ProposeIn(BaseModel):
     token: str | None = Field(None, max_length=MAX_TOKEN)
     orders_path: str | None = None
     products_path: str | None = None
+    # 추가 필드 (W4): 신청 받은함 경로. 주면 첫 쪽을 읽어 칸 이름·첫 줄을 `claims_sample`로 준다
+    claims_path: str | None = None
 
     @field_validator("auth_header")
     @classmethod
@@ -218,9 +222,18 @@ async def propose_mapping(body: ProposeIn) -> dict:
     """저장하지 않고 둘러본다. 경로 둘을 다 주면 첫 쪽을 읽어 짝을 제안한다."""
     base = _base(body.base_url)
     headers = upstream.auth_headers(body.auth_header, body.auth_scheme, _token(body.token, base))
-    paths = await upstream.get_paths(base, headers)
+    paths, write_paths = await upstream.get_all_paths(base, headers)
+    # 추가 칸 (W4): 쓰기 짝 후보 경로, 신청 받은함 첫 쪽
+    extra: dict[str, Any] = {"write_paths": write_paths, "claims_sample": None}
+    if body.claims_path:
+        res = _resource(body.claims_path)
+        try:
+            rows = await upstream.first_page(base + res.path, res.paging, headers)
+        except upstream.UpstreamError as exc:
+            raise _upstream_422(exc) from exc
+        extra["claims_sample"] = _sample(rows)
     if not (body.orders_path and body.products_path):
-        return ok({"paths": paths, "samples": None, "mapping": None})
+        return ok({"paths": paths, "samples": None, "mapping": None, **extra})
     targets: dict[Resource, ResourceMap] = {
         "orders": _resource(body.orders_path),
         "products": _resource(body.products_path),
@@ -240,7 +253,7 @@ async def propose_mapping(body: ProposeIn) -> dict:
         "auth_scheme": body.auth_scheme,
         "resources": proposed,
     }
-    return ok({"paths": paths, "samples": samples, "mapping": mapping})
+    return ok({"paths": paths, "samples": samples, "mapping": mapping, **extra})
 
 
 def _complete(m: SiteMapping) -> None:
@@ -294,6 +307,26 @@ async def verify(base: str, m: SiteMapping, token: str) -> dict[str, int]:
     return counts
 
 
+# 주문·상품 짝 저장이 보내지 않으면 저장된 값을 그대로 두는 칸 (W4). 쓰기 짝·받은함 짝은
+# 회사 연결 › 사이트 쓰기 화면(`write_setup`)이 따로 저장한다
+KEPT_FIELDS = ("writes", "inboxes")
+
+
+def keep_extras(sent: dict[str, Any]) -> dict[str, Any]:
+    """보낸 짝에 없는 `writes`·`inboxes`를 저장된 짝에서 채운다(보낸 칸만 바꾼다).
+
+    저장된 짝이 깨졌으면 채우지 않는다(깨진 값을 되살리지 않는다).
+    """
+    try:
+        found = load_mapping()
+    except MappingError:
+        found = None
+    if found is None:
+        return sent
+    saved = found.model_dump()
+    return {**sent, **{k: saved[k] for k in KEPT_FIELDS if k not in sent}}
+
+
 def _write_mapping(m: SiteMapping) -> None:
     folder = adapter_dir()
     folder.mkdir(parents=True, exist_ok=True)
@@ -334,7 +367,7 @@ async def save(body: SaveIn, request: Request) -> dict:
         )
     base = _base(body.base_url)
     try:
-        m = SiteMapping.model_validate(body.mapping)
+        m = SiteMapping.model_validate(keep_extras(body.mapping))
     except ValidationError as exc:
         reason = f"짝 모양이 맞지 않아요: {exc.error_count()}곳"
         raise ApiError(422, "MAPPING_BROKEN", reason) from exc

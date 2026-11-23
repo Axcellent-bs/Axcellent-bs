@@ -5,6 +5,7 @@ import { isRedeployFailed } from "./rollbackResult";
 export type { Redeploy, RollbackView } from "./rollbackResult";
 import type { CommLine, CommOutcome } from "./types";
 import type { WorkRequestRow } from "./workRequests";
+import type { RoomChatCard } from "./chatCards.ts";
 import { foldSafety, type FoldLine } from "./safetyFold.ts";
 import { chatMessageCount, timelineLanes } from "./quietLog.ts";
 
@@ -217,6 +218,8 @@ export type ChatItem =
       requestCard?: string
       /** 마케팅 대화의 이미지 시트·스토리보드 카드(올린 캐릭터·결과) */
       creative?: { kind: "creative"; record_id: string; role: "attached" | "result"; has_storyboard: boolean; has_script?: boolean }
+      /** 데이터분석 분석 의뢰·보고서 카드(1:1과 같은 ChatCardView, 11/23). 서버 메시지 id·그 대화 id와 함께 */
+      chatCard?: RoomChatCard
       /** 받는 쪽 원래 이름(공통 로그 to_agent). AI 오피스가 부서끼리 걸어가는 데 쓴다 */
       toKey?: string
       /** 안전 관문 execution_id (실행 기록·공통 로그 줄). 안전 확인 줄 합치기(lib/safetyFold.ts)가 묶는 기준 */

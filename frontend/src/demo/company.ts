@@ -11,7 +11,7 @@ import { useSyncExternalStore } from 'react'
 import { call, companyConnection } from '@/lib/companyConnection'
 import { DASHBOARD_API_URL } from '@/lib/env'
 import { getSession, onSessionChange } from '@/lib/humanSession'
-import { pickCompany, readPublicCompany, refusedForThisPerson } from '@/lib/publicCompany'
+import { pickCompany, publicFallbackOk, readPublicCompany, readTurns, refusedForThisPerson } from '@/lib/publicCompany'
 
 export type ConnectedCompany = {
   id: string
@@ -56,8 +56,14 @@ const toServer = (c: CompanyInfo) => ({ name: c.name, industry: c.industry, netw
 // 이 사람 토큰으로 연결 키 목록을 읽었나. 읽었으면 서버가 준 세션 회사의 줄이 답이라 로그인 전 공개 정보로 채우지 않는다
 // (공개 정보는 세션이 없어 늘 캣북스. 다른 회사 관리자 화면에 캣북스 이름이 보이지 않게, 설계 6.2)
 let keysRead = false
+// 로그인한 사람의 키 목록 응답을 기다리는 중인가. 기다리는 동안(연결 실패로 못 받은 때 포함)은 공개 정보(늘 캣북스)로
+// 채우지 않는다. 세션이 바뀌면 앞 사람 값을 바로 비우고 새 응답을 기다린다(사후 리뷰 11/23)
+let waiting = (() => { try { return !!getSession() } catch { return false } })()
+// 세션 차례. 세션이 바뀐 뒤 늦게 온 앞 사람 응답은 버린다
+const turns = readTurns()
 function apply(s: ServerState) {
   keysRead = true
+  waiting = false
   company = s.company
     ? { id: s.company.id, name: s.company.name, industry: s.company.industry, network: s.company.network, siteUrl: s.company.site_url || undefined, key: s.company.key ?? undefined, connectedAt: s.company.connected_at }
     : null
@@ -75,15 +81,18 @@ function apply(s: ServerState) {
 // 키로 연결한 회사가 없어도 서버에 사이트 연결(판매 서버 + 회사 설정)이 있으면 그 회사로 본다(#1357)
 let siteCompany: ConnectedCompany | null = null
 function loadSiteCompany(): Promise<void> {
+  const turn = turns.current()
   return companyConnection.get()
     .then((s) => {
+      if (!turns.isCurrent(turn)) return // 세션이 바뀐 뒤 온 앞 사람 응답
       const on = s.source === 'connection' && s.connection?.enabled !== false && s.tenant
       siteCompany = on && s.tenant ? { id: s.tenant.id, name: s.tenant.name, industry: '', network: '', connectedAt: s.connection?.updated_at ?? undefined } : null
       notify()
     })
     .catch((e: unknown) => {
       // 토큰이 없거나 받지 않으면(로그인 전·로그아웃) 지난 사람이 읽은 값을 지운다. 연결 실패면 지난 값 그대로
-      if (refusedForThisPerson(e)) { siteCompany = null; notify() }
+      // (같은 사람의 값이다. 세션이 바뀌면 onSessionChange가 먼저 비운다)
+      if (turns.isCurrent(turn) && refusedForThisPerson(e)) { siteCompany = null; notify() }
     })
 }
 
@@ -104,8 +113,12 @@ function loadPublicCompany(): Promise<void> {
 // 처음 읽기가 끝났는지. 끝나기 전에는 "연결 전"으로 보고 회사 연결 화면으로 보내지 않는다(App의 Guarded)
 let loaded = false
 export function refreshCompany(): Promise<void> {
-  const keysNow = call<ServerState>('GET', PATH).then(apply).catch((e: unknown) => {
-    if (refusedForThisPerson(e)) { keys = []; company = null; keysRead = false; notify() } // 연결 실패면 지난 값 그대로
+  const turn = turns.current()
+  const keysNow = call<ServerState>('GET', PATH).then((s) => { if (turns.isCurrent(turn)) apply(s) }).catch((e: unknown) => {
+    if (!turns.isCurrent(turn)) return // 세션이 바뀐 뒤 온 앞 사람 응답
+    // 거절(401·403)이면 이 사람 값이 없다: 비우고 로그인 전 공개 정보를 쓴다.
+    // 연결 실패면 지난 값 그대로(같은 사람의 값. 세션이 바뀐 직후라면 이미 비어 있고 계속 기다린다)
+    if (refusedForThisPerson(e)) { keys = []; company = null; keysRead = false; waiting = false; notify() }
   })
   return Promise.all([keysNow, loadSiteCompany(), loadPublicCompany()]).then(() => {
     if (!loaded) { loaded = true; notify() }
@@ -114,13 +127,22 @@ export function refreshCompany(): Promise<void> {
 /** 회사 연결 저장·해제 뒤 (SiteConnect) */
 export const refreshServerCompany = refreshCompany
 try { void refreshCompany() } catch { loaded = true /* fetch가 없는 환경 */ }
-// 로그인·로그아웃하면 그 사람 토큰으로 다시 읽는다. 아직 회사를 모르면 다 읽을 때까지 Guarded가 기다린다
+// 로그인·로그아웃하면(세션이 바뀌면) 앞 사람 값을 바로 비우고 그 사람 토큰으로 다시 읽는다.
+// 비우지 않으면 새 응답이 오기 전·연결 실패 때 앞 사람 회사 정보가 보인다(사후 리뷰 11/23).
+// 아직 회사를 모르면 다 읽을 때까지 Guarded가 기다린다
 onSessionChange(() => {
-  if (getSession() && !getCompany()) { loaded = false; notify() }
+  turns.next()
+  keys = []
+  company = null
+  siteCompany = null
+  keysRead = false
+  waiting = !!getSession()
+  if (getSession() && !getCompany()) loaded = false
+  notify()
   try { void refreshCompany() } catch { loaded = true; notify() }
 })
 
-export const getCompany = () => pickCompany(company, siteCompany, keysRead ? null : publicCompany)
+export const getCompany = () => pickCompany(company, siteCompany, publicFallbackOk(keysRead, waiting) ? publicCompany : null)
 export const useCompany = () => useSyncExternalStore(subscribe, getCompany)
 /** 서버에서 연결 회사를 처음 한 번 다 읽었나 */
 export const useCompanyLoaded = () => useSyncExternalStore(subscribe, () => loaded)
@@ -154,7 +176,7 @@ export async function connectWithKey(k: IssuedKey, info: CompanyInfo) {
 export async function updateCompanyInfo(info: CompanyInfo) {
   apply(await call<ServerState>('POST', `${PATH}/company`, toServer(info)))
 }
-/** 끊어도 키에 남긴 회사 정보는 두어서, 같은 키로 다시 연결할 때 미리 채운다 */
+/** 끊으면 서버가 그 키 줄의 회사·회사 정보를 지운다(연결 전 키로 돌아가 운영자만 본다, 사후 리뷰 11/23) */
 export async function disconnect() {
   apply(await call<ServerState>('POST', `${PATH}/disconnect`))
 }
