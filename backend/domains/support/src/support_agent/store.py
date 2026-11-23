@@ -10,7 +10,7 @@ import itertools
 from datetime import UTC, datetime
 from typing import Any
 
-from support_agent import abuse_rules, languages
+from support_agent import abuse_rules, company_scope, languages
 from support_agent.schemas import (
     ActivityEntry,
     Analysis,
@@ -55,6 +55,10 @@ class InquiryStore:
         """감사 기록 ID. 카운터라 동시 요청이 겹쳐도 같은 ID가 나오지 않는다."""
         return next(self._audit_ids)
 
+    def _mine(self) -> list[Conversation]:
+        """지금 요청 회사의 문의 (요청 밖이면 전부). `company_scope`."""
+        return [c for c in self._conversations.values() if company_scope.visible(c.tenant_id)]
+
     def list(
         self,
         status: InquiryStatus | None = None,
@@ -65,7 +69,7 @@ class InquiryStore:
             ConversationListItem.model_validate(
                 c.model_dump(include=set(ConversationListItem.model_fields))
             )
-            for c in self._conversations.values()
+            for c in self._mine()
             if (status is None or c.status == status)
             and (user_id is None or c.user_id == user_id)
             and (language is None or c.language == language)
@@ -73,19 +77,17 @@ class InquiryStore:
         return sorted(items, key=lambda c: (c.updated_at, c.id), reverse=True)
 
     def all(self) -> list[Conversation]:
-        """집계용 전체 문의 (읽기 전용으로 쓴다)."""
-        return list(self._conversations.values())
+        """집계용 전체 문의 (읽기 전용으로 쓴다). 요청 안이면 그 회사 문의만."""
+        return self._mine()
 
     def get(self, inquiry_id: int) -> Conversation | None:
-        return self._conversations.get(inquiry_id)
+        """문의 하나. 다른 회사 문의는 없는 것처럼 None."""
+        found = self._conversations.get(inquiry_id)
+        return found if found is not None and company_scope.visible(found.tenant_id) else None
 
     def find_by_context(self, context_id: str) -> Conversation | None:
         """이 context_id의 문의 (여럿이면 번호가 가장 큰 것). 개인정보를 지운 문의는 뺀다."""
-        found = [
-            c
-            for c in self._conversations.values()
-            if c.context_id == context_id and not c.purged_at
-        ]
+        found = [c for c in self._mine() if c.context_id == context_id and not c.purged_at]
         return max(found, key=lambda c: c.id) if found else None
 
     def create(
