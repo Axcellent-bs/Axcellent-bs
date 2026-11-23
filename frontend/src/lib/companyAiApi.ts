@@ -57,3 +57,12 @@ export function errText(e: unknown): string {
   if (e instanceof ApiError) return `${e.message}${e.code ? ` (${e.code})` : ""}`;
   return e instanceof Error ? e.message : String(e);
 }
+
+// SNS 계정 연결(마케팅 › SNS·미디어). 유튜브는 구글 동의 화면으로 보내고, 돌아오면 서버가 이 회사 키 저장소에 넣는다
+const YT = `${DASHBOARD_API_URL}/api/dashboard/marketing/youtube`;
+export async function youtubeConnectUrl(): Promise<string> {
+  const d = (await call(`${YT}/connect`, {})) as { url?: unknown };
+  if (typeof d.url !== "string" || !d.url.startsWith("https://accounts.google.com/")) throw new Error("구글 연결 주소를 받지 못했어요.");
+  return d.url;
+}
+export const youtubeDisconnect = () => call(`${YT}/disconnect`, {});

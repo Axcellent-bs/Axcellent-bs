@@ -30,6 +30,10 @@ COMPANY_AI_KEY_NAMES: tuple[str, ...] = (
     "LLM_API_KEY",
     "DEV_CODER_LLM_API_KEY",
     "MARKETING_VIDEO_API_KEY",
+    # SNS 계정 연결(회사마다 다름, 11/23): 인스타 토큰·계정 ID, 유튜브 채널 연결(OAuth로 넣음)
+    "MARKETING_IG_ACCESS_TOKEN",
+    "MARKETING_IG_USER_ID",
+    "MARKETING_YOUTUBE_REFRESH_TOKEN",
 )
 
 CompanyAiCoderMode = Literal["company", "separate"]

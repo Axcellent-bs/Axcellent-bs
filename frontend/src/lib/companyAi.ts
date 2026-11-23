@@ -7,8 +7,14 @@
 
 export type AiState = "connected" | "no_key" | "trial" | "trial_exhausted" | "budget_exhausted" | "no_company";
 export type Tone = "ok" | "wait" | "bad" | "off";
-export type KeyName = "LLM_API_KEY" | "DEV_CODER_LLM_API_KEY" | "MARKETING_VIDEO_API_KEY";
-export const KEY_NAMES: readonly KeyName[] = ["LLM_API_KEY", "DEV_CODER_LLM_API_KEY", "MARKETING_VIDEO_API_KEY"];
+export type KeyName =
+  | "LLM_API_KEY" | "DEV_CODER_LLM_API_KEY" | "MARKETING_VIDEO_API_KEY"
+  // SNS 계정 연결(회사마다 다름, 11/23)
+  | "MARKETING_IG_ACCESS_TOKEN" | "MARKETING_IG_USER_ID" | "MARKETING_YOUTUBE_REFRESH_TOKEN";
+export const KEY_NAMES: readonly KeyName[] = [
+  "LLM_API_KEY", "DEV_CODER_LLM_API_KEY", "MARKETING_VIDEO_API_KEY",
+  "MARKETING_IG_ACCESS_TOKEN", "MARKETING_IG_USER_ID", "MARKETING_YOUTUBE_REFRESH_TOKEN",
+];
 
 export type CoderMode = "company" | "separate";
 export interface CompanyAiSettings {
@@ -275,6 +281,7 @@ export function videoView(hasKey: boolean, enabled: boolean): { tone: Tone; labe
 export const keyHintKo = (hint: string) => (hint ? `••••${hint}` : "—");
 export const KEY_LABEL: Record<KeyName, string> = {
   LLM_API_KEY: "회사 AI 키", DEV_CODER_LLM_API_KEY: "코딩 에이전트 키", MARKETING_VIDEO_API_KEY: "영상 생성 키",
+  MARKETING_IG_ACCESS_TOKEN: "인스타 토큰", MARKETING_IG_USER_ID: "인스타 계정 ID", MARKETING_YOUTUBE_REFRESH_TOKEN: "유튜브 채널 연결",
 };
 const keyLabel = (name?: string) => (name && KEY_LABEL[name as KeyName]) || name || "키";
 const OP_LABEL: Record<string, string> = { add: "등록", replace: "교체", delete: "삭제" };

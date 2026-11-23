@@ -3,13 +3,13 @@ import { useVisibleInterval } from "@/lib/visibleInterval";
 import { shortDateTime } from "@/lib/format";
 import { fetchYoutubeStatus, type YoutubeStatus } from "@/lib/youtube";
 
-// 마케팅 › SNS·미디어 › 이미지 시트 위. AXcellent 유튜브 채널이 연결돼 있는지 화면이 보일 때 60초마다 다시 본다.
+// 마케팅 › SNS·미디어 › 이미지 시트 위. 로그인한 회사의 유튜브 채널이 연결돼 있는지 화면이 보일 때 60초마다 다시 본다.
 // 서버가 토큰을 새로 받아 채널 이름을 읽어 본다(영상은 올리지 않음). 키 값은 오지 않는다.
 
 const REFRESH_MS = 60_000;
 const LOOK: Record<string, { dot: string; label: string; note: string }> = {
   ok: { dot: "bg-emerald-500", label: "연결됨", note: "승인된 영상은 이 채널에 올라가요" },
-  missing_keys: { dot: "bg-ink-300", label: "연결 전", note: "서버에 유튜브 연결 값(MARKETING_YOUTUBE_*)이 아직 없어요" },
+  missing_keys: { dot: "bg-ink-300", label: "연결 전", note: "이 회사 유튜브 채널이 아직 연결되지 않았어요(위 SNS 계정 연결에서 연결)" },
   invalid_credentials: { dot: "bg-red-500", label: "연결 거절", note: "연결 값이 만료됐거나 틀렸어요. 다시 연결해 주세요" },
   error: { dot: "bg-amber-500", label: "닿지 않음", note: "유튜브에 닿지 않았어요. 잠시 뒤 다시 확인해요" },
 };

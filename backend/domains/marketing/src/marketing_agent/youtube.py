@@ -85,12 +85,19 @@ def _now() -> datetime:
 
 
 def _secret(name: str) -> str:
-    """로그인한 회사(지금 회사)의 키. 회사마다 자기 유튜브 채널을 연결한다(tenant=회사 ID)."""
+    """로그인한 회사(지금 회사)의 키. 회사마다 자기 유튜브 채널을 연결한다(tenant=회사 ID).
+
+    클라이언트 ID·비밀은 AXcellent 앱 하나를 같이 쓰므로 회사에 없으면 기본 tenant 값을 쓴다.
+    refresh token(채널 연결)은 그 회사 것만 쓴다.
+    """
     from ax_agent_template import company_ai
     from ax_secret_store import get_secret
 
     try:
-        return get_secret(name, tenant=company_ai.company_id()).strip()
+        value = get_secret(name, tenant=company_ai.company_id()).strip()
+        if not value and name != KEYS[2]:
+            value = get_secret(name).strip()
+        return value
     except Exception:  # noqa: BLE001 - 키 저장소 장애는 연결 안 됨으로 본다
         return ""
 

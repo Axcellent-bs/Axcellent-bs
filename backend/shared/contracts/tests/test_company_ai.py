@@ -71,6 +71,9 @@ def test_key_names_are_the_three_from_the_design() -> None:
         "LLM_API_KEY",
         "DEV_CODER_LLM_API_KEY",
         "MARKETING_VIDEO_API_KEY",
+        "MARKETING_IG_ACCESS_TOKEN",
+        "MARKETING_IG_USER_ID",
+        "MARKETING_YOUTUBE_REFRESH_TOKEN",
     )
 
 
