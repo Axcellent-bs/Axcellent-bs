@@ -4597,12 +4597,29 @@ class TrendBeat(AxModel):
     evidence_items: list[TrendReportEvidence] = Field(default_factory=list)
 
 
+# 기획에 넘길 재료의 종류 (11/23): 해시태그 · 형식 · 관심 주제 · 밈 · 글쓰기 · 올리는 때 · 그 밖
+TrendMaterialKind = Literal["hashtag", "format", "topic", "meme", "writing", "timing", "other"]
+
+
+class TrendMaterial(AxModel):
+    """기획에 넘길 재료 하나 (11/23). 무엇을 쓰라는지 짧은 말(숫자 없음)과, 코드가 만든 근거.
+    시간별 장면·대본은 기획(planning video_plan) 몫이라 데이터는 재료까지만 낸다."""
+
+    kind: TrendMaterialKind
+    text: str = Field(max_length=80)
+    evidence: list[str] = Field(default_factory=list)  # 코드가 만든 근거 문장
+    evidence_items: list[TrendReportEvidence] = Field(default_factory=list)  # evidence와 같은 순서
+
+
 class TrendRecommendationSection(AxModel):
     status: SectionStatus = "waiting"
     reason: str | None = None
     conclusion: str | None = None
+    # 옛 보고서의 시간별 콘티 (지우지 않는다). 11/23부터 새 보고서는 비우고 materials를 쓴다
     beats: list[TrendBeat] = Field(default_factory=list)
     music_note: str = ""
+    # 아래는 예전 응답은 없다 (11/23). 기획에 넘길 재료 (종류마다 하나, 최대 4)
+    materials: list[TrendMaterial] = Field(default_factory=list, max_length=4)
 
 
 ThemeSeenIn = Literal["radar", "youtube", "llm"]

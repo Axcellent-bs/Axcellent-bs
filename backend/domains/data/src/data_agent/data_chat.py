@@ -305,11 +305,19 @@ def _ro(path: str | Path | None) -> sqlite3.Connection | None:
     return sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
 
 
-def _rows(path: str | Path | None, sql: str, args: tuple[Any, ...] = ()) -> list[tuple]:
+def _rows(path: str | Path | None, sql: str, args: tuple[Any, ...] = (), *,
+          table: str | None = None) -> list[tuple]:  # fmt: skip
+    """읽기 전용 줄. `table`을 주면 회사 표다: sql의 `{mine}` 자리에 지금 요청의 회사 조건을 넣고
+    값은 앞에 붙인다 (여러 회사 1-5, `company_scope.read_filter`)."""
+    from data_agent import company_scope
+
     conn = _ro(path)
     if conn is None:
         return []
     try:
+        if table is not None:
+            where, mine = company_scope.read_filter(conn, table)
+            sql, args = sql.format(mine=where), (*mine, *args)
         return conn.execute(sql, args).fetchall()
     except sqlite3.Error:
         return []
@@ -322,8 +330,9 @@ def _cached(env: Mapping[str, str], skill: str, ok: Callable[[dict], bool]) -> d
     from data_agent import response_cache
 
     path = env.get(response_cache.DB_ENV) or str(_backend_data() / "trend_responses.db")
-    for (value,) in _rows(path, "SELECT value FROM responses WHERE skill = ?"
-                          " ORDER BY stored_at DESC LIMIT 50", (skill,)):  # fmt: skip
+    for (value,) in _rows(path, "SELECT value FROM responses WHERE {mine} AND skill = ?"
+                          " ORDER BY stored_at DESC LIMIT 50", (skill,),
+                          table="responses"):  # fmt: skip
         try:
             output = json.loads(value)[1]
         except (ValueError, IndexError, TypeError):
@@ -395,13 +404,14 @@ def read_insight(env: Mapping[str, str], now: datetime) -> dict | None:
     from data_agent.skills import video_performance as vp
 
     rows = _rows(env.get(tib.DB_ENV) or tib.DEFAULT_DB,
-                 "SELECT output FROM briefs ORDER BY created_at DESC LIMIT 1")  # fmt: skip
+                 "SELECT output FROM briefs WHERE {mine} ORDER BY created_at DESC LIMIT 1",
+                 table="briefs")  # fmt: skip
     if not rows:
         return None
     out = json.loads(rows[0][0])
-    sql = ("SELECT insight_id, COUNT(*) FROM videos WHERE test = 0"
+    sql = ("SELECT insight_id, COUNT(*) FROM videos WHERE {mine} AND test = 0"
            " AND insight_id IS NOT NULL GROUP BY insight_id")  # fmt: skip
-    used = {r[0]: r[1] for r in _rows(env.get(vp.DB_ENV) or vp.DEFAULT_DB, sql)}
+    used = {r[0]: r[1] for r in _rows(env.get(vp.DB_ENV) or vp.DEFAULT_DB, sql, table="videos")}
     by_id = {f.get("fact_id"): f for f in out.get("facts", [])}
 
     def band(insight_id: str) -> str:
@@ -469,8 +479,8 @@ def read_performance(env: Mapping[str, str], now: datetime) -> dict | None:
             "시점별": points,
         })  # fmt: skip
     sends_db = env.get(campaign_update.DB_ENV) or campaign_update.DEFAULT_DB
-    sql = "SELECT campaign_id, state, sent_at, reason FROM sends"
-    sends = {r[0]: r[1:] for r in _rows(sends_db, sql)}
+    sql = "SELECT campaign_id, state, sent_at, reason FROM sends WHERE {mine}"
+    sends = {r[0]: r[1:] for r in _rows(sends_db, sql, table="sends")}
     campaigns = {}
     for o in outs:
         if not o.campaign_id:
@@ -681,8 +691,9 @@ def read_report(env: Mapping[str, str], now: datetime) -> dict | None:
     from data_agent.trend_report_hooks import report_label
 
     path = env.get(trend_report_store.DB_ENV)
-    rows = _rows(path, "SELECT result, handoff FROM reports ORDER BY created_at DESC LIMIT ?",
-                 (MATERIAL_ROWS,))  # fmt: skip
+    rows = _rows(path, "SELECT result, handoff FROM reports WHERE {mine}"
+                 " ORDER BY created_at DESC LIMIT ?", (MATERIAL_ROWS,),
+                 table="reports")  # fmt: skip
     if not rows:
         return None
     items = []

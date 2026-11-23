@@ -11,7 +11,7 @@ import { dataAi, type RequestVideoPerformance } from "@/lib/data";
 import { planDocPath } from "@/lib/planDoc";
 import { planId } from "@/lib/format";
 import { STALE_HOURS, staleHours } from "@/lib/officeRequests";
-import { keyEvidence, reportHash, sortBeats } from "@/lib/trendReportView";
+import { keyEvidence, recommendationItems, reportHash } from "@/lib/trendReportView";
 import type { TrendReportDoneCard } from "@/lib/planningData";
 import type { TrendReport as Report } from "@/lib/data";
 import { DoneCard, ProgressCard } from "@/components/office/ChatCards";
@@ -52,7 +52,7 @@ function ReportCell({ reportId }: { reportId: string }) {
   if (done) return <DoneCard card={done} />;
   const finish = (r: Report) => setDone({
     kind: "trend_report_done", report_id: r.report_id, status: r.status, summary_line: r.summary_line,
-    top_evidence: keyEvidence(sortBeats(r.sections.recommendation.beats)).map((k) => k.short),
+    top_evidence: keyEvidence(recommendationItems(r.sections.recommendation)).map((k) => k.short),
     report_path: `/data/trend${reportHash(r.report_id)}`,
   });
   return <ProgressCard card={{ kind: "trend_report_progress", report_id: reportId }} onDone={finish} />;
@@ -160,7 +160,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   if (!showRequestCard(hasToken, requestId) || !row) return null;
   const proposal = proposalOfRequest(row, proposals);
   const found = proposal ? proposals?.find((p) => p.id === proposal) : undefined;
-  const plan = found ? planCard(found) : null;
+  const plan = found ? planCard(found, row.request_id) : null;
   const perfView = made ? perfStep(perf.out, Date.now()) : null;
   const result = perfView ? resultStep(row.request_id, found, perfView) : null;
   const st = REQUEST_STATUS[row.status];
@@ -209,7 +209,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                 {report && <ReportCell reportId={report} />}
                 {isInsight && plan && <PlanCell card={plan} />}
                 {isInsight && proposal && !plan && (
-                  <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(planDocPath({ id: proposal }))}>기획 제안 열기</button>
+                  <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(planDocPath({ id: proposal, request: row.request_id }))}>기획 제안 열기</button>
                 )}
                 {s.decide && !decided.has(s.stepId) && (
                   <span className="mt-1 flex flex-wrap gap-1.5">

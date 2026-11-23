@@ -474,18 +474,27 @@ async def load_order(order_id: str, *, client: httpx.AsyncClient | None = None) 
 
 
 async def refund(
-    payment_id: str, amount: int, idempotency_key: str, context_id: str
+    payment_id: str,
+    amount: int,
+    idempotency_key: str,
+    context_id: str,
+    *,
+    cancel_order: bool = False,
 ) -> dict[str, Any]:
-    """현금 환불을 반영한다. 같은 키의 재요청은 이전 환불을 돌려준다 (`meta.replayed`)."""
-    response = await _send(
-        "POST",
-        f"/payments/{payment_id}/refund",
-        json={
-            "refund_amount": amount,
-            "idempotency_key": idempotency_key,
-            "context_id": context_id,
-        },
-    )
+    """현금 환불을 반영한다. 같은 키의 재요청은 이전 환불을 돌려준다 (`meta.replayed`).
+
+    `cancel_order`는 취소 클레임 지급이다. 판매 서버(catbooks-demo #60)는 이 환불로 결제가 전액
+    환불되고 아직 발송 전이면 주문도 취소하고(`order.cancelled`) 응답에 `order_cancelled`를 붙인다.
+    그 전 판매 서버는 모르는 칸을 무시하고 환불만 한다.
+    """
+    body: dict[str, Any] = {
+        "refund_amount": amount,
+        "idempotency_key": idempotency_key,
+        "context_id": context_id,
+    }
+    if cancel_order:
+        body["cancel_order"] = True
+    response = await _send("POST", f"/payments/{payment_id}/refund", json=body)
     if response.status_code not in (200, 201):
         raise _error(response)
     return response.json()["data"]

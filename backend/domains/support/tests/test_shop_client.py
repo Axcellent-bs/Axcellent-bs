@@ -83,7 +83,10 @@ class FakeShop:
                 status, code = self.refund_failure
                 return httpx.Response(status, json={"error": {"code": code, "message": "x"}})
             self.refunds.setdefault(body["idempotency_key"], body)
-            return httpx.Response(201, json={"data": {"refund_id": "rfd_0001"}, "meta": {}})
+            data: dict[str, Any] = {"refund_id": "rfd_0001"}
+            if body.get("cancel_order"):  # catbooks-demo #60: 배송 전 전액 환불이면 주문도 취소
+                data["order_cancelled"] = True
+            return httpx.Response(201, json={"data": data, "meta": {}})
         return httpx.Response(500)
 
     def refund_calls(self) -> list[httpx.Request]:
@@ -290,9 +293,22 @@ def test_paid_claim_refunds_cash_through_shop_api(
         "refund_amount": 23000,
         "idempotency_key": "ctx_shop_abc123:refund_request:claim:1",  # 클레임 접수 사건 기준
         "context_id": "ctx_shop_abc123",
+        "cancel_order": True,  # 배송 전 취소 클레임이라 주문도 취소해 달라고 한다
     }
     assert refund.headers["authorization"] == "Bearer mock:support"
-    assert call(client, "get_claim", {"claim_id": 1})["output"]["status"] == "completed"
+    claim = call(client, "get_claim", {"claim_id": 1})["output"]
+    assert claim["status"] == "completed"
+    assert claim["audit"][-1]["detail"]["order_cancelled"] is True
+
+
+@pytest.mark.asyncio
+async def test_refund_sends_cancel_order_only_when_asked(shop: FakeShop) -> None:
+    await shop_client.refund(PAYMENT_ID, 1000, "k-a", "ctx_shop_x")
+    data = await shop_client.refund(PAYMENT_ID, 1000, "k-b", "ctx_shop_x", cancel_order=True)
+    first, second = (json.loads(r.content) for r in shop.refund_calls())
+    assert "cancel_order" not in first
+    assert second["cancel_order"] is True
+    assert data["order_cancelled"] is True
 
 
 def test_failed_refund_keeps_the_claim_unpaid_and_a_retry_pays_once(

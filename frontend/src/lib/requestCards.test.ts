@@ -183,3 +183,9 @@ test("기획 결과 받기: 이 의뢰로 결과를 받은 제안이면 '제안 
   assert.equal(resultStep(RID, { id: "PROP-15" }, done).chip.label, "보내는 중");
   assert.equal(resultStep(RID, null, measuring).line, "7일을 재면 기획 제안에 결과를 보내요 · 다음 분석 의뢰의 \"지난번 결과\"에 들어가요");
 });
+
+test("기획 칸 열기 주소: 의뢰 번호를 주면 ?request= 로 붙는다 (PDF 주소에는 안 붙음)", () => {
+  const c = planCard({ id: "PROP-18", title: "제목", idea: "할 일" }, "wr_d8cf3a9691");
+  assert.equal(c.openPath, "/planning/proposals/PROP-18?request=wr_d8cf3a9691");
+  assert.equal(c.printPath, "/planning/proposals/PROP-18?print=1");
+});

@@ -3,11 +3,13 @@
 총괄 plan ②(trend_report_insight)와 사람이 누르는 기획에 보내기(trend_report_handoff)가 같이 쓴다.
 같은 보고서면 늘 같은 결과다(insight_id = "trend_report:" + report_id, 시각은 보고서 끝난 시각).
 
-- facts(최대 12): 콘티 근거가 가리키는 행 먼저, 그다음 섹션 1 상위 3(basis filtered만, small_base
-  제외), 섹션 2 상위 3, 섹션 3 상위 2(link = permalink), 섹션 4 상위 2. 근거가 0개면 insight 없음
+- facts(최대 12): 추천 근거(재료, 옛 보고서는 콘티)가 가리키는 행 먼저, 그다음 섹션 1 상위 3
+  (basis filtered만, small_base 제외), 섹션 2 상위 3, 섹션 3 상위 2(link = permalink),
+  섹션 4 상위 2. 근거가 0개면 insight 없음
 - 캡션 등 외부 글은 body_md·facts에 넣지 않는다(태그·계정 이름·숫자만)
 - body_md의 숫자는 facts(label·value)·제목에 같은 값이 있을 때만 (기획 숫자 검사와 같은 규칙).
-  콘티 칸 이름은 훅·전환·증거·마무리, 섹션 요약·한계는 숫자 없는 말
+  11/23: "## 기획에 넘길 재료"에 "재료(해시태그): …" 줄 (시간별 장면은 기획이 짠다).
+  옛 보고서(콘티만)는 "## 콘티"에 훅·전환·증거·마무리 줄. 섹션 요약·한계는 숫자 없는 말
 - products·product_ids·content_category·content_format은 비운다(고객사 상품을 모름)
 """
 
@@ -15,7 +17,8 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from ax_contracts.schemas.data import TrendReport
 from ax_contracts.schemas.planning import InsightFact, ReceiveInsightInput
@@ -128,8 +131,11 @@ def _top(report: TrendReport, rows: dict[str, Row]) -> list[str]:
 
 def pick_facts(report: TrendReport) -> list[InsightFact]:
     rows = row_facts(report)
-    beat_ids = [e.id for b in report.sections.recommendation.beats for e in b.evidence_items]
-    theme_ids = [k for k in rows if k.startswith("theme:")]  # 콘티 근거 → 주제 후보 → 지금 순서
+    rec = report.sections.recommendation
+    # 추천 근거 먼저: 재료(11/23) · 옛 보고서는 콘티 → 주제 후보 → 섹션 상위
+    beat_ids = [e.id for m in rec.materials for e in m.evidence_items]
+    beat_ids += [e.id for b in rec.beats for e in b.evidence_items]
+    theme_ids = [k for k in rows if k.startswith("theme:")]
     order = list(dict.fromkeys([*(i for i in beat_ids if i in rows), *theme_ids,
                                 *_top(report, rows)]))  # fmt: skip
     return [InsightFact(label=clip(rows[i][0], LABEL_MAX), value=clip(rows[i][1], VALUE_MAX),
@@ -152,9 +158,11 @@ def shorts_format(report: TrendReport) -> str | None:
 # 그래서 body_md의 숫자는 facts에 같은 값이 있을 때만 남기고, 섹션 요약·한계는 숫자 없는 말로 쓴다
 _NUM = re.compile(r"\d[\d,]*(?:\.\d+)?")
 SLOT_WORD = {"0-3": "훅", "3-15": "전환", "15-25": "증거", "25-30": "마무리"}
+MATERIAL_WORD = {"hashtag": "해시태그", "format": "형식", "topic": "관심 주제", "meme": "밈",
+                 "writing": "글쓰기", "timing": "올리는 때", "other": "그 밖"}  # fmt: skip
 # 고정 한계 문장 → 숫자 없는 말 (보고서 화면에는 원문 그대로)
 PLAIN_LIMITS = {
-    "숫자는": "숫자는 전부 코드가 계산했고, AI는 결론 한 줄과 콘티 문장만 숫자 없이 썼다",
+    "숫자는": "숫자는 전부 코드가 계산했고, AI는 결론 한 줄과 재료 문장만 숫자 없이 썼다",
     "검색·쇼핑은": "검색·쇼핑은 최근 한 주 평균을 직전 네 주 평균과 견줬다. 네이버 값은 요청 안의"
                   " 상대값이라 키워드끼리 크기는 비교하지 않는다",
     "터짐 =": "터짐은 그 계정 최근 게시물 중앙값보다 크게 뜨고 최근 한 주 안에 올린 것",
@@ -203,17 +211,29 @@ def body_md(report: TrendReport, facts: list[InsightFact] | None = None) -> str:
     none = f"(결론 없음: {report.summary_reason or '이유 모름'})"
     conclusion = report.summary_line or none
     lines = ["## 결론", conclusion if safe(conclusion) else "(결론 문장은 보고서 화면에서 확인)"]
-    if rec.beats:
-        words = {k: v[1] for k, v in evidence_catalog(report).items()}
+    words = {k: v[1] for k, v in evidence_catalog(report).items()}
+
+    def evidence_lines(items: Sequence[Any]) -> None:
+        for item in items:
+            if safe(item.text):
+                lines.append(f"  - 근거: {item.text}")
+            elif (word := words.get(item.id)) and safe(word):
+                lines.append(f"  - 근거: {word}")
+
+    if rec.materials:  # 11/23: 시간별 장면은 기획이 짠다. 데이터는 재료까지만
+        lines.append("## 기획에 넘길 재료")
+        for m in rec.materials:
+            text = m.text if safe(m.text) else "(재료 문장은 보고서 화면에서 확인)"
+            lines.append(f"- 재료({MATERIAL_WORD.get(m.kind, '그 밖')}): {text}")
+            evidence_lines(m.evidence_items)
+        if rec.music_note and safe(rec.music_note):
+            lines.append(f"- 음악: {rec.music_note}")
+    elif rec.beats:  # 옛 보고서 (콘티만): 지금처럼 장면 줄로
         lines.append("## 콘티")
         for beat in rec.beats:
             text = beat.text if safe(beat.text) else "(장면 문장은 보고서 화면에서 확인)"
             lines.append(f"- {SLOT_WORD.get(beat.slot, '장면')}: {text}")
-            for item in beat.evidence_items:
-                if safe(item.text):
-                    lines.append(f"  - 근거: {item.text}")
-                elif (word := words.get(item.id)) and safe(word):
-                    lines.append(f"  - 근거: {word}")
+            evidence_lines(beat.evidence_items)
         if rec.music_note and safe(rec.music_note):
             lines.append(f"- 음악: {rec.music_note}")
     if s.theme.status == "known" and s.theme.rows:  # 11/20: 숫자는 facts에 있는 값만

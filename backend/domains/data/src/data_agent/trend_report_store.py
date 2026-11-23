@@ -19,6 +19,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from data_agent import company_scope
+
 DB_ENV = "DATA_TREND_REPORT_DB"
 LIVE = ("queued", "running")  # 아직 끝나지 않은 상태
 REUSABLE = ("queued", "running", "done", "partial")  # 같은 의뢰면 이 저장본을 연다
@@ -52,6 +54,8 @@ class TrendReportStore:
             for col in ("chat_thread_id", "handoff"):
                 if col not in have:
                     self._conn.execute(f"ALTER TABLE reports ADD COLUMN {col} TEXT")
+            # 11/23 여러 회사 1-5: 회사 칸 (옛 줄은 캣북스). ig_media는 공개 수집이라 공유
+            company_scope.ensure_tenant_column(self._conn, "reports")
             # 11/20: 총괄 긴 작업으로 이 보고서를 기다리는 쪽 (요청마다 한 줄, 토큰은 저장 안 함)
             self._conn.execute(
                 "CREATE TABLE IF NOT EXISTS report_waiters (task_id TEXT PRIMARY KEY,"
@@ -71,19 +75,28 @@ class TrendReportStore:
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO reports (id, brief_hash, day, brief, caller, context_id, status,"
-                " sections, result, created_at, finished_at, chat_thread_id)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " sections, result, created_at, finished_at, chat_thread_id, tenant_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (report_id, brief_hash, day.isoformat(), json.dumps(brief, ensure_ascii=False),
                  caller, context_id, str(result.get("status") or "queued"),
                  json.dumps(sections), json.dumps(result, ensure_ascii=False),
-                 created_at.isoformat(), None, chat_thread_id),
+                 created_at.isoformat(), None, chat_thread_id, company_scope.active()),
             )  # fmt: skip
+
+    @staticmethod
+    def _mine(all_companies: bool) -> tuple[str, tuple[str, ...]]:
+        """(조건, 값): 지금 요청의 회사 줄만. all_companies면 회사를 보지 않는다 (재시작 정리)."""
+        if all_companies:
+            return "1 = 1", ()
+        return "tenant_id = ?", (company_scope.active(),)
 
     def chat_thread(self, report_id: str) -> str | None:
         """그 보고서를 넣은 대화 id (대화 카드로 넣지 않았으면 None)."""
+        where, args = self._mine(False)
         with self._lock:
             row = self._conn.execute(
-                "SELECT chat_thread_id FROM reports WHERE id = ?", (report_id,)
+                f"SELECT chat_thread_id FROM reports WHERE id = ? AND {where}",  # noqa: S608
+                (report_id, *args),
             ).fetchone()
         return row[0] if row else None
 
@@ -119,15 +132,21 @@ class TrendReportStore:
     # ---------------------------------------------------------------- 기획에 보낸 결과
 
     def handoff(self, report_id: str) -> dict[str, Any] | None:
+        where, args = self._mine(False)
         with self._lock:
-            row = self._conn.execute("SELECT handoff FROM reports WHERE id = ?",
-                                     (report_id,)).fetchone()  # fmt: skip
+            row = self._conn.execute(
+                f"SELECT handoff FROM reports WHERE id = ? AND {where}",  # noqa: S608
+                (report_id, *args),
+            ).fetchone()
         return json.loads(row[0]) if row and row[0] else None
 
     def save_handoff(self, report_id: str, value: Mapping[str, Any]) -> None:
+        where, args = self._mine(False)
         with self._lock, self._conn:
-            self._conn.execute("UPDATE reports SET handoff = ? WHERE id = ?",
-                               (json.dumps(value, ensure_ascii=False), report_id))  # fmt: skip
+            self._conn.execute(
+                f"UPDATE reports SET handoff = ? WHERE id = ? AND {where}",  # noqa: S608
+                (json.dumps(value, ensure_ascii=False), report_id, *args),
+            )
 
     def known_names(self, limit: int = 50) -> dict[str, str]:
         """최근 보고서들의 경쟁사 표시 이름 {아이디: 이름} (최근 것이 이긴다, 없는 이름은 뺀다)."""
@@ -138,13 +157,15 @@ class TrendReportStore:
         return out
 
     def same(self, brief_hash: str, day: date) -> str | None:
-        """같은 날 같은 의뢰의 가장 최근 저장본 (실패·중단은 빼고). 없으면 None."""
+        """같은 날 같은 의뢰의 가장 최근 저장본 (실패·중단은 빼고, 같은 회사 안에서만).
+        없으면 None."""
         marks = ",".join("?" * len(REUSABLE))
+        where, args = self._mine(False)
         with self._lock:
             row = self._conn.execute(
                 f"SELECT id FROM reports WHERE brief_hash = ? AND day = ? AND status IN ({marks})"  # noqa: S608
-                " ORDER BY created_at DESC LIMIT 1",
-                (brief_hash, day.isoformat(), *REUSABLE),
+                f" AND {where} ORDER BY created_at DESC LIMIT 1",
+                (brief_hash, day.isoformat(), *REUSABLE, *args),
             ).fetchone()
         return row[0] if row else None
 
@@ -159,20 +180,32 @@ class TrendReportStore:
                  json.dumps(result, ensure_ascii=False), result.get("finished_at"), report_id),
             )  # fmt: skip
 
-    def get(self, report_id: str) -> dict[str, Any] | None:
+    def get(self, report_id: str, *, all_companies: bool = False) -> dict[str, Any] | None:
+        """그 회사의 보고서 (다른 회사 id면 None). all_companies는 재시작 정리용."""
+        where, args = self._mine(all_companies)
         with self._lock:
             row = self._conn.execute(
-                "SELECT result, brief FROM reports WHERE id = ?", (report_id,)
+                f"SELECT result, brief FROM reports WHERE id = ? AND {where}",  # noqa: S608
+                (report_id, *args),
             ).fetchone()
         if row is None:
             return None
         return {"result": json.loads(row[0]), "input": json.loads(row[1])}
 
+    def company_of(self, report_id: str) -> str | None:
+        """보고서의 회사 (재시작 정리에서 그 회사로 알림을 잇는다)."""
+        with self._lock:
+            row = self._conn.execute("SELECT tenant_id FROM reports WHERE id = ?",
+                                     (report_id,)).fetchone()  # fmt: skip
+        return row[0] if row else None
+
     def statuses(self, report_id: str) -> tuple[str, dict[str, str]] | None:
-        """(보고서 상태, 섹션별 상태)."""
+        """(보고서 상태, 섹션별 상태). 그 회사 것만."""
+        where, args = self._mine(False)
         with self._lock:
             row = self._conn.execute(
-                "SELECT status, sections FROM reports WHERE id = ?", (report_id,)
+                f"SELECT status, sections FROM reports WHERE id = ? AND {where}",  # noqa: S608
+                (report_id, *args),
             ).fetchone()
         return (row[0], json.loads(row[1])) if row else None
 
@@ -180,10 +213,13 @@ class TrendReportStore:
         return [r for r, _ in self.recent_with_handoff(limit)]
 
     def recent_with_handoff(self, limit: int) -> list[tuple[dict[str, Any], dict[str, Any] | None]]:
-        """최근 보고서 (결과, 기획에 보낸 결과 또는 None)."""
+        """최근 보고서 (결과, 기획에 보낸 결과 또는 None). 그 회사 것만."""
+        where, args = self._mine(False)
         with self._lock:
             rows = self._conn.execute(
-                "SELECT result, handoff FROM reports ORDER BY created_at DESC LIMIT ?", (limit,)
+                f"SELECT result, handoff FROM reports WHERE {where}"  # noqa: S608
+                " ORDER BY created_at DESC LIMIT ?",
+                (*args, limit),
             ).fetchall()
         return [(json.loads(r[0]), json.loads(r[1]) if r[1] else None) for r in rows]
 

@@ -9,6 +9,9 @@ import { shortDateTime, won } from "@/lib/format";
 import { CLAIM_REASON_KO, CLAIM_TYPE_KO, INSPECTION_KO } from "@/lib/labels";
 import type { QueueRun, QueueView } from "@/lib/types";
 
+/** 큐 일괄 지급 한 번의 상한. 서버 `DASHBOARD_QUEUE_PROCESS_MAX` 기본값과 같게 둔다 (#1581) */
+const QUEUE_PROCESS_MAX = 20;
+
 export default function QueuePage() {
   const [view, setView] = useState<QueueView | null>(null);
   const [run, setRun] = useState<QueueRun | null>(null);
@@ -30,6 +33,8 @@ export default function QueuePage() {
 
   if (!view) return <Loading error={error} />;
   const ready = view.queue.filter((e) => e.ready).length;
+  // 한 번에 지급하는 수는 서버가 상한으로 자른다(`DASHBOARD_QUEUE_PROCESS_MAX`, 기본 20)
+  const thisRun = Math.min(ready, limit ? Number(limit) : QUEUE_PROCESS_MAX, QUEUE_PROCESS_MAX);
   const resultOf = (id: number) => run?.results.find((r) => r.claim_id === id);
 
   return (
@@ -44,13 +49,22 @@ export default function QueuePage() {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-xs text-ink-500">최대
-            <input className="field w-16 py-1.5 text-center" inputMode="numeric" placeholder="전체" value={limit} onChange={(e) => setLimit(e.target.value.replace(/\D/g, ""))} aria-label="처리 개수 제한" />건
+            <input className="field w-16 py-1.5 text-center" inputMode="numeric" placeholder={String(QUEUE_PROCESS_MAX)} value={limit} onChange={(e) => setLimit(e.target.value.replace(/\D/g, ""))} aria-label="처리 개수 제한" />건
           </label>
           <button className="btn-primary" disabled={busy !== null || ready === 0}
             onClick={() => act("process", async () => setRun(await api.admin.processQueue(limit ? { limit: Number(limit) } : {})))}>
-            {busy === "process" ? "처리 중…" : `준비된 ${ready}건 순서대로 처리`}
+            {busy === "process"
+              ? "처리 중…"
+              : ready > thisRun
+                ? `준비된 ${ready}건 중 ${thisRun}건 순서대로 처리`
+                : `준비된 ${ready}건 순서대로 처리`}
           </button>
         </div>
+        {ready > QUEUE_PROCESS_MAX && (
+          <p className="w-full text-right text-xs text-ink-500">
+            환불은 실제 돈이라 한 번에 최대 {QUEUE_PROCESS_MAX}건까지 지급해요. 남은 건은 다시 누르면 이어서 처리돼요.
+          </p>
+        )}
       </div>
       {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-xs font-medium text-red-800">{error}</p>}
       <IncidentCompensationQueue />

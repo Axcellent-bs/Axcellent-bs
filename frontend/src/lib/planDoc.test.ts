@@ -31,3 +31,9 @@ test("기획서 만든 시각: 활동 기록 write_spec 줄 중 그 번호의 �
   assert.equal(specCreatedAt(act, "SPEC-2"), "11-19 09:00");
   assert.equal(specCreatedAt(act, "SPEC-9"), null);
 });
+
+test("대화 카드에서 열면 ?request=wr_… 가 붙고, PDF와 같이 쓸 수 있다", () => {
+  assert.equal(planDocPath({ id: "PROP-18", request: "wr_d8cf3a9691" }), "/planning/proposals/PROP-18?request=wr_d8cf3a9691");
+  assert.equal(planDocPath({ id: "PROP-18", spec: "SPEC-30", request: "wr_d8cf3a9691" }, true), "/planning/work/specs/SPEC-30?print=1&request=wr_d8cf3a9691");
+  assert.equal(planDocPath({ id: "PROP-18", request: null }), "/planning/proposals/PROP-18");
+});

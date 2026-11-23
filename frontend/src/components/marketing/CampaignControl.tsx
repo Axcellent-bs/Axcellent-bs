@@ -5,6 +5,8 @@ import { dataAi, kpiLive, type CampaignEffectOutput } from "@/lib/data";
 import { todayKst } from "@/lib/finance";
 import { videoFields, type VideoKind } from "@/lib/campaignVideo";
 import { missingVideoFields, startFields, type ContentFormat } from "@/lib/campaignStart";
+import { digitsOnly, krwText, periodSpend, type AdMetricsRow } from "@/lib/adMetrics";
+import { adMetricsApi, adMetricsEnabled } from "@/lib/adMetricsApi";
 
 // 캠페인 시작·결과·취소. 재무는 예산에 의견만 내고 막지 않는다(2026-11-06). 시작을 막는 것은
 // 안전 관문의 금액 규칙(사람 승인 보류)이다. 광고 플랫폼 연결이 없어
@@ -227,6 +229,18 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
   const [effect, setEffect] = useState<Effect | null>(null);
   const [effectNote, setEffectNote] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // 저장된 광고 숫자(광고 숫자 칸). 기간 안 광고비 합계를 미리 채우고, 사람이 고치면 그 값을 쓴다
+  const [adRows, setAdRows] = useState<AdMetricsRow[] | null>(null);
+  const [adError, setAdError] = useState(false);
+  const [spendTouched, setSpendTouched] = useState(false);
+  useEffect(() => {
+    if (!adMetricsEnabled) return;
+    let alive = true;
+    adMetricsApi.get(id)
+      .then((v) => { if (alive) { setAdRows(v.rows); setAdError(false); } })
+      .catch(() => { if (alive) setAdError(true); });
+    return () => { alive = false; };
+  }, [id]);
   // 사람이 값을 고치면 불러온 값이 아니다. 기간을 바꾸면 불러온 값은 맞지 않아 지운다
   const typed = (set: (v: string) => void) => (e: { target: { value: string } }) => { set(e.target.value.replace(/[^0-9]/g, "")); setEffect(null); setEffectNote(null); };
   const period = (set: (v: string) => void) => (e: { target: { value: string } }) => {
@@ -235,6 +249,9 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
     setEffectNote(null);
   };
   const periodOk = from !== "" && to !== "" && from <= to;
+  const adSpend = adRows && periodOk ? periodSpend(adRows, from, to) : null;
+  const prefill = adSpend?.total ?? null;
+  const spendValue = spendTouched || prefill === null ? spend : String(prefill);
   async function pull() {
     setLoading(true);
     setEffectNote(null);
@@ -252,7 +269,7 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
   }
   const save = () => run(() => campaigns.result(id, {
     campaign_name: name, channel: channel || "미지정", period_from: from, period_to: to,
-    spend_krw: Number(spend), coupon_krw: Number(coupon || 0), gmv_krw: gmv ? Number(gmv) : null, orders: orders ? Number(orders) : null,
+    spend_krw: Number(spendValue), coupon_krw: Number(coupon || 0), gmv_krw: gmv ? Number(gmv) : null, orders: orders ? Number(orders) : null,
     source: effect?.source ?? SOURCE,
     measured_gmv_krw: effect?.measuredGmv ?? null, measured_orders: effect?.measuredOrders ?? null, effect_generated_at: effect?.generatedAt ?? null,
     ...(production !== "" ? { production_cost_krw: Number(production) } : {}),
@@ -268,13 +285,14 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
       </div>
       {effectNote && <p role="status" className="mt-2 rounded-xl bg-ink-50 px-3 py-2 text-ink-700">{effectNote}</p>}
       <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto] sm:items-end">
-        <label className="block"><span className="text-ink-700">실제 광고비(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={spend} onChange={digits(setSpend)} /></label>
+        <label className="block"><span className="text-ink-700">실제 광고비(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={spendValue} onChange={(e) => { setSpend(digitsOnly(e.target.value)); setSpendTouched(true); }} /></label>
         <label className="block"><span className="text-ink-700">늘어난 판매액(원, 모르면 비움)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={gmv} onChange={typed(setGmv)} /></label>
         <label className="block"><span className="text-ink-700">증분 주문(건, 모르면 비움)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={orders} onChange={typed(setOrders)} /></label>
         <label className="block"><span className="text-ink-700">회사 부담 쿠폰(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={coupon} onChange={digits(setCoupon)} /></label>
         <label className="block"><span className="text-ink-700">영상 제작비(원, 선택)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={production} onChange={digits(setProduction)} /></label>
-        <button className="btn-primary" disabled={busy || loading || !humanTokenSet || spend === "" || !periodOk} onClick={save}>결과 저장</button>
+        <button className="btn-primary" disabled={busy || loading || !humanTokenSet || spendValue === "" || !periodOk} onClick={save}>결과 저장</button>
       </div>
+      <AdSpendNote spend={adSpend} prefilled={!spendTouched && prefill !== null} failed={adError} />
       {canCancel && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input className="field min-w-0 flex-1" aria-label="취소 이유" placeholder="쓰지 않고 멈출 때 취소 이유" value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -282,5 +300,21 @@ function ResultRow({ id, amount, name, channel, busy, run, canCancel }: {
         </div>
       )}
     </li>
+  );
+}
+
+/** 결과 저장 칸 아래 광고비 미리 채우기 안내. 기간 안 저장된 줄이 없으면 아무것도 보이지 않는다 */
+function AdSpendNote({ spend, prefilled, failed }: { spend: ReturnType<typeof periodSpend> | null; prefilled: boolean; failed: boolean }) {
+  if (failed) return <p className="mt-1 text-xs text-ink-500">저장된 광고 숫자를 읽지 못해 광고비를 미리 채우지 않았습니다. 보고서를 보고 직접 적으세요.</p>;
+  if (!spend || spend.rows === 0) return null;
+  if (spend.total === null) {
+    return <p className="mt-1 text-xs text-amber-800">기간 안 광고 숫자 {spend.rows}줄 중 광고비를 모르는 날({spend.missingDates.join(", ")})이 있어 미리 채우지 않았습니다. 광고 숫자 칸에 적거나 여기에 직접 적으세요.</p>;
+  }
+  return (
+    <p className="mt-1 text-xs text-ink-500">
+      {prefilled
+        ? `광고 숫자 칸에 저장된 기간 안 ${spend.rows}줄의 광고비 합계 ${krwText(spend.total)}을 채웠습니다. 고치면 사람이 적은 값으로 저장합니다.`
+        : `광고 숫자 칸의 기간 안 광고비 합계는 ${krwText(spend.total)}입니다. 지금 칸에는 사람이 적은 값을 씁니다.`}
+    </p>
   );
 }

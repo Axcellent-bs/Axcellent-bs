@@ -1,12 +1,13 @@
 // node --test (npm test). 보고서 한눈에 읽기 계산 (lib/trendReportRead.ts): 섹션 한 줄 요약 · 기본 펼침 · 핵심 숫자 · 재료 · 검색 표
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { TrendReport } from "./data.ts";
+import type { TrendMaterialKind, TrendReport } from "./data.ts";
 import { TREND_REPORT_EXAMPLE } from "./trendReportExample.ts";
 import { TREND_REPORT_TR3F0D as R } from "./trendReportExampleRead.ts";
 import {
-  briefLine, defaultOpenSections, isOpen, keyNumber, materialCells, materialKindLabel, searchTable, sectionOfEvidence, sectionSummary,
+  briefLine, defaultOpenSections, isOpen, keyNumber, keyNumbers, searchTable, sectionOfEvidence, sectionSummary,
 } from "./trendReportRead.ts";
+import { MATERIAL_LABEL, aiPickMode, keyEvidence, recommendationItems } from "./trendReportView.ts";
 
 test("sectionSummary 검색: 상위 2개 키워드 변화와 'N개는 값 없음'", () => {
   assert.equal(sectionSummary("search", R), "소설 +361.3% · 다꾸 +6.9% · 3개는 값 없음");
@@ -49,7 +50,7 @@ test("기본 펼침: 콘티 근거가 가리키는 섹션만 (검색·해시태�
 test("기본 펼침: 재료(materials)가 있으면 재료 근거가 가리키는 섹션을 쓴다", () => {
   const rec = {
     ...R.sections.recommendation,
-    materials: [{ kind: "format", text: "릴스", evidence_items: [{ id: "competitor:1", text: "민음사", short: "민음사 ×3.7" }] }],
+    materials: [{ kind: "format" as const, text: "릴스", evidence: ["민음사"], evidence_items: [{ id: "competitor:1", text: "민음사", short: "민음사 ×3.7" }] }],
   };
   assert.deepEqual([...defaultOpenSections(rec)], ["competitors"]);
 });
@@ -82,20 +83,29 @@ test("핵심 숫자: 짧은 근거에서 숫자를 크게, 나머지는 설명 �
   assert.deepEqual(keyNumber({ id: "meme:1", text: "t", short: "밈 책 더미" }), { id: "meme:1", big: "밈 책 더미", label: "", text: "t" });
 });
 
-test("재료 칸: materials가 없거나 비면 null(콘티를 그림), 있으면 한국어 이름 · 글 · 근거", () => {
-  assert.equal(materialCells(undefined), null);
-  assert.equal(materialCells([]), null);
-  assert.equal(materialCells([{ kind: "hashtag", text: "  " }]), null);
-  const cells = materialCells([
-    { kind: "hashtag", text: "#북토크 — 새로 뜸", evidence_items: [{ id: "hashtag:1", text: "근거", short: "s" }] },
-    { kind: "caption", text: "첫 줄을 질문으로", evidence: ["옛 근거 문장"] },
-    { kind: "new_kind", text: "모르는 종류" },
-  ])!;
-  assert.deepEqual(cells.map((c) => c.label), ["해시태그", "글쓰기", "new_kind"]);
-  assert.deepEqual(cells[0].evidence, [{ id: "hashtag:1", text: "근거" }]);
-  assert.deepEqual(cells[1].evidence, [{ id: null, text: "옛 근거 문장" }]);
-  assert.equal(materialKindLabel("format"), "형식");
-  assert.equal(materialKindLabel("topic"), "관심 주제");
+test("재료 종류 7가지(#1597 계약 TrendMaterialKind) 모두 한국어 이름 (영문 그대로 나오는 종류 없음)", () => {
+  const KINDS: TrendMaterialKind[] = ["hashtag", "format", "topic", "meme", "writing", "timing", "other"];
+  assert.deepEqual(Object.keys(MATERIAL_LABEL).sort(), [...KINDS].sort());
+  for (const k of KINDS) {
+    const label = MATERIAL_LABEL[k];
+    assert.ok(label && label.trim(), k);
+    assert.match(label, /^[가-힣 ]+$/, `${k} → ${label}`);
+  }
+});
+
+test("결론 카드: 재료가 있으면 재료만(콘티와 두 번 나오지 않음), 재료 없는 옛 보고서(beats만)는 콘티, 핵심 숫자는 그 칸들 근거", () => {
+  // 옛 보고서: materials 없음·빈 목록 → 콘티
+  assert.equal(aiPickMode(R.sections.recommendation), "beats");
+  assert.equal(aiPickMode({ ...R.sections.recommendation, materials: [] }), "beats");
+  assert.deepEqual(keyNumbers(keyEvidence(recommendationItems(R.sections.recommendation))).map((k) => k.big), ["+361%", "2곳", "×3.7"]);
+  // 새 보고서: 재료(beats 비움) → 재료 한 곳, 핵심 숫자도 재료 근거에서
+  const rec = {
+    ...R.sections.recommendation, beats: [],
+    materials: [{ kind: "format" as const, text: "릴스", evidence: ["민음사"], evidence_items: [{ id: "competitor:1", text: "민음사", short: "민음사 ×3.7" }] }],
+  };
+  assert.equal(aiPickMode(rec), "materials");
+  assert.deepEqual(keyNumbers(keyEvidence(recommendationItems(rec))).map((k) => k.big), ["×3.7"]);
+  assert.equal(aiPickMode({ ...rec, materials: [] }), "none");
 });
 
 test("검색 표: 키워드 한 줄씩, 값 없는 키워드는 맨 아래 한 줄로 합침", () => {

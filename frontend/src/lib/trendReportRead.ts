@@ -1,9 +1,9 @@
 // 트렌드 분석 보고서를 "한눈에" 읽히게 하는 순수 계산 (11/23, components/data/TrendReportView.tsx). node --test (trendReportRead.test.ts)
-// - 머리: 의뢰 한 줄 요약(briefLine) · 결론 카드 핵심 숫자 3칸(keyNumbers) · 기획에 넘길 재료(materialCells, 백엔드가 materials를 주면)
+// - 머리: 의뢰 한 줄 요약(briefLine) · 결론 카드 핵심 숫자 3칸(keyNumbers) (재료 칸은 #1597 trendReportView.ts)
 // - 근거 섹션: 접는 카드 머리 한 줄(sectionSummary, 이미 있는 숫자만) · 기본 펼침(defaultOpenSections, 결론이 기대는 근거의 섹션만)
 // - 검색 표(searchTable): 키워드 한 줄씩, 값 없는 키워드는 한 줄로 합침
 // 숫자는 서버 값 그대로 글자로만 바꾼다
-import type { TrendEvidenceItem, TrendReport, TrendReportBrief, TrendReportMaterial, TrendReportSearchRow } from "./data.ts";
+import type { TrendEvidenceItem, TrendReport, TrendReportBrief, TrendReportSearchRow } from "./data.ts";
 import {
   GENDER_LABEL, SECTION_STATUS, competitorChip, pctText, searchKind, searchMain, sortSearchRows, volumeText,
 } from "./trendReportView.ts";
@@ -45,28 +45,7 @@ export function keyNumber(e: TrendEvidenceItem): KeyNumber {
 
 export const keyNumbers = (items: TrendEvidenceItem[]) => items.map(keyNumber);
 
-// ---- 결론 카드: 기획에 넘길 재료 (백엔드 recommendation.materials, 없으면 화면이 콘티를 그대로 그린다)
-
-/** 재료 종류 → 한국어 이름 (모르는 종류는 그대로) */
-export const MATERIAL_KIND_LABEL: Record<string, string> = {
-  hashtag: "해시태그", format: "형식", topic: "관심 주제", theme: "관심 주제", keyword: "관심 주제", caption: "글쓰기", writing: "글쓰기",
-  copy: "글쓰기", hook: "첫 장면", timing: "올릴 시간", music: "음악", meme: "밈", product: "상품",
-};
-export const materialKindLabel = (kind: string) => MATERIAL_KIND_LABEL[kind] ?? kind;
-
-export interface MaterialCell { key: string; label: string; text: string; evidence: { id: string | null; text: string }[] }
-
-/** 재료 칸들. materials가 없거나 비면 null (옛 보고서 → 콘티) */
-export function materialCells(materials: TrendReportMaterial[] | null | undefined): MaterialCell[] | null {
-  const list = (materials ?? []).filter((m) => m && m.text?.trim());
-  if (!list.length) return null;
-  return list.map((m, i) => ({
-    key: `${m.kind}:${i}`,
-    label: materialKindLabel(m.kind),
-    text: m.text,
-    evidence: m.evidence_items?.length ? m.evidence_items.map((e) => ({ id: e.id, text: e.text })) : (m.evidence ?? []).map((text) => ({ id: null, text })),
-  }));
-}
+// 기획에 넘길 재료(재료 칸 모양·한국어 이름 MATERIAL_LABEL·재료/콘티 고르기 aiPickMode)는 #1597의 lib/trendReportView.ts를 쓴다
 
 // ---- 근거 섹션: 접기
 

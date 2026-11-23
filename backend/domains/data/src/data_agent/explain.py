@@ -29,7 +29,7 @@ from typing import Literal
 from pydantic import BaseModel, ValidationError
 
 from ax_agent_template.llm import LLMClient, LLMFormatError, LLMNotConfiguredError
-from data_agent import catalog
+from data_agent import catalog, company_scope
 from data_agent.llm_budget import LLMDailyCapReached
 
 # 1,234 / 1234 / 0.5 / 12.5 형태. 숫자 뒤의 퍼센트 기호와 이름·단위 꼬리("xx", "분")도 같이 본다.
@@ -346,11 +346,15 @@ class ExplainCache:
 
     @staticmethod
     def _key(prompt: str) -> str:
-        return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        """프롬프트 해시. 회사 ID를 넣는다 (여러 회사 1-5: 같은 문장이라도 회사가 다르면 다른 키).
+        캣북스는 예전 키 그대로 (저장한 설명을 LLM으로 다시 만들지 않게)."""
+        cid = company_scope.active()
+        body = prompt if cid == company_scope.CATBOOKS else f"{cid}\n{prompt}"
+        return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
     def get(self, prompt: str) -> Explanation | None:
         if self._conn is None:
-            return self._data.get(prompt)
+            return self._data.get(self._key(prompt))
         with self._lock:
             row = self._conn.execute(
                 "SELECT value FROM explanations WHERE key = ?", (self._key(prompt),)
@@ -365,7 +369,7 @@ class ExplainCache:
         if self._conn is None:
             if len(self._data) >= self.max_entries:
                 self._data.pop(next(iter(self._data)))
-            self._data[prompt] = value
+            self._data[self._key(prompt)] = value
             return
         body = json.dumps(dataclasses.asdict(value), ensure_ascii=False)
         with self._lock, self._conn:

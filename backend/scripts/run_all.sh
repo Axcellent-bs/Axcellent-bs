@@ -425,6 +425,28 @@ if [ ! -e "$PWD/$DATA/.data-company-keywords-backup-done" ]; then
     fi
   fi
 fi
+# data 회사 칸(여러 회사 1-5 ②, 회사 화면·보고서·대화·캐시·예산): data DB 12개도 켤 때 칸이 붙거나 표를 다시 만든다
+# (옛 줄은 catbooks). 같은 방식으로 한 번만 .data/backup-before-data-company-reports-<시각>.tgz
+# (umask 077, 표식 .data/.data-company-reports-backup-done)
+if [ ! -e "$PWD/$DATA/.data-company-reports-backup-done" ]; then
+  _dr_db=""
+  for _f in trend_reports.db trend_responses.db insight_brief.db brief_lines.db explain_cache.db data_chat.db       event_proposals.db idea_reports.db promo_concepts.db campaign_sends.db data_llm_budget.db       video_performance.db; do
+    [ -e "$PWD/$DATA/$_f" ] && _dr_db="$_dr_db $_f"
+  done
+  if [ -z "$_dr_db" ]; then
+    : > "$PWD/$DATA/.data-company-reports-backup-done"
+  else
+    _bk="$PWD/$DATA/backup-before-data-company-reports-$(date +%Y%m%d%H%M%S).tgz"
+    # shellcheck disable=SC2086
+    if ( umask 077; tar czf "$_bk" -C "$PWD/$DATA" $_dr_db ); then
+      echo "data 회사 칸(보고서·대화·캐시)을 붙이기 전 백업: $_bk ($_dr_db )"
+      : > "$PWD/$DATA/.data-company-reports-backup-done"
+    else
+      rm -f "$_bk"
+      echo "경고: data 회사 칸(보고서·대화·캐시)을 붙이기 전 백업을 만들지 못했습니다 ($_bk). 다음에 켤 때 다시 시도합니다" >&2
+    fi
+  fi
+fi
 # backend/.env 에 없으면 레포 맨 위 .env 에서 LLM·임베딩 설정 6개만 읽는다 (DejaFix 형식 .env 를 같이 쓰는 경우).
 # 다른 값(메일·Zabbix 등)은 서버에 넘기지 않고, 줄 끝 주석(공백 뒤 #)은 뗀다
 if [ -f ../.env ]; then

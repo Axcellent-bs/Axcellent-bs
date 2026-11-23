@@ -10,7 +10,7 @@ import { waitForImages } from "@/lib/printImages";
 import { COMPACT, METRIC, ago } from "@/components/data/InstagramRadar";
 import {
   dataAi, type InstagramRadarPost, type SectionStatus, type TrendReport, type TrendReportBeat, type TrendReportBrief, type TrendReportCompetitorRow,
-  type TrendReportHandoffOutput, type TrendReportSections, type TrendThemeSection,
+  type TrendReportHandoffOutput, type TrendReportMaterial, type TrendReportSections, type TrendThemeSection,
 } from "@/lib/data";
 import { useCompany } from "@/demo/company";
 import { DeliveryBadge, HandoffButton, ReportInsightCard, usePlanningRecord } from "@/components/data/ReportInsights";
@@ -19,20 +19,20 @@ import { kindLabel, thumbSrc } from "@/lib/igRadarGrid";
 import { planDocPath } from "@/lib/planDoc";
 import { sectionState, type SectionState } from "@/lib/segmentView";
 import {
-  BEAT_LABEL, CALLER_LABEL, EVIDENCE, HASHTAG_HIDDEN_NOTE, REPORT_POLL_MS, REPORT_STATUS, SECTION_EVIDENCE, SECTION_STATUS,
-  beatEvidence, beatWidths, competitorChip, competitorSummary, countedSections, evidenceDomId, evidenceExpanded, evidenceListClass, hashtagMeta,
-  headerRows, keepPolling, keyEvidence, limitGroups, printHeaderLine, reportLabel, sectionNotes, SECTION_TITLE, shareText, showThemeSection, sortBeats,
-  sortCompetitors, themeRowView, traitLines, type ChipTone, type EvidenceKind, type ReportPart,
+  BEAT_LABEL, CALLER_LABEL, EVIDENCE, HASHTAG_HIDDEN_NOTE, MATERIAL_LABEL, MATERIALS_NOTE, REPORT_POLL_MS, REPORT_STATUS, SECTION_EVIDENCE, SECTION_STATUS,
+  aiPickMode, beatEvidence, beatWidths, competitorChip, competitorSummary, countedSections, evidenceDomId, evidenceExpanded, evidenceListClass, hashtagMeta,
+  headerRows, keepPolling, keyEvidence, limitGroups, printHeaderLine, recommendationItems, reportLabel, sectionNotes, SECTION_TITLE, shareText, showThemeSection,
+  sortBeats, sortCompetitors, themeRowView, traitLines, type ChipTone, type EvidenceKind, type ReportPart,
 } from "@/lib/trendReportView";
 import {
-  briefLine, defaultOpenSections, isOpen, keyNumbers, materialCells, searchTable, sectionOfEvidence, sectionSummary, type FoldKey, type MaterialCell,
+  briefLine, defaultOpenSections, isOpen, keyNumbers, searchTable, sectionOfEvidence, sectionSummary, type FoldKey,
 } from "@/lib/trendReportRead";
 
 // 트렌드 분석 의뢰 보고서 하나 (trend_report_get). 주소 #request?id=<report_id> (분석 의뢰 탭, TrendRequest.tsx가 연다).
 // - 진행 중(queued·running)이면 섹션별 진행 칩을 보여 주고 5초마다 다시 읽는다. 완료·부분·실패·중단이면 멈춘다
 // - 11/23 한눈에 읽히게 (계산은 lib/trendReportRead.ts):
 //   머리 = 제목·상태·번호 + [PDF로 저장]·[기획서 보기](기획에 넘긴 제안이 있을 때만) + 의뢰 한 줄 요약("의뢰 내용 자세히"로 표 펼침)
-//   → 결론 카드(AI 추천 결론 크게 · 핵심 숫자 3칸 · 기획에 넘길 재료(materials, 없으면 지금 콘티))
+//   → 결론 카드(AI 추천 결론 크게 · 핵심 숫자 3칸 · 기획에 넘길 재료(materials, #1597. 재료 없는 옛 보고서는 콘티))
 //   → 근거 섹션(0 주제 후보 · 1 검색 · 2 해시태그 · 3 콘텐츠 · 4 경쟁사 · 근거와 한계)은 접는 카드 + 머리 한 줄 요약.
 //     기본 펼침은 결론이 기대는 근거의 섹션만, 누른 것은 이 화면에서만 기억한다. 핵심 숫자·근거를 누르면 그 섹션을 펴고 그 행으로 간다
 //   검색 = 표 하나(값 없는 키워드는 한 줄로), 콘텐츠 = 작은 썸네일(54×72) 가로 카드 3열, 경쟁사 = 표 하나
@@ -495,23 +495,23 @@ function BeatCell({ b, width, onJump }: { b: TrendReportBeat; width: number; onJ
   );
 }
 
-/** 재료 칸 하나: 종류 · 내용 · 근거 */
-function MaterialItem({ m, onJump }: { m: MaterialCell; onJump: (id: string) => void }) {
+/** 기획에 넘길 재료 한 칸 (#1597 계약 TrendReportMaterial): 종류 한국어 이름(MATERIAL_LABEL) · 무엇을 쓰라는지 · 근거 */
+function MaterialItem({ m, onJump }: { m: TrendReportMaterial; onJump: (id: string) => void }) {
   return (
     <li className="min-w-0 border border-ink-100 bg-surface px-3 py-2">
-      <p className="text-xs font-semibold text-ink-500">{m.label}</p>
+      <p className="text-xs font-semibold text-ink-500">{MATERIAL_LABEL[m.kind]}</p>
       <p className="mt-1 whitespace-pre-line break-words text-sm text-ink-900">{m.text}</p>
-      <EvidenceList items={m.evidence} onJump={onJump} />
+      <EvidenceList items={beatEvidence(m)} onJump={onJump} />
     </li>
   );
 }
 
-/** 결론 카드: AI 추천 결론 한 줄 크게 · 핵심 숫자 3칸 · 기획에 넘길 재료(없으면 지금 콘티) */
+/** 결론 카드: AI 추천 결론 한 줄 크게 · 핵심 숫자 3칸 · 기획에 넘길 재료 (재료 없는 옛 보고서는 콘티. 재료 칸은 여기 한 곳에만) */
 function Conclusion({ s, summaryReason, onJump }: { s: TrendReportSections["recommendation"]; summaryReason: string | null; onJump: (id: string) => void }) {
-  const beats = sortBeats(s.beats);
+  const mode = aiPickMode(s);
+  const beats = mode === "beats" ? sortBeats(s.beats) : [];
   const widths = beatWidths(beats.map((b) => b.slot));
-  const keys = keyNumbers(keyEvidence(beats));
-  const materials = materialCells(s.materials);
+  const keys = keyNumbers(keyEvidence(recommendationItems(s)));
   const waiting = s.status === "waiting" || s.status === "running";
   return (
     <section className="card min-w-0 space-y-3 border-2 border-brand-500 p-4 sm:p-5 trend-report-section" aria-label="결론">
@@ -539,11 +539,11 @@ function Conclusion({ s, summaryReason, onJump }: { s: TrendReportSections["reco
           ))}
         </ul>
       )}
-      {materials ? (
+      {mode === "materials" ? (
         <div className="space-y-1.5">
-          <p className="text-[13px] font-semibold text-ink-900">기획에 넘길 재료 <span className="font-normal text-ink-500">· 시간별 장면은 기획이 짜요</span></p>
+          <p className="text-[13px] font-semibold text-ink-900">기획에 넘길 재료 <span className="font-normal text-ink-500">· {MATERIALS_NOTE}</span></p>
           <ol className="trend-print-beats print-keep-grid grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="기획에 넘길 재료">
-            {materials.map((m) => <MaterialItem key={m.key} m={m} onJump={onJump} />)}
+            {(s.materials ?? []).map((m, i) => <MaterialItem key={`${m.kind}:${i}`} m={m} onJump={onJump} />)}
           </ol>
         </div>
       ) : beats.length > 0 && (

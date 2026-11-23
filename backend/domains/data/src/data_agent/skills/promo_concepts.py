@@ -80,7 +80,7 @@ from ax_contracts.schemas.data import (
     TrendKeywordGroup,
     TrendPopularRequest,
 )
-from data_agent import llm_failure
+from data_agent import company_scope, llm_failure
 from data_agent.connectors import CatalogProduct
 from data_agent.content_fields import fill_concepts
 from data_agent.explain import _bad_numbers
@@ -230,6 +230,8 @@ class PromoStore:
                 self._conn.execute("ALTER TABLE runs ADD COLUMN rules TEXT")
             if "expires_at" not in cols:  # 상한으로 덜 만든 기록의 만료 시각 (NULL = 하루 캐시)
                 self._conn.execute("ALTER TABLE runs ADD COLUMN expires_at TEXT")
+            # 여러 회사 1-5 (11/23): 회사 칸 (옛 줄은 캣북스). 하루 캐시도 그 회사 기록만
+            company_scope.ensure_tenant_column(self._conn, "runs")
             self._conn.commit()
 
     def close(self) -> None:
@@ -239,8 +241,8 @@ class PromoStore:
              expires_at: datetime | None = None) -> None:  # fmt: skip
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO runs (run_id, day, created_at, output, rules, expires_at)"
-                " VALUES (?,?,?,?,?,?)",
+                "INSERT INTO runs (run_id, day, created_at, output, rules, expires_at, tenant_id)"
+                " VALUES (?,?,?,?,?,?,?)",
                 (
                     output.run_id,
                     day.isoformat(),
@@ -248,15 +250,19 @@ class PromoStore:
                     output.model_dump_json(),
                     rules,
                     expires_at.isoformat() if expires_at else None,
+                    company_scope.active(),
                 ),
             )
 
     def latest(
         self, day: date, rules: str | None = None, now: datetime | None = None
     ) -> PromoConceptsOutput | None:
-        """그날 마지막 기록 (만료된 것은 빼고). `rules`를 주면 그 규칙 버전으로 만든 것만."""
-        sql = "SELECT output FROM runs WHERE day = ? AND (expires_at IS NULL OR expires_at > ?)"
-        args: tuple[str, ...] = (day.isoformat(), (now or datetime.now(UTC)).isoformat())
+        """그날 마지막 기록 (만료된 것은 빼고, 그 회사 것만).
+        `rules`를 주면 그 규칙 버전으로 만든 것만."""
+        sql = ("SELECT output FROM runs WHERE tenant_id = ? AND day = ?"
+               " AND (expires_at IS NULL OR expires_at > ?)")  # fmt: skip
+        args: tuple[str, ...] = (company_scope.active(), day.isoformat(),
+                                 (now or datetime.now(UTC)).isoformat())  # fmt: skip
         if rules is not None:
             sql += " AND rules = ?"
             args += (rules,)

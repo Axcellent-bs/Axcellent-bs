@@ -13,7 +13,8 @@ import { humanizePlanIds } from '@/lib/format'
 import { printDoc, useAutoPrintQuery } from '@/lib/print'
 import { planPrintHeader } from '@/lib/planDoc'
 import { useCompany } from '@/demo/company'
-import { VideoPlanSection } from '@/components/planning/videoPlan'
+import { Fold, RequestDecideBar, VideoStoryboard } from '@/components/planning/videoPlan'
+import { requestOfSearch, storyBasis } from '@/lib/videoStoryboard'
 
 interface P { s: S; d: Dispatch<Action> }
 
@@ -276,24 +277,9 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
   const req = p.request ? s.requests.find((r) => r.id === p.request) : undefined
   const company = useCompany()
   useAutoPrintQuery(true) // 대화 카드 "PDF로 저장"(?print=1)으로 열었으면 그린 뒤 한 번 인쇄
-  return (
-    <div className={`pp-view${open ? " solo" : ""}`}>
-      <div className="pp-main doc-print">
-        <p className="print-only doc-print-head">{planPrintHeader({ id: p.id, company: company?.name, at: p.created, status: p.status })}</p>
-        <a className="plain-link proj-back print-hide" href={toPath('proposals')} onClick={(e) => { e.preventDefault(); go(toPath('proposals')) }}>‹ 제안 목록</a>
-        <div className="pp-head">
-          <span className={`rq-dept d-${p.from}`}>{DEPT_NAME[p.from]}</span>
-          <Tag>{PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill}</Tag>
-          <span className="mono idc" title={p.insightId ? `${p.id} · ${DEPT_NAME[p.from]} id ${p.insightId}` : p.id}>{idText(p.id)}</span>
-          <span style={{ flex: 1 }} />
-          <Tag tone={STATUS_TONE[p.status]}>{p.status}</Tag>
-          <span className="muted small">{p.created}</span>
-        </div>
-        {open
-          ? <input key={`t-${p.id}`} className="doc-title-input" defaultValue={p.title} onBlur={(e) => save('title', e.target.value)} aria-label="제목" />
-          : <h2 className="pp-title">{p.title}</h2>}
-        <div className="print-hide"><Steps p={p} /></div>
-
+  const request = requestOfSearch(window.location.search)
+  const judgment = (
+    <>
         <section className="pp-part">
           <h3 className="pp-part-h"><span className="pp-no">1</span>{DEPT_NAME[p.from]} 인사이트</h3>
           <p className="pp-insight">{p.insight}</p>
@@ -355,7 +341,35 @@ function ProposalView({ s, d, p }: P & { p: Proposal }) {
           {p.warnings.length > 0 && <ul className="pp-warn">{p.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
         </section>
 
-        {p.videoPlan && <VideoPlanSection v={p.videoPlan} />}
+    </>
+  )
+  return (
+    <div className={`pp-view${open ? " solo" : ""}`}>
+      <div className="pp-main doc-print">
+        <p className="print-only doc-print-head">{planPrintHeader({ id: p.id, company: company?.name, at: p.created, status: p.status })}</p>
+        <a className="plain-link proj-back print-hide" href={toPath('proposals')} onClick={(e) => { e.preventDefault(); go(toPath('proposals')) }}>‹ 제안 목록</a>
+        <div className="pp-head">
+          <span className={`rq-dept d-${p.from}`}>{DEPT_NAME[p.from]}</span>
+          <Tag>{PROPOSAL_SKILL_LABEL[p.skill] ?? p.skill}</Tag>
+          <span className="mono idc" title={p.insightId ? `${p.id} · ${DEPT_NAME[p.from]} id ${p.insightId}` : p.id}>{idText(p.id)}</span>
+          <span style={{ flex: 1 }} />
+          <Tag tone={STATUS_TONE[p.status]}>{p.status}</Tag>
+          <span className="muted small">{p.created}</span>
+        </div>
+        {open
+          ? <input key={`t-${p.id}`} className="doc-title-input" defaultValue={p.title} onBlur={(e) => save('title', e.target.value)} aria-label="제목" />
+          : <h2 className="pp-title">{p.title}</h2>}
+        <div className="print-hide"><Steps p={p} /></div>
+
+        {p.videoPlan ? (
+          // 영상 제작안이 있으면 스토리보드가 먼저 (11/23 재현 님 시안 ④). 인사이트·기획 판단은 아래 접기 (확인 대기면 펼쳐 둔다: 고칠 칸이 있어서)
+          <VideoStoryboard v={p.videoPlan} audience={p.audience} basis={storyBasis(p)}>
+            <Fold title="기획 판단·근거" note={`인사이트 근거 ${p.facts.length}개 · 기획 판단`} defaultOpen={open}>
+              {judgment}
+            </Fold>
+          </VideoStoryboard>
+        ) : judgment}
+        <RequestDecideBar request={request} proposal={p.id} />
       </div>
 
       {!open && (
