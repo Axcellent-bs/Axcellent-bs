@@ -58,11 +58,13 @@ export function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-// SNS 계정 연결(마케팅 › SNS·미디어). 유튜브는 구글 동의 화면으로 보내고, 돌아오면 서버가 이 회사 키 저장소에 넣는다
+// SNS 계정 연결(마케팅 › SNS·미디어). 유튜브는 구글 동의 화면으로 보내고, 돌아오면 화면이 `complete`를 불러
+// (연결을 시작한 계정으로 로그인한 상태에서만) 서버가 이 회사 키 저장소에 넣는다
 const YT = `${DASHBOARD_API_URL}/api/dashboard/marketing/youtube`;
 export async function youtubeConnectUrl(): Promise<string> {
   const d = (await call(`${YT}/connect`, {})) as { url?: unknown };
   if (typeof d.url !== "string" || !d.url.startsWith("https://accounts.google.com/")) throw new Error("구글 연결 주소를 받지 못했어요.");
   return d.url;
 }
+export const youtubeComplete = (code: string, state: string) => call(`${YT}/complete`, { code, state });
 export const youtubeDisconnect = () => call(`${YT}/disconnect`, {});

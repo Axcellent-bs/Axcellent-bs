@@ -3,7 +3,10 @@
 - ① 짝 맞춘 읽기: 주문(목록·하나)·상품·분류·고객·판매 합계·내보내기·상태 확인
 - ③ 사이트에 없는 자료: 각 주소의 응답 모양 그대로 빈 값 (`meta.source = "site_adapter"`)
 - 고객지원 접수 동기화(POST): 변환기 장부에 기록만 (에이전트 토큰 또는 판매 서버 서비스 키 필요)
-- 그 밖: 404 `NOT_MAPPED` (② 사람 반영 쓰기와 문의·신청 읽기는 다음 PR)
+- ③-쓰기(환불·쿠폰·배너·신청 결과·문의 화면 값·롤백·장애 해제): `writes`가 판정한다.
+  환불·쿠폰은 safety 실행 기록 확인(판정 2, `gate_check`)을 지나야 받는다. 직접 쓰기(W3) 전이라
+  받은 쓰기는 모두 할 일함(`applied: "pending_human"`)
+- 그 밖: 404 `NOT_MAPPED` (문의·신청 읽기는 다음 PR)
 
 읽기는 shop-api처럼 토큰 없이 받는다(dashboard-api는 사내망에만 있다).
 """
@@ -22,8 +25,15 @@ from fastapi import APIRouter, Depends, Header, Query, Request
 from ax_agent_template.server import verify_token
 from ax_dashboard_api.auth import bearer
 from ax_dashboard_api.envelope import ApiError
-from ax_dashboard_api.site_adapter import bookkeeping, resources, upstream
-from ax_dashboard_api.site_adapter.mapping import MappingError, Resource, SiteMapping, load_mapping
+from ax_dashboard_api.site_adapter import bookkeeping, resources, upstream, writes
+from ax_dashboard_api.site_adapter.mapping import (
+    MappingError,
+    Resource,
+    SiteMapping,
+    WriteAction,
+    load_mapping,
+)
+from ax_dashboard_api.site_adapter.writes import WriteRequest, digest
 
 
 def _require_connected() -> None:
@@ -347,12 +357,16 @@ async def _sync(
     request: Request, kind: str, key: str, action: str, authorization: str | None
 ) -> dict[str, Any]:
     _writer(authorization)
+    bookkeeping.record(kind, key, action, await _json_body(request))
+    return _ok({"ok": True})
+
+
+async def _json_body(request: Request) -> dict[str, Any]:
     try:
         body = await request.json()
     except ValueError:
         body = {}
-    bookkeeping.record(kind, key, action, body if isinstance(body, dict) else {})
-    return _ok({"ok": True})
+    return body if isinstance(body, dict) else {}
 
 
 _INQUIRY_ACTIONS = {"synced", "failed", "view", "feedback-synced", "gone"}
@@ -373,6 +387,10 @@ async def sync_write(
     action: str,
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
+    if kind == "claims" and action == "result":
+        return await claim_result(request, seq, authorization)
+    if kind == "inquiries" and action == "view":
+        return await inquiry_view(request, seq, authorization)
     allowed = (
         (kind == "inquiries" and action in _INQUIRY_ACTIONS | {"retry"})
         or (kind == "claims" and action in {"failed", "retry"})
@@ -382,6 +400,252 @@ async def sync_write(
     if not allowed:
         return _not_mapped("POST", request.url.path)
     return await _sync(request, kind, seq, action, authorization)
+
+
+# ---------------------------------------------------------------- ③-쓰기 (W2: 관문 확인 뒤 할 일함)
+
+
+def _agent(authorization: str | None, action: WriteAction) -> str:
+    """판정 1: 에이전트 토큰의 서비스가 그 동작의 허용 서비스인지.
+
+    사람 토큰·판매 서버 서비스 키·모르는 토큰은 403 `AGENT_NOT_ALLOWED` (할 일함에도 안 넣음).
+    """
+    token = bearer(authorization)
+    if not token:
+        raise ApiError(401, "AUTH_REQUIRED", "에이전트 토큰이 필요해요")
+    try:
+        service = verify_token(token)
+    except PermissionError:
+        logger.warning("에이전트 토큰이 아닌 사이트 쓰기: action=%s", action)
+        raise ApiError(
+            403, "AGENT_NOT_ALLOWED", "사이트 쓰기는 에이전트 토큰으로만 보낼 수 있어요"
+        ) from None
+    writes.allowed_service(action, service)
+    return service
+
+
+def _text(body: dict[str, Any], name: str) -> str:
+    value = body.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise ApiError(422, "INVALID_REQUEST", f"{name}가 필요해요")
+    return value
+
+
+def _context(body: dict[str, Any]) -> str | None:
+    value = body.get("context_id")
+    return value if isinstance(value, str) and value else None
+
+
+def _hour() -> str:
+    """본문에 멱등 키가 없는 쓰기(롤백·장애 해제)의 키: 같은 시(UTC) 안의 같은 요청은 한 번."""
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H")
+
+
+async def _write(req: WriteRequest) -> dict[str, Any]:
+    data, replayed = await writes.apply(req)
+    return _ok(data, replayed=replayed)
+
+
+@router.post("/api/shop/payments/{payment_id}/refund")
+async def refund(
+    request: Request, payment_id: str, authorization: str | None = Header(default=None)
+) -> dict[str, Any]:
+    service = _agent(authorization, "refund")
+    body = await _json_body(request)
+    amount = body.get("refund_amount")
+    return await _write(
+        WriteRequest(
+            action="refund",
+            service=service,
+            shop_path=f"/api/shop/payments/{payment_id}/refund",
+            idempotency_key=_text(body, "idempotency_key"),
+            fingerprint=digest({"payment_id": payment_id, "body": body}),
+            context_id=_context(body),
+            summary={
+                "payment_id": payment_id,
+                "refund_amount": amount,
+                "cancel_order": bool(body.get("cancel_order")),
+            },
+            # 환불 id·주문 취소 여부는 사람이 사이트에서 처리한 뒤에야 안다: 싣지 않는다
+            response={"payment_id": payment_id, "refund_amount": amount},
+            gate_claim={"refund_amount": amount},
+        )
+    )
+
+
+@router.post("/api/shop/coupons")
+async def coupon_issue(
+    request: Request, authorization: str | None = Header(default=None)
+) -> dict[str, Any]:
+    service = _agent(authorization, "coupon_issue")
+    body = await _json_body(request)
+    picked = {
+        k: body.get(k) for k in ("purpose_code", "buyer_id", "count", "unit_value", "campaign_id")
+    }
+    return await _write(
+        WriteRequest(
+            action="coupon_issue",
+            service=service,
+            shop_path="/api/shop/coupons",
+            idempotency_key=_text(body, "idempotency_key"),
+            fingerprint=digest(body),
+            context_id=_context(body),
+            summary=picked,
+            response=dict(picked),
+            task_id_fields=("coupon_id",),
+            gate_claim={k: picked[k] for k in ("buyer_id", "count", "unit_value")},
+        )
+    )
+
+
+@router.post("/api/shop/banners")
+async def banner_post(
+    request: Request, authorization: str | None = Header(default=None)
+) -> dict[str, Any]:
+    service = _agent(authorization, "banner_post")
+    body = await _json_body(request)
+    notice_id = _text(body, "notice_id")
+    return await _write(
+        WriteRequest(
+            action="banner_post",
+            service=service,
+            shop_path="/api/shop/banners",
+            idempotency_key=notice_id,
+            fingerprint=digest(body),
+            context_id=_context(body),
+            # 공지 문구는 고객에게 보일 글이라 사람이 그대로 올릴 수 있게 싣는다
+            summary={k: body.get(k) for k in ("notice_id", "text", "valid_from", "valid_to")},
+            response={"notice_id": notice_id, "context_id": _context(body)},
+        )
+    )
+
+
+@router.delete("/api/shop/banners/{notice_id}")
+async def banner_end(
+    notice_id: str, authorization: str | None = Header(default=None)
+) -> dict[str, Any]:
+    service = _agent(authorization, "banner_end")
+    return await _write(
+        WriteRequest(
+            action="banner_end",
+            service=service,
+            shop_path=f"/api/shop/banners/{notice_id}",
+            idempotency_key=notice_id,
+            fingerprint=digest({"notice_id": notice_id}),
+            context_id=None,
+            summary={"notice_id": notice_id},
+            response={"notice_id": notice_id},
+        )
+    )
+
+
+@router.post("/api/shop/admin/payment-version/rollback")
+async def payment_rollback(
+    request: Request, authorization: str | None = Header(default=None)
+) -> dict[str, Any]:
+    service = _agent(authorization, "payment_rollback")
+    body = await _json_body(request)
+    to_version = _text(body, "to_version")
+    return await _write(
+        WriteRequest(
+            action="payment_rollback",
+            service=service,
+            shop_path="/api/shop/admin/payment-version/rollback",
+            idempotency_key=f"{to_version}@{_hour()}",
+            fingerprint=digest(body),
+            context_id=_context(body),
+            summary={"to_version": to_version},
+            # 되돌렸는지는 사람이 한 뒤에야 안다: 전후 버전을 비워 인프라 확인이 성공으로 보지 않게
+            response={"before": None, "version": None, "to_version": to_version},
+        )
+    )
+
+
+@router.delete("/api/shop/admin/faults")
+async def fault_release(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    service = _agent(authorization, "fault_release")
+    return await _write(
+        WriteRequest(
+            action="fault_release",
+            service=service,
+            shop_path="/api/shop/admin/faults",
+            idempotency_key=_hour(),
+            fingerprint=digest("fault_release"),
+            context_id=None,
+            # 아직 풀지 않았다: `released: false`라 인프라는 해제 성공으로 보지 않는다
+            response={"released": False},
+        )
+    )
+
+
+async def claim_result(request: Request, seq: str, authorization: str | None) -> dict[str, Any]:
+    """신청 결과 쓰기 (판정 결과를 고객 화면에 옮김, 관문 없음). `sync_write`가 넘긴다."""
+    service = _agent(authorization, "claim_result")
+    body = await _json_body(request)
+    body_digest = digest(body)
+    return await _write(
+        WriteRequest(
+            action="claim_result",
+            service=service,
+            shop_path=f"/api/shop/admin/claims/{seq}/result",
+            idempotency_key=f"{seq}:{body_digest[:16]}",
+            fingerprint=body_digest,
+            context_id=None,
+            summary={
+                "seq": seq,
+                "support_claim_id": body.get("support_claim_id"),
+                "status": body.get("status"),
+                "result": body.get("result"),
+            },
+            response={"ok": True},
+        )
+    )
+
+
+def _agent_name(authorization: str | None) -> str | None:
+    """에이전트 토큰이면 그 이름, 아니면(판매 서버 서비스 키 등) None."""
+    try:
+        return verify_token(bearer(authorization) or "")
+    except PermissionError:
+        return None
+
+
+async def inquiry_view(request: Request, seq: str, authorization: str | None) -> dict[str, Any]:
+    """문의 화면 값 쓰기. `sync_write`가 넘긴다.
+
+    접수 동기화 기록은 예전 그대로 남기고(같은 인증, 같은 기록), 고객지원 에이전트가 보낸 것은
+    쓰기(`inquiry_answer`)로도 판정한다. 판매 서버 서비스 키나 다른 에이전트가 보낸 것은 예전처럼
+    기록만 한다(사이트에 쓰지 않으니 할 일도 만들지 않는다).
+    """
+    _writer(authorization)
+    body = await _json_body(request)
+    bookkeeping.record("inquiries", seq, "view", body)
+    agent = _agent_name(authorization)
+    if agent is None or agent != writes.ALLOWED_SERVICE["inquiry_answer"]:
+        return _ok({"ok": True})
+    raw_view = body.get("view")
+    view: dict[str, Any] = raw_view if isinstance(raw_view, dict) else {}
+    view_digest = body.get("view_digest")
+    body_digest = digest(body)
+    key_part = view_digest if isinstance(view_digest, str) and view_digest else body_digest[:16]
+    return await _write(
+        WriteRequest(
+            action="inquiry_answer",
+            service=agent,
+            shop_path=f"/api/shop/admin/inquiries/{seq}/view",
+            idempotency_key=f"{seq}:{key_part}",
+            fingerprint=body_digest,
+            context_id=None,
+            # 메시지 글(고객 글·답변)은 싣지 않는다: 사람이 고객지원 화면에서 본다
+            summary={
+                "seq": seq,
+                "support_inquiry_id": view.get("id"),
+                "status": view.get("status"),
+                "view_digest": view_digest,
+            },
+            response={"ok": True},
+        )
+    )
 
 
 # ---------------------------------------------------------------- 그 밖

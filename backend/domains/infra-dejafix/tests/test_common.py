@@ -29,6 +29,10 @@ def test_agent_card_format_and_served() -> None:
         "verify_recovery",
         # 같은 유형 과거 장애의 처리 방식(장애 상태 해제) 다시 하기
         "release_fault",
+        # 승인된 개발 배포를 연결된 배포 도구로 띄우기·실행 상태 읽기 (dev 전용)
+        "deploy_version",
+        "deploy_run_status",
+        "deploy_tool_services",
         # 사람과 직접 대화 (dashboard-api 전용, 조회·설명만)
         "infra_chat_send",
         "infra_chat_list",
@@ -43,6 +47,8 @@ def test_agent_card_format_and_served() -> None:
     assert skills["rollback_deployment"].allowed_requesters == ["orchestrator"]
     assert skills["verify_recovery"].allowed_requesters == ["orchestrator"]
     assert skills["release_fault"].allowed_requesters == ["orchestrator"]
+    assert skills["deploy_version"].allowed_requesters == ["dev"]
+    assert skills["deploy_run_status"].grade == "read"
     assert "orchestrator" in skills["diagnose_incident"].allowed_requesters
     for skill in card.skills:
         if skill.id == "receive_improvement_note":  # 총괄의 개선 노트를 받는 공통 skill

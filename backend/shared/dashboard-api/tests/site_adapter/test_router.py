@@ -187,7 +187,8 @@ def test_sync_write_needs_agent_token(client: TestClient) -> None:
 
 
 def test_unmapped_is_404(client: TestClient) -> None:
-    resp = client.post(f"{BASE}/api/shop/coupons", json={}, headers=AGENT)
+    # 쿠폰 발급은 이제 쓰기 판정으로 간다(test_writes). 아직 받지 않는 쓰기 주소로 본다
+    resp = client.post(f"{BASE}/api/shop/sellers/s1/payouts", json={}, headers=AGENT)
     assert resp.status_code == 404 and resp.json()["error"]["code"] == "NOT_MAPPED"
 
 

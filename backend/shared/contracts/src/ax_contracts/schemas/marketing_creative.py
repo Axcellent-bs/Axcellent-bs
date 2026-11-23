@@ -141,3 +141,34 @@ class YoutubeStatusOutput(AxModel):
     connection: str
     channel: str | None = None
     checked_at: str
+
+
+# ---- 의뢰로 만든 영상(wr_…)의 유튜브 올리기 (2026-11-23). 제작 기록 유튜브와 같은 흐름이다.
+# 대상은 의뢰 영상 초안 번호(post_draft_id)이고, 올리는 파일은 늘 AI 라벨을 입힌 영상이다
+REQUEST_VIDEO_YOUTUBE_DRAFT_SKILL = "request_video_youtube_draft"
+REQUEST_VIDEO_YOUTUBE_REQUEST_SKILL = "request_video_youtube_request"
+REQUEST_VIDEO_DRAFT_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+
+
+class RequestVideoYoutubeDraftInput(AxModel):
+    """AI 초안 만들기(처음·`regenerate`)나 사람이 고친 값 저장. 비운 칸은 그대로 둔다."""
+
+    post_draft_id: str = Field(pattern=REQUEST_VIDEO_DRAFT_ID_PATTERN)
+    regenerate: bool = False
+    title: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=5000)
+    tags: list[str] | None = Field(default=None, max_length=15)
+    privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
+
+
+class RequestVideoYoutubeRequestInput(AxModel):
+    """초안대로 유튜브에 올리기를 사람 승인(C `publish_youtube`)에 올린다."""
+
+    post_draft_id: str = Field(pattern=REQUEST_VIDEO_DRAFT_ID_PATTERN)
+    who: str | None = Field(default=None, max_length=80)
+
+
+class RequestVideoYoutubeOutput(AxModel):
+    post_draft_id: str = Field(pattern=REQUEST_VIDEO_DRAFT_ID_PATTERN)
+    request_id: str | None = None  # 의뢰 번호(wr_…)
+    youtube: dict[str, Any]  # 제작 기록 render.youtube와 같은 모양

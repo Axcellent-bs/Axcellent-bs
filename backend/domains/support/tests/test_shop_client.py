@@ -66,6 +66,7 @@ class FakeShop:
         self.refund_failure: tuple[int, str] | None = None
         self.refunds: dict[str, dict[str, Any]] = {}
         self.down = False
+        self.pending_human = False  # 사이트 변환기: 환불을 할 일함에 넣고 사람 반영 대기로 답한다
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -82,6 +83,14 @@ class FakeShop:
             if self.refund_failure:
                 status, code = self.refund_failure
                 return httpx.Response(status, json={"error": {"code": code, "message": "x"}})
+            if self.pending_human:
+                data = {
+                    "payment_id": PAYMENT_ID,
+                    "refund_amount": body["refund_amount"],
+                    "applied": "pending_human",
+                    "handoff_task_id": "hof_site1",
+                }
+                return httpx.Response(200, json={"data": data, "meta": {"source": "site_adapter"}})
             self.refunds.setdefault(body["idempotency_key"], body)
             data: dict[str, Any] = {"refund_id": "rfd_0001"}
             if body.get("cancel_order"):  # catbooks-demo #60: 배송 전 전액 환불이면 주문도 취소
@@ -327,6 +336,28 @@ def test_failed_refund_keeps_the_claim_unpaid_and_a_retry_pays_once(
     assert (again["paid"], again["held"]) == (1, 0)
     keys = {json.loads(r.content)["idempotency_key"] for r in shop.refund_calls()}
     assert keys == {"ctx_shop_abc123:refund_request:claim:1"}  # 재시도도 같은 키
+
+
+def test_pending_human_refund_is_held_not_paid(
+    client: TestClient, shop: FakeShop, executed: None
+) -> None:
+    """사이트 변환기가 환불을 할 일함에 넣으면(`applied: pending_human`) 돈이 나간 것이 아니다.
+
+    지급 완료·환불액으로 적지 않고 보류로 둔다. 다시 처리해도 같은 키로 보낸다.
+    """
+    create(client)
+    shop.pending_human = True
+    run = process(client)
+    assert (run["paid"], run["held"]) == (0, 1)
+    assert run["results"][0]["detail"] == "shop_refund_pending_human:hof_site1"
+    assert "사이트 반영 대기" in run["results"][0]["blockers"][0]["message"]
+    claim = call(client, "get_claim", {"claim_id": 1})["output"]
+    assert claim["status"] == "approved"
+    assert not claim.get("refund_paid")
+    again = process(client)
+    assert (again["paid"], again["held"]) == (0, 1)
+    keys = {json.loads(r.content)["idempotency_key"] for r in shop.refund_calls()}
+    assert keys == {"ctx_shop_abc123:refund_request:claim:1"}
 
 
 def test_unreachable_shop_api_holds_the_refund(

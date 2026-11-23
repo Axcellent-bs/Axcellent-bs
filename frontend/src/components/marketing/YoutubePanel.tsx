@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { YOUTUBE_ERROR_KO, requestYoutubeUpload, saveYoutubeDraft, type YoutubePrivacy, type YoutubeState } from "@/lib/youtube";
+import { YOUTUBE_ERROR_KO, requestRequestVideoYoutubeUpload, requestYoutubeUpload, saveRequestVideoYoutubeDraft, saveYoutubeDraft, type YoutubeDraftEdits, type YoutubePrivacy, type YoutubeState } from "@/lib/youtube";
 
 // 제작 기록 영상 → AXcellent 유튜브 (RenderPanel 안, 2026-11-23).
 // 1) AI가 제목·설명·태그 초안을 쓴다(고칠 수 있다) 2) [유튜브 올리기 요청]은 늘 사람 승인(안전 처리 로그)
 // 3) 승인되면 서버가 올리고 주소를 남긴다. SNS·미디어 카드, 제작 기록 상세, AI 대화방 카드가 같이 쓴다.
+// 11/23: 의뢰로 만든 영상(requestVideoId=post_draft_id)도 같은 칸을 쓴다. 올리는 파일은 늘 AI 표시 입힌 영상이라 고르지 않는다.
 
 const STATUS_KO: Record<string, string> = {
   draft: "초안", awaiting_approval: "사람 승인 대기", uploading: "올리는 중", done: "올림", failed: "실패", rejected: "거절됨", blocked: "막힘",
@@ -12,17 +13,30 @@ const STATUS_KO: Record<string, string> = {
 const PRIVACY_KO: Record<YoutubePrivacy, string> = { unlisted: "일부 공개(링크 있는 사람만)", public: "공개", private: "비공개" };
 const LOCKED = new Set(["awaiting_approval", "uploading", "done"]);
 
-export function YoutubePanel({ recordId, youtube, hasVideo, hasFinal, onChanged }: {
-  recordId: string;
-  youtube?: YoutubeState;
-  hasVideo: boolean;
-  hasFinal: boolean;
-  onChanged: () => void;
-}) {
+type Target =
+  | { recordId: string; hasVideo: boolean; hasFinal: boolean; requestVideoId?: undefined }
+  | { requestVideoId: string; recordId?: undefined; hasVideo?: undefined; hasFinal?: undefined };
+
+/** 제작 기록 또는 의뢰로 만든 영상 중 어느 쪽에 저장·요청할지 */
+function api(t: Target) {
+  if (t.requestVideoId !== undefined) {
+    const id = t.requestVideoId;
+    return { save: ({ part: _part, ...e }: YoutubeDraftEdits) => saveRequestVideoYoutubeDraft(id, e), request: () => requestRequestVideoYoutubeUpload(id) };
+  }
+  const id = t.recordId;
+  return { save: (e: YoutubeDraftEdits) => saveYoutubeDraft(id, e), request: () => requestYoutubeUpload(id) };
+}
+
+export function YoutubePanel(props: Target & { youtube?: YoutubeState | null; onChanged: () => void }) {
+  const { youtube, onChanged } = props;
+  const forRequest = props.requestVideoId !== undefined;
+  const hasVideo = forRequest || !!props.hasVideo;
+  const hasFinal = !forRequest && !!props.hasFinal;
+  const { save, request } = api(props);
   const [title, setTitle] = useState(youtube?.title ?? "");
   const [description, setDescription] = useState(youtube?.description ?? "");
   const [privacy, setPrivacy] = useState<YoutubePrivacy>(youtube?.privacy ?? "unlisted");
-  const [part, setPart] = useState<"video" | "final_video">(youtube?.part ?? (hasFinal ? "final_video" : "video"));
+  const [part, setPart] = useState<"video" | "final_video">(youtube?.part === "video" || youtube?.part === "final_video" ? youtube.part : hasFinal ? "final_video" : "video");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +44,7 @@ export function YoutubePanel({ recordId, youtube, hasVideo, hasFinal, onChanged 
     setTitle(youtube?.title ?? "");
     setDescription(youtube?.description ?? "");
     if (youtube?.privacy) setPrivacy(youtube.privacy);
-    if (youtube?.part) setPart(youtube.part);
+    if (youtube?.part === "video" || youtube?.part === "final_video") setPart(youtube.part);
   }, [youtube?.title, youtube?.description, youtube?.privacy, youtube?.part]);
 
   const status = youtube?.status ?? "";
@@ -61,7 +75,7 @@ export function YoutubePanel({ recordId, youtube, hasVideo, hasFinal, onChanged 
       {status === "done" && youtube?.url ? (
         <p className="text-sm text-ink-900">유튜브에 올렸어요: <a href={youtube.url} target="_blank" rel="noreferrer" className="text-brand-700 underline">{youtube.url}</a> <span className="text-xs text-ink-500">({PRIVACY_KO[youtube.privacy ?? "unlisted"]})</span></p>
       ) : !youtube?.title ? (
-        <button type="button" className="btn-ghost text-xs" disabled={busy !== null} onClick={() => void run("draft", () => saveYoutubeDraft(recordId, {}))}>
+        <button type="button" className="btn-ghost text-xs" disabled={busy !== null} onClick={() => void run("draft", () => save({}))}>
           {busy === "draft" ? "AI가 쓰는 중…" : "AI로 유튜브 제목·설명 쓰기"}
         </button>
       ) : (
@@ -74,22 +88,24 @@ export function YoutubePanel({ recordId, youtube, hasVideo, hasFinal, onChanged 
                 {(Object.keys(PRIVACY_KO) as YoutubePrivacy[]).map((p) => <option key={p} value={p}>{PRIVACY_KO[p]}</option>)}
               </select>
             </label>
-            <label className="flex items-center gap-1">올릴 영상
-              <select className="field w-auto py-1 text-xs" value={part} disabled={locked} onChange={(e) => setPart(e.target.value as "video" | "final_video")}>
-                <option value="final_video" disabled={!hasFinal}>완성 영상{hasFinal ? "" : " (없음)"}</option>
-                <option value="video" disabled={!hasVideo}>Higgsfield 영상{hasVideo ? "" : " (없음)"}</option>
-              </select>
-            </label>
+            {forRequest ? <span className="chip bg-ink-50 text-ink-700">올릴 영상: AI 표시가 들어간 의뢰 영상</span> : (
+              <label className="flex items-center gap-1">올릴 영상
+                <select className="field w-auto py-1 text-xs" value={part} disabled={locked} onChange={(e) => setPart(e.target.value as "video" | "final_video")}>
+                  <option value="final_video" disabled={!hasFinal}>완성 영상{hasFinal ? "" : " (없음)"}</option>
+                  <option value="video" disabled={!hasVideo}>Higgsfield 영상{hasVideo ? "" : " (없음)"}</option>
+                </select>
+              </label>
+            )}
             {youtube?.tags?.length ? <span className="text-ink-500">태그 {youtube.tags.join(", ")}</span> : null}
           </div>
           {!locked && (
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" className="btn-ghost text-xs" disabled={busy !== null}
-                onClick={() => void run("save", () => saveYoutubeDraft(recordId, { title, description, privacy, part }))}>{busy === "save" ? "저장 중…" : "초안 저장"}</button>
+                onClick={() => void run("save", () => save({ title, description, privacy, part }))}>{busy === "save" ? "저장 중…" : "초안 저장"}</button>
               <button type="button" className="btn-ghost text-xs" disabled={busy !== null}
-                onClick={() => void run("regen", () => saveYoutubeDraft(recordId, { regenerate: true, privacy, part }))}>{busy === "regen" ? "다시 쓰는 중…" : "AI로 다시 쓰기"}</button>
+                onClick={() => void run("regen", () => save({ regenerate: true, privacy, part }))}>{busy === "regen" ? "다시 쓰는 중…" : "AI로 다시 쓰기"}</button>
               <button type="button" className="btn-primary text-xs" disabled={busy !== null || !anyVideo || !title.trim()}
-                onClick={() => void run("upload", async () => { await saveYoutubeDraft(recordId, { title, description, privacy, part }); await requestYoutubeUpload(recordId); })}>
+                onClick={() => void run("upload", async () => { await save({ title, description, privacy, part }); await request(); })}>
                 {busy === "upload" ? "요청 중…" : "유튜브 올리기 요청 (사람 승인)"}
               </button>
             </div>
