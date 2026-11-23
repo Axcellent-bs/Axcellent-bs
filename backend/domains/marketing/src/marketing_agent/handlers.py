@@ -54,6 +54,12 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeYoutubeRequestInput,
     YoutubeStatusOutput,
 )
+from ax_contracts.schemas.marketing_youtube_stats import (
+    YoutubeUploadsListInput,
+    YoutubeUploadsListOutput,
+    YoutubeVideoStatsInput,
+    YoutubeVideoStatsOutput,
+)
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import ad_metrics as _ad_metrics
 from marketing_agent import (
@@ -76,6 +82,7 @@ from marketing_agent import creative_render as _render
 from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import storyboard as _storyboard
 from marketing_agent import youtube as _youtube
+from marketing_agent import youtube_stats as _youtube_stats
 from marketing_agent.brief_handoff import (
     AUTO,
     DRAFT_MEDIA_KIND,
@@ -961,6 +968,46 @@ async def youtube_status(request: AgentRequest) -> AgentResult:
         TaskStatus.COMPLETED,
         output=out.model_dump(mode="json"),
         evidence=_evidence(["youtube_status"], f"유튜브 연결 {out.connection}", []),
+    )
+
+
+async def youtube_video_stats(request: AgentRequest) -> AgentResult:
+    """회사 유튜브 영상의 조회수·좋아요·댓글(read, 5분 캐시). 키·토큰 값은 돌려주지 않는다."""
+    data = _parse(request, YoutubeVideoStatsInput)
+    if isinstance(data, AgentResult):
+        return data
+    out = YoutubeVideoStatsOutput(
+        **await _youtube_stats.video_stats(data.video_ids, data.record_ids)
+    )
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        outcome=out.status,
+        evidence=_evidence(
+            ["youtube_video_stats"],
+            f"유튜브 영상 성과 {len(out.items)}개 ({out.reason or out.status})",
+            [i.video_id for i in out.items],
+        ),
+    )
+
+
+async def youtube_uploads_list(request: AgentRequest) -> AgentResult:
+    """회사 유튜브에 올린 영상 목록(read): 기록 id·video_id·주소·올린 시각·제목·연결 번호."""
+    data = _parse(request, YoutubeUploadsListInput)
+    if isinstance(data, AgentResult):
+        return data
+    items = _youtube_stats.uploads(data.limit, data.campaign_id)
+    out = YoutubeUploadsListOutput(items=items, total=len(items))
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            ["youtube_uploads_list"],
+            f"올린 유튜브 영상 {out.total}개",
+            [i.record_id for i in items],
+        ),
     )
 
 
@@ -1959,6 +2006,8 @@ HANDLERS = {
     "creative_youtube_draft": creative_youtube_draft,
     "creative_youtube_request": creative_youtube_request,
     "youtube_status": youtube_status,
+    "youtube_video_stats": youtube_video_stats,
+    "youtube_uploads_list": youtube_uploads_list,
     "creative_record_attach": creative_record_attach,
     "receive_campaign_brief": receive_campaign_brief,
     "record_campaign_ad_metrics": record_campaign_ad_metrics,

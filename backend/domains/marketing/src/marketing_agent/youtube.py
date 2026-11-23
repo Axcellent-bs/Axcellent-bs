@@ -11,6 +11,7 @@
   `_REFRESH_TOKEN`(채널 주인이 한 번 동의해서 받은 값). 값은 로그·응답에 넣지 않는다
 - 기본 공개 범위는 `unlisted`(일부 공개). 사람이 초안에서 public·private로 바꿀 수 있다
 - AI 생성 영상이므로 설명 끝에 AI 생성 표시를 붙이고(지우지 않는다) 합성 미디어로 표시한다
+- 그 아래 태그에서 고른 해시태그 줄을 붙인다(설명 전체 3~5개, #AXcellent 포함, 이미 있으면 안 붙임)
 - 제목·줄거리는 외부 입력이라 LLM 데이터 블록(`untrusted`)에만 넣는다. LLM이 없으면 고정 문구 초안
 """
 
@@ -19,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -49,6 +51,12 @@ STATUS_TTL = 60.0
 PENDING = ("awaiting_approval", "uploading")
 Privacy = Literal["private", "unlisted", "public"]
 VideoPart = Literal["video", "final_video"]
+# 설명 끝 해시태그: 태그에서 골라 설명 전체 해시태그가 3~5개가 되게(#AXcellent 포함, 중복 없이)
+HASHTAG_MAX = 5
+HASHTAG_DEFAULTS = ("AI직원", "AI")  # 태그가 모자랄 때만 채워 최소 3개를 맞춘다
+HASHTAG_ROOM = 200  # 해시태그 줄 자리(5개 × 태그 30자 + 공백·#)
+HASHTAG_WORD_RE = re.compile(r"[^\W_][\w]*")  # 공백·기호 없는 한 낱말(한국어 허용)
+HASHTAG_RE = re.compile(r"#([^\W_][\w]*)")
 
 # 테스트에서 바꿔 끼운다
 CLIENT: Callable[[], httpx.AsyncClient] = lambda: httpx.AsyncClient(timeout=600)  # noqa: E731
@@ -172,17 +180,50 @@ def _put(record_id: str, **values: Any) -> dict[str, Any]:
     return cur
 
 
+def _hashtag_keys(body: str) -> list[str]:
+    """설명에 이미 있는 해시태그(대소문자 무시, 나온 순서)."""
+    return list(dict.fromkeys(m.casefold() for m in HASHTAG_RE.findall(body)))
+
+
+def _hashtag_line(body: str, tags: list[str]) -> str:
+    """설명 끝에 붙일 해시태그 줄. 설명 전체 해시태그가 `HASHTAG_MAX`개가 되도록 태그에서 고른다.
+
+    공백 없는 태그(한국어 허용)만 쓰고, 이미 설명에 있는 해시태그(AI 표시의 #AXcellent 포함)는
+    다시 붙이지 않는다. 태그가 모자라면 `HASHTAG_DEFAULTS`로 채운다.
+    고칠 게 없으면 빈 문자열(사람이 고친 설명에 다시 붙여도 그대로다).
+    """
+    have = _hashtag_keys(body)
+    picks: list[str] = []
+    for tag in ["AXcellent", *tags, *HASHTAG_DEFAULTS]:
+        word = str(tag).strip().lstrip("#")
+        if not word or not HASHTAG_WORD_RE.fullmatch(word):
+            continue  # 공백·기호가 든 태그는 해시태그가 되지 않는다
+        key = word.casefold()
+        if key in have or key in (p.casefold() for p in picks):
+            continue
+        if len(have) + len(picks) >= HASHTAG_MAX:
+            break
+        picks.append(word)
+    return " ".join(f"#{p}" for p in picks)
+
+
 def _clean(title: str, description: str, tags: list[str]) -> tuple[str, str, list[str]]:
     title = " ".join(title.replace("<", "").replace(">", "").split())[:100]
     body = description.replace("<", "").replace(">", "").strip()
-    if AI_NOTICE not in body:
-        body = f"{body}\n\n{AI_NOTICE}"
     seen: list[str] = []
     for tag in tags:
         t = " ".join(str(tag).split())[:30]
         if t and t not in seen:
             seen.append(t)
-    return title, body[:5000], seen[:15]
+    seen = seen[:15]
+    # 끝에 붙는 AI 표시·해시태그가 5000자에서 잘리지 않게 본문을 먼저 줄인다
+    body = body[: 5000 - len(AI_NOTICE) - HASHTAG_ROOM]
+    if AI_NOTICE not in body:
+        body = f"{body}\n\n{AI_NOTICE}"
+    line = _hashtag_line(body, seen)
+    if line:
+        body = f"{body}\n{line}"
+    return title, body[:5000], seen
 
 
 def _default_part(rec: dict[str, Any]) -> str | None:
