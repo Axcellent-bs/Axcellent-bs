@@ -15,7 +15,7 @@ from typing import Any
 from ax_agent_template import config
 from ax_agent_template.client import call_agent
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
-from ax_dashboard_api.envelope import ApiError
+from ax_dashboard_api.envelope import ApiError, tenant_meta
 
 AGENT_NAME = "dashboard-api"
 TARGET = "finance"
@@ -45,7 +45,7 @@ async def call(
             token=config.agent_token(AGENT_NAME),
             deadline=datetime.now(UTC) + timedelta(seconds=DEADLINE_SECONDS),
             idempotency_key=f"ui:finchat:{uuid.uuid4().hex}",
-            **({"tenant_id": tenant_id} if tenant_id else {}),  # 개인 MCP 창구: 토큰의 회사
+            **tenant_meta(tenant_id),  # 명시 값 먼저, 없으면 세션 회사
         ),
         skill=skill,
         input=payload,

@@ -103,6 +103,20 @@ class SessionCompanyMiddleware:
             _SESSION_COMPANY.reset(token)
 
 
+def tenant_meta(explicit: str | None = None) -> dict[str, str]:
+    """에이전트를 부를 때 `RequestMeta`에 더할 회사 칸. 명시한 값이 먼저, 없으면 세션 회사.
+
+    캣북스 세션과 세션 없는 호출(백그라운드·공용 토큰)은 칸을 비워 지금 기본값(shop-demo)을
+    그대로 둔다(받는 쪽의 로그 조회가 그 값을 본다). 다른 회사 세션이면 그 회사 id를 싣는다.
+    """
+    if explicit:
+        return {"tenant_id": explicit}
+    company = _SESSION_COMPANY.get()
+    if company and TENANT_ID_ALIASES.get(company, company) != TENANT_ID_CATBOOKS:
+        return {"tenant_id": company}
+    return {}
+
+
 def meta_tenant_id() -> str:
     """응답 meta의 회사. 세션이 캣북스거나 없으면 지금 값(`TENANT_ID`, 기본 shop-demo)을 둔다
     (공통 로그 조회가 그 값을 본다). 다른 회사 세션이면 그 회사 id."""
