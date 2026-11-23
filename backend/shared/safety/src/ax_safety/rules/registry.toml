@@ -510,6 +510,15 @@ action = "release_fault"
 owner = "infra"
 base_grade = "A"
 
+# 배포 실행 (#1615): dev 배포 기록을 사람이 승인·실행하면 dev가 부른다. 고객이 도구 연결에서 정한
+# 배포 도구(GitHub Actions·Jenkins)로 버전을 띄운다. 사람 승인은 dev(approve·dispatch, 세션 모드면
+# 로그인한 사람)가 강제하고 infra도 승인한 사람이 없으면 거절하므로 관문은 다시 묻지 않는다 (A)
+[[actions]]
+action = "deploy_version"
+owner = "infra"
+requesters = ["dev"]
+base_grade = "A"
+
 # 재무 화면에서 사람이 정한 개선 요청을 기획 create_ticket으로 보내기. 돈은 움직이지 않고 기획에 요청 한 건이
 # 생길 뿐이다(고객지원 request_change와 같은 A). 요청자는 사람 토큰을 받은 재무 화면 API다
 [[actions]]
