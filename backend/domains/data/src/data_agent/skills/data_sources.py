@@ -36,7 +36,7 @@ from ax_contracts.schemas.data import (
     SourceDataKind,
     SourceStatus,
 )
-from data_agent import collector_lock
+from data_agent import collector_lock, company_scope
 from data_agent.connectors import data4library, kosis, naver_shopping
 from data_agent.connectors.naver_datalab import CLIENT_ID_ENV, CLIENT_SECRET_ENV
 from data_agent.connectors.youtube import KEY_ENV as YOUTUBE_KEY_ENV
@@ -147,18 +147,23 @@ def approved_ids(env: Mapping[str, str]) -> set[str]:
     return ids
 
 
-class ProbeStore:
-    """출처 확인 호출 결과 (출처 id → 성공 여부·이유·시각)."""
+PROBES = (
+    "CREATE TABLE IF NOT EXISTS {table} (source_id TEXT NOT NULL,"
+    " ok INTEGER NOT NULL, reason TEXT NOT NULL, at TEXT NOT NULL,"
+    " tenant_id TEXT NOT NULL DEFAULT 'catbooks', PRIMARY KEY (tenant_id, source_id))"
+)
 
-    def __init__(self, path: str | Path) -> None:
+
+class ProbeStore:
+    """출처 확인 호출 결과 (출처 id → 성공 여부·이유·시각). 회사마다 따로 (1-5, 키에 tenant_id)."""
+
+    def __init__(self, path: str | Path, company_id: str | None = None) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.company_id = company_scope.resolve(company_id)
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._lock = threading.Lock()
-        with self._lock, self._conn:
-            self._conn.execute(
-                "CREATE TABLE IF NOT EXISTS probes (source_id TEXT PRIMARY KEY,"
-                " ok INTEGER NOT NULL, reason TEXT NOT NULL, at TEXT NOT NULL)"
-            )
+        with self._lock:
+            company_scope.rebuild_with_tenant_key(self._conn, "probes", PROBES)
 
     def close(self) -> None:
         self._conn.close()
@@ -166,15 +171,16 @@ class ProbeStore:
     def get(self, source_id: str) -> tuple[bool, str, datetime] | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT ok, reason, at FROM probes WHERE source_id = ?", (source_id,)
+                "SELECT ok, reason, at FROM probes WHERE tenant_id = ? AND source_id = ?",
+                (self.company_id, source_id),
             ).fetchone()
         return (bool(row[0]), row[1], datetime.fromisoformat(row[2])) if row else None
 
     def put(self, source_id: str, ok: bool, reason: str, at: datetime) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO probes VALUES (?,?,?,?)",
-                (source_id, int(ok), reason, at.isoformat()),
+                "INSERT OR REPLACE INTO probes VALUES (?,?,?,?,?)",
+                (source_id, int(ok), reason, at.isoformat(), self.company_id),
             )
 
 

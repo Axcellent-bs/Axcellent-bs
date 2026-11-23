@@ -218,19 +218,33 @@ def ig_radar_accounts() -> list[str] | None:
 # ---------------------------------------------------------------- 인스타 레이더 자동 목록
 # data 경쟁사 찾기(company_accounts.find)가 business_discovery로 확인한 계정 + 사람 include
 # (exclude 뺌, 팔로워 큰 순). 화면 저장 목록도 회사 trends.toml 목록도 없을 때만 레이더가 쓴다.
-# 파일: `AX_IG_RADAR_AUTO_FILE` → 회사 연결 파일 옆 `instagram_radar_auto.json`
-# (ig_radar_file과 같은 자리 규칙). 회사 연결 파일이 없으면 None이고 쓰지 않는다.
+# 파일: `AX_IG_RADAR_AUTO_FILE` → 회사 폴더를 켰으면
+# `<회사 폴더>/<지금 회사>/instagram_radar_auto.json`
+# (여러 회사 1-5, 11/23: 회사 데이터라 회사 폴더. 옛 자리 = 회사 연결 파일 옆은 처음 읽을 때
+# company_files 이관 규칙으로 옮기고 `.moved`를 남긴다. `AX_COMPANY_FOLDERS=off`면 옛 자리로 되살림)
+# → 아니면 회사 연결 파일 옆. 회사 연결 파일이 없으면 None이고 쓰지 않는다.
 # data가 쓰고 data·dashboard-api가 읽는다
 IG_RADAR_AUTO_FILE_ENV = "AX_IG_RADAR_AUTO_FILE"
 IG_RADAR_AUTO_FILE = "instagram_radar_auto.json"
 
 
 def ig_radar_auto_file() -> Path | None:
+    from ax_agent_template import company_files
+    from ax_agent_template.companies import canonical_company_id
+    from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
+
+    cid = canonical_company_id(current()) or TENANT_ID_CATBOOKS
     raw = os.getenv(IG_RADAR_AUTO_FILE_ENV, "").strip()
     if raw:
+        company_files.restore_old(IG_RADAR_AUTO_FILE, target=Path(raw), company_id=cid)
         return Path(raw)
     conn = os.getenv("AX_COMPANY_CONNECTION_FILE", "").strip()
-    return Path(conn).with_name(IG_RADAR_AUTO_FILE) if conn else None
+    legacy = Path(conn).with_name(IG_RADAR_AUTO_FILE) if conn else None
+    if company_files.folders_on():
+        return company_files.company_file(IG_RADAR_AUTO_FILE, source=legacy, company_id=cid)
+    if legacy is not None:  # 되돌리기(off): 옛 자리가 비어 있으면 회사 폴더 값으로 되살린다
+        company_files.restore_old(IG_RADAR_AUTO_FILE, target=legacy, company_id=cid)
+    return legacy
 
 
 def ig_radar_auto_accounts() -> list[str] | None:

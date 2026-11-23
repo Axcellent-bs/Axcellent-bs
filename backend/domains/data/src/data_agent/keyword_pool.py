@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from ax_agent_template.tenant import setting as tenant_setting
+from data_agent import company_scope
 from data_agent.connectors import ConnectorUnavailable
 
 DB_ENV = "DATA_KEYWORD_POOL_DB"
@@ -105,30 +106,47 @@ class PoolRow:
         return None if self.pc is None or self.mobile is None else self.pc + self.mobile
 
 
+# 회사 키워드로 만든 표라 회사마다 따로 (1-5, 11/23). 키에 tenant_id. 옛 표는 다시 만들어 캣북스로
+TABLES = {
+    "pool": (
+        "CREATE TABLE IF NOT EXISTS {table} (day TEXT NOT NULL, keyword TEXT NOT NULL,"
+        " pc INTEGER, mobile INTEGER, pc_below_10 INTEGER NOT NULL,"
+        " mobile_below_10 INTEGER NOT NULL, competition TEXT, source TEXT NOT NULL,"
+        " category TEXT, tenant_id TEXT NOT NULL DEFAULT 'catbooks',"
+        " PRIMARY KEY (tenant_id, day, keyword))"
+    ),
+    "runs": (
+        "CREATE TABLE IF NOT EXISTS {table} (day TEXT NOT NULL, status TEXT NOT NULL,"
+        " reason TEXT, hints INTEGER NOT NULL, calls INTEGER NOT NULL, at TEXT NOT NULL,"
+        " tenant_id TEXT NOT NULL DEFAULT 'catbooks', PRIMARY KEY (tenant_id, day))"
+    ),
+    # v3(11/20): 급상승 후보(그날 처음 고른 것을 그날 그대로)·판정(하루 1번, 일간·주간 공용)
+    "rising_candidates": (
+        "CREATE TABLE IF NOT EXISTS {table} (day TEXT NOT NULL,"
+        " position INTEGER NOT NULL, keyword TEXT NOT NULL, sources TEXT NOT NULL,"
+        " tenant_id TEXT NOT NULL DEFAULT 'catbooks', PRIMARY KEY (tenant_id, day, position))"
+    ),
+    "rising_judgments": (
+        "CREATE TABLE IF NOT EXISTS {table} (day TEXT NOT NULL,"
+        " keyword TEXT NOT NULL, status TEXT NOT NULL, ratio REAL, baseline REAL,"
+        " points_json TEXT NOT NULL, judged_at TEXT NOT NULL, score REAL, reason TEXT,"
+        " tenant_id TEXT NOT NULL DEFAULT 'catbooks', PRIMARY KEY (tenant_id, day, keyword))"
+    ),
+}
+
+
 class PoolStore:
-    def __init__(self, path: str | Path) -> None:
+    """키워드 풀 저장소 하나 = 회사 하나 (`company_id`, 없으면 지금 요청·지금 회사)."""
+
+    def __init__(self, path: str | Path, company_id: str | None = None) -> None:
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.company_id = company_scope.resolve(company_id)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=5.0)
-        with self._lock, self._conn:
-            self._conn.executescript(
-                "CREATE TABLE IF NOT EXISTS pool (day TEXT NOT NULL, keyword TEXT NOT NULL,"
-                " pc INTEGER, mobile INTEGER, pc_below_10 INTEGER NOT NULL,"
-                " mobile_below_10 INTEGER NOT NULL, competition TEXT, source TEXT NOT NULL,"
-                " category TEXT, PRIMARY KEY (day, keyword));"
-                "CREATE TABLE IF NOT EXISTS runs (day TEXT PRIMARY KEY, status TEXT NOT NULL,"
-                " reason TEXT, hints INTEGER NOT NULL, calls INTEGER NOT NULL, at TEXT NOT NULL);"
-                # v3(11/20): 급상승 후보(그날 처음 고른 것을 그날 그대로)·
-                # 판정(하루 1번, 일간·주간 공용)
-                "CREATE TABLE IF NOT EXISTS rising_candidates (day TEXT NOT NULL,"
-                " position INTEGER NOT NULL, keyword TEXT NOT NULL, sources TEXT NOT NULL,"
-                " PRIMARY KEY (day, position));"
-                "CREATE TABLE IF NOT EXISTS rising_judgments (day TEXT NOT NULL,"
-                " keyword TEXT NOT NULL, status TEXT NOT NULL, ratio REAL, baseline REAL,"
-                " points_json TEXT NOT NULL, judged_at TEXT NOT NULL, score REAL, reason TEXT,"
-                " PRIMARY KEY (day, keyword));"
-            )
+        with self._lock:
+            for table, create in TABLES.items():
+                company_scope.rebuild_with_tenant_key(self._conn, table, create)
 
     def close(self) -> None:
         self._conn.close()
@@ -136,22 +154,26 @@ class PoolStore:
     def done(self, day: date) -> bool:
         with self._lock:
             row = self._conn.execute(
-                "SELECT status FROM runs WHERE day = ?", (day.isoformat(),)
+                "SELECT status FROM runs WHERE tenant_id = ? AND day = ?",
+                (self.company_id, day.isoformat()),
             ).fetchone()
         return row is not None and row[0] in ("ok", "hint_only")
 
     def save(self, day: date, rows: Sequence[PoolRow], status: str, reason: str | None,
              hints: int, calls: int, at: datetime) -> None:  # fmt: skip
+        cid = self.company_id
         with self._lock, self._conn:
-            self._conn.execute("DELETE FROM pool WHERE day = ?", (day.isoformat(),))
+            self._conn.execute("DELETE FROM pool WHERE tenant_id = ? AND day = ?",
+                               (cid, day.isoformat()))  # fmt: skip
             self._conn.executemany(
-                "INSERT OR REPLACE INTO pool VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO pool VALUES (?,?,?,?,?,?,?,?,?,?)",
                 [(day.isoformat(), r.keyword, r.pc, r.mobile, int(r.pc_below_10),
-                  int(r.mobile_below_10), r.competition, r.source, r.category) for r in rows],
+                  int(r.mobile_below_10), r.competition, r.source, r.category, cid)
+                 for r in rows],
             )  # fmt: skip
             self._conn.execute(
-                "INSERT OR REPLACE INTO runs VALUES (?,?,?,?,?,?)",
-                (day.isoformat(), status, reason, hints, calls, at.isoformat()),
+                "INSERT OR REPLACE INTO runs VALUES (?,?,?,?,?,?,?)",
+                (day.isoformat(), status, reason, hints, calls, at.isoformat(), cid),
             )
 
 
@@ -161,18 +183,22 @@ class PoolStore:
         """그날 처음 고른 후보 [(키워드, 출처들)] (순서대로). 없으면 빈 목록."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT keyword, sources FROM rising_candidates WHERE day = ? ORDER BY position",
-                (day.isoformat(),),
+                "SELECT keyword, sources FROM rising_candidates WHERE tenant_id = ? AND day = ?"
+                " ORDER BY position",
+                (self.company_id, day.isoformat()),
             ).fetchall()
         return [(k, list(json.loads(s))) for k, s in rows]
 
     def save_candidates(self, day: date, items: Sequence[tuple[str, Sequence[str]]]) -> None:
+        cid = self.company_id
         with self._lock, self._conn:
-            self._conn.execute("DELETE FROM rising_candidates WHERE day = ?", (day.isoformat(),))
+            self._conn.execute("DELETE FROM rising_candidates WHERE tenant_id = ? AND day = ?",
+                               (cid, day.isoformat()))  # fmt: skip
             self._conn.executemany(
-                "INSERT INTO rising_candidates VALUES (?,?,?,?)",
-                [(day.isoformat(), n, k, json.dumps(list(s))) for n, (k, s) in enumerate(items)],
-            )
+                "INSERT INTO rising_candidates VALUES (?,?,?,?,?)",
+                [(day.isoformat(), n, k, json.dumps(list(s)), cid)
+                 for n, (k, s) in enumerate(items)],
+            )  # fmt: skip
 
     _JUDGE_COLS = ("day", "keyword", "status", "ratio", "baseline", "points_json", "judged_at",
                    "score", "reason")  # fmt: skip
@@ -182,8 +208,8 @@ class PoolStore:
         with self._lock:
             rows = self._conn.execute(
                 f"SELECT {', '.join(self._JUDGE_COLS)} FROM rising_judgments"  # noqa: S608
-                " WHERE day >= ? AND day <= ? ORDER BY day DESC",
-                (since.isoformat(), until.isoformat()),
+                " WHERE tenant_id = ? AND day >= ? AND day <= ? ORDER BY day DESC",
+                (self.company_id, since.isoformat(), until.isoformat()),
             ).fetchall()
         return [dict(zip(self._JUDGE_COLS, r, strict=True)) for r in rows]
 
@@ -193,9 +219,9 @@ class PoolStore:
         body = json.dumps([[d.isoformat(), v] for d, v in points])
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO rising_judgments VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO rising_judgments VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (day.isoformat(), keyword, status, ratio, baseline, body, at.isoformat(), score,
-                 reason),
+                 reason, self.company_id),
             )  # fmt: skip
 
 
@@ -215,19 +241,33 @@ def read_ro(path: str | Path) -> sqlite3.Connection | None:
 _COLS = "keyword, pc, mobile, pc_below_10, mobile_below_10, competition, source, category"
 
 
-def latest(path: str | Path) -> tuple[date | None, list[PoolRow]]:
-    """가장 최근 날짜의 풀 (검색량 많은 순). 읽기 전용, 파일이 없으면 (None, [])."""
+def _tenant_filter(conn: sqlite3.Connection) -> bool:
+    """읽기 전용으로 연 옛 파일(회사 칸 없음)이면 False: 그 줄은 모두 캣북스다."""
+    return company_scope.TENANT_COLUMN in {
+        r[1] for r in conn.execute("PRAGMA table_info(pool)")
+    }
+
+
+def latest(path: str | Path, company_id: str | None = None) -> tuple[date | None, list[PoolRow]]:
+    """가장 최근 날짜의 풀 (검색량 많은 순, 그 회사만). 읽기 전용, 파일이 없으면 (None, [])."""
     conn = read_ro(path)
     if conn is None:
         return None, []
+    cid = company_scope.resolve(company_id)
     try:
-        row = conn.execute("SELECT MAX(day) FROM pool").fetchone()
+        if _tenant_filter(conn):
+            where, args = "tenant_id = ?", (cid,)
+        elif cid == company_scope.CATBOOKS:
+            where, args = "1 = 1", ()
+        else:
+            return None, []
+        row = conn.execute(f"SELECT MAX(day) FROM pool WHERE {where}", args).fetchone()  # noqa: S608
         if not row or not row[0]:
             return None, []
         day = date.fromisoformat(row[0])
-        sql = (f"SELECT {_COLS} FROM pool WHERE day = ?"  # noqa: S608
+        sql = (f"SELECT {_COLS} FROM pool WHERE {where} AND day = ?"  # noqa: S608
                " ORDER BY COALESCE(pc, 0) + COALESCE(mobile, 0) DESC, keyword")  # fmt: skip
-        rows = _rows(conn, sql, (row[0],))
+        rows = _rows(conn, sql, (*args, row[0]))
         return day, rows
     except sqlite3.DatabaseError:
         return None, []
@@ -235,21 +275,30 @@ def latest(path: str | Path) -> tuple[date | None, list[PoolRow]]:
         conn.close()
 
 
-def by_day(path: str | Path, since: date, until: date) -> dict[date, list[PoolRow]]:
-    """날짜별 풀 (since~until, 한국 날짜). 읽기 전용."""
+def by_day(
+    path: str | Path, since: date, until: date, company_id: str | None = None
+) -> dict[date, list[PoolRow]]:
+    """날짜별 풀 (since~until, 한국 날짜, 그 회사만). 읽기 전용."""
     conn = read_ro(path)
     if conn is None:
         return {}
+    cid = company_scope.resolve(company_id)
     try:
+        if _tenant_filter(conn):
+            where, args = "tenant_id = ?", (cid,)
+        elif cid == company_scope.CATBOOKS:
+            where, args = "1 = 1", ()
+        else:
+            return {}
         out: dict[date, list[PoolRow]] = {}
         for (day,) in conn.execute(
-            "SELECT DISTINCT day FROM pool WHERE day >= ? AND day <= ?",
-            (since.isoformat(), until.isoformat()),
+            f"SELECT DISTINCT day FROM pool WHERE {where} AND day >= ? AND day <= ?",  # noqa: S608
+            (*args, since.isoformat(), until.isoformat()),
         ).fetchall():
             out[date.fromisoformat(day)] = _rows(
                 conn,
-                f"SELECT {_COLS} FROM pool WHERE day = ?",
-                (day,),  # noqa: S608
+                f"SELECT {_COLS} FROM pool WHERE {where} AND day = ?",  # noqa: S608
+                (*args, day),
             )
         return out
     except sqlite3.DatabaseError:

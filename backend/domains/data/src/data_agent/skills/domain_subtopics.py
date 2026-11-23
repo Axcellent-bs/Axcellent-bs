@@ -43,6 +43,7 @@ from ax_contracts.schemas.data import (
     DomainSubtopicsRequest,
     SubtopicSearch,
 )
+from data_agent import company_scope
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.llm_budget import no_llm
 from data_agent.skills import trend_candidates as cand
@@ -115,20 +116,33 @@ class Short:
     thumbnail_url: str | None = None  # 받은 검색 응답 값 (예전 저장분은 None)
 
 
+# 회사 씨앗으로 찾은 것이라 회사마다 따로 (1-5, 11/23). 키에 tenant_id
+TABLES = {
+    "searches": (
+        "CREATE TABLE IF NOT EXISTS {table} (seed TEXT NOT NULL,"
+        " searched_at TEXT NOT NULL, day TEXT NOT NULL, shorts TEXT NOT NULL,"
+        " tenant_id TEXT NOT NULL DEFAULT 'catbooks', PRIMARY KEY (tenant_id, seed))"
+    ),
+    # 축 결정 (같은 축 목록·같은 이름이면 같은 축)
+    "axes": (
+        "CREATE TABLE IF NOT EXISTS {table} (axes TEXT NOT NULL, name TEXT NOT NULL,"
+        " axis TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'catbooks',"
+        " PRIMARY KEY (tenant_id, axes, name))"
+    ),
+}
+
+
 class SubtopicStore:
-    def __init__(self, path: str | Path) -> None:
+    """하위 주제 검색·축 저장소 하나 = 회사 하나 (`company_id`, 없으면 지금 요청·지금 회사)."""
+
+    def __init__(self, path: str | Path, company_id: str | None = None) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.company_id = company_scope.resolve(company_id)
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._lock = threading.Lock()
-        with self._lock, self._conn:
-            self._conn.execute(
-                "CREATE TABLE IF NOT EXISTS searches (seed TEXT PRIMARY KEY,"
-                " searched_at TEXT NOT NULL, day TEXT NOT NULL, shorts TEXT NOT NULL)"
-            )
-            self._conn.execute(  # 축 결정 (같은 축 목록·같은 이름이면 같은 축)
-                "CREATE TABLE IF NOT EXISTS axes (axes TEXT NOT NULL, name TEXT NOT NULL,"
-                " axis TEXT NOT NULL, PRIMARY KEY (axes, name))"
-            )
+        with self._lock:
+            for table, create in TABLES.items():
+                company_scope.rebuild_with_tenant_key(self._conn, table, create)
 
     def close(self) -> None:
         self._conn.close()
@@ -136,7 +150,8 @@ class SubtopicStore:
     def get(self, seed: str) -> tuple[datetime, list[Short]] | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT searched_at, shorts FROM searches WHERE seed = ?", (_n(seed),)
+                "SELECT searched_at, shorts FROM searches WHERE tenant_id = ? AND seed = ?",
+                (self.company_id, _n(seed)),
             ).fetchone()
         if not row:
             return None
@@ -150,7 +165,8 @@ class SubtopicStore:
         key = json.dumps(list(axes), ensure_ascii=False)
         with self._lock:
             rows = self._conn.execute(
-                "SELECT name, axis FROM axes WHERE axes = ?", (key,)
+                "SELECT name, axis FROM axes WHERE tenant_id = ? AND axes = ?",
+                (self.company_id, key),
             ).fetchall()
         wanted = {_n(n): n for n in names}
         return {wanted[r[0]]: r[1] for r in rows if r[0] in wanted}
@@ -159,15 +175,17 @@ class SubtopicStore:
         key = json.dumps(list(axes), ensure_ascii=False)
         with self._lock, self._conn:
             self._conn.executemany(
-                "INSERT OR REPLACE INTO axes VALUES (?,?,?)",
-                [(key, _n(n), a) for n, a in picked.items()],
+                "INSERT OR REPLACE INTO axes VALUES (?,?,?,?)",
+                [(key, _n(n), a, self.company_id) for n, a in picked.items()],
             )
 
     def fresh_shorts(self, since: datetime) -> list[Short]:
         """`since` 이후 검색한 씨앗들의 숏츠 (같은 영상은 한 번만, 최근 검색 값)."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT searched_at, shorts FROM searches ORDER BY searched_at DESC"
+                "SELECT searched_at, shorts FROM searches WHERE tenant_id = ?"
+                " ORDER BY searched_at DESC",
+                (self.company_id,),
             ).fetchall()
         out: dict[str, Short] = {}
         for at, raw in rows:
@@ -182,7 +200,8 @@ class SubtopicStore:
     def searched_on(self, day: str) -> int:
         with self._lock:
             row = self._conn.execute(
-                "SELECT COUNT(*) FROM searches WHERE day = ?", (day,)
+                "SELECT COUNT(*) FROM searches WHERE tenant_id = ? AND day = ?",
+                (self.company_id, day),
             ).fetchone()
         return int(row[0])
 
@@ -191,9 +210,10 @@ class SubtopicStore:
                  "thumb": s.thumbnail_url} for s in shorts]  # fmt: skip
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO searches VALUES (?,?,?,?)",
-                (_n(seed), at.isoformat(), _day(at), json.dumps(data, ensure_ascii=False)),
-            )
+                "INSERT OR REPLACE INTO searches VALUES (?,?,?,?,?)",
+                (_n(seed), at.isoformat(), _day(at), json.dumps(data, ensure_ascii=False),
+                 self.company_id),
+            )  # fmt: skip
 
 
 def pool_shorts(env: Mapping[str, str], now: datetime, near: str | Path) -> list[Short]:
