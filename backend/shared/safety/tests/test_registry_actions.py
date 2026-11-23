@@ -175,6 +175,15 @@ async def test_receive_campaign_brief_refuses_other_requesters(
 
 
 @pytest.mark.asyncio
+async def test_record_campaign_ad_metrics_is_a_for_marketing(gate: Gate, act) -> None:
+    """광고 숫자 기록은 돈이 나가지 않는 마케팅 저장소 기록이라 A. 다른 요청자는 등록 안 된 일."""
+    decision = await gate.execute(act("record_campaign_ad_metrics", "marketing", "ad-1"))
+    assert (decision.grade, decision.status) == ("A", "executed")
+    other = await gate.execute(act("record_campaign_ad_metrics", "data", "ad-2"))
+    assert (other.status, other.hold_reason) == ("held", HoldReason.UNREGISTERED_ACTION)
+
+
+@pytest.mark.asyncio
 async def test_confirm_spec_rules(gate: Gate, act) -> None:
     clean = dict(open_questions=0, warnings=0, basis_count=2, irreversible_count=0)
     ok = await gate.execute(act("confirm_spec", "planning", "spec-ok", **clean))
@@ -217,9 +226,7 @@ async def test_merge_pr_rules(gate: Gate, verifier: Any, act) -> None:
         "pr_linked_incident": {"linked_incident_count": 1},
         "merge_irreversible": {"irreversible_count": 1},
     }.items():
-        decision = await gate.execute(
-            act("merge_pr", "dev", f"merge-{key}", **{**clean, **bad})
-        )
+        decision = await gate.execute(act("merge_pr", "dev", f"merge-{key}", **{**clean, **bad}))
         assert decision.status == "held"
         review = gate.store.get_review(decision.review_id or "")
         assert [hit["key"] for hit in review.report["rules"]] == [key]  # type: ignore[union-attr]
@@ -648,9 +655,7 @@ async def test_rollback_all_clear_goes_to_b_verification(
         act("rollback_deployment", "infra", "rb-clear", **_ROLLBACK_OK)
     )
     assert (decision.grade, decision.status) == ("B", "executed")
-    assert [(t.verifier, t.skill) for t in verifier.tasks] == [
-        ("dev", "verify_rollback_target")
-    ]
+    assert [(t.verifier, t.skill) for t in verifier.tasks] == [("dev", "verify_rollback_target")]
 
 
 @pytest.mark.parametrize(
@@ -669,9 +674,7 @@ async def test_rollback_at_or_below_threshold_stays_b(
     decision = await rollback_gate.execute(act("rollback_deployment", "infra", key, **params))
     assert (decision.grade, decision.status) == ("B", "executed")
     assert decision.hold_reason is None
-    assert [(t.verifier, t.skill) for t in verifier.tasks] == [
-        ("dev", "verify_rollback_target")
-    ]
+    assert [(t.verifier, t.skill) for t in verifier.tasks] == [("dev", "verify_rollback_target")]
 
 
 @pytest.mark.asyncio

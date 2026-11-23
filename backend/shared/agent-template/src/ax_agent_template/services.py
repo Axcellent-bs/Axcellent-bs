@@ -174,6 +174,8 @@ SERVICES: tuple[Service, ...] = (
             "creative_video_request",
             "creative_record_attach",
             "receive_campaign_brief",
+            "record_campaign_ad_metrics",
+            "get_campaign_ad_metrics",
             "list_campaign_briefs",
             "get_campaign_brief",
             "handoff_brief_to_sns",

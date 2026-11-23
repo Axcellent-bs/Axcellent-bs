@@ -171,6 +171,33 @@
       "priority": "recommended"
     },
     {
+      "id": "record_campaign_ad_metrics",
+      "description": "캠페인(cmp_…, 받은 기획안) × 날짜(KST) × source × medium당 광고 숫자 한 줄을 적거나 고쳐 쓴다(A record_campaign_ad_metrics). impressions·clicks·spend_krw는 사람이 적은 값 그대로이고 None=모름, 0=0. 같은 키를 다시 적으면 고쳐 쓰고 이전 값은 revisions에 남긴다(값이 같으면 unchanged). 거절 reason_code: unknown_campaign·invalid_date·future_date·invalid_source_medium·clicks_over_impressions·storage_error. entered_by는 dashboard-api가 사람 토큰에서 채운다. 비율은 계산하지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/ad_metrics.py#RecordAdMetricsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/ad_metrics.py#RecordAdMetricsOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "get_campaign_ad_metrics",
+      "description": "광고 숫자 원본 줄을 campaign_id 또는 기간(date_from·date_to, KST, 양 끝 포함)으로 준다(read). 비율은 주지 않는다. 칸별 합계는 None이 섞이면 None과 missing_dates. 입력이 없으면 status=unknown(아직 입력 없음), 0으로 채우지 않는다. source·medium 조합표(combos)와 추적 링크 기본 주소(default_base_url)도 준다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/ad_metrics.py#GetAdMetricsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/ad_metrics.py#GetAdMetricsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "data",
+        "finance",
+        "orchestrator",
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "receive_campaign_brief",
       "description": "기획이 확정한 기획안(CampaignBriefInput)을 받아 보관한다. 같은 proposal_id는 한 번만 받고 다시 오면 duplicate(보관본 그대로, 처음 campaign_id 반환). 받으면 accepted와 campaign_id(cmp_ + proposal_id, start_campaign도 같은 id를 쓴다), 받을 수 없으면 rejected와 reason_code(unsupported_schema_version·invalid_proposal_id·empty_title·empty_idea·empty_why). facts·target은 받은 그대로 보관하며 숫자를 계산하지 않는다. 캠페인은 시작하지 않는다. 저장소는 메모리라 다시 시작하면 사라진다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#CampaignBriefInput",

@@ -32,6 +32,12 @@ from ax_contracts.schemas import (
     NoticePublishedData,
     TaskStatus,
 )
+from ax_contracts.schemas.ad_metrics import (
+    GetAdMetricsInput,
+    GetAdMetricsOutput,
+    RecordAdMetricsInput,
+    RecordAdMetricsOutput,
+)
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.finance import ContentFormat
 from ax_contracts.schemas.marketing_creative import (
@@ -45,6 +51,7 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeVideoRequestOutput,
 )
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
+from marketing_agent import ad_metrics as _ad_metrics
 from marketing_agent import (
     brief_media,
     brief_publish,
@@ -155,6 +162,8 @@ class State:
         self.notices = NoticeStore()
         self.coupons = CouponLedger()
         self.briefs = BriefStore()
+        # 캠페인별 광고 숫자(사람이 적은 값). MARKETING_AD_METRICS_DB, 없으면 메모리
+        self.ad_metrics = _ad_metrics.AdMetricsStore()
         self.campaigns = CampaignTracker()  # 시작된 캠페인 대장(자동 결과 전달)
         self.sns = SnsStore()
         self.media_ledger = MediaLedger()  # 열 수 없으면 시작 때 실패한다
@@ -923,6 +932,103 @@ async def receive_campaign_brief(request: AgentRequest) -> AgentResult:
                 "data_summary": f"기획안 {data.proposal_id} {out.outcome}",
                 "ref_ids": [data.proposal_id, campaign_id, decision.execution_id],
             }
+        ),
+    )
+
+
+def _ad_rejected(request: AgentRequest, reason: str) -> AgentResult:
+    out = RecordAdMetricsOutput(outcome="rejected", reason_code=reason)  # type: ignore[arg-type]
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        outcome="rejected",
+        evidence=_evidence(["record_campaign_ad_metrics"], f"광고 숫자 거절 {reason}", []),
+    )
+
+
+async def record_campaign_ad_metrics(request: AgentRequest) -> AgentResult:
+    """광고 숫자 한 줄을 적거나 고쳐 쓴다(A `record_campaign_ad_metrics`).
+
+    순서: 검증 → 받은 기획안의 캠페인인지 → 안전 관문 `execute()` → `executed`일 때만 저장.
+    관문이 보류·거절·무응답이면 저장하지 않는다(fail-closed). 비율은 계산하지 않는다.
+    """
+    data = _parse(request, RecordAdMetricsInput)
+    if isinstance(data, AgentResult):
+        return data
+    reason = _ad_metrics.rejection(data)
+    if reason is not None:
+        return _ad_rejected(request, reason)
+    try:
+        brief = STATE.briefs.get(None, data.campaign_id)
+    except BriefStorageError:
+        return _ad_rejected(request, "storage_error")
+    if brief is None:
+        return _ad_rejected(request, "unknown_campaign")
+    key = (
+        f"{request.meta.context_id}:record_campaign_ad_metrics:{data.campaign_id}:{data.date}"
+        f":{data.source}:{data.medium}:{data.impressions}:{data.clicks}:{data.spend_krw}"
+    )
+    evidence = _evidence(
+        ["record_campaign_ad_metrics"],
+        f"{data.campaign_id} {data.date} {data.source}/{data.medium} 광고 숫자 적기",
+        [data.campaign_id],
+    )
+    decision = await execute(
+        "record_campaign_ad_metrics",
+        {
+            "campaign_id": data.campaign_id,
+            "date": data.date,
+            "source": data.source,
+            "medium": data.medium,
+            "impressions": data.impressions,
+            "clicks": data.clicks,
+            "spend_krw": data.spend_krw,
+            "entered_by": data.entered_by,
+        },
+        request.meta.model_copy(update={"idempotency_key": key}),
+        evidence,
+    )
+    blocked = _from_decision(request, decision, evidence)
+    if blocked:
+        return blocked
+    try:
+        outcome, row = STATE.ad_metrics.record(data)
+    except _ad_metrics.AdMetricsStorageError:
+        return _ad_rejected(request, "storage_error")
+    out = RecordAdMetricsOutput(outcome=outcome, row=row)  # type: ignore[arg-type]
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        outcome=outcome,
+        evidence=evidence.model_copy(update={"data_summary": f"광고 숫자 {outcome}"}),
+    )
+
+
+async def get_campaign_ad_metrics(request: AgentRequest) -> AgentResult:
+    """광고 숫자 원본 줄과 칸별 합계(read). 비율은 주지 않는다. 입력이 없으면 unknown."""
+    data = _parse(request, GetAdMetricsInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        rows = STATE.ad_metrics.query(data)
+    except _ad_metrics.AdMetricsStorageError:
+        return _result(request, TaskStatus.FAILED, outcome="storage_error")
+    base = {"combos": _ad_metrics.combos(), "default_base_url": _ad_metrics.default_base_url()}
+    if not rows:
+        out = GetAdMetricsOutput(status="unknown", reason="아직 입력 없음", **base)
+    else:
+        out = GetAdMetricsOutput(status="ok", rows=rows, totals=_ad_metrics.totals(rows), **base)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        outcome=out.status,
+        evidence=_evidence(
+            ["get_campaign_ad_metrics"],
+            f"광고 숫자 {len(rows)}줄",
+            [data.campaign_id] if data.campaign_id else [],
         ),
     )
 
@@ -1713,6 +1819,8 @@ HANDLERS = {
     "creative_video_request": creative_video_request,
     "creative_record_attach": creative_record_attach,
     "receive_campaign_brief": receive_campaign_brief,
+    "record_campaign_ad_metrics": record_campaign_ad_metrics,
+    "get_campaign_ad_metrics": get_campaign_ad_metrics,
     "list_campaign_briefs": list_campaign_briefs,
     "get_campaign_brief": get_campaign_brief,
     "handoff_brief_to_sns": handoff_brief_to_sns,
