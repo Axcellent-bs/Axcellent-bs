@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ax_agent_template import company_connection
-from ax_agent_template.companies import canonical_company_id, default_company_id
+from ax_agent_template.companies import LEGACY_DEFAULT_COMPANY, canonical_company_id
 
 SESSION_SECRET_ENV = "AX_SESSION_SECRET"
 ALLOW_SHARED_ENV = "AX_ALLOW_SHARED_HUMAN_TOKEN"
@@ -54,9 +54,11 @@ LEGACY_COMPANY_ENV = "AX_LEGACY_COMPANY"
 
 
 def legacy_company_id() -> str:
-    """회사가 없는 옛 토큰의 회사. env `AX_LEGACY_COMPANY` → 없으면 설치의 기본 회사.
-    (1단계: 기본은 캣북스.) 4단계에서 옛 토큰을 거절한다. 부를 때마다 읽는다."""
-    return canonical_company_id(os.getenv(LEGACY_COMPANY_ENV, "").strip()) or default_company_id()
+    """회사가 없는 옛 토큰의 회사. env `AX_LEGACY_COMPANY` → 없으면 고정된 옛 값(캣북스).
+    기본 회사(`default_company_id()`)를 따라가지 않는다: 회사 ID가 생기기 전에 발급된 토큰은
+    늘 캣북스 토큰이었으니, 설치의 기본 회사를 바꿔도 그 토큰이 새 기본 회사로 읽히면 안 된다.
+    4단계에서 옛 토큰을 거절한다. 부를 때마다 읽는다."""
+    return canonical_company_id(os.getenv(LEGACY_COMPANY_ENV, "").strip()) or LEGACY_DEFAULT_COMPANY
 
 
 def __getattr__(name: str) -> str:  # 옛 이름 `LEGACY_COMPANY_ID` 호환

@@ -142,6 +142,23 @@ def test_legacy_company_env_and_default(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.delenv("AX_DEFAULT_COMPANY", raising=False)
     assert ha.legacy_company_id() == "catbooks"  # 아무 것도 안 정하면 옛 동작 그대로
     monkeypatch.setenv("AX_DEFAULT_COMPANY", "nubi")
+    assert ha.legacy_company_id() == "catbooks"  # 기본 회사를 바꿔도 옛 토큰은 따라가지 않는다
+    monkeypatch.setenv(ha.LEGACY_COMPANY_ENV, "nubi")
     assert ha.legacy_company_id() == "nubi"
     monkeypatch.setenv(ha.LEGACY_COMPANY_ENV, "shop-demo")
     assert ha.legacy_company_id() == "catbooks"
+
+
+def test_changing_the_default_company_does_not_move_a_cid_less_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(ha.LEGACY_COMPANY_ENV, raising=False)
+    token = _signed(
+        {"sub": "acc-1", "name": "예진", "role": "admin", "iat": 100, "exp": 10_000, "jti": "j9"}
+    )
+    monkeypatch.delenv("AX_DEFAULT_COMPANY", raising=False)
+    assert ha.verify_session(token, now=200).company_id == "catbooks"
+    monkeypatch.setenv("AX_DEFAULT_COMPANY", "nubi")
+    assert ha.verify_session(token, now=200).company_id == "catbooks"
+    monkeypatch.setenv(ha.LEGACY_COMPANY_ENV, "nubi")  # 명시한 옛 회사만 바꾼다
+    assert ha.verify_session(token, now=200).company_id == "nubi"
