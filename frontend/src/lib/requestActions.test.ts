@@ -61,3 +61,13 @@ test("실패 문구: 403·404·409는 결정 실패 문구 그대로, 422·502·
   assert.equal(requestEditError(new ApiError("새 의뢰를 접수하지 못했어요. 지금 의뢰는 그대로예요", 502)).text, "새 의뢰를 접수하지 못했어요. 지금 의뢰는 그대로예요");
   assert.equal(requestEditError(new TypeError("Failed to fetch")).text, "처리하지 못했어요");
 });
+
+test("의뢰문 수정에서 새 의뢰가 안 생긴 세 경우: 서버 문장을 보이고 수정 칸은 열어 둔다(다시 읽지 않음)", () => {
+  const dup = requestEditError(new ApiError("같은 의뢰가 이미 접수돼 있어요 (번호 wr_abc123)", 422));
+  assert.deepEqual(dup, { text: "같은 의뢰가 이미 접수돼 있어요 (번호 wr_abc123)", reload: false });
+  const limited = requestEditError(new ApiError("오늘 접수할 수 있는 의뢰 수를 넘었어요. 내일 다시 고쳐 주세요", 429));
+  assert.deepEqual(limited, { text: "오늘 접수할 수 있는 의뢰 수를 넘었어요. 내일 다시 고쳐 주세요", reload: false });
+  const rejected = requestEditError(new ApiError("고친 글은 접수할 수 없는 의뢰예요. 지금 의뢰는 그대로예요", 422));
+  assert.equal(rejected.text, "고친 글은 접수할 수 없는 의뢰예요. 지금 의뢰는 그대로예요");
+  assert.ok(![dup, limited, rejected].some((x) => x.text.includes("의뢰로 접수되지 않았어요")));
+});

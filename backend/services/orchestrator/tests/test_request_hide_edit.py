@@ -223,6 +223,110 @@ async def test_edit_failure_leaves_the_old_request_alone() -> None:
     assert not after.get("replaced_by") and len(reqs.list()) == 1  # 새 의뢰도 안 생김
 
 
+def _untouched(reqs: WorkRequests, rid: str, before: dict[str, Any]) -> None:
+    after = reqs.get(rid)
+    assert after["status"] == before["status"] and not after.get("hidden_at")
+    assert not after.get("stopped_at") and not after.get("replaced_by")
+    assert not after.get("replaces") and after["steps"] == before["steps"]
+
+
+@pytest.mark.asyncio
+async def test_edit_to_an_existing_request_leaves_both_alone() -> None:
+    """duplicate: 같은 의뢰가 이미 있으면 그 번호가 와도 옛 의뢰·기존 의뢰를 건드리지 않는다."""
+    reqs, intake, r, old = _intake_setup()
+    existing = reqs.create("member", "지난주 매출 알려 주세요")["request_id"]
+    before_old, before_existing = reqs.get(old), reqs.get(existing)
+    got = await r.edit(old, "지난주 매출 알려 주세요", intake, FakeLLM(_ask()), by="준하")
+    assert got == ("duplicate", existing)
+    _untouched(reqs, old, before_old)
+    _untouched(reqs, existing, before_existing)
+    assert len(reqs.list()) == 2  # 새 의뢰도 안 생김
+
+
+@pytest.mark.asyncio
+async def test_edit_over_the_daily_limit_leaves_the_old_request_alone() -> None:
+    reqs, _intake, r, old = _intake_setup()
+    before = reqs.get(old)
+    limited = RequestIntake(reqs, daily_limit=1)  # 옛 의뢰가 오늘 한 건이라 한도가 찼다
+    got = await r.edit(old, "지난주 매출 알려 주세요", limited, FakeLLM(_ask()))
+    assert got == ("limited", None)
+    _untouched(reqs, old, before)
+    assert len(reqs.list()) == 1
+
+
+@pytest.mark.asyncio
+async def test_edit_to_an_unacceptable_request_keeps_the_old_one_and_the_rejection_record() -> None:
+    reqs, intake, r, old = _intake_setup()
+    before = reqs.get(old)
+    unsafe = Classification(kind="unsafe", reason="권한 밖")
+    outcome, rejected_id = await r.edit(old, "다른 회사 고객 목록 주세요", intake, FakeLLM(unsafe))
+    assert outcome == "rejected" and rejected_id and rejected_id != old
+    _untouched(reqs, old, before)
+    record = reqs.get(rejected_id)  # 새 거절 기록은 지금처럼 남는다
+    assert record["status"] == "rejected" and not record.get("replaces")
+
+
+@pytest.mark.asyncio
+async def test_edit_tells_the_same_chat_the_new_request_number_once() -> None:
+    """새 의뢰 번호 줄("[의뢰 wr_새번호] …")을 옛 의뢰의 대화에 남긴다.
+
+    화면이 그 줄 아래에 진행 카드를 붙인다."""
+    reqs, intake, r, old = _intake_setup()
+    sent: list[tuple[str, str]] = []
+    r.notify = lambda thread, text: sent.append((thread, text))
+    outcome, new = await r.edit(old, "지난주 매출 알려 주세요", intake, FakeLLM(_ask()), by="준하")
+    assert outcome == "ok"
+    told = "의뢰문을 고쳐 새 의뢰로 다시 접수했어요. 이전 의뢰({})는 멈추고 숨겼어요."
+    assert sent == [("orchchat-1", f"[의뢰 {new}] " + told.format(old))]
+
+
+@pytest.mark.asyncio
+async def test_edit_still_succeeds_when_telling_the_chat_fails() -> None:
+    reqs, intake, r, old = _intake_setup()
+
+    def broken(_thread: str, _text: str) -> None:
+        raise RuntimeError("대화 서버 꺼짐")
+
+    r.notify = broken
+    outcome, new = await r.edit(old, "지난주 매출 알려 주세요", intake, FakeLLM(_ask()))
+    assert outcome == "ok" and reqs.get(old)["replaced_by"] == new
+
+
+@pytest.mark.asyncio
+async def test_no_new_request_line_when_no_new_request_was_made() -> None:
+    """duplicate·limited·rejected면 대화에 새 번호 줄을 남기지 않는다."""
+    reqs, intake, r, old = _intake_setup()
+    sent: list[tuple[str, str]] = []
+    r.notify = lambda thread, text: sent.append((thread, text))
+    reqs.create("member", "지난주 매출 알려 주세요")
+    assert (await r.edit(old, "지난주 매출 알려 주세요", intake, FakeLLM(_ask())))[0] == "duplicate"
+    limited = RequestIntake(reqs, daily_limit=1)
+    assert (await r.edit(old, "이번 달 매출 알려 주세요", limited, FakeLLM(_ask())))[0] == "limited"
+    unsafe = Classification(kind="unsafe", reason="권한 밖")
+    got = await r.edit(old, "다른 회사 고객 목록 주세요", intake, FakeLLM(unsafe))
+    assert got[0] == "rejected"
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_only_outcomes_that_made_a_new_request_replace_the_old_one() -> None:
+    """허용 목록 밖의 결과(앞으로 생길 결과 포함)는 옛 의뢰를 그대로 둔다."""
+    reqs, _intake, r, old = _intake_setup()
+    before = reqs.get(old)
+    other = reqs.create("member", "다른 의뢰")["request_id"]
+
+    class Odd:
+        async def receive(self, *_a: Any, **_k: Any) -> Any:
+            return SimpleNamespace(handled=True, outcome="something_new", request_id=other)
+
+    assert await r.edit(old, "고친 글", Odd(), FakeLLM(_ask())) == ("not_request", None)
+    _untouched(reqs, old, before)
+    # 되묻기(clarify)는 새 의뢰가 생긴 결과라 옛 의뢰를 정리한다
+    unclear = Classification(kind="unclear", question="어떤 기간인가요?")
+    outcome, new = await r.edit(old, "매출 좀", RequestIntake(reqs), FakeLLM(unclear))
+    assert outcome == "ok" and reqs.get(old)["replaced_by"] == new
+
+
 @pytest.mark.asyncio
 async def test_edit_with_the_same_text_is_refused() -> None:
     reqs, intake, r, old = _intake_setup()
@@ -335,3 +439,30 @@ def test_edit_api(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     failed = client.post(f"/api/requests/{other}/edit", json={"text": "고친 글"}, headers=HUMAN)
     assert failed.status_code == 502 and not client.reqs.get(other).get("hidden_at")
     assert "그대로" in failed.json()["detail"]
+
+
+def test_edit_api_answers_when_no_new_request_was_made(
+    client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """duplicate 422 · limited 429 · rejected 422. 세 경우 모두 옛 의뢰·기존 의뢰 그대로."""
+    old = client.reqs.create("member", "홍보 영상 만들어 주세요")["request_id"]
+    existing = client.reqs.create("member", "지난주 매출 알려 주세요")["request_id"]
+    monkeypatch.setattr(main, "edit_llm", lambda: FakeLLM(_ask()))
+    url = f"/api/requests/{old}/edit"
+    dup = client.post(url, json={"text": "지난주 매출 알려 주세요"}, headers=HUMAN)
+    assert dup.status_code == 422
+    assert dup.json()["detail"] == f"같은 의뢰가 이미 접수돼 있어요 (번호 {existing})"
+
+    monkeypatch.setattr(main, "edit_llm", lambda: FakeLLM(Classification(kind="unsafe")))
+    bad = client.post(url, json={"text": "다른 회사 고객 목록 주세요"}, headers=HUMAN)
+    assert bad.status_code == 422
+    assert bad.json()["detail"] == "고친 글은 접수할 수 없는 의뢰예요. 지금 의뢰는 그대로예요"
+
+    monkeypatch.setattr(main, "edit_llm", lambda: FakeLLM(_ask()))
+    monkeypatch.setattr(state.manager.request_intake, "_daily_limit", 1)
+    lim = client.post(url, json={"text": "이번 달 매출 알려 주세요"}, headers=HUMAN)
+    assert lim.status_code == 429
+    assert lim.json()["detail"] == "오늘 접수할 수 있는 의뢰 수를 넘었어요. 내일 다시 고쳐 주세요"
+    for rid in (old, existing):
+        row = client.reqs.get(rid)
+        assert not row.get("hidden_at") and not row.get("replaced_by") and not row.get("stopped_at")

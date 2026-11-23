@@ -57,6 +57,10 @@ RETRY_DELAY = 0.2
 WAITING = ("held", "waiting_human", "waiting_async")
 NOT_OK = ("failed", "skipped", "rejected_by_human")
 HIDE_NOTE = "사람이 의뢰를 삭제함"  # 의뢰 삭제(멈추고 숨김)로 닫은 단계·의뢰의 이유
+# 의뢰문 수정에서 "실제로 새 의뢰가 생긴" 접수 결과(허용 목록). 이때만 옛 의뢰를 숨기고 잇는다.
+# 일 접수·되묻기(입력 되묻기 포함)·두 번째 되묻기에서 사람에게·담당 불명·구매자 연결 없음 안내
+NEW_REQUEST_OUTCOMES = frozenset({"task", "clarify", "unclear", "unknown", "no_link"})
+EDIT_TOLD = "의뢰문을 고쳐 새 의뢰로 다시 접수했어요. 이전 의뢰({old})는 멈추고 숨겼어요."
 NEEDS_APPROVAL = "needs_approval"
 HUMAN_CHECK = "human_check"
 NO_AGENT = "no_agent"
@@ -954,12 +958,14 @@ class RequestRunner:
     async def edit(
         self, request_id: str, text: str, intake: Any, llm: Any, by: str | None = None
     ) -> tuple[str, str | None]:
-        """의뢰문 수정 = 고쳐서 다시 접수. (결과, 새 의뢰 번호).
+        """의뢰문 수정 = 고쳐서 다시 접수. (결과, 의뢰 번호).
 
-        결과: ok · missing · same(바뀐 내용 없음) · not_request(새 글이 의뢰로 접수되지 않음).
+        결과: ok(새 의뢰 번호) · missing · same(바뀐 내용 없음) · duplicate(같은 의뢰가 이미 있음,
+        그 번호) · limited(하루 접수 한도) · rejected(고친 글이 접수할 수 없는 일, 새 거절 기록
+        번호) · not_request(의뢰로 접수되지 않음).
         순서: 대화 접수와 같은 함수(`RequestIntake.receive`, 분류·되묻기 그대로)로 새 의뢰를 먼저
-        만들고, 성공하면 옛 의뢰를 삭제(멈추고 숨김)하고 둘을 잇는다. 새 접수에 실패하면(예외 포함)
-        옛 의뢰는 건드리지 않는다.
+        만든다. 접수 결과가 **새 의뢰가 생긴 경우**(`NEW_REQUEST_OUTCOMES`, 허용 목록)일 때만 옛
+        의뢰를 삭제(멈추고 숨김)하고 둘을 잇는다. 그 밖의 결과·예외는 모두 옛 의뢰를 그대로 둔다.
         """
         row = self._requests.get(request_id)
         if row is None:
@@ -970,10 +976,18 @@ class RequestRunner:
                                       thread_id=row.get("thread_id"),
                                       buyer_id=row.get("buyer_id"))  # fmt: skip
         new_id = result.request_id
-        if not result.handled or not new_id or new_id == request_id:
+        outcome = result.outcome if result.handled else None
+        if outcome in ("duplicate", "limited", "rejected"):  # 옛 의뢰·기존 의뢰 모두 그대로
+            return outcome, new_id
+        if outcome not in NEW_REQUEST_OUTCOMES or not new_id or new_id == request_id:
             return "not_request", None
         self.hide(request_id, by)
         self._requests.link_replacement(request_id, new_id)
+        # 새 의뢰 번호를 옛 의뢰의 대화에 남긴다("[의뢰 wr_새번호] …"). 화면은 그 줄 아래에
+        # 진행 카드를 붙인다. 알리지 못해도 수정은 성공이다(_tell 규칙)
+        new_row = self._requests.get(new_id)
+        if new_row is not None:
+            self._tell(new_row, EDIT_TOLD.format(old=request_id))
         return "ok", new_id
 
     def _skip_blocked(self, row: dict[str, Any]) -> None:
