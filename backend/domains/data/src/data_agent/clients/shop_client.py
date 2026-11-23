@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 from pydantic import ValidationError
 
-from ax_agent_template.company_connection import shop_api_override
+from ax_agent_template.config import shop_api_url as company_shop_api_url
 from ax_contracts.data_access.shop_failed_orders import (
     FailedOrder,
     ShopFailedOrdersQuery,
@@ -175,8 +175,12 @@ class MockShopClient:
 
 
 def shop_api_url(env: Mapping[str, str] = os.environ) -> str:
-    """shop-api 주소: 회사 연결 → `AX_SHOP_API_URL` → `http://shop-api:8010`."""
-    return shop_api_override() or env.get("AX_SHOP_API_URL") or DEFAULT_SHOP_API_URL
+    """shop-api 주소: 요청 회사의 연결 → (캣북스만) `AX_SHOP_API_URL` → `http://shop-api:8010`.
+
+    캣북스가 아닌 회사는 설치 값으로 빠지지 않고 그 회사 변환기 경로다
+    (템플릿 `config.shop_api_url`).
+    """
+    return company_shop_api_url(env.get("AX_SHOP_API_URL") or DEFAULT_SHOP_API_URL)
 
 
 def shop_api(env: Mapping[str, str] = os.environ) -> ShopApi:

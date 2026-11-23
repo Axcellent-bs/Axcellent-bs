@@ -18,7 +18,7 @@ import pytest
 from ax_agent_template import companies, company_files, company_scope
 from ax_agent_template import company_connection as cc
 from ax_agent_template import tenant as tenants
-from ax_agent_template.config import agent_url
+from ax_agent_template.config import agent_url, shop_api_url
 
 CAT_SHOP = "http://127.0.0.1:8090"
 NUBI_SITE = "http://127.0.0.1:18081"
@@ -163,6 +163,36 @@ def test_disabled_other_company_does_not_fall_back(data: Path, monkeypatch) -> N
     _save(NUBI_SITE, "nubi", enabled=False)
     with company_scope.using("nubi"):
         assert agent_url("shop-api") == "http://dash:8020/site-adapter/nubi"
+
+
+def test_other_company_does_not_fall_back_even_without_connection_feature(
+    data: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1634 리뷰 1: 연결 기능이 꺼진 설치(연결 파일 없음)에서도 다른 회사는 설치 값을 안 받는다."""
+    monkeypatch.delenv(cc.CONNECTION_FILE_ENV)
+    monkeypatch.setenv("AX_SHOP_API_URL", CAT_SHOP)
+    assert agent_url("shop-api") == CAT_SHOP
+    with company_scope.using("nubi"):
+        assert agent_url("shop-api") == "http://dash:8020/site-adapter/nubi"
+
+
+def test_shop_api_url_helper_blocks_the_install_fallback_for_other_companies(
+    data: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1634 리뷰 1: 도메인이 주는 폴백(`AX_SHOP_API_URL`·기본 주소)은 캣북스·요청 밖에서만 쓴다."""
+    fallback = "http://shop-api:8010"
+    assert shop_api_url(fallback) == fallback  # 요청 밖
+    with company_scope.using("catbooks"):
+        assert shop_api_url(fallback) == fallback
+    with company_scope.using("shop-demo"):  # 별칭도 캣북스
+        assert shop_api_url(fallback) == fallback
+    with company_scope.using("nubi"):
+        assert shop_api_url(fallback) == "http://dash:8020/site-adapter/nubi"
+    _save(NUBI_SITE, "nubi")
+    _save(CAT_SHOP, "catbooks")
+    with company_scope.using("nubi"):
+        assert shop_api_url(fallback) == NUBI_SITE  # 연결이 있으면 그 회사 주소
+    assert shop_api_url(fallback) == CAT_SHOP
 
 
 def test_folders_off_restores_catbooks_and_keeps_other_company(
