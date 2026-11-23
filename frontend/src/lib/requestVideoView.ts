@@ -1,7 +1,9 @@
 // 의뢰로 만든 영상(홍보 영상 의뢰 wr_… → SNS 초안 reel)의 순수 계산. node --test (requestVideoView.test.ts).
 // 환경 값(env)에 기대지 않는 것만 둔다. 읽기·주소는 lib/requestVideos.ts.
-// 화면은 SNS·미디어 탭(/marketing/sns)에 둔다: 이 영상은 게시 승인(C 등급)으로 이어지는 SNS 초안이라서.
+// 화면은 제작 기록(/marketing/records?view=videos)의 '의뢰로 만든 영상' 탭에 둔다(11/23, 제작 기록과 같이 본다).
+// 영상마다 회사 유튜브 올리기(사람 승인 C)를 할 수 있다. Instagram 게시 승인은 기획안 카드의 승인 패널 그대로다.
 import type { WorkRequestRow } from "./workRequests.ts";
+import type { YoutubeState } from "./youtube.ts";
 
 /** 백엔드 계약: GET /api/dashboard/marketing/request-videos 의 items 한 건 */
 export interface RequestVideo {
@@ -19,6 +21,8 @@ export interface RequestVideo {
   preview_path: string | null;
   /** draft_ready | check_rejected | label_missing (백엔드 request_video._item). label_missing이면 labeled:false */
   status: string;
+  /** 이 영상의 유튜브 올리기 상태(제작 기록 render.youtube와 같은 모양). 아직 없으면 null */
+  youtube?: YoutubeState | null;
 }
 
 export const REQUEST_ID = /^wr_[0-9a-f]{10}$/;
@@ -26,15 +30,15 @@ export const isRequestId = (v: string | null | undefined): v is string => !!v &&
 
 /** 홍보 영상 의뢰의 영상 제작 단계: 마케팅 generate_media (의뢰 종류 promo_video의 "make" 단계) */
 export const VIDEO_MAKE_SKILL = "generate_media";
-export const SNS_VIDEOS_PATH = "/marketing/sns";
+export const REQUEST_VIDEOS_PATH = "/marketing/records?view=videos";
 
-/** 영상 열기 링크: 영상 제작 단계가 완료일 때만 `/marketing/sns?request=<wr_…>`, 아니면 null */
+/** 영상 열기 링크: 영상 제작 단계가 완료일 때만 `/marketing/records?view=videos&request=<wr_…>`, 아니면 null */
 export function requestVideoLink(r: Pick<WorkRequestRow, "request_id" | "task" | "plan" | "steps">): string | null {
   if (!isRequestId(r.request_id)) return null;
   if (r.task && r.task !== "promo_video") return null;
   const make = r.plan.find((p) => p.skill === VIDEO_MAKE_SKILL && p.dept === "marketing");
   if (!make || r.steps[make.step_id]?.status !== "completed") return null;
-  return `${SNS_VIDEOS_PATH}?request=${encodeURIComponent(r.request_id)}`;
+  return `${REQUEST_VIDEOS_PATH}&request=${encodeURIComponent(r.request_id)}`;
 }
 
 /** 쿼리 ?request= 값이 의뢰 번호 형식이면 그 번호, 아니면 null (형식 밖 값은 서버에 보내지 않는다) */
@@ -61,3 +65,6 @@ export const sortForRequest = (items: RequestVideo[], requestId: string | null):
 
 export const VIDEOS_EMPTY_KO = "아직 영상이 없어요. 홍보 영상 의뢰가 끝나면 여기에 나타나요.";
 export const AI_LABEL_NOTE_KO = "이 영상은 AI가 만들었어요. AI 기본법에 따라 영상 파일과 게시 글에 AI 생성 표시가 들어가며, 게시는 사람 승인(C 등급)을 거쳐요.";
+
+/** 유튜브 칸을 보여 줄 수 있나: AI 표시를 입힌 영상(재생되는 영상)만 올릴 수 있다 */
+export const canUploadToYoutube = (v: Pick<RequestVideo, "labeled" | "preview_path" | "status">): boolean => videoPane(v).kind === "play";

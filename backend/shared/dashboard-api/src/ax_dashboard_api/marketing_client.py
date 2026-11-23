@@ -1046,5 +1046,31 @@ async def youtube_request_call(record_id: str, who: str | None) -> dict[str, Any
     return await _creative_read("creative_youtube_request", payload)
 
 
+async def _request_video_youtube(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return await _creative_read(skill, payload)
+    except ApiError as error:
+        if error.status_code == 404:
+            raise ApiError(404, "NOT_FOUND", "의뢰로 만든 영상이 없다") from error
+        raise
+
+
+async def request_video_youtube_draft_call(
+    post_draft_id: str, body: dict[str, Any]
+) -> dict[str, Any]:
+    """의뢰로 만든 영상의 유튜브 제목·설명 초안(마케팅 `request_video_youtube_draft`)."""
+    return await _request_video_youtube(
+        "request_video_youtube_draft", {"post_draft_id": post_draft_id, **body}
+    )
+
+
+async def request_video_youtube_request_call(post_draft_id: str, who: str | None) -> dict[str, Any]:
+    """의뢰로 만든 영상(AI 라벨 입힌 파일)의 유튜브 올리기를 사람 승인에 올린다."""
+    payload: dict[str, Any] = {"post_draft_id": post_draft_id}
+    if who:
+        payload["who"] = who
+    return await _request_video_youtube("request_video_youtube_request", payload)
+
+
 async def youtube_status_call() -> dict[str, Any]:
     return await _creative_read("youtube_status", {})

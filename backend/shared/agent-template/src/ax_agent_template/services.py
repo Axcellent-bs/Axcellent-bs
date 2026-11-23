@@ -196,6 +196,8 @@ SERVICES: tuple[Service, ...] = (
             "draft_outage_sns_post",
             "list_outage_sns_drafts",
             "list_request_videos",
+            "request_video_youtube_draft",
+            "request_video_youtube_request",
             "merge_outage_sns_drafts",
             "check_sns_post",
             "publish_sns",
