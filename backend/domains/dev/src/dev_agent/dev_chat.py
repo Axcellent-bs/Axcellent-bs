@@ -1208,6 +1208,9 @@ async def _handoff(
             "evidence": ticket_evidence(plan, th, connection),
             "source_ref": f"{DEV_CHAT_REF}{tid}",
             "evidence_ids": [],
+            "mode": th.mode,
+            # 대화를 연 계정 id만 보낸다 (사람 토큰 이름과 섞지 않는다). 계정이 없으면 비운다
+            **({"requested_by": th.account} if th.account else {}),
         },
     )
     try:

@@ -748,6 +748,8 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         req_id: str | None = None,
         from_service: str | None = None,
         separate: bool = False,
+        mode: Literal["agent", "subscription"] | None = None,
+        requested_by: str | None = None,
     ) -> ActionResult:
         """create_ticket: 묶을 요청이 있으면 중복 연결, 아니면 등록 후 간단 요청 판정.
 
@@ -790,6 +792,8 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
             evidence_ids=list(evidence_ids or []),
             from_service=from_service,
             separate=separate,
+            mode=mode,
+            requested_by=requested_by,
         )
         s.requests.append(req)
         s.activity.append(
@@ -1347,6 +1351,8 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         evidence_ids: list[str],
         idempotency_key: str,
         separate: bool = False,
+        mode: Literal["agent", "subscription"] | None = None,
+        requested_by: str | None = None,
     ) -> ActionResult:
         """변경 요청 접수 (A, #174). 같은 요청이 있으면 묶고(linked_duplicate), 없으면 새 REQ와
         `ctx_req_`를 발급한다(created). 같은 idempotency_key의 두 번째 요청은 이전 결과를 돌려준다.
@@ -1354,7 +1360,7 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         - 중복 판정은 내용으로 한다: 기획 LLM이 있으면 제목·근거(기획서가 있으면 문제·목표·요구)를
           비교해 "같은 일"로 본 열린 요청에 묶는다(`_relate_new`). 제목이 같아도 내용이 다르면
           묶지 않는다. LLM이 없거나 판단이 실패하면 예전 규칙(`find_duplicate`, 같은 제목).
-          `source_ref`·`evidence_ids`는 저장만 한다.
+          `source_ref`·`evidence_ids`·`mode`·`requested_by`는 저장만 한다.
         - 묶이면 원래 요청의 `context_id`를 돌려준다 (요청 부서는 그 사건에 문의를 잇는다).
         - 결과 통지는 같은 `context_id`에 `path`를 비운 새 요청으로 보낸다(합의). 요청 부서의 수신
           skill이 아직 없어 지금은 활동 기록(get_request_status)까지만 남긴다.
@@ -1399,6 +1405,8 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
                 req_id=f"REQ-{m}",
                 from_service=requester if requester in SERVICE_BY_ID else None,
                 separate=separate,
+                mode=mode,
+                requested_by=requested_by,
             )
             req_id = result.output["request_id"]
             return ActionResult(
