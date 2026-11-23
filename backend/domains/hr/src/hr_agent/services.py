@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ax_agent_template.llm import LLMClient, LLMSettings
+from ax_agent_template import company_ai
+from ax_agent_template.llm import LLMClient
 from hr_agent.audit import AuditLog
 from hr_agent.clients.memory import MemoryClient, MockMemoryClient
 from hr_agent.clients.planning import MockPlanningClient, PlanningClient
@@ -77,7 +78,7 @@ def build_services(
         planning = A2APlanningClient()
     if llm is None and not settings.mock:
         # 실제 모드에서 LLM 설정(`HR_LLM_*` 또는 `LLM_*`)이 있으면 문장 생성과 검증에 쓴다
-        llm_settings = LLMSettings.from_env("hr")
+        llm_settings = company_ai.settings_for("hr")  # 회사 키가 있으면 회사 값(11/23)
         if llm_settings.model and llm_settings.base_url:
             llm = LLMClient("hr", llm_settings)
     gate: GateClient

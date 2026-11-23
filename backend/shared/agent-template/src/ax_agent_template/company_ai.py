@@ -18,12 +18,14 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from ax_agent_template import tenant as tenants
 from ax_agent_template.companies import canonical_company_id
+from ax_agent_template.llm import LLMSettings
 from ax_contracts.schemas.company_ai import CompanyAiCoder, CompanyAiSettings
 
 log = logging.getLogger(__name__)
@@ -133,6 +135,47 @@ def coder_llm(cid: str | None = None) -> CompanyLlm | None:
     if not value:
         return None
     return CompanyLlm(api_key=value, base_url=settings.base_url, model=settings.model)
+
+
+def company_llm(cid: str | None = None) -> CompanyLlm | None:
+    """AI 직원(총괄·인사·아카이브 등)이 쓸 회사 키. 없으면 None.
+
+    코딩 에이전트의 "따로 설정"과 상관없이 늘 회사 키 `LLM_API_KEY`와 회사 주소·모델이다.
+    """
+    use = cid or company_id()
+    if not use:
+        return None
+    value = key(COMPANY_KEY, use)
+    if not value:
+        return None
+    settings = load_settings(use)
+    return CompanyLlm(api_key=value, base_url=settings.base_url, model=settings.model)
+
+
+def apply(base: LLMSettings, cid: str | None = None) -> LLMSettings:
+    """서버 설정(`from_env`) 위에 회사 키·주소·모델을 얹는다. 회사 키가 없으면 그대로.
+
+    임베딩 값(`embed_*`)은 건드리지 않는다(회사 임베딩 설정은 결정 대기).
+    회사 주소·모델이 비어 있으면 서버 설정 값을 쓴다.
+    """
+    company = company_llm(cid)
+    if company is None:
+        return base
+    return replace(
+        base,
+        api_key=company.api_key,
+        base_url=company.base_url or base.base_url,
+        model=company.model or base.model,
+    )
+
+
+def settings_for(dept: str, env: Mapping[str, str] | None = None) -> LLMSettings:
+    """부서의 LLM 설정: `<부서>_LLM_*`·`LLM_*`(`from_env`)에 회사 키가 있으면 회사 값을 얹는다.
+
+    회사 키가 없거나 회사 연결 전이거나 키 저장소가 db 모드가 아니면 `from_env` 그대로다
+    (로컬·테스트 동작 그대로).
+    """
+    return apply(LLMSettings.from_env(dept, env))
 
 
 def hint(value: str) -> str:

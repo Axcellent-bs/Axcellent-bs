@@ -22,7 +22,8 @@ from archive_agent.retrieval.duplicates import SameDecisionJudge, TitleSuggester
 from archive_agent.retrieval.verify import RelevanceVerifier
 from archive_agent.store import Store
 from archive_agent.util import dumps, loads
-from ax_agent_template.llm import LLMClient, LLMSettings
+from ax_agent_template import company_ai
+from ax_agent_template.llm import LLMClient
 
 
 class IdempotencyStore:
@@ -85,7 +86,7 @@ def build_services(
         memory = HttpMemoryClient()
     if llm is None and not settings.mock:
         # 실제 모드에서 LLM 설정(`HR_LLM_*` 또는 `LLM_*`)이 있으면 문장 생성과 검증에 쓴다
-        llm_settings = LLMSettings.from_env("hr")
+        llm_settings = company_ai.settings_for("hr")  # 회사 키가 있으면 회사 값(11/23)
         if llm_settings.model and llm_settings.base_url:
             llm = LLMClient("hr", llm_settings)
     if dense is None and settings.dense_search and not settings.mock:
