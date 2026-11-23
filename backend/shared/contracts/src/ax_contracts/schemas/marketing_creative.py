@@ -251,3 +251,25 @@ class RequestVideoInstagramOutput(AxModel):
     post_draft_id: str = Field(pattern=REQUEST_VIDEO_DRAFT_ID_PATTERN)
     request_id: str | None = None  # 의뢰 번호(wr_…)
     instagram: dict[str, Any]  # 제작 기록 render.instagram과 같은 모양
+
+
+# ---- 의뢰로 만든 영상(wr_…)의 썸네일 후보 고르기 (2026-11-23). 후보 3장은 라벨 입힌 영상에서 뽑은
+# 그림(AI 표시 포함)이다. 고르지 않으면 첫 후보가 기본값이고, 게시·유튜브 승인 해시에 들어간다
+REQUEST_VIDEO_COVER_SKILL = "request_video_cover_select"
+REQUEST_VIDEO_COVER_ID_PATTERN = r"^cov_[0-9a-f]{12}$"
+
+
+class RequestVideoCoverSelectInput(AxModel):
+    """후보(`covers[].media_id`) 안의 값만 받는다. 승인 대기·승인 뒤에 바꾸면 그 승인은 무효다."""
+
+    post_draft_id: str = Field(pattern=REQUEST_VIDEO_DRAFT_ID_PATTERN)
+    media_id: str = Field(pattern=REQUEST_VIDEO_COVER_ID_PATTERN)
+    who: str | None = Field(default=None, max_length=80)
+
+
+class RequestVideoCoverOutput(AxModel):
+    post_draft_id: str = Field(pattern=REQUEST_VIDEO_DRAFT_ID_PATTERN)
+    cover_media_id: str = Field(pattern=REQUEST_VIDEO_COVER_ID_PATTERN)
+    changed: bool  # 같은 것을 다시 고르면 false(승인은 그대로)
+    cover_rev: int = Field(ge=0)
+    approvals_reset: list[str] = Field(default_factory=list)  # 무효가 된 승인: instagram·youtube

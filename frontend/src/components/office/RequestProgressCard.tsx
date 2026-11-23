@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { speaker } from "@/lib/agentChat";
 import { orchestrator } from "@/lib/orchestrator";
+import { VIDEO_WAIT_LABEL, videoApproval } from "@/lib/requestCharacter";
+import { RequestCreative } from "@/components/office/RequestCreative";
 import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestTitle } from "@/lib/requestHandoffs";
@@ -15,7 +17,9 @@ import { keyEvidence, recommendationItems, reportHash } from "@/lib/trendReportV
 import type { TrendReportDoneCard } from "@/lib/planningData";
 import type { TrendReport as Report } from "@/lib/data";
 import { DoneCard, ProgressCard } from "@/components/office/ChatCards";
+import { RequestCoverCell } from "@/components/marketing/CoverPicker";
 import { refreshWorkRequests, useWorkRequests } from "@/components/office/useWorkRequests";
+import { RequestActions } from "@/components/office/RequestActions";
 
 // 대화방 "의뢰 진행" 카드 (총괄에게 맡긴 고객 의뢰 하나, 11/20). 전체 대화방·이슈 방·총괄 1:1에서 의뢰 번호가 처음 나온 총괄 말풍선 아래에 붙는다.
 // - 데이터: 의뢰 목록(useWorkRequests, 10초)에서 찾고, 없으면 GET /api/requests/{id}를 한 번. 사람 토큰이 없으면 카드 없이 지금 글만
@@ -187,7 +191,10 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
         <span className={`chip text-[11px] ${st.tone}`}>{st.label}</span>
         <span className="chip bg-ink-100 text-[11px] tabular-nums text-ink-500">{row.request_id}</span>
         {stale !== null && <span className="chip bg-ink-100 text-[11px] text-ink-500" title={`${STALE_HOURS}시간 넘게 바뀌지 않아 AI 오피스 자리 상태에는 쓰지 않아요`}>오래 멈춤 · {stale}시간</span>}
+        {row.hidden_at && <span className="chip bg-ink-100 text-[11px] text-ink-500">삭제한 의뢰</span>}
       </p>
+      {/* 11/23 의뢰 정리 메뉴 (고객 의뢰 넘김 카드와 같은 함수) */}
+      {!row.hidden_at && <RequestActions row={row} title={requestTitle(row, tasks)} />}
       <ol className="space-y-2">
         {rows.map((s, i) => {
           const report = s.skill === "trend_report_create" ? reportIdOfRequest(row, s.stepId) : null;
@@ -199,12 +206,15 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                 <p className="flex flex-wrap items-center gap-1.5">
                   <b className="font-semibold">{s.dept ? `${speaker(s.dept).replace(/\s*AI$/, "")} · ` : ""}{s.label}</b>
                   <span className={`chip text-[11px] ${s.chip.tone}`} title={isInsight && proposal ? (found?.spec ? `${proposal} · ${found.spec}` : proposal) : undefined}>
-                    {isInsight && proposal ? (plan?.chip ?? planId(proposal)) : s.chip.label}
+                    {isInsight && proposal ? (plan?.chip ?? planId(proposal)) : videoApproval(row)?.stepId === s.stepId ? VIDEO_WAIT_LABEL : s.chip.label}
                   </span>
                 </p>
                 {s.muted && <p className="text-xs text-ink-500">{s.muted}</p>}
                 {videoLink && s.skill === "generate_media" && (
-                  <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(videoLink)}>영상 열기</button>
+                  <>
+                    <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(videoLink)}>영상 열기</button>
+                    <RequestCoverCell requestId={row.request_id} />
+                  </>
                 )}
                 {report && <ReportCell reportId={report} />}
                 {isInsight && plan && <PlanCell card={plan} />}
@@ -247,6 +257,8 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
           </li>
         )}
       </ol>
+      {/* 11/23 홍보 영상: [이미지 시트][스토리보드] 대화방 안 패널 · 영상 승인 대기면 [승인 화면 열기] */}
+      <RequestCreative row={row} plan={found?.videoPlan ?? null} />
     </section>
   );
 }

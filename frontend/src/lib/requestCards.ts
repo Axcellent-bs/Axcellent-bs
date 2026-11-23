@@ -276,6 +276,15 @@ export function requestActionError(e: unknown): { text: string; reload: boolean 
   return { text: status === null ? "처리하지 못했어요" : `처리하지 못했어요 (${status})`, reload: false };
 }
 
+/** 의뢰 삭제·수정·되돌리기 실패 → 한 줄. 403·404·409는 requestActionError 그대로,
+ *  422·502·503은 서버가 준 문장("바뀐 내용이 없어요"·"지금 의뢰는 그대로예요" 등)을 쓴다 */
+export function requestEditError(e: unknown): { text: string; reload: boolean } {
+  const status = typeof (e as { status?: unknown } | null)?.status === "number" ? (e as { status: number }).status : null;
+  const message = e instanceof Error ? e.message : "";
+  if (status !== null && [422, 502, 503].includes(status) && message) return { text: message, reload: false };
+  return requestActionError(e);
+}
+
 // ---- 의뢰 진행 카드가 보이는 방 (작업 기록 접기 ①의 조건, lib/commFilter.ts chatLane)
 
 /**

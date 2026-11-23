@@ -56,6 +56,9 @@ class ContainerRequest:
     caption: str
     is_ai_generated: bool
     share_to_feed: bool  # 기본값이 문서에 없으므로 항상 명시해서 보낸다
+    # 릴스 표지(의뢰 영상 썸네일, AI 표시가 든 JPEG의 asset_ref).
+    # 어댑터가 `supports_cover`일 때만 넣는다
+    cover_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +110,8 @@ class InstagramAdapter(Protocol):
     name: str
     # 캐러셀 호출을 쓸 수 있는가. 필드 이름이 공식 문서로 확인되기 전의 실제 어댑터는 False다
     supports_carousel: bool
+    # 릴스 표지(`cover_url`)를 받는가. 없으면(옛 어댑터) False로 보고 표지 없이 올린다
+    supports_cover: bool
 
     async def create_container(self, request: ContainerRequest) -> str: ...
 

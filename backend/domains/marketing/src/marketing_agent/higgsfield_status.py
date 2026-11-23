@@ -7,6 +7,11 @@
 
 - 키 값은 로그·결과에 내지 않는다(`Authorization: Key <ID>:<SECRET>` 헤더로만 쓴다).
 - 이미지 모델 경로(`MARKETING_HIGGSFIELD_IMAGE_MODEL`)는 설정값을 그대로 보여 준다(비밀값 아님).
+
+회사 계정 연결(원격 MCP, 11/23): 요청 회사가 Higgsfield 계정을 연결했으면 그 계정에
+`balance`(읽기, 크레딧을 쓰지 않는다)를 한 번 물어 `source=mcp`·남은 크레딧·요금제를 돌려준다.
+그림·영상도 이 계정으로 만든다(`creative_render.route`). 연결이 거절되면 `invalid_key`(다시 연결).
+없으면 예전 키 확인 그대로.
 """
 
 from __future__ import annotations
@@ -18,7 +23,11 @@ from datetime import UTC, datetime
 
 import httpx
 
-from ax_contracts.schemas.marketing_higgsfield import HiggsfieldConnection, HiggsfieldStatusOutput
+from ax_contracts.schemas.marketing_higgsfield import (
+    HiggsfieldConnection,
+    HiggsfieldSource,
+    HiggsfieldStatusOutput,
+)
 from ax_secret_store import get_secret
 from marketing_agent.media.config import HIGGSFIELD_API_KEY_ENV, HIGGSFIELD_IMAGE_MODEL_ENV
 
@@ -36,7 +45,14 @@ def _image_model() -> str | None:
 
 
 def _out(
-    key: bool, connection: HiggsfieldConnection, message: str, code: int | None = None
+    key: bool,
+    connection: HiggsfieldConnection,
+    message: str,
+    code: int | None = None,
+    *,
+    source: HiggsfieldSource | None = None,
+    credits: float | None = None,
+    plan: str | None = None,
 ) -> HiggsfieldStatusOutput:
     return HiggsfieldStatusOutput(
         key_configured=key,
@@ -45,7 +61,48 @@ def _out(
         image_model=_image_model(),
         checked_at=datetime.now(UTC),
         message_ko=message,
+        source=source if source is not None else ("api_key" if key else None),
+        credits=credits if credits is None or credits >= 0 else None,
+        plan=plan,
     )
+
+
+async def probe_mcp(cid: str, client: httpx.AsyncClient | None = None) -> HiggsfieldStatusOutput:
+    """회사 계정 연결에 `balance`를 한 번 물어 본다(크레딧을 쓰지 않는다)."""
+    from marketing_agent import creative_mcp
+    from marketing_agent.higgsfield_mcp import McpError
+    from marketing_agent.higgsfield_mcp_auth import McpAuthError
+
+    key = bool(higgsfield_key())
+    try:
+        if client is None:
+            async with httpx.AsyncClient(timeout=TIMEOUT_S) as own:
+                credits, plan = await creative_mcp.balance(creative_mcp.Higgsfield(own, cid))
+        else:
+            credits, plan = await creative_mcp.balance(creative_mcp.Higgsfield(client, cid))
+    except McpAuthError as exc:
+        logger.warning("Higgsfield 계정 연결 확인 실패: %s", exc)
+        if str(exc) == "client_id_missing":
+            return _out(
+                key, "unreachable", "서버에 Higgsfield 연결 설정(CLIENT_ID)이 없어요", source="mcp"
+            )
+        if str(exc) in ("reconnect_needed", "not_connected"):
+            return _out(
+                key, "invalid_key", "Higgsfield 계정 연결이 끊겼어요. 다시 연결해 주세요",
+                source="mcp",
+            )  # fmt: skip
+        return _out(key, "unreachable", "Higgsfield에 닿지 못했어요", source="mcp")
+    except (McpError, httpx.HTTPError, ValueError) as exc:
+        code = str(exc) if isinstance(exc, McpError) else type(exc).__name__
+        logger.warning("Higgsfield 계정 연결 확인 실패: %s", code)
+        if code == "unauthorized":
+            return _out(
+                key, "invalid_key", "Higgsfield가 연결을 거절했어요. 다시 연결해 주세요",
+                source="mcp",
+            )  # fmt: skip
+        return _out(key, "unreachable", "Higgsfield에 닿지 못했어요", source="mcp")
+    message = "Higgsfield 회사 계정에 연결돼 있어요(구독 크레딧)"
+    return _out(key, "ok", message, source="mcp", credits=credits, plan=plan)
 
 
 def higgsfield_key() -> str:
@@ -63,7 +120,12 @@ def higgsfield_key() -> str:
 
 
 async def probe(client: httpx.AsyncClient | None = None) -> HiggsfieldStatusOutput:
-    """키를 Higgsfield에 한 번 보여 주고 연결 상태를 돌려준다."""
+    """회사 계정 연결이 있으면 그것을, 없으면 키를 Higgsfield에 한 번 보여 주고 상태를 돌려준다."""
+    from marketing_agent import higgsfield_mcp_auth
+
+    cid = higgsfield_mcp_auth.company()
+    if cid and higgsfield_mcp_auth.connected(cid):
+        return await probe_mcp(cid, client)
     key = higgsfield_key()
     if not key:
         return _out(False, "not_configured", "Higgsfield 키가 설정돼 있지 않아요")
@@ -87,10 +149,10 @@ async def probe(client: httpx.AsyncClient | None = None) -> HiggsfieldStatusOutp
 
 async def status(now: float | None = None) -> HiggsfieldStatusOutput:
     """`CACHE_S` 동안은 지난 결과를 돌려준다."""
-    from ax_agent_template import company_ai
+    from marketing_agent import higgsfield_mcp_auth
 
     t = time.monotonic() if now is None else now
-    cid = company_ai.company_id() or ""
+    cid = higgsfield_mcp_auth.company() or ""
     hit = _cache.get(cid)
     if hit is not None and t - hit[0] < CACHE_S:
         return hit[1]

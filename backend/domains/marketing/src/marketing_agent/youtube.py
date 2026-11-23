@@ -496,6 +496,23 @@ async def send_video(cur: dict[str, Any], data: bytes) -> str:
         return str(video_id)
 
 
+THUMBNAIL_URL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
+
+
+async def send_thumbnail(video_id: str, jpeg: bytes) -> None:
+    """올린 영상에 썸네일(JPEG)을 붙인다. 채널이 맞춤 썸네일을 못 쓰면(미인증 등) YoutubeError."""
+    async with CLIENT() as client:
+        token = await _access_token(client)
+        sent = await client.post(
+            THUMBNAIL_URL,
+            params={"videoId": video_id},
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "image/jpeg"},
+            content=jpeg,
+        )
+        if sent.status_code >= 400:
+            raise YoutubeError(f"thumbnail_http_{sent.status_code}")
+
+
 async def _upload(record_id: str) -> None:
     cur = _get(record_id)
     part = cur.get("part") or "video"

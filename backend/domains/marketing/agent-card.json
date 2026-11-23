@@ -159,6 +159,42 @@
       "priority": "recommended"
     },
     {
+      "id": "brand_characters_list",
+      "description": "요청 회사(meta.tenant_id)의 대표 캐릭터 목록(최대 3개, 마지막에 표시한 것이 기본). 이름·제작 기록 번호(CR-…)·작은 미리보기·시트 그림 유무·저장 시각·권리 확인한 사람과 때. 다른 회사 기록은 보이지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_brand.py#BrandCharactersListInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_brand.py#BrandCharactersListOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "brand_character_mark",
+      "description": "제작 기록(input.record_id: CR-…)을 요청 회사의 대표 캐릭터로 표시한다. input.rights_confirmed=true(사람이 '우리 회사가 쓸 권리가 있는 그림'을 확인)와 input.who(dashboard-api가 사람 토큰에서 채움)가 있어야 하고 확인한 사람·때를 기록에 남긴다. 회사당 3개까지이고 4개째를 표시하면 가장 오래된 표시를 뗀다(dropped). 기록의 표시 칸만 바꾼다(외부 호출·비용 없음). 거절 outcome: rights_not_confirmed·not_found.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_brand.py#BrandCharacterMarkInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_brand.py#BrandCharacterMarkOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "brand_character_unmark",
+      "description": "대표 캐릭터 표시만 뗀다(제작 기록은 남는다). 요청 회사의 대표 캐릭터가 아니면 not_found.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_brand.py#BrandCharacterUnmarkInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_brand.py#BrandCharacterMarkOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "creative_youtube_draft",
       "description": "제작 기록(input.record_id: CR-…)의 영상으로 AXcellent 유튜브에 올릴 제목·설명·태그 초안을 AI가 쓴다(LLM이 없으면 고정 문구). regenerate=true면 다시 쓰고, title·description·tags·privacy(private·unlisted·public, 기본 unlisted)·part(video·final_video)를 주면 사람이 고친 값으로 저장한다. 설명 끝 AI 생성 표시는 지우지 않는다. 기록 render.youtube(status=draft)에 남기고 올리지는 않는다. campaign_id(cmp_…, 시작한 캠페인 대장이나 받은 기획안의 캠페인, \"\"면 연결 풀기)를 주면 render.youtube.campaign_id에 남겨 재무 결과의 유튜브 조회수가 그 영상을 찾는다(올린 뒤에도 바꿀 수 있다). 거절 outcome: not_found·already_requested·unknown_campaign.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeYoutubeDraftInput",
@@ -470,6 +506,18 @@
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoYoutubeRequestInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoYoutubeOutput",
       "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
+      "id": "request_video_cover_select",
+      "description": "의뢰로 만든 영상(input.post_draft_id)의 썸네일 후보(list_request_videos의 covers[].media_id, 라벨 입힌 영상에서 뽑은 AI 표시 포함 그림 3장) 중 하나(input.media_id)를 고른다. 후보 밖 값은 cover_not_candidate로 거절한다. 고르지 않으면 첫 후보가 기본값이고 게시(publish_sns)·유튜브(publish_youtube) 승인 해시에 들어간다. 승인 대기·승인 뒤에 바꾸면 그 승인을 무효로 한다(Instagram 대기 건 cover_changed, 유튜브는 초안으로). 이미 올라간 영상이면 cover_locked. 초안 저장소 메타데이터만 바꾸며 게시·비용은 없다. 거절 outcome: not_found·cover_not_candidate·cover_locked·storage_error.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoCoverSelectInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoCoverOutput",
+      "grade": "read",
       "allowed_requesters": [
         "dashboard-api"
       ],
