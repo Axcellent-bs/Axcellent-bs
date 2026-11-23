@@ -848,6 +848,7 @@ VIDEO_REFUSALS = {
     "gate_held": (409, "GATE_HELD"),
     "gate_rejected": (409, "GATE_REJECTED"),
     "gate_blocked": (409, "GATE_BLOCKED"),
+    "unknown_campaign": (422, "UNKNOWN_CAMPAIGN"),
 }
 CREATIVE_FILES = {
     "sheet_image": ("sheet.jpg", "image/jpeg"),
@@ -1070,6 +1071,11 @@ async def request_video_youtube_request_call(post_draft_id: str, who: str | None
     if who:
         payload["who"] = who
     return await _request_video_youtube("request_video_youtube_request", payload)
+
+
+async def campaigns_list_call(limit: int) -> dict[str, Any]:
+    """마케팅이 시작한 캠페인 대장(`list_marketing_campaigns`, read)."""
+    return await _creative_read("list_marketing_campaigns", {"limit": limit})
 
 
 async def youtube_status_call() -> dict[str, Any]:

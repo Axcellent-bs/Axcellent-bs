@@ -141,6 +141,13 @@ class CampaignResultInput(AxModel):
     # 조회수: 데이터 `video_performance`가 잰 값 그대로. views_point는 그 측정 시점
     views: int | None = Field(default=None, ge=0)
     views_point: ViewsPoint | None = None
+    # 회사 유튜브 조회수 (11/23, 옛 요청에 없다). 마케팅이 이 캠페인에 연결한 회사 유튜브 영상을
+    # `youtube_video_stats`로 읽은 값(읽은 때 누적)의 합이다. `views`(데이터 video_performance)와
+    # 따로 싣고 섞지 않는다. 못 읽으면 비운다. `youtube_views_at`은 읽은 시각(ISO),
+    # `youtube_video_ids`는 더한 영상
+    youtube_views: int | None = Field(default=None, ge=0)
+    youtube_views_at: str | None = Field(default=None, max_length=40)
+    youtube_video_ids: list[str] | None = Field(default=None, max_length=50)
 
 
 class CampaignBudgetReviewInput(AxModel):

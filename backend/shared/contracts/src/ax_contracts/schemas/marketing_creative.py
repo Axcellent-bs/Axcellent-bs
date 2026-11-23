@@ -105,6 +105,8 @@ class CreativeRecordAttachOutput(AxModel):
 CREATIVE_YOUTUBE_DRAFT_SKILL = "creative_youtube_draft"
 CREATIVE_YOUTUBE_REQUEST_SKILL = "creative_youtube_request"
 YOUTUBE_STATUS_SKILL = "youtube_status"
+# 유튜브 영상이 어느 캠페인 영상인지(11/23, 선택). 빈 문자열이면 연결을 푼다
+YOUTUBE_CAMPAIGN_LINK_PATTERN = r"^(cmp_[A-Za-z0-9][A-Za-z0-9_-]{0,63})?$"
 
 
 class CreativeYoutubeDraftInput(AxModel):
@@ -117,6 +119,9 @@ class CreativeYoutubeDraftInput(AxModel):
     tags: list[str] | None = Field(default=None, max_length=15)
     privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
     part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+    # 어느 캠페인(cmp_…) 영상인지(11/23, 추가). 비우면(None) 그대로, ""면 연결을 푼다.
+    # 올린 뒤에도 바꿀 수 있다(올리기와 상관없는 표시라 승인이 필요 없다)
+    campaign_id: str | None = Field(default=None, pattern=YOUTUBE_CAMPAIGN_LINK_PATTERN)
 
 
 class CreativeYoutubeRequestInput(AxModel):
@@ -159,6 +164,8 @@ class RequestVideoYoutubeDraftInput(AxModel):
     description: str | None = Field(default=None, max_length=5000)
     tags: list[str] | None = Field(default=None, max_length=15)
     privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
+    # 어느 캠페인(cmp_…) 영상인지(11/23, 추가). 비우면(None) 그대로, ""면 연결을 푼다
+    campaign_id: str | None = Field(default=None, pattern=YOUTUBE_CAMPAIGN_LINK_PATTERN)
 
 
 class RequestVideoYoutubeRequestInput(AxModel):

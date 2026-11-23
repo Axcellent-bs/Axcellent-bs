@@ -93,6 +93,8 @@ class YoutubeRequestUpload(AxModel):
     uploaded_at: str | None = None
     title: str | None = None
     privacy: str | None = None
+    # 사람이 유튜브 칸에서 고른 캠페인(cmp_…, 11/23 추가). 고르지 않았으면 None
+    campaign_id: str | None = None
 
 
 class YoutubeUploadsListOutput(AxModel):

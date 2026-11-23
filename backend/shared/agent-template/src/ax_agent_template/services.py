@@ -177,6 +177,7 @@ SERVICES: tuple[Service, ...] = (
             "youtube_status",
             "youtube_video_stats",
             "youtube_uploads_list",
+            "list_marketing_campaigns",
             "creative_record_attach",
             "receive_campaign_brief",
             "record_campaign_ad_metrics",

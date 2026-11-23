@@ -13,6 +13,7 @@
 - AI 생성 영상이므로 설명 끝에 AI 생성 표시를 붙이고(지우지 않는다) 합성 미디어로 표시한다
 - 그 아래 태그에서 고른 해시태그 줄을 붙인다(설명 전체 3~5개, #AXcellent 포함, 이미 있으면 안 붙임)
 - 제목·줄거리는 외부 입력이라 LLM 데이터 블록(`untrusted`)에만 넣는다. LLM이 없으면 고정 문구 초안
+- 어느 캠페인 영상인지(`render.youtube.campaign_id`, 11/23, 선택)는 `set_campaign`으로 남긴다
 """
 
 from __future__ import annotations
@@ -309,6 +310,17 @@ async def write_draft(
         privacy=edits.get("privacy") or cur.get("privacy") or "unlisted",
         part=edits.get("part") or cur.get("part") or _default_part(rec),
     )
+
+
+def set_campaign(record_id: str, campaign_id: str) -> dict[str, Any]:
+    """이 영상이 어느 캠페인(cmp_…) 영상인지 남긴다(""면 연결을 푼다). 돌려주는 값은 render.youtube.
+
+    올리기와 상관없는 표시라 상태(초안·승인 대기·올림)에 관계없이 바꿀 수 있다. 재무 결과의
+    유튜브 조회수는 이 값으로 영상을 찾는다(`youtube_stats.uploads(campaign_id=…)`).
+    """
+    if _creative.store().get(record_id) is None:
+        raise YoutubeError("not_found")
+    return _put(record_id, campaign_id=campaign_id or None)
 
 
 # ---------------------------------------------------------------- 올리기 (사람 승인)

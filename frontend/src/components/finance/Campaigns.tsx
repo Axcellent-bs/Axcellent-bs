@@ -1,5 +1,6 @@
 import { finance, krw, signedKrw, type BudgetDecision, type CampaignVerdict } from "@/lib/finance";
 import { shortDateTime } from "@/lib/format";
+import { categoryViewsBreakdown, spendSourceBadge, viewSourcesText } from "@/lib/campaignLinks";
 import { Link } from "@/lib/nav";
 import { AppliedRules, Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 
@@ -45,10 +46,17 @@ function Wiring({ from, to, ask }: { from?: Wire[]; to?: Wire[]; ask?: { who: Wi
   );
 }
 
-// 마케팅 자동 전송(campaign_auto.AUTO_SOURCE). 광고비가 승인 예산이라 손익이 잠정이다. 값을 바꾸면 마케팅과 맞춘다
-const AUTO_BUDGET_SOURCE = "marketing.auto.approved_budget";
+// 마케팅 자동 전송의 광고비 출처(campaign_auto.AUTO_SOURCE·AD_METRICS_SOURCE)는 spendSourceBadge가 나눈다:
+// 승인 예산이면 '예산 기준(잠정)', 기간 광고 숫자 합계면 '광고 숫자 합계'
 
 const pct = (v: number | null) => (v === null ? "-" : `${(v * 100).toFixed(1)}%`);
+
+/** 자동 전송 결과의 광고비 출처 칩. 사람이 저장한 결과에는 아무것도 붙이지 않는다 */
+function SpendSource({ source }: { source: string }) {
+  const badge = spendSourceBadge(source);
+  if (!badge) return null;
+  return <> <span title={badge.title}><Chip label={badge.label} tone={badge.provisional ? TONE.warn : TONE.muted} /></span></>;
+}
 
 export function CampaignsSection({ tick }: { tick: number }) {
   const view = useResource("campaigns", () => finance.campaigns(), tick);
@@ -88,8 +96,8 @@ export function CampaignsSection({ tick }: { tick: number }) {
                     </thead>
                     <tbody>
                       {v.campaigns.map((c) => (
-                        <tr key={c.campaign_id} className="border-t border-ink-100" title={[`출처: ${c.source}`, c.effect_generated_at ? `측정 시각: ${c.effect_generated_at}` : "", c.measured_gmv_krw != null && c.measured_gmv_krw < 0 ? `측정 증분 판매액: ${c.measured_gmv_krw}원` : "", c.measured_orders != null && c.measured_orders < 0 ? `측정 증분 주문: ${c.measured_orders}건` : ""].filter(Boolean).join("\n")}>
-                          <td className="py-2 font-medium text-ink-900">{c.campaign_name}{c.source === AUTO_BUDGET_SOURCE && <> <span title="마케팅이 캠페인 종료 뒤 자동으로 보낸 결과입니다. 광고비가 실제 집행액이 아니라 승인 예산이라 손익이 실제와 다를 수 있습니다. 사람이 실제 집행액으로 다시 저장하면 이 표시가 사라집니다."><Chip label="예산 기준(잠정)" tone={TONE.warn} /></span></>}</td>
+                        <tr key={c.campaign_id} className="border-t border-ink-100" title={[`출처: ${c.source}`, viewSourcesText(c) ? `조회수: ${viewSourcesText(c)}` : "", c.effect_generated_at ? `측정 시각: ${c.effect_generated_at}` : "", c.measured_gmv_krw != null && c.measured_gmv_krw < 0 ? `측정 증분 판매액: ${c.measured_gmv_krw}원` : "", c.measured_orders != null && c.measured_orders < 0 ? `측정 증분 주문: ${c.measured_orders}건` : ""].filter(Boolean).join("\n")}>
+                          <td className="py-2 font-medium text-ink-900">{c.campaign_name}<SpendSource source={c.source} /></td>
                           <td className="py-2 text-ink-700">{c.channel}</td>
                           <td className="py-2 text-right tabular-nums">{krw(c.spend_krw)}</td>
                           <td className="py-2 text-right tabular-nums">{c.gmv_krw === null ? "자료 없음" : krw(c.gmv_krw)}</td>
@@ -105,6 +113,13 @@ export function CampaignsSection({ tick }: { tick: number }) {
                   </table>
                 </div>
               )}
+              {v.campaigns.some((c) => viewSourcesText(c)) && (
+                <ul className="space-y-0.5 text-xs text-ink-500">
+                  {v.campaigns.filter((c) => viewSourcesText(c)).map((c) => (
+                    <li key={c.campaign_id}>{c.campaign_name} 조회수: {viewSourcesText(c)}{c.cost_per_view != null ? ` → 조회당 제작비 ${c.cost_per_view.toLocaleString("ko-KR")}원` : ""}</li>
+                  ))}
+                </ul>
+              )}
               {v.campaigns[0] && <AppliedRules rules={v.campaigns[0].applied_rules} plain />}
             </div>
           )}
@@ -112,7 +127,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
       </Panel>
 
       <Panel id="campaign-categories" title="콘텐츠 카테고리별 제작비"
-        hint={<>쇼츠·릴스를 카테고리(예: 데이터 AI 숏츠 형식인 챌린지·상황극·스케치, 또는 사람이 정한 아재개그)별로 묶어 조회당 제작비를 봅니다. 조회수는 데이터 AI가 잰 게시 7일 값만 쓰고, 7일이 안 된 영상은 측정 중으로 셉니다. 다음 회차 제안은 재무 의견이고, 기획 AI가 영상 기획안을 넘기기 전에 물어 갑니다. 비중은 기획·마케팅과 사람이 정합니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.planning]} /></>}>
+        hint={<>쇼츠·릴스를 카테고리(예: 데이터 AI 숏츠 형식인 챌린지·상황극·스케치, 또는 사람이 정한 아재개그)별로 묶어 조회당 제작비를 봅니다. 조회수는 데이터 AI가 잰 게시 7일 값(영상 성과)과, 마케팅 유튜브 칸에서 그 캠페인 영상으로 고른 회사 유튜브 영상의 조회수(마케팅이 결과를 보낼 때 읽은 누적 값)를 더해 씁니다. 영상 성과가 7일이 안 됐으면 측정 중으로 셉니다. 유튜브 조회수를 못 읽으면 더하지 않습니다. 다음 회차 제안은 재무 의견이고, 기획 AI가 영상 기획안을 넘기기 전에 물어 갑니다. 비중은 기획·마케팅과 사람이 정합니다.<Wiring from={[W.marketing, W.dataPerf]} to={[W.planning]} /></>}>
         <ResourceBody res={view}>
           {(v) => {
             const rows = v.categories ?? [];
@@ -128,7 +143,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] text-sm">
                   <thead className="text-left text-ink-500">
-                    <tr>{(["카테고리", "잰 캠페인", "제작비 합", "7일 조회수", "조회당 제작비", "측정 중", "다음 회차 제작비 (재무 의견)"] as const).map((h, i) => <th key={h} className={`pb-2 font-medium ${i >= 1 ? "text-right" : ""}`}>{h}</th>)}</tr>
+                    <tr>{(["카테고리", "잰 캠페인", "제작비 합", "조회수 (7일 + 유튜브)", "조회당 제작비", "측정 중", "다음 회차 제작비 (재무 의견)"] as const).map((h, i) => <th key={h} className={`pb-2 font-medium ${i >= 1 ? "text-right" : ""}`}>{h}</th>)}</tr>
                   </thead>
                   <tbody>
                     {rows.map((row) => (
@@ -136,7 +151,7 @@ export function CampaignsSection({ tick }: { tick: number }) {
                         <td className="py-2 font-medium text-ink-900">{row.content_category}</td>
                         <td className="py-2 text-right tabular-nums">{row.campaigns.length}개</td>
                         <td className="py-2 text-right tabular-nums">{row.campaigns.length ? krw(row.production_cost_krw) : "-"}</td>
-                        <td className="py-2 text-right tabular-nums">{row.campaigns.length ? `${row.views.toLocaleString("ko-KR")}회` : "-"}</td>
+                        <td className="py-2 text-right tabular-nums">{row.campaigns.length ? <>{`${row.views.toLocaleString("ko-KR")}회`}{categoryViewsBreakdown(row) && <span className="block text-xs text-ink-500">{categoryViewsBreakdown(row)}</span>}</> : "-"}</td>
                         <td className="py-2 text-right font-semibold tabular-nums text-ink-900">{row.cost_per_view === null ? "측정 전" : `${row.cost_per_view.toLocaleString("ko-KR")}원`}</td>
                         <td className="py-2 text-right tabular-nums text-ink-500">{row.measuring ? `${row.measuring}개` : "-"}</td>
                         <td className="py-2 text-right tabular-nums">{next(row)}</td>
