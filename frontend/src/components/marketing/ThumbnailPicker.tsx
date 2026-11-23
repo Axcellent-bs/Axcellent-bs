@@ -28,15 +28,15 @@ function Thumb({ recordId, cell, wide, onPick }: { recordId: string; cell: Thumb
   );
 }
 
-export function ThumbnailPicker({ recordId, state, hasVideo, youtubeStatus, onChanged }: {
-  recordId: string; state?: ThumbnailsState | null; hasVideo: boolean; youtubeStatus?: string | null; onChanged: () => void;
+export function ThumbnailPicker({ recordId, state, hasVideo, youtubeStatus, instagramStatus, onChanged }: {
+  recordId: string; state?: ThumbnailsState | null; hasVideo: boolean; youtubeStatus?: string | null; instagramStatus?: string | null; onChanged: () => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState<"make" | "pick" | null>(null);
   const [note, setNote] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
   const cells = thumbCells(state, selected);
-  const locked = thumbsLocked(youtubeStatus);
+  const locked = thumbsLocked(youtubeStatus, instagramStatus);
   const action = thumbAction(state, hasVideo, locked);
   const status = state?.status ?? "";
   const target = cells.find((c) => c.selected);
@@ -58,13 +58,13 @@ export function ThumbnailPicker({ recordId, state, hasVideo, youtubeStatus, onCh
       .then((r) => {
         setConfirming(false);
         setSelected(null);
-        setNote({ tone: "ok", text: r.approvals_reset.length ? "썸네일을 바꿨어요. 유튜브 올리기 승인을 다시 요청해 주세요." : "썸네일을 정했어요." });
+        setNote({ tone: "ok", text: r.approvals_reset.length ? "썸네일을 바꿨어요. 유튜브·인스타 올리기 승인을 다시 요청해 주세요." : "썸네일을 정했어요." });
         onChanged();
       })
       .catch((e: unknown) => fail(e, "썸네일을 정하지 못했어요"))
       .finally(() => setBusy(null));
   };
-  const onCommit = () => (needsThumbConfirm(cells, youtubeStatus) ? setConfirming(true) : commit());
+  const onCommit = () => (needsThumbConfirm(cells, youtubeStatus, instagramStatus) ? setConfirming(true) : commit());
 
   if (!hasVideo && !state?.status) return null;
   return (
@@ -84,7 +84,7 @@ export function ThumbnailPicker({ recordId, state, hasVideo, youtubeStatus, onCh
           <ul className="flex flex-wrap gap-2">
             {cells.map((c) => <Thumb key={c.media_id} recordId={recordId} cell={c} wide={state?.aspect !== "9:16"} onPick={() => { setSelected(c.media_id); setConfirming(false); }} />)}
           </ul>
-          {locked ? <p className="text-xs text-ink-500">유튜브에 올린 영상이라 썸네일을 바꿀 수 없어요.</p>
+          {locked ? <p className="text-xs text-ink-500">이미 올린 영상이라 썸네일을 바꿀 수 없어요.</p>
             : confirming ? (
               <div role="alertdialog" aria-label="썸네일 바꾸기 확인" className="space-y-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 <p>{THUMB_CONFIRM_KO}</p>

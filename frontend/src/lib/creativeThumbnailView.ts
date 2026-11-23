@@ -49,7 +49,7 @@ export const THUMB_ERROR_KO: Record<string, string> = {
   interrupted: "서버가 다시 켜져 중단됐어요",
   gate_rejected: "사람 결정에서 거절됐어요",
 };
-export const THUMB_CONFIRM_KO = "썸네일을 바꾸면 유튜브 올리기 승인을 다시 받아야 해요.";
+export const THUMB_CONFIRM_KO = "썸네일을 바꾸면 유튜브·인스타 올리기 승인을 다시 받아야 해요.";
 export const thumbErrorText = (code?: string | null) => (code ? THUMB_ERROR_KO[code] ?? code : null);
 
 export interface ThumbCell {
@@ -75,14 +75,22 @@ export function canCommitThumb(cells: ThumbCell[], picked: boolean): boolean {
   return !!target && (!target.chosen || !picked);
 }
 
-/** 바꾸기 전 확인: 유튜브 승인 대기 중이고 다른 후보로 바꿀 때만 */
-export function needsThumbConfirm(cells: ThumbCell[], youtubeStatus?: string | null): boolean {
+/** 바꾸기 전 확인: 유튜브·인스타 승인 대기 중이고 다른 후보로 바꿀 때만 */
+export function needsThumbConfirm(cells: ThumbCell[], youtubeStatus?: string | null, instagramStatus?: string | null): boolean {
   const target = cells.find((c) => c.selected);
-  return youtubeStatus === "awaiting_approval" && !!target && !target.chosen;
+  const waiting = youtubeStatus === "awaiting_approval" || instagramStatus === "awaiting_approval";
+  return waiting && !!target && !target.chosen;
 }
 
-/** 올린 뒤에는 잠긴다(고르기·다시 만들기 모두) */
-export const thumbsLocked = (youtubeStatus?: string | null) => youtubeStatus === "uploading" || youtubeStatus === "done";
+/** 올린 뒤에는 잠긴다(고르기·다시 만들기 모두). 인스타 릴스 표지로 올리는 중·올린 뒤도 같다 */
+export const thumbsLocked = (youtubeStatus?: string | null, instagramStatus?: string | null) =>
+  youtubeStatus === "uploading" || youtubeStatus === "done" || instagramStatus === "posting" || instagramStatus === "done";
+
+/** 지금 정해진 썸네일(고른 것, 없으면 첫 장). 릴스 표지 미리보기에 쓴다. 후보가 없으면 null */
+export function chosenThumb(s: ThumbnailsState | null | undefined): { media_id: string; picked: boolean } | null {
+  const cell = thumbCells(s, null).find((c) => c.chosen);
+  return cell ? { media_id: cell.media_id, picked: s?.chosen === cell.media_id } : null;
+}
 
 /** 만들기 버튼 글: 후보가 있으면 다시 만들기. 진행 중이거나 영상이 없으면 null(버튼 없음) */
 export function thumbAction(s: ThumbnailsState | null | undefined, hasVideo: boolean, locked: boolean): "make" | "remake" | null {

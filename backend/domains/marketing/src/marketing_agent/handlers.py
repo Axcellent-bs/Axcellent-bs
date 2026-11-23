@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import re
@@ -2022,12 +2023,27 @@ async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
     result = await request_video.list_request_videos(request, STATE.sns)
     if result.status != TaskStatus.COMPLETED or not result.output:
         return result
-    items = _request_youtube.attach_states(list(result.output.get("items") or []))
+    # 썸네일 기능 전에 만든 영상: 후보가 없으면 한 번 만든다(ffmpeg 프레임, 크레딧 0)
+    lacking = [
+        str(i.get("post_draft_id"))
+        for i in result.output.get("items") or []
+        if i.get("labeled") and not i.get("covers")
+    ]
+    cover_errors: dict[str, str] = {}
+    if lacking:
+        made, cover_errors = await asyncio.to_thread(_request_cover.backfill, STATE.sns, lacking)
+        if made:
+            again = await request_video.list_request_videos(request, STATE.sns)
+            if again.status == TaskStatus.COMPLETED and again.output:
+                result = again
+    items = _request_youtube.attach_states(list((result.output or {}).get("items") or []))
     items = _instagram.attach_states(items)
     for item in items:  # 썸네일을 바꾸면 다시 승인받아야 하는 요청이 있나(화면 확인 상자)
         item["approval_waiting"] = _request_cover.approval_waiting(
             str(item.get("post_draft_id")), item.get("youtube")
         )
+        if not item.get("covers"):  # 후보를 만들지 못한 사유(화면에 보인다)
+            item["covers_error"] = cover_errors.get(str(item.get("post_draft_id")))
     return result.model_copy(update={"output": result.output | {"items": items}})
 
 

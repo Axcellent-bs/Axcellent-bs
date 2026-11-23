@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAuthedMedia } from "@/lib/authedMedia";
 import { listRequestVideos, requestVideoCoverUrl, selectRequestVideoCover } from "@/lib/requestVideos";
-import { COVER_CONFIRM_KO, canCommitCover, coverCells, needsCoverConfirm, type CoverCell, type RequestVideo } from "@/lib/requestVideoView";
+import { COVER_CONFIRM_KO, canCommitCover, coverCells, coverErrorKo, needsCoverConfirm, type CoverCell, type RequestVideo } from "@/lib/requestVideoView";
 
 // 의뢰 영상 썸네일 후보 3장 → 사람이 고르기 (시안 ③). 제작 기록 › 의뢰로 만든 영상 카드와 대화방 의뢰 카드(영상 제작 완료)에 둔다.
 // 후보는 AI 라벨을 입힌 영상에서 뽑은 그림이라 AI 표시가 들어 있다. 고르지 않으면 첫 후보가 기본값이고 게시·유튜브 승인에 같이 들어간다.
@@ -36,7 +36,8 @@ export function CoverPicker({ video, onChanged }: { video: RequestVideo; onChang
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
   const cells = coverCells(video, selected);
-  if (cells.length === 0) return null;
+  const reason = coverErrorKo(video.covers_error);
+  if (cells.length === 0) return reason ? <p role="status" className="text-xs text-accent">{reason}</p> : null;
   const canCommit = canCommitCover(cells, video.cover_picked === true);
   const target = cells.find((c) => c.selected);
 

@@ -32,9 +32,23 @@ export interface RequestVideo {
   cover_media_id?: string | null;
   /** 사람이 직접 골랐나(false면 첫 후보가 기본값) */
   cover_picked?: boolean;
-  /** 승인 대기·승인됨(게시 전)인 게시·유튜브 요청이 있나. 있으면 썸네일을 바꾸기 전에 확인을 묻는다 */
+  /** 승인 대기·승인됨(게시 전)인 게시·유튜브·인스타 요청이 있나. 있으면 썸네일을 바꾸기 전에 확인을 묻는다 */
   approval_waiting?: boolean;
+  /** 후보를 만들지 못한 사유(옛 영상 채우기, 백엔드 request_video_cover.backfill). 없으면 null */
+  covers_error?: string | null;
 }
+
+/** 썸네일 후보를 만들지 못한 사유 (서버 ffmpeg 프레임 뽑기) */
+export const COVER_ERROR_KO: Record<string, string> = {
+  ffmpeg_missing: "서버에 ffmpeg가 없어 썸네일 후보를 만들지 못했어요(서버에 ffmpeg 설치 필요, 설치하면 10분 안에 다시 시도해요)",
+  ffprobe_missing: "서버에 ffprobe가 없어 영상 길이를 읽지 못해 썸네일 후보를 만들지 못했어요(ffmpeg 패키지 설치 필요)",
+  duration_unknown: "영상 길이를 읽지 못해 썸네일 후보를 만들지 못했어요",
+  frame_grab_failed: "영상에서 그림을 뽑지 못해 썸네일 후보를 만들지 못했어요",
+  label_missing: "AI 표시가 입혀진 영상이 아니라 썸네일 후보를 만들지 않았어요",
+  draft_missing: "서버 미디어 폴더 설정이 없어 썸네일 후보를 만들지 못했어요",
+};
+export const coverErrorKo = (code?: string | null): string | null =>
+  code ? COVER_ERROR_KO[code] ?? `썸네일 후보를 만들지 못했어요 (${code})` : null;
 
 /** 썸네일 후보 한 장 (백엔드 request_video_cover.public) */
 export interface RequestVideoCover {

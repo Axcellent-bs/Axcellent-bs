@@ -313,8 +313,8 @@ class GraphInstagramAdapter:
             else:
                 params["video_url"] = self.public_media_url(request.media_ref)
             params["share_to_feed"] = "true" if request.share_to_feed else "false"
-            if request.cover_ref:  # 의뢰 영상 썸네일(AI 표시가 든 JPEG)
-                params["cover_url"] = await self._image_url(request.cover_ref)
+            if request.cover_ref:  # 릴스 표지(고른 썸네일, AI 표시가 든 JPEG)
+                params["cover_url"] = await self._cover_url(request.cover_ref)
         body = await self._request("POST", f"{self._user_id}/media", params=params)
         container_id = body.get("id")
         if not isinstance(container_id, str) or not container_id:
@@ -326,6 +326,25 @@ class GraphInstagramAdapter:
             return await self._hosted_image_url(media_ref)
         self.check_local_image(media_ref)
         return self.public_media_url(media_ref)
+
+    async def _cover_url(self, media_ref: str) -> str:
+        """릴스 표지 공개 주소. 영상과 같은 방식(미디어 호스트면 서명 URL)이다.
+
+        표지는 릴스 비율(9:16)이라 피드 이미지 비율(4:5~1.91:1) 검사를 하지 않는다. JPEG·8MB만 본다.
+        """
+        if not self._uses_media_host(media_ref):
+            return self.public_media_url(media_ref)
+        assert self._media_host is not None
+        try:
+            content = sns_media.resolve_asset(media_ref).read_bytes()
+        except (sns_media.MediaPathError, OSError):
+            raise IgApiError(*_MEDIA_URL_UNREACHABLE) from None
+        if content[:3] != b"\xff\xd8\xff" or len(content) > JPEG_MAX_BYTES:
+            raise IgApiError(*_MEDIA_FORMAT)
+        try:
+            return await self._media_host.upload_jpeg(content)
+        except MediaHostError:
+            raise IgApiError(*_MEDIA_URL_UNREACHABLE) from None
 
     async def create_carousel_item(self, media_ref: str) -> str:
         if not self.supports_carousel:

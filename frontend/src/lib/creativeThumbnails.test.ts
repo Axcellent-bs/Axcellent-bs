@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  THUMB_CONFIRM_KO, canCommitThumb, needsThumbConfirm, thumbAction, thumbChip, thumbCells, thumbErrorText, thumbsLocked,
+  THUMB_CONFIRM_KO, canCommitThumb, chosenThumb, needsThumbConfirm, thumbAction, thumbChip, thumbCells, thumbErrorText, thumbsLocked,
   type ThumbnailsState,
 } from "./creativeThumbnailView.ts";
 
@@ -34,16 +34,29 @@ test("[이걸로 정하기]와 확인 상자: 유튜브 승인 대기 중 다른
   assert.equal(canCommitThumb(thumbCells(done(), null), false), true); // 기본값(첫 장) 확정
   assert.equal(canCommitThumb(thumbCells(done({ chosen: A }), null), true), false); // 이미 고른 그대로
   assert.equal(canCommitThumb(thumbCells(done({ chosen: A }), B), true), true);
-  assert.equal(THUMB_CONFIRM_KO, "썸네일을 바꾸면 유튜브 올리기 승인을 다시 받아야 해요.");
+  assert.equal(THUMB_CONFIRM_KO, "썸네일을 바꾸면 유튜브·인스타 올리기 승인을 다시 받아야 해요.");
   assert.equal(needsThumbConfirm(thumbCells(done(), B), "awaiting_approval"), true);
   assert.equal(needsThumbConfirm(thumbCells(done(), B), "draft"), false);
   assert.equal(needsThumbConfirm(thumbCells(done(), A), "awaiting_approval"), false); // 같은 것이면 승인이 안 풀린다
+  // 인스타 릴스 승인 대기도 표지가 바뀌면 풀린다
+  assert.equal(needsThumbConfirm(thumbCells(done(), B), "draft", "awaiting_approval"), true);
+  assert.equal(needsThumbConfirm(thumbCells(done(), A), null, "awaiting_approval"), false);
+});
+
+test("릴스 표지: 정해진 썸네일(고른 것, 없으면 첫 장)", () => {
+  assert.deepEqual(chosenThumb(done()), { media_id: A, picked: false });
+  assert.deepEqual(chosenThumb(done({ chosen: C })), { media_id: C, picked: true });
+  assert.equal(chosenThumb(null), null);
+  assert.equal(chosenThumb({ status: "running" }), null);
 });
 
 test("잠김·만들기 버튼: 올린 뒤에는 둘 다 막고, 진행 중이거나 영상이 없으면 버튼이 없다", () => {
   assert.equal(thumbsLocked("done"), true);
   assert.equal(thumbsLocked("uploading"), true);
   assert.equal(thumbsLocked("awaiting_approval"), false);
+  assert.equal(thumbsLocked(null, "posting"), true); // 인스타에 표지로 올리는 중·올린 뒤
+  assert.equal(thumbsLocked(null, "done"), true);
+  assert.equal(thumbsLocked(null, "awaiting_approval"), false);
   assert.equal(thumbAction(undefined, true, false), "make");
   assert.equal(thumbAction({ status: "unavailable", error: "not_connected" }, true, false), "make");
   assert.equal(thumbAction(done(), true, false), "remake");

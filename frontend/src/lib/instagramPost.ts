@@ -80,6 +80,8 @@ export const INSTAGRAM_ERROR_KO: Record<string, string> = {
   ig_video_format: "인스타가 영상 규격을 받지 않았어요(릴스 규격 확인)",
   ig_media_url_unreachable: "인스타가 영상 주소에 닿지 못했어요(미디어 호스팅 설정 확인)",
   gate_rejected: "사람이 거절했어요",
+  cover_changed: "표지(썸네일)가 바뀌어 다시 승인이 필요해요. 다시 요청해 주세요",
+  cover_missing: "고른 썸네일 파일이 기록과 달라요. 썸네일을 다시 골라 주세요",
 };
 
 export const instagramErrorKo = (code?: string | null): string =>

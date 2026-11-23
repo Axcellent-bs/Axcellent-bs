@@ -21,6 +21,11 @@ Graph Content Publishing(컨테이너 → 상태 → `media_publish` 1회 → �
 - 게시가 끝나면 `sns.post_published`(기존 `PUBLISHED_HOOKS`)를 쌓고, 의뢰 영상이면 데이터
   `video_performance`에 게시물을 등록한다(`request_video_publish.register_published`)
 - 상태: 제작 기록 `render.instagram`, 의뢰 영상 `marketing_request_video_instagram` 표(회사 칸별)
+- 릴스 표지(11/23): 제작 기록은 고른 Higgsfield 썸네일(`creative_thumbnails`, 안 고르면 첫 장),
+  의뢰 영상은 고른 프레임 썸네일(`request_video_cover`)을 `cover_url`로 넘긴다. 유튜브처럼 그
+  `cover_token`(`media_id:sha256:cover_rev`)을 승인 해시에 넣고, 승인 대기 중에 바뀌면 초안으로
+  되돌리고(`reset_for_cover`), 승인 뒤 바뀌면 `cover_changed`로 올리지 않는다. 후보가 없으면
+  표지 없이(옛 해시 그대로) 올린다. 공개 주소는 영상과 같은 방식(미디어 호스트 서명 URL)
 """
 
 from __future__ import annotations
@@ -392,6 +397,73 @@ async def wait_idle() -> None:
         await asyncio.gather(*list(_tasks), return_exceptions=True)
 
 
+# ---------------------------------------------------------------- 표지(고른 썸네일)
+def _record_cover(record_id: str) -> dict[str, Any] | None:
+    from marketing_agent import creative_thumbnails as _thumbs
+
+    return _thumbs.current_cover(record_id)
+
+
+def _request_cover(sns: Any, post_draft_id: str) -> dict[str, Any] | None:
+    from marketing_agent import request_video_cover as _cover
+
+    draft = sns.get(post_draft_id) if sns is not None else None
+    return _cover.current_cover(draft) if draft is not None else None
+
+
+def _cover_for_request(t: Target, sns: Any | None) -> dict[str, Any] | None:
+    """승인 요청 전: 고르지 않았으면 첫 후보를 적고 지금 표지를 돌려준다. 파일이 어긋나면 거절."""
+    if t.kind == "record":
+        from marketing_agent import creative_thumbnails as _thumbs
+
+        _thumbs.ensure_cover(t.id)
+        cover = _record_cover(t.id)
+    else:
+        from marketing_agent import request_video_cover as _cover
+
+        draft = sns.get(t.id) if sns is not None else None
+        if draft is not None:
+            _cover.ensure_cover(sns, draft)
+        cover = _request_cover(sns, t.id)
+    if cover is not None and not cover["ok"]:
+        raise InstagramError("cover_missing")
+    return cover
+
+
+def _cover_now(t: Target, sns: Any | None) -> dict[str, Any] | None:
+    if t.kind == "record":
+        return _record_cover(t.id)
+    if sns is None:
+        from marketing_agent.handlers import STATE
+
+        sns = STATE.sns
+    return _request_cover(sns, t.id)
+
+
+def _cover_ref(t: Target, cover: dict[str, Any]) -> str:
+    """표지 JPEG의 미디어 폴더 기준 참조(영상과 같은 공개 방식으로 넘긴다)."""
+    if t.kind == "request" and cover.get("asset_ref"):
+        return str(cover["asset_ref"])
+    return _ref(Path(cover["path"]))
+
+
+def reset_for_cover(t: Target) -> bool:
+    """표지(썸네일)가 바뀌면: 승인 대기 중인 올리기를 초안으로 되돌린다(다시 승인받아야 한다)."""
+    if get(t).get("status") != "awaiting_approval":
+        return False
+    _put(t, status="draft", error="cover_changed", key=None, review_id=None, params=None)
+    return True
+
+
+def cover_locked(t: Target) -> bool:
+    """이미 올리는 중·올린 릴스면 표지를 바꾸지 않는다."""
+    return get(t).get("status") in ("posting", "done")
+
+
+def awaiting(t: Target) -> bool:
+    return get(t).get("status") == "awaiting_approval"
+
+
 async def request_record(meta: RequestMeta, record_id: str, who: str | None) -> dict[str, Any]:
     """제작 기록 영상의 인스타 릴스 올리기를 사람 승인(C)에 올린다(돌려주는 값: 상태)."""
     if _creative.store().get(record_id) is None:
@@ -407,7 +479,8 @@ async def request_record(meta: RequestMeta, record_id: str, who: str | None) -> 
     if not connected():
         raise InstagramError("instagram_not_connected")
     ref, sha = await _record_video(record_id, str(cur["part"]))
-    return await _ask(meta, t, cur, ref, sha, who, "")
+    cover = _cover_for_request(t, None)
+    return await _ask(meta, t, cur, ref, sha, who, "", cover)
 
 
 async def request_request(
@@ -423,7 +496,8 @@ async def request_request(
         raise InstagramError("draft_missing")
     if not connected():
         raise InstagramError("instagram_not_connected")
-    return await _ask(meta, t, cur, ref, sha, who, request_id)
+    cover = _cover_for_request(t, sns)
+    return await _ask(meta, t, cur, ref, sha, who, request_id, cover)
 
 
 async def _ask(
@@ -434,9 +508,13 @@ async def _ask(
     sha: str,
     who: str | None,
     request_id: str,
+    cover: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     caption_sha = hashlib.sha256(cur["caption"].encode()).hexdigest()
-    digest = hashlib.sha256(f"{caption_sha}|{sha}".encode()).hexdigest()[:16]
+    seed = f"{caption_sha}|{sha}"
+    if cover is not None:  # 썸네일 후보 없는 영상은 옛 해시 그대로
+        seed += f"|{cover['token']}"
+    digest = hashlib.sha256(seed.encode()).hexdigest()[:16]
     key = f"{meta.context_id}:{PUBLISH_ACTION}:{t.id}:{digest}"
     first_line = cur["caption"].splitlines()[0][:60] if cur["caption"] else ""
     params = {
@@ -454,6 +532,12 @@ async def _ask(
         "requested_by": (who or "")[:80],
         "summary": f"인스타 릴스 올리기: {first_line} (AI 생성 영상)",
     }
+    if cover is not None:  # 승인자가 볼 표지(AI 표시가 들어간 그림)
+        params |= {
+            "cover_media_id": cover["media_id"],
+            "cover_token": cover["token"],
+            "cover_ref": _cover_ref(t, cover),
+        }
     decision = await execute(
         PUBLISH_ACTION,
         params,
@@ -605,8 +689,10 @@ async def _publish(adapter: Any, container_id: str) -> str:
     return outcome if isinstance(outcome, str) else outcome.media_id
 
 
-async def _send(cur: dict[str, Any]) -> dict[str, Any]:
-    """승인받은 캡션·라벨 영상 그대로 릴스를 게시한다. 결과: media_id·permalink·config_issue."""
+async def _send(
+    cur: dict[str, Any], t: Target | None = None, sns: Any | None = None
+) -> dict[str, Any]:
+    """승인받은 캡션·라벨 영상·표지 그대로 릴스를 게시한다. 결과: media_id·permalink·cover."""
     from marketing_agent.sns_publish.instagram import ContainerRequest, IgApiError, IgResponseLost
 
     params = dict(cur.get("params") or {})
@@ -619,15 +705,21 @@ async def _send(cur: dict[str, Any]) -> dict[str, Any]:
     caption = str(cur.get("caption") or "")
     if not same or hashlib.sha256(caption.encode()).hexdigest() != params.get("caption_sha256"):
         raise InstagramError("video_changed")
+    # 표지도 승인받은 그 값이어야 한다(승인 뒤 바꿨거나 파일이 바뀌었으면 올리지 않는다)
+    cover = _cover_now(t, sns) if t is not None else None
+    if (cover["token"] if cover is not None else None) != params.get("cover_token"):
+        raise InstagramError("cover_changed")
     async with CLIENT() as client:
         adapter = _adapter(client)
         await _guard(adapter)
+        use_cover = bool(params.get("cover_ref")) and getattr(adapter, "supports_cover", False)
         request = ContainerRequest(
             media_ref=ref,
             media_kind="reel",
             caption=caption,
             is_ai_generated=True,  # 릴스에도 늘 AI 표시
             share_to_feed=True,
+            cover_ref=str(params["cover_ref"]) if use_cover else None,
         )
         container_id = await adapter.create_container(request)
         await _wait_finished(adapter, container_id)
@@ -637,7 +729,19 @@ async def _send(cur: dict[str, Any]) -> dict[str, Any]:
             permalink = info.permalink
         except (IgApiError, IgResponseLost):
             permalink = None  # 게시는 됐다. 주소만 못 읽었다
-    return {"media_id": media_id, "permalink": permalink, "container_id": container_id}
+    got: dict[str, Any] = {
+        "media_id": media_id,
+        "permalink": permalink,
+        "container_id": container_id,
+    }
+    if params.get("cover_media_id"):
+        reason = None if use_cover else "adapter_no_cover"
+        got["cover"] = {
+            "media_id": params["cover_media_id"],
+            "applied": use_cover,
+            "reason": reason,
+        }
+    return got
 
 
 def _halt_if_needed(code: str, key: str) -> None:
@@ -656,7 +760,7 @@ async def _post(t: Target, sns: Any | None = None) -> None:
 
     cur = get(t)
     try:
-        got = await _send(cur)
+        got = await _send(cur, t, sns)
     except Exception as error:  # noqa: BLE001 - 어떤 실패든 상태에 남긴다(올리는 중으로 멈추지 않게)
         if isinstance(error, InstagramError):
             code = str(error)
