@@ -6,7 +6,8 @@ import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestTitle } from "@/lib/requestHandoffs";
 import { REQUEST_STATUS, type WorkRequestRow } from "@/lib/workRequests";
-import { planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, showRequestCard, stepRows, type PlanCardView, type PlanLookup, type StepDot } from "@/lib/requestCards";
+import { madeVideo, perfStep, PLAN_LOOKUP_MIN_MS, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, resultStep, showRequestCard, stepRows, type PerfStepView, type PlanCardView, type PlanLookup, type StepDot } from "@/lib/requestCards";
+import { dataAi, type RequestVideoPerformance } from "@/lib/data";
 import { planDocPath } from "@/lib/planDoc";
 import { planId } from "@/lib/format";
 import { STALE_HOURS, staleHours } from "@/lib/officeRequests";
@@ -65,6 +66,8 @@ function loadPlanLookup(): Promise<PlanLookup[]> {
   const inflight = planningApi(apiBase("planning")).state()
     .then((raw) => (fromBackend(raw, []).proposals ?? []).map((p): PlanLookup => ({
       id: p.id, insightId: p.insightId, spec: p.spec, title: p.title, idea: p.idea, videoPlan: p.videoPlan,
+      result: p.result ? { direction: p.result.direction, summary: p.result.summary } : undefined,
+      campaign: p.handoff?.campaign,
     })))
     .catch(() => planCache.list ?? [])
     .then((list) => { planCache = { at: Date.now(), list, inflight: null }; return list; });
@@ -83,6 +86,47 @@ function usePlanLookup(need: boolean, version: string | undefined): PlanLookup[]
     return () => { alive = false; };
   }, [need, version]);
   return list;
+}
+
+// 의뢰 영상 성과 읽기 (데이터 video_performance campaign_id = 의뢰 번호). 의뢰마다 1분에 한 번까지 (planLookupDue)
+const perfCache = new Map<string, { at: number; out: RequestVideoPerformance | null }>();
+function usePerf(requestId: string, need: boolean): { out: RequestVideoPerformance | null; tick: number } {
+  const [state, setState] = useState<{ out: RequestVideoPerformance | null; tick: number }>(() => ({ out: perfCache.get(requestId)?.out ?? null, tick: 0 }));
+  useEffect(() => {
+    if (!need) return;
+    let alive = true;
+    const load = () => {
+      const hit = perfCache.get(requestId);
+      if (hit && !planLookupDue(hit.at, Date.now())) { setState((s) => ({ out: hit.out, tick: s.tick })); return; }
+      dataAi.requestVideoPerformance(requestId)
+        .then((r) => r.output)
+        .catch(() => hit?.out ?? null) // 못 읽으면 지금 카드 그대로
+        .then((out) => { perfCache.set(requestId, { at: Date.now(), out }); if (alive) setState((s) => ({ out, tick: s.tick + 1 })); });
+    };
+    load();
+    const timer = setInterval(load, PLAN_LOOKUP_MIN_MS);
+    return () => { alive = false; clearInterval(timer); };
+  }, [requestId, need]);
+  return state;
+}
+
+/** 데이터 · 성과 측정 칸: 시점 4칸(조회·좋아요, 배수 · 잴 날짜) + 출처 한 줄 */
+function PerfCell({ view }: { view: PerfStepView }) {
+  return (
+    <section aria-label="의뢰 영상 성과" className="mt-1.5 w-full space-y-1.5 rounded-xl border border-ink-100 bg-ink-50 px-3 py-2.5">
+      {view.note && <p className="text-xs text-amber-800">{view.note}</p>}
+      <ul className="grid grid-cols-2 gap-1.5 text-xs sm:grid-cols-4">
+        {view.cells.map((c) => (
+          <li key={c.name} className={`min-w-0 rounded-lg border border-ink-100 bg-surface px-2 py-1.5 ${c.wait ? "text-ink-500" : "text-ink-900"}`}>
+            <b className="block text-[11px] font-medium text-ink-500">{c.name}</b>
+            <span className="block break-words tabular-nums">{c.main}</span>
+            {c.sub && <span className="block break-words text-ink-700">{c.sub}</span>}
+          </li>
+        ))}
+      </ul>
+      <p className="break-words text-xs text-ink-500">{view.source}</p>
+    </section>
+  );
 }
 
 /** 기획 단계 칸 (보고서 완료 카드와 같은 모양): 영상 제작안 요약 · 콘셉트 한 줄 · [기획서 열기] [PDF로 저장] */
@@ -110,11 +154,15 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   const rows = useMemo(() => (row ? stepRows(row) : []), [row]);
   const insightStep = row?.plan.find((p) => p.skill === "receive_insight");
   const insightDone = !!(insightStep && row?.steps[insightStep.step_id]?.status === "completed");
-  const proposals = usePlanLookup(insightDone, row?.updated_at);
+  const made = !!row && madeVideo(row);
+  const perf = usePerf(requestId, hasToken && made);
+  const proposals = usePlanLookup(insightDone, `${row?.updated_at ?? ""}|${perf.tick}`);
   if (!showRequestCard(hasToken, requestId) || !row) return null;
   const proposal = proposalOfRequest(row, proposals);
   const found = proposal ? proposals?.find((p) => p.id === proposal) : undefined;
   const plan = found ? planCard(found) : null;
+  const perfView = made ? perfStep(perf.out, Date.now()) : null;
+  const result = perfView ? resultStep(row.request_id, found, perfView) : null;
   const st = REQUEST_STATUS[row.status];
   const videoLink = requestVideoLink(row);
   const stale = staleHours(row, Date.now());
@@ -174,6 +222,30 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
             </li>
           );
         })}
+        {perfView && (
+          <li className="grid grid-cols-[1.375rem_minmax(0,1fr)] gap-2">
+            <span className={`mt-0.5 grid h-5 w-5 place-items-center rounded-full text-[11px] font-bold ${DOT[perfView.done ? "ok" : "run"]}`} aria-hidden="true">{rows.length + 1}</span>
+            <div className="min-w-0 text-ink-900">
+              <p className="flex flex-wrap items-center gap-1.5">
+                <b className="font-semibold">데이터 · 성과 측정</b>
+                <span className={`chip text-[11px] ${perfView.chip.tone}`}>{perfView.chip.label}</span>
+              </p>
+              <PerfCell view={perfView} />
+            </div>
+          </li>
+        )}
+        {perfView && result && (
+          <li className="grid grid-cols-[1.375rem_minmax(0,1fr)] gap-2">
+            <span className={`mt-0.5 grid h-5 w-5 place-items-center rounded-full text-[11px] font-bold ${DOT[result.chip.label === "결과 받음" ? "ok" : "gray"]}`} aria-hidden="true">{rows.length + 2}</span>
+            <div className="min-w-0 text-ink-900">
+              <p className="flex flex-wrap items-center gap-1.5">
+                <b className="font-semibold">기획 · 결과 받기</b>
+                <span className={`chip text-[11px] ${result.chip.tone}`}>{result.chip.label}</span>
+              </p>
+              <p className="break-words text-xs text-ink-500">{result.line}</p>
+            </div>
+          </li>
+        )}
       </ol>
     </section>
   );

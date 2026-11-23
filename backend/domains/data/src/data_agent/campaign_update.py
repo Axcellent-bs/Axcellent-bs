@@ -15,6 +15,9 @@ data 서버 안의 주기 루틴이 캠페인마다 한 번 보낸다. 수집기
 - 응답: applied·duplicate → 보냄, unknown_proposal → 안 보냄(다시 안 함), 그 밖의 거절 → 안 보냄
   (다시 안 함), 연결 실패·5xx·시간 초과·safety에 닿지 못함 → 실패, 다음 루프에 다시
   (캠페인당 한국 날짜 하루 3번)
+- 의뢰 영상 갈래(11/23, `request_result`): campaign_id가 `wr_`인 등록 영상(시험 아님,
+  제안 번호 있음)은 campaign_result 대신 7일 조회 ÷ 우리 릴스 중앙값으로 direction을 정해
+  같은 길(`_deliver`)로 보낸다
 - 기능 플래그 `DATA_SEND_CAMPAIGN_UPDATE`(기본 꺼짐). 꺼져 있으면 아무것도 부르지 않고 화면에는
   "자동 보내기 꺼짐"
 """
@@ -221,6 +224,17 @@ class SendStore:
         data["sent_at"] = datetime.fromisoformat(data["sent_at"]) if data["sent_at"] else None
         return SendRow(**data)
 
+    def sent_with_prefix(self, prefix: str) -> list[tuple[str, str | None, datetime | None]]:
+        """보낸 줄 중 campaign_id가 prefix로 시작하는 것 (campaign_id, direction, sent_at).
+        최신순."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT campaign_id, direction, sent_at FROM sends WHERE state = 'sent'"
+                " AND substr(campaign_id, 1, ?) = ? ORDER BY sent_at DESC",
+                (len(prefix), prefix),
+            ).fetchall()
+        return [(c, d, datetime.fromisoformat(at) if at else None) for c, d, at in rows]
+
     def save(self, row: SendRow) -> None:
         values = [getattr(row, c) for c in self.COLUMNS]
         values[4] = row.sent_at.isoformat() if row.sent_at else None
@@ -258,17 +272,27 @@ async def send_one(
     out: CampaignResultOutput, store: SendStore, now: datetime, *, send: Send, gate: Gate
 ) -> bool:
     """보낼 차례인 캠페인 하나를 보낸다. 기획을 불렀으면 True."""
-    row = store.get(out.campaign_id) or SendRow(out.campaign_id)
+    return await _deliver(out.campaign_id, out.proposal_id, lambda: build_update(out), store, now,
+                          send=send, gate=gate)  # fmt: skip
+
+
+async def _deliver(
+    campaign_id: str, proposal_id: str | None, make: Callable[[], ReceiveCampaignUpdateInput],
+    store: SendStore, now: datetime, *, send: Send, gate: Gate,
+) -> bool:  # fmt: skip
+    """보내기 공통 (캠페인 경로·의뢰 영상 경로): 안전 확인 → 기획 receive_campaign_update.
+    idempotency_key "<campaign_id>:result", context_id는 줄마다 하나. 기획을 불렀으면 True."""
+    row = store.get(campaign_id) or SendRow(campaign_id)
     row.context_id = row.context_id or _new_context()
-    row.proposal_id = out.proposal_id
+    row.proposal_id = proposal_id
     store.save(row)  # 재시도 때도 같은 context_id
     try:
-        update = build_update(out)
+        update = make()
     except (ValidationError, ValueError) as error:
         row.state, row.reason = "not_sent", f"계약 검증 실패: {str(error)[:120]}"
         store.save(row)
         return False
-    key = f"{out.campaign_id}:result"
+    key = f"{campaign_id}:result"
     meta = RequestMeta(
         context_id=row.context_id,
         token="internal:data",  # call_agent가 data 토큰으로 바꿔 보낸다
@@ -280,14 +304,14 @@ async def send_one(
     decision = await gate(
         ACTION,
         {
-            "campaign_id": out.campaign_id,
-            "proposal_id": out.proposal_id,
+            "campaign_id": campaign_id,
+            "proposal_id": proposal_id,
             "direction": update.direction,
         },  # fmt: skip
         meta,
         Evidence(
-            ref_ids=[f"campaign:{out.campaign_id}", f"proposal:{out.proposal_id}"],
-            data_summary=f"{out.campaign_id} 성과 → 기획 {out.proposal_id} ({update.direction})",
+            ref_ids=[f"campaign:{campaign_id}", f"proposal:{proposal_id}"],
+            data_summary=f"{campaign_id} 성과 → 기획 {proposal_id} ({update.direction})",
         ),
     )
     if decision.status != "executed":
@@ -336,6 +360,42 @@ async def send_ready(
         if row is not None and _failures_today(row, now) >= RETRY_PER_DAY:
             continue  # 오늘은 3번 다 실패 → 한국 날짜가 바뀌면 다시
         calls += await send_one(out, store, now, send=send, gate=gate)
+    return calls
+
+
+async def send_request_ready(
+    videos: Sequence[Any],
+    video_store: Any,
+    store: SendStore,
+    env: Mapping[str, str],
+    now: datetime,
+    *,
+    send: Send | None = None,
+    gate: Gate | None = None,
+) -> int:
+    """의뢰 영상(wr_) 갈래: 7일을 쟀거나 놓친 영상을 보낸다. 같은 보내기 길·재시도·플래그."""
+    from data_agent import request_result as rr
+
+    if not enabled(env):
+        return 0
+    if send is None:
+        from ax_agent_template.client import call_agent as send
+    if gate is None:
+        from ax_agent_template.execute import execute as gate
+    calls = 0
+    for v in videos:
+        if not rr.is_request_video(v):
+            continue
+        row = store.get(v.campaign_id)
+        if row is not None and row.state in ("sent", "not_sent"):
+            continue  # 의뢰당 1번, 거절은 다시 안 함
+        if not rr.ready(v, video_store, now):
+            continue
+        if row is not None and _failures_today(row, now) >= RETRY_PER_DAY:
+            continue
+        calls += await _deliver(v.campaign_id, v.proposal_id,
+                                lambda v=v: rr.build_update(v, video_store), store, now,
+                                send=send, gate=gate)  # fmt: skip
     return calls
 
 
@@ -404,29 +464,32 @@ async def tick(env: Mapping[str, str], now: datetime | None = None, **kwargs: An
     path = env.get(PERF_ENV) or PERF_DB
     if str(path) != ":memory:" and not Path(path).is_file():
         return 0  # 등록된 영상이 없다 (캠페인 없음)
-    videos = VideoStore(path)
-    try:
-        ids = list(dict.fromkeys(v.campaign_id for v in videos.videos(include_test=True)
-                                 if v.campaign_id))  # fmt: skip
-    finally:
-        videos.close()
-    if not ids:
-        return 0
-    try:
-        from data_agent.handlers import get_campaign_connector
+    from data_agent.request_result import PREFIX as REQUEST_PREFIX
 
-        connector = get_campaign_connector()
-    except NotImplementedError:
-        connector = None
-    outs = []
-    for cid in ids:
-        request = CampaignResultRequest(campaign_id=cid, view="planning")
-        outs.append((await cr.campaign_result(request, connector, env=env, now=now)).output)
+    videos = VideoStore(path)
     store = store_of(env)
     try:
-        return await send_ready(outs, store, env, now, **kwargs)
+        listed = videos.videos(include_test=True)
+        # 의뢰 영상(wr_)은 매출 판정 경로(campaign_result)가 아니라 아래 갈래로 보낸다
+        ids = list(dict.fromkeys(v.campaign_id for v in listed if v.campaign_id
+                                 and not v.campaign_id.startswith(REQUEST_PREFIX)))  # fmt: skip
+        calls = await send_request_ready(listed, videos, store, env, now, **kwargs)
+        if not ids:
+            return calls
+        try:
+            from data_agent.handlers import get_campaign_connector
+
+            connector = get_campaign_connector()
+        except NotImplementedError:
+            connector = None
+        outs = []
+        for cid in ids:
+            request = CampaignResultRequest(campaign_id=cid, view="planning")
+            outs.append((await cr.campaign_result(request, connector, env=env, now=now)).output)
+        return calls + await send_ready(outs, store, env, now, **kwargs)
     finally:
         store.close()
+        videos.close()
 
 
 async def run_forever(env: Mapping[str, str] | None = None) -> None:

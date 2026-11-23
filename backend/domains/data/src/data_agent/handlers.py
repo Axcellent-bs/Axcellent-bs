@@ -1391,6 +1391,17 @@ async def trend_report_insight(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     insight, why = build_insight(get_trend_reports().get(data.report_id))
+    if insight is not None and not insight.past:
+        # 지난번 의뢰 영상 결과 (기획에 보낸 7일 성과, 최근 3개). 못 읽어도 인사이트는 그대로
+        from data_agent.request_result import past_of
+
+        try:
+            insight.past = past_of(os.environ)
+        except Exception as error:  # noqa: BLE001 - 지난번 결과는 덧붙임일 뿐
+            import logging
+
+            logging.getLogger(__name__).warning("지난번 의뢰 영상 결과를 읽지 못함 (%s)",
+                                                type(error).__name__)  # fmt: skip
     out = TrendReportInsightOutput(report_id=data.report_id, insight=insight, reason=why)
     summary = (f"트렌드 분석 보고서 {data.report_id} → 기획 입력 (근거 {len(insight.facts)}개)"
                if insight else f"트렌드 분석 보고서 {data.report_id}: {why}")  # fmt: skip
@@ -2186,7 +2197,8 @@ async def video_performance(request: AgentRequest) -> AgentResult:
             shorts = ShortsStatsOutput.model_validate(stored[1])
         except ValidationError:
             shorts = None
-    result = await run(data, get_youtube(), env=os.environ, shorts=shorts)
+    result = await run(data, get_youtube(), env=os.environ, shorts=shorts,
+                       instagram=get_instagram_graph())  # fmt: skip
     return _result(
         request,
         TaskStatus.COMPLETED,
