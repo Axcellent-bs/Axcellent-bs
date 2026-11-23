@@ -12,7 +12,13 @@ from fastapi import FastAPI
 from ax_agent_template import config
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
-from support_agent import inquiry_pull, receipt_vision, settlement_auto, settlement_books
+from support_agent import (
+    company_scope,
+    inquiry_pull,
+    receipt_vision,
+    settlement_auto,
+    settlement_books,
+)
 from support_agent.audit_handlers import AUDIT_HANDLERS
 from support_agent.change_handlers import CHANGE_HANDLERS
 from support_agent.chat_handlers import CHAT_HANDLERS
@@ -95,7 +101,8 @@ ALL_HANDLERS = {
 # 영수증 사진 분석기: 이미지를 읽을 모델이 설정돼 있을 때만 꽂는다(목 모드·미설정이면 꽂지 않는다)
 receipt_vision.connect()
 _CARD = load_card()
-app = create_agent_app(_CARD, ALL_HANDLERS)
+# 요청마다 meta.tenant_id의 회사 건만 보게 한다 (회사 나누기, `company_scope`)
+app = create_agent_app(_CARD, {k: company_scope.scoped(v) for k, v in ALL_HANDLERS.items()})
 _OWNED_SKILLS = frozenset(skill.id for skill in _CARD.skills)  # 이 서버가 받는 skill
 
 # 판매 서버 문의함을 정해진 간격으로 읽는 루프를 앱 시작·종료에 맞춰 돌린다 (꺼져 있으면 안 돈다)

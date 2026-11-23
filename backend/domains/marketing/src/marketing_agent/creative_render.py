@@ -40,11 +40,9 @@ import httpx
 
 from ax_agent_template.execute import execute
 from ax_contracts.schemas import Evidence, ExecuteDecision, RequestMeta
-from ax_secret_store import get_secret
 from marketing_agent import creative_records as _creative
 from marketing_agent.media import usage as usage_mod
 from marketing_agent.media.config import (
-    HIGGSFIELD_API_KEY_ENV,
     HIGGSFIELD_IMAGE_MODEL_ENV,
     HIGGSFIELD_VIDEO_MODEL_ENV,
     MediaSettings,
@@ -115,7 +113,9 @@ def _now() -> datetime:
 
 
 def _key() -> str:
-    return get_secret(HIGGSFIELD_API_KEY_ENV).strip()
+    from marketing_agent.higgsfield_status import higgsfield_key
+
+    return higgsfield_key()
 
 
 def image_model() -> str:
