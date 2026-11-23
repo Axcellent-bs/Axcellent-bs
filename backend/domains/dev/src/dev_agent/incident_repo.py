@@ -25,7 +25,7 @@ from ax_contracts.schemas.planning import RelatedPr, RevertMergedPrOutput
 from ax_workflow.core import ActionError, ActionResult, GateRefused
 from ax_workflow.handover import area_of_path
 from ax_workflow.models import PR, IncidentRevert, State
-from dev_agent import vcs
+from dev_agent import hold_resume, vcs
 from dev_agent.service import DevService
 from dev_agent.vcs.base import Change, VcsAdapter, VcsError
 
@@ -273,7 +273,13 @@ async def revert_merged(
     key = f"{connection_id}#{pr_number}"
     ctx = incident_context_id or context_id
     why = " ".join(reason.split())[:200]
-    out, rev = await _revert(svc, adapter, ctx, key, connection_id, pr_number, why, requester)
+    # 관문이 되돌리기 PR 열기·머지를 보류하면 사람 승인 뒤 같은 입력으로 다시 부른다 (hold_resume)
+    again = {
+        "context_id": context_id, "requester": requester, "connection_id": connection_id,
+        "pr_number": pr_number, "reason": reason, "incident_context_id": incident_context_id,
+    }  # fmt: skip
+    with hold_resume.recipe("incident_revert", call=again, **hold_resume.repo_of(connection_id)):
+        out, rev = await _revert(svc, adapter, ctx, key, connection_id, pr_number, why, requester)
     return await _record(svc, ctx, connection_id, pr_number, out, rev)
 
 

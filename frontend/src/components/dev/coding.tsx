@@ -437,7 +437,7 @@ export function CodingStep({ task, on, prs }: { task: Task; on?: boolean; prs?: 
         </p>
       )}
       {held && (
-        <p className="small" role="status"><b>안전 확인 탭에서 승인 필요</b> · 안전 장치가 보류했어요. 승인한 뒤 다시 눌러 주세요. <a href={toPath('work/holds')} className="plain-link">안전 확인</a></p>
+        <p className="small" role="status"><b>안전 확인 탭에서 승인 필요</b> · 안전 장치가 보류했어요. 승인하면 개발 AI가 보류된 일(머지·PR 열기)을 한 번 이어서 해요. 결과는 활동 기록에 남아요. <a href={toPath('work/holds')} className="plain-link">안전 확인</a></p>
       )}
       {mine && prOpen && (c.status === 'waiting_human' || c.status === 'opened') && (
         <p className="small muted">내 Claude 작업이라 추가 지시는 PR에 코멘트로 남겨 주세요.{prHref && <> <a href={prHref} className="plain-link">{idText(prId ?? '')} 보기</a></>}</p>

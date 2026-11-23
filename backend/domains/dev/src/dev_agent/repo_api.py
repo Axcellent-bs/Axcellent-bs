@@ -26,7 +26,7 @@ from ax_workflow.auth import require_human
 from ax_workflow.autocheck import merge_risk_paths
 from ax_workflow.core import ActionError, GateRefused
 from ax_workflow.models import PR
-from dev_agent import vcs, vcs_bridge
+from dev_agent import hold_resume, vcs, vcs_bridge
 from dev_agent.service import DevService
 from dev_agent.vcs.base import (
     CHANGE_LIST_LIMIT,
@@ -55,6 +55,53 @@ VCS_STATUS = {
     "invalid": 400,
     "rate_limited": 429,
 }
+
+
+async def resume_op(spec: dict[str, Any]) -> tuple[Callable[[], Awaitable[Any]], str]:
+    """보류 승인 뒤 레포 쓰기를 다시 만든다 (hold_resume). 그 사이 바뀌었으면 `Stale`.
+
+    보류 때 적어 둔 연결·레포·PR 번호·방법만 쓴다 (사람이 고른 값 그대로). 돌려준 쓰기는
+    `repo_write`의 잠금 안에서 형상관리를 한 번 더 보고 부른다 (같은 PR 보류 둘을 다 승인해도
+    되돌리기 PR은 하나, 이미 병합됐으면 건너뜀)."""
+    from dev_agent.hold_resume import Stale, expect_repo
+
+    cid, number = str(spec["connection"]), int(spec["number"])
+    expect_repo(cid, spec.get("repo"), spec.get("base_url"))
+    adapter = vcs.get_adapter(cid)
+    if spec["op"] == "merge":
+        method = str(spec.get("method") or "merge")
+
+        async def merge() -> Any:
+            head = await adapter.describe_change(number)
+            if head.state != "open":
+                now = "머지됨" if head.state == "merged" else head.state
+                raise Stale(f"레포 PR #{number}는 이미 {now}")
+            return await adapter.merge_change(number, method)
+
+        return merge, f"레포 PR #{number} 머지함"
+    if spec["op"] == "revert":
+        title = spec.get("title")
+
+        async def revert() -> Any:
+            if not (await adapter.get_change(number)).merged:
+                raise Stale(f"레포 PR #{number}가 병합된 상태가 아니다")
+            made = await _open_revert(adapter, number)
+            if made is not None:
+                raise Stale(f"레포 PR #{number}의 되돌리기 PR #{made}가 이미 있다")
+            return await adapter.revert_change(number, title)
+
+        return revert, f"레포 PR #{number} 되돌리기 PR 엶"
+    raise Stale(f"모르는 레포 쓰기: {spec['op']}")
+
+
+async def _open_revert(adapter: VcsAdapter, number: int) -> int | None:
+    """이미 연(닫히지 않은) 되돌리기 PR. 제목을 사람이 바꿨어도 본문 `Reverts #N`으로 찾는다."""
+    from dev_agent.incident_repo import _REVERTS
+
+    for c in await adapter.list_changes(state="all"):
+        if c.state != "closed" and any(int(m) == number for m in _REVERTS.findall(c.body or "")):
+            return c.number
+    return None
 
 
 class RepoError(Exception):
@@ -487,6 +534,13 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
                 text,
                 _size_params(cid, change),
                 lambda: adapter.merge_change(number, method),
+                resume={
+                    "op": "merge",
+                    "connection": cid,
+                    "number": number,
+                    "method": method,
+                    **hold_resume.repo_of(cid),
+                },
             )
             head = await adapter.describe_change(number)
             return ok({"pr": _plain(head), "via": "repo", "internal": None})
@@ -580,6 +634,13 @@ def add_repo_routes(router: APIRouter, get_service: Callable[[], DevService]) ->
                 f"사람이 레포 PR #{number} 되돌리기 PR 열기",
                 _size_params(cid, change),
                 lambda: adapter.revert_change(number, (title or "").strip() or None),
+                resume={
+                    "op": "revert",
+                    "connection": cid,
+                    "number": number,
+                    "title": (title or "").strip() or None,
+                    **hold_resume.repo_of(cid),
+                },
             )
             return ok({"revert": _plain(made)})
 

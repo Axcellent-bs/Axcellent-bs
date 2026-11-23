@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
 from ax_workflow.auth import AuthError
-from dev_agent import llm_key, vcs
+from dev_agent import hold_resume, llm_key, vcs
 from dev_agent.api import create_dev_router
 from dev_agent.handlers import DEV_HANDLERS
 from dev_agent.runtime import get_service
@@ -62,6 +62,8 @@ vcs.load_saved()
 llm_key.load_saved()
 app = create_agent_app(load_card(), DEV_HANDLERS)
 app.include_router(create_dev_router(get_service))
+# 관문이 보류한 액션: 사람 결정 이벤트를 받아 이어서 한다 (REDIS_URL이 없으면 폴링만)
+hold_resume.setup_subscriber(get_service)
 
 
 async def _resync_on_start() -> None:

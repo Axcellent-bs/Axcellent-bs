@@ -18,6 +18,8 @@ _ACTION = {
     "dev_task_return": "기획에 돌려보내기",
     "dev_task_revise": "추가 지시",
     "code_write": "코드 쓰기",
+    "repo_revert_pr": "되돌리기 PR 열기",
+    "auto_policy_update": "자동 처리 범위 바꾸기",
 }
 _DECISION = {"held": "보류", "rejected": "거절", "expired": "만료"}
 

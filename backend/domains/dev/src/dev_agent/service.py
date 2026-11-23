@@ -8,10 +8,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -105,7 +107,7 @@ from ax_workflow.rules import (
     verify_rollback,
 )
 from ax_workflow.trace import changed_paths_for
-from dev_agent import coder, cross_check, llm_key, repo_routing, vcs, vcs_bridge
+from dev_agent import coder, cross_check, hold_resume, llm_key, repo_routing, vcs, vcs_bridge
 from dev_agent.cross_check import CrossChecker, CrossEvidence
 from dev_agent.deploy_store import get_deploy_store
 from dev_agent.external_actions import MOCK_CONNECTION, VCS_WRITE_ACTIONS
@@ -167,6 +169,9 @@ class DevService(PlanningCore):
         self._pending_spawn: list[str] = []
         self._init_state()
         self._release_base = self._done_specs(self.state)
+        # 관문이 보류한 액션: 사람이 승인하면 한 번 이어서 한다 (hold_resume.py)
+        self.holds = hold_resume.HoldStore(self.clock)
+        self._hold_poll: asyncio.Task | None = None
 
     def _spawn_hold(self, task_id: str, reason: str | None = None, key: str | None = None) -> None:
         try:
@@ -193,7 +198,12 @@ class DevService(PlanningCore):
             params = dict(params or {})
             if not params.get("connection_id"):
                 params["connection_id"] = self._connection_for(target, params)
-        return await super()._execute(action, ctx, target, summary, params, refs, allow)
+        try:
+            return await super()._execute(action, ctx, target, summary, params, refs, allow)
+        except GateRefused as exc:
+            if exc.decision.status == "held":  # 승인되면 이어서 할 수 있게 남긴다
+                self.holds.note(action, exc.idempotency_key, ctx, exc.decision)
+            raise
 
     def _connection_for(self, target: str, params: dict) -> str:
         """이 쓰기가 닿는 연결 id. 못 정하면 첫 연결, 연결이 없으면 `mock`."""
@@ -244,9 +254,24 @@ class DevService(PlanningCore):
                     await work_queue.expire_leases(self)  # 진행 보고가 끊긴 구독형 작업 되돌리기
                 except Exception:  # noqa: BLE001 - 맞추기 실패로 루프가 멈추지 않게 한다
                     pass  # 다음 차례에 다시 (대화 손보기는 그대로 돈다)
+                self._spawn_hold_poll()  # 사람이 승인한 보류 건: 한 번 이어서 (기다리지 않음)
                 await self.chat_upkeep()
 
         self._pr_sync = asyncio.get_running_loop().create_task(loop())
+
+    def _spawn_hold_poll(self) -> None:
+        """보류 건 결정 묻기를 따로 돌린다. 앞 차례가 아직 돌면 건너뛴다 (PR 맞추기·대화 손보기가
+        승인 뒤 이어서 하기(머지 등)를 기다리느라 멈추지 않게)."""
+        if self._hold_poll is not None and not self._hold_poll.done():
+            return
+
+        async def go() -> None:
+            try:
+                await hold_resume.poll_once(self)
+            except Exception:  # noqa: BLE001 - 다음 차례에 다시 묻는다
+                pass
+
+        self._hold_poll = asyncio.get_running_loop().create_task(go())
 
     async def chat_upkeep(self) -> list[str]:
         """개발 AI 대화 주기 손보기. 단계마다 따로 잡아 앞 단계가 실패해도 다음 단계는 돈다.
@@ -874,6 +899,7 @@ class DevService(PlanningCore):
         super().reset()
         self._release_base = self._done_specs(self.state)
         get_deploy_store().reset()  # 배포 기록도 처음으로 (목 모드만 시드, 실제 모드는 빈 목록)
+        self.holds.reset()
 
     async def _send_hr(
         self,
@@ -1790,9 +1816,10 @@ class DevService(PlanningCore):
         merge_text = f"{pr_id} 간단 요청 규칙·검수·CI 통과 → 자동 머지 허용"
         merge_rules, ev = await self._cross_check(s, pr, pr_check(s, pr), ctx)
         try:
-            await self._execute(
-                "merge_pr", ctx, pr_id, merge_text, {**merge_rules.params, "auto": True}
-            )
+            with hold_resume.recipe("merge_pr", pr=pr_id):
+                await self._execute(
+                    "merge_pr", ctx, pr_id, merge_text, {**merge_rules.params, "auto": True}
+                )
         except GateRefused as exc:
             # safety가 보류·거절하면 PR은 열어 두고 교차검증 대기로 둔다 (판단은 사람 머지 버튼).
             # 근거를 이미 모았으면 사람 확인
@@ -2006,9 +2033,10 @@ class DevService(PlanningCore):
             )
             try:
                 if lv > 0:
-                    await self._execute(
-                        "auto_policy_update", ctx, f"L{lv}->L{lv - 1}", text, {"to": lv - 1}
-                    )
+                    with hold_resume.recipe("policy_demote", frm=lv, to=lv - 1, text=text):
+                        await self._execute(
+                            "auto_policy_update", ctx, f"L{lv}->L{lv - 1}", text, {"to": lv - 1}
+                        )
             except GateRefused as exc:
                 # 범위 축소가 관문에서 막혀도 사건 연결(장애 표시)은 한다.
                 # 축소만 사람에게 남긴다
@@ -2687,6 +2715,15 @@ class DevService(PlanningCore):
         if self.task_paused(self.state, task_id):
             raise ActionError("REQUEST_PAUSED", f"{task_id}의 요청이 사람 중단 중이다 → 재개 뒤")
         resumable = ("failed", "waiting_human", "canceled", "returned")
+        held = self.holds.get(task.coding.hold_review or "") if approved else None
+        taken = ("resuming", "done", "held_again")  # 실패·건너뜀·거절·만료면 사람 버튼은 예전처럼
+        if held is not None and held.status in taken and hold_resume.current_resume() is None:
+            # 승인된 보류 건을 개발 AI가 이미 이어 갔다 (승인 이벤트·폴링). 다시 하지 않는다
+            return ActionResult(
+                outcome="already_resumed",
+                output={"task_id": task_id, "status": task.coding.status,
+                        "review_id": held.review_id, "hold": held.status},
+            )  # fmt: skip
         if task_id in self._coding or task.coding.status not in resumable:
             raise ActionError("NOT_RETRYABLE", f"{task_id}는 진행 중이거나 끝났다")
         conflict = task.coding.merge_conflict
@@ -2805,15 +2842,16 @@ class DevService(PlanningCore):
             paths = sorted(vcs.logical_paths(cr.connection, [f.path for f in cr.files]))
             lines, files = coder.total_lines(cr.files), len(cr.files)
             n = sum(1 for g in self.gate_calls if g.action == "generate_pr") + 1
-            key = f"{task_id}:hold{n}:{self.clock().strftime('%H%M%S')}"
+            key = f"{task_id}:hold{n}:{self.clock().strftime('%H%M%S')}:{uuid.uuid4().hex[:8]}"
             text = f"{task_id} PR 열기 보류 다시 요청 ({lines}줄·{files}파일)"
             cr.hold_key, cr.hold_paths, cr.hold_ok = key, paths, False
             cr.updated_at = self.clock()
             try:
-                await self._execute(
-                    "generate_pr", ctx, key, text,
-                    vcs_bridge.pr_size_params(lines, files, paths, x.id),
-                )  # fmt: skip
+                with hold_resume.recipe("coding_pr", task_id=task_id, key=key):
+                    await self._execute(
+                        "generate_pr", ctx, key, text,
+                        vcs_bridge.pr_size_params(lines, files, paths, x.id),
+                    )  # fmt: skip
             except GateRefused as exc:
                 if exc.decision.status != "held":
                     raise ActionError(
@@ -3004,15 +3042,30 @@ class DevService(PlanningCore):
         text: str,
         params: dict | None,
         op: Callable[[], Awaitable[Any]],
+        *,
+        resume: dict | None = None,
+        key_target: str | None = None,
     ) -> Any:
         """레포 작업 공간 사람 버튼 (사람이 직접 올린 PR·브랜치). 관문을 지난 뒤에만 형상관리를
-        부르고 활동을 남긴다. 형상관리 오류는 실패 활동을 남긴 뒤 `VcsError`로 다시 던진다."""
+        부르고 활동을 남긴다. 형상관리 오류는 실패 활동을 남긴 뒤 `VcsError`로 다시 던진다.
+
+        `resume`: 보류되면 승인 뒤 `op`를 다시 만들 재료 (`repo_api.resume_op`).
+        `key_target`: 승인된 보류 건을 이어서 할 때 보류 때 관문 대상(키) 그대로."""
         box: dict[str, Any] = {}
         ctx = f"repo:{target.split('#', 1)[0].split(':', 1)[0]}"
 
         async def run(s: State) -> ActionResult:
-            n = sum(1 for g in self.gate_calls if g.action == action) + 1
-            await self._execute(action, ctx, f"{target}:{n}", text, params)
+            # 누를 때마다 새 키. 세는 값(gate_calls)은 다시 켜면 0이라 옛 키(이미 승인·실행된 것)를
+            # 다시 쓸 수 있었다 → 다시 켜도 겹치지 않는 값을 붙인다
+            tgt = key_target or f"{target}:{uuid.uuid4().hex[:12]}"
+            again = {"action": action, "target": target, "key_target": tgt, "text": text}
+            made = (
+                hold_resume.recipe("repo_write", **again, params=params, op=resume)
+                if resume is not None
+                else contextlib.nullcontext()
+            )
+            with made:
+                await self._execute(action, ctx, tgt, text, params)
             try:
                 box["result"] = await op()
             except VcsError as exc:
@@ -3155,7 +3208,10 @@ class DevService(PlanningCore):
             return  # 사람이 요청을 중단함: 재개할 때 띄운다 (receive_request_pause)
         self._coding_seq += 1
         run_id = self._coding_live[task_id] = self._coding_seq
-        task = asyncio.create_task(self._run_coder(task_id, run_id))
+        # 이어서 하던 보류 건을 물려받지 않는다 (나중 보류가 닫힌 건에 이어 붙지 않게)
+        task = asyncio.create_task(
+            self._run_coder(task_id, run_id), context=hold_resume.clean_context()
+        )
         self._coding[task_id] = task
 
         def done(t: asyncio.Task) -> None:
@@ -3497,17 +3553,20 @@ class DevService(PlanningCore):
             # 다시 시도마다 새 키로 보낸다. 같은 키면 관문이 처음 결정(보류)을 그대로 돌려준다.
             # 사람이 보류 건을 승인하고 "승인하고 PR 열기"로 돌렸고 경로가 같으면 그 키로 보낸다
             reuse = cr.hold_ok and cr.hold_key is not None and cr.hold_paths == paths
-            key = cr.hold_key if reuse and cr.hold_key else f"{pr_id}:run{job.run_id}"
+            # 새 키는 다시 켜도 겹치지 않게 (실행 번호는 다시 켜면 1부터라 옛 승인 키와 겹친다)
+            fresh = f"{pr_id}:{task.id}:run{job.run_id}:{uuid.uuid4().hex[:8]}"
+            key = cr.hold_key if reuse and cr.hold_key else fresh
             if reuse:
                 gen_text += " (사람이 보류 건 승인)"
             try:
-                await self._execute(
-                    "generate_pr",
-                    job.ctx,
-                    key,
-                    gen_text,
-                    vcs_bridge.pr_size_params(lines, files, paths, task.id),
-                )
+                with hold_resume.recipe("coding_pr", task_id=task.id, key=key):
+                    await self._execute(
+                        "generate_pr",
+                        job.ctx,
+                        key,
+                        gen_text,
+                        vcs_bridge.pr_size_params(lines, files, paths, task.id),
+                    )
             except GateRefused as exc:
                 held = exc.decision.status == "held"
                 cr.status = "waiting_human" if held else "failed"
@@ -4083,7 +4142,8 @@ class DevService(PlanningCore):
             merge_text = f"{p.id} 자동 머지 ({rule_text} → merge_pr 규칙 통과, 사후 감사)"
         else:
             merge_text = f"사람이 {p.id} 머지"
-        await self._execute("merge_pr", ctx, p.id, merge_text, {**check.params, "auto": auto})
+        with hold_resume.recipe("merge_pr", pr=p.id):
+            await self._execute("merge_pr", ctx, p.id, merge_text, {**check.params, "auto": auto})
         # merge_pr 관문을 지난 뒤 형상관리에서 실제로 병합한다.
         # 실패하면 한 줄 남기고 병합하지 않는다
         note = await vcs_bridge.merge_pr(p)
@@ -4193,13 +4253,16 @@ class DevService(PlanningCore):
             f"간단 요청 기준 {lv.lines}줄·{lv.files}파일·{pol.paths}로 갱신 요청"
             " (기준표 pr_changed_lines·files)"
         )
-        await self._execute(
-            "auto_policy_update",
-            "auto_policy",
-            f"L{pol.level}->L{to}",
-            text,
-            {"to": to, "lines": lv.lines, "files": lv.files, "paths": pol.paths},
-        )
+        # 제안마다 다른 키 (같은 L0->L1 승급이 다음에 또 와도 지난 승인을 재생하지 않게)
+        ctx = f"auto_policy:{pol.proposal.at.isoformat()}"
+        with hold_resume.recipe("policy_promote", frm=pol.level, to=to):
+            await self._execute(
+                "auto_policy_update",
+                ctx,
+                f"L{pol.level}->L{to}",
+                text,
+                {"to": to, "lines": lv.lines, "files": lv.files, "paths": pol.paths},
+            )
         s.activity.append(
             self._act(
                 t,
@@ -4224,6 +4287,25 @@ class DevService(PlanningCore):
         pol.level = to
         pol.streak = 0
         pol.proposal = None
+
+    async def resume_policy_demote(self, ctx: str, frm: int, to: int, text: str) -> None:
+        """장애 연결로 보류된 자동 처리 범위 축소를 사람 승인 뒤 잇는다 (보류 때와 같은 키)."""
+
+        async def run(s: State) -> None:
+            pol = s.auto_policy
+            if pol.level != frm:
+                raise ActionError("NOT_RETRYABLE", f"자동 처리 범위가 이미 L{pol.level}")
+            await self._execute("auto_policy_update", ctx, f"L{frm}->L{to}", text, {"to": to})
+            t = self.clock()
+            pol.level = to
+            pol.log.append(
+                AutoLog(at=t, text=f"L{frm} → L{to} 축소 (보류 뒤 사람 승인)", by="사람")
+            )
+            s.activity.append(
+                self._act(t, ctx, "planning", "safety", "auto_policy.updated", "execute", text, "B")
+            )
+
+        await self._apply(run)
 
     async def _reject_promotion(self, s: State) -> None:
         pol = s.auto_policy

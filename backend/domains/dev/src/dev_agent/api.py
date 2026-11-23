@@ -467,6 +467,13 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _gate_err(exc)
         return _ok(result.output, svc)
 
+    @router.get("/holds", dependencies=CALLER)
+    def get_holds() -> dict:
+        """관문이 보류한 개발 AI 액션과 사람 결정 뒤 이어서 한 결과 (hold_resume, 읽기)."""
+        svc = get_service()
+        rows = svc.holds.listed()
+        return _ok(rows, svc, count=len(rows))
+
     @router.post("/dev-tasks/{task_id}/cancel", response_model=None, dependencies=HUMAN)
     async def post_dev_task_cancel(
         task_id: str, request: Request, account: str | None = None
