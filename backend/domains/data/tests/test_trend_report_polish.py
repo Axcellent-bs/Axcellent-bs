@@ -223,10 +223,11 @@ def test_body_md_numbers_are_all_in_the_facts(tmp_path: Path) -> None:
     insight, why = ti.build_insight(report)
     assert insight is not None, why
     body = insight.body_md or ""
-    assert "## 섹션 요약" in body and "## 한계" in body and "## 콘티" in body
+    # 11/23: "## 콘티"(장면 줄) 대신 "## 기획에 넘길 재료"(재료 줄)
+    assert "## 섹션 요약" in body and "## 한계" in body and "## 기획에 넘길 재료" in body
     allowed = ti.allowed_numbers(report, insight.facts)
     assert ti.numbers(body) <= allowed, ti.numbers(body) - allowed
-    assert "0-3초" not in body and "- 훅:" in body
+    assert "0-3초" not in body and "## 콘티" not in body and "- 재료(해시태그):" in body
     assert "펀딩" not in body
     assert ti.build_insight(report)[0] == insight  # 같은 보고서면 같은 결과 (insight_id 그대로)
 

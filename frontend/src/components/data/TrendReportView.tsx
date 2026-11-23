@@ -8,7 +8,7 @@ import { printWithClass, usePrinting } from "@/lib/print";
 import { PostCard } from "@/components/data/InstagramRadar";
 import {
   dataAi, type SectionStatus, type TrendReport, type TrendReportBeat, type TrendReportBrief, type TrendReportCompetitorRow, type TrendReportHandoffOutput,
-  type TrendReportSections, type TrendThemeSection,
+  type TrendReportMaterial, type TrendReportSections, type TrendThemeSection,
 } from "@/lib/data";
 import { useCompany } from "@/demo/company";
 import { DeliveryBadge, HandoffButton, ReportInsightCard, usePlanningRecord } from "@/components/data/ReportInsights";
@@ -16,8 +16,8 @@ import { deliveryOf, handoffChip, proposalFor, reportInsightId } from "@/lib/han
 import { thumbSrc } from "@/lib/igRadarGrid";
 import { sectionState, type SectionState } from "@/lib/segmentView";
 import {
-  BEAT_LABEL, CALLER_LABEL, EVIDENCE, HASHTAG_HIDDEN_NOTE, REPORT_POLL_MS, REPORT_STATUS, SECTION_EVIDENCE, SECTION_STATUS,
-  barPct, beatEvidence, beatWidths, competitorChip, competitorSummary, countedSections, evidenceDomId, evidenceExpanded, evidenceListClass, hashtagMeta,
+  BEAT_LABEL, CALLER_LABEL, EVIDENCE, HASHTAG_HIDDEN_NOTE, MATERIAL_LABEL, MATERIALS_NOTE, REPORT_POLL_MS, REPORT_STATUS, SECTION_EVIDENCE, SECTION_STATUS,
+  aiPickMode, barPct, beatEvidence, recommendationItems, beatWidths, competitorChip, competitorSummary, countedSections, evidenceDomId, evidenceExpanded, evidenceListClass, hashtagMeta,
   headerRows, keepPolling, keyEvidence, limitGroups, printHeaderLine, reportLabel, searchMain, searchNotes, sectionNotes, SECTION_TITLE, shareText, showThemeSection, sortBeats,
   sortCompetitors, sortSearchRows, themeRowView, traitLines, type ChipTone, type EvidenceKind, type ReportPart,
 } from "@/lib/trendReportView";
@@ -25,7 +25,7 @@ import {
 // 트렌드 분석 의뢰 보고서 하나 (trend_report_get). 주소 #request?id=<report_id> (분석 의뢰 탭, TrendRequest.tsx가 연다).
 // - 진행 중(queued·running)이면 섹션별 진행 칩을 보여 주고 5초마다 다시 읽는다. 완료·부분·실패·중단이면 멈춘다
 // - 헤더: "항목 | 칩" 목록(추정·프리셋 출처만 꼬리표) · "의뢰 고쳐서 다시 만들기"(TrendRequest가 폼을 연다)
-// - 위에서 아래로: 헤더 → AI 추천(콘티 타임라인) → "근거 데이터"(범례 칩 + 0 주제 후보(find 의뢰만) · 1 검색 · 2 해시태그 · 3 콘텐츠 · 4 경쟁사)
+// - 위에서 아래로: 헤더 → AI 추천(결론 · 기획에 넘길 재료 4칸, 11/23. 재료 없는 옛 보고서는 콘티 타임라인) → "근거 데이터"(범례 칩 + 0 주제 후보(find 의뢰만) · 1 검색 · 2 해시태그 · 3 콘텐츠 · 4 경쟁사)
 //   → 다음 단계(보고서 인사이트 카드: 기획에 보내기, ReportInsights.tsx) → 근거와 한계
 // - 머리 "기획에 보내기"(trend_report_handoff)와 맨 아래 카드는 결과를 같이 쓴다. 기획 기록에 이미 있으면 버튼 대신 전달 칩
 // - 인쇄(PDF): 맨 위에 인쇄 때만 머리글 한 줄("TR-xxxx · 회사 · 만든 시각 · 상태"), 콘티는 2×2 (styles.css)
@@ -433,11 +433,40 @@ function BeatCell({ b, width }: { b: TrendReportBeat; width: number }) {
   );
 }
 
-/** AI 추천: 위쪽 강조 카드. 결론 + 핵심 근거 칩 + 콘티 타임라인 */
+/** 기획에 넘길 재료 한 칸: 종류 · 무엇을 쓰라는지 · 접히는 "근거 N" (인쇄에서는 펼침) */
+function MaterialCell({ m }: { m: TrendReportMaterial }) {
+  const [open, setOpen] = useState(false);
+  const items = beatEvidence(m);
+  const printing = usePrinting();
+  const shown = evidenceExpanded(open, printing);
+  return (
+    <li className="min-w-0 rounded-xl border border-ink-100 bg-surface px-3 py-2">
+      <p className="text-xs font-semibold text-ink-500">{MATERIAL_LABEL[m.kind] ?? m.kind}</p>
+      <p className="mt-1 break-words text-sm text-ink-900">{m.text}</p>
+      {items.length > 0 && (
+        <div className="mt-1.5">
+          <button type="button" className="text-[11px] text-brand-700 hover:underline print-hide" aria-expanded={shown} onClick={() => setOpen(!open)}>
+            근거 {items.length} {shown ? "▲" : "▼"}
+          </button>
+          <ul className={`mt-1 space-y-1 ${evidenceListClass(open)}`}>
+            {items.map((e, i) => (
+              <li key={i} className="text-[11px] text-ink-500">
+                {e.id ? <button type="button" className="text-left hover:text-brand-700 hover:underline" onClick={() => jumpToEvidence(e.id!)}>{e.text}</button> : e.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** AI 추천: 위쪽 강조 카드. 결론 + 핵심 근거 칩 + 기획에 넘길 재료 4칸 (옛 보고서는 콘티 타임라인) */
 function AiPick({ s, summaryReason }: { s: TrendReportSections["recommendation"]; summaryReason: string | null }) {
-  const beats = sortBeats(s.beats);
+  const mode = aiPickMode(s);
+  const beats = mode === "beats" ? sortBeats(s.beats) : [];
   const widths = beatWidths(beats.map((b) => b.slot));
-  const keys = keyEvidence(beats);
+  const keys = keyEvidence(recommendationItems(s));
   const waiting = s.status === "waiting" || s.status === "running";
   return (
     <section className="card min-w-0 space-y-3 border-2 border-brand-500 p-4 sm:p-5 trend-report-section" aria-label="AI 추천">
@@ -460,6 +489,16 @@ function AiPick({ s, summaryReason }: { s: TrendReportSections["recommendation"]
             </li>
           ))}
         </ul>
+      )}
+      {mode === "materials" && (
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-ink-900">
+            기획에 넘길 재료 <span className="text-xs font-normal text-ink-500">· {MATERIALS_NOTE}</span>
+          </p>
+          <ul className="trend-print-beats grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="기획에 넘길 재료">
+            {(s.materials ?? []).map((m) => <MaterialCell key={m.kind} m={m} />)}
+          </ul>
+        </div>
       )}
       {beats.length > 0 && (
         <ol className="trend-print-beats flex flex-col gap-2 sm:flex-row sm:items-stretch" aria-label="콘티">

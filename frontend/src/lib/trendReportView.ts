@@ -3,7 +3,7 @@
 import type {
   BeatSlot, FieldSource, ReportStatus, SectionStatus, ThemeMode, TrendEvidenceItem, TrendReport, TrendReportBeat, TrendReportBrief, TrendReportCaller,
   TrendReportCompetitorRow, TrendReportGender, TrendReportHashtagRow, TrendReportInput, TrendReportSearchRow, TrendThemeRow, TrendThemeSeenIn,
-  TrendThemeSection, TrendTraitStructured,
+  TrendThemeSection, TrendTraitStructured, TrendMaterialKind, TrendReportMaterial,
 } from "./data.ts";
 
 /** 진행 중 보고서를 다시 읽는 간격 */
@@ -331,14 +331,35 @@ export function evidenceDomId(id: string): string {
   return `tr-ev-${id.replace(/[^A-Za-z0-9_-]+/g, "-")}`;
 }
 
+/** 근거가 붙은 것 (옛 콘티 칸 · 기획에 넘길 재료) */
+type WithEvidence = Pick<TrendReportBeat, "evidence" | "evidence_items">;
+
 /** 칸의 근거 항목: evidence_items가 있으면 그것, 옛 저장본이면 문장만 (id 없음) */
-export function beatEvidence(b: TrendReportBeat): { id: string | null; text: string }[] {
+export function beatEvidence(b: WithEvidence): { id: string | null; text: string }[] {
   if (b.evidence_items?.length) return b.evidence_items.map((e) => ({ id: e.id, text: e.text }));
   return b.evidence.map((text) => ({ id: null, text }));
 }
 
-/** 핵심 근거 칩: beat 순서대로 id 중복 없이 최대 3개의 short */
-export function keyEvidence(beats: TrendReportBeat[], max = 3): TrendEvidenceItem[] {
+// ---- 기획에 넘길 재료 (11/23): 시간별 콘티 대신. 시간별 장면은 기획이 짠다
+
+export const MATERIAL_LABEL: Record<TrendMaterialKind, string> = {
+  hashtag: "해시태그", format: "형식", topic: "관심 주제", meme: "밈", writing: "글쓰기", timing: "올리는 때", other: "그 밖",
+};
+export const MATERIALS_NOTE = "시간별 장면은 기획이 짜요";
+
+/** 추천 칸 모양: 재료가 있으면 재료 4칸, 재료 없이 콘티만 있으면(옛 보고서) 콘티, 둘 다 없으면 없음 */
+export function aiPickMode(rec: { materials?: TrendReportMaterial[]; beats: TrendReportBeat[] }): "materials" | "beats" | "none" {
+  if (rec.materials?.length) return "materials";
+  return rec.beats.length ? "beats" : "none";
+}
+
+/** 추천 근거가 붙은 칸들: 재료가 있으면 재료, 아니면 시간 순서 콘티 (핵심 근거 칩·대화 카드가 같이 쓴다) */
+export function recommendationItems(rec: { materials?: TrendReportMaterial[]; beats: TrendReportBeat[] }): WithEvidence[] {
+  return rec.materials?.length ? rec.materials : sortBeats(rec.beats);
+}
+
+/** 핵심 근거 칩: 칸 순서대로 id 중복 없이 최대 3개의 short */
+export function keyEvidence(beats: WithEvidence[], max = 3): TrendEvidenceItem[] {
   const seen = new Set<string>();
   const out: TrendEvidenceItem[] = [];
   for (const b of beats) {
