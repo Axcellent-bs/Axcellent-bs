@@ -6,17 +6,25 @@ import { removeFailText, type ToastApi } from "@/components/office/useToast";
 import { loadOwners, saveThreadId, threadKey, loadThreadId } from "@/lib/directThreads";
 import { OFFICE_ROOM_MAX_HOURS, ROOM_ALL, listOfficeRoom, removeOfficeRoom } from "@/lib/officeRoom";
 import { useSession } from "@/demo/session";
+import { hideConfirm, incidentHideItem } from "@/lib/roomCleanup";
 
 // 방 목록 ⋯ 메뉴의 "지우기" 항목과 확인 창. 서버가 지운 결과만 믿는다(먼저 지운 척하지 않는다).
-// 전체 대화방: 내가 만든 단톡방 대화만 / 1:1: 내 1:1 기록만 (단톡방에서 건 대화는 뺀다) / 장애·이슈 방: 지우지 않는다.
+// 전체 대화방: 내가 만든 단톡방 대화만 / 1:1: 내 1:1 기록만 (단톡방에서 건 대화는 뺀다)
+// 장애·이슈 방(11/23): "방 삭제 (모두에게 숨김)" — 해결된 사건만, 진행 중이면 흐리게 "해결된 뒤 삭제할 수 있어요".
+//   기록은 서버에 남고 방 목록 "숨긴 방 보기"에서 되돌린다 (onHideIncident를 주는 화면만)
 
 export type RowKind = "all" | "incident" | "direct";
 
-interface Spec { title: string; name: string; lines: string[]; run: () => Promise<void> }
+interface Spec { title: string; name: string; lines: string[]; run: () => Promise<void>; note?: string | null }
 
-export function useRoomRemoval({ toast, onAllRemoved, onDirectRemoved }: {
+/** 장애·이슈 방 줄의 사건 정보 (11/23 방 삭제: 해결된 사건만) */
+export interface RoomInfo { id: string; status?: string }
+
+export function useRoomRemoval({ toast, onAllRemoved, onDirectRemoved, onHideIncident }: {
   toast: ToastApi; onAllRemoved: () => void; onDirectRemoved: () => void;
-}): { itemsFor: (kind: RowKind, title: string, agentKey?: string) => MenuItem[]; refreshMine: () => void; modal: ReactNode } {
+  /** 11/23 장애·이슈 방 삭제(모두에게 숨김). 서버 문장으로 던진다. 없으면 항목을 두지 않는다 */
+  onHideIncident?: (id: string) => Promise<void>;
+}): { itemsFor: (kind: RowKind, title: string, agentKey?: string, room?: RoomInfo) => MenuItem[]; refreshMine: () => void; modal: ReactNode } {
   const { account } = useSession();
   const accountId = account?.id;
   const [spec, setSpec] = useState<Spec | null>(null);
@@ -92,9 +100,32 @@ export function useRoomRemoval({ toast, onAllRemoved, onDirectRemoved }: {
     }
   };
 
-  const itemsFor = (kind: RowKind, title: string, agentKey?: string): MenuItem[] => {
-    void title;
-    if (kind === "incident") return [{ key: "rm", label: "삭제 없음", sub: "장애 기록은 감사용으로 남깁니다", disabled: true }];
+  // 11/23 장애·이슈 방 삭제 = 모두에게 숨김 (해결된 사건만, 확인은 화면 안 상자, 기록은 서버에 남고 되돌릴 수 있음)
+  const askHide = (title: string, id: string) => {
+    if (!onHideIncident) return;
+    const text = hideConfirm(title);
+    setSpec({
+      title: text.head,
+      name: "",
+      lines: [text.body],
+      note: null,
+      run: async () => {
+        try {
+          await onHideIncident(id);
+          toast.show(`"${title}" 방을 숨겼어요 · '숨긴 방 보기'에서 되돌릴 수 있어요`);
+        } catch (err) {
+          toast.show(err instanceof Error && err.message ? err.message : "방을 삭제하지 못했어요", { ms: 6000 });
+        }
+      },
+    });
+  };
+
+  const itemsFor = (kind: RowKind, title: string, agentKey?: string, room?: RoomInfo): MenuItem[] => {
+    if (kind === "incident") {
+      if (!onHideIncident || !room) return [{ key: "rm", label: "삭제 없음", sub: "장애 기록은 감사용으로 남깁니다", disabled: true }];
+      const item = incidentHideItem(room.status);
+      return [{ key: "rm", ...item, onSelect: () => askHide(title, room.id) }];
+    }
     if (kind === "all") {
       const sub = mine.n === null ? (mine.err ? "단톡방 목록을 읽지 못했어요" : "확인 중…") : mine.n === 0 ? "만든 사람만 삭제할 수 있어요" : `내가 건 대화 ${mine.n}건`;
       return [{ key: "rm", label: REMOVE_LABEL, sub, danger: true, disabled: !mine.n, onSelect: askAll }];
@@ -104,6 +135,6 @@ export function useRoomRemoval({ toast, onAllRemoved, onDirectRemoved }: {
     return [{ key: "rm", label: REMOVE_LABEL, sub: can ? "내 1:1 기록만" : "이 부서는 아직 지울 수 없어요", danger: true, disabled: !can, onSelect: () => { if (agentKey) void askDirect(agentKey); } }];
   };
 
-  const modal = spec ? <ConfirmRemove title={spec.title} name={spec.name} lines={spec.lines} onConfirm={spec.run} onClose={() => setSpec(null)} /> : null;
+  const modal = spec ? <ConfirmRemove title={spec.title} name={spec.name} lines={spec.lines} onConfirm={spec.run} onClose={() => setSpec(null)} {...(spec.note !== undefined ? { note: spec.note } : {})} /> : null;
   return { itemsFor, refreshMine, modal };
 }

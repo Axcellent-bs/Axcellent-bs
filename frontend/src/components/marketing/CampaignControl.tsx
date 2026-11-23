@@ -4,7 +4,8 @@ import { campaigns, type CampaignAnswer } from "@/lib/marketingLive";
 import { dataAi, kpiLive, type CampaignEffectOutput } from "@/lib/data";
 import { todayKst } from "@/lib/finance";
 import { videoFields, type VideoKind } from "@/lib/campaignVideo";
-import { missingVideoFields, startFields, type ContentFormat } from "@/lib/campaignStart";
+import { campaignIdForProposal, missingVideoFields, startCampaignId, startedConflict, startFields, type ContentFormat } from "@/lib/campaignStart";
+import { briefs, type StoredBrief } from "@/lib/briefs";
 import { digitsOnly, krwText, periodSpend, type AdMetricsRow } from "@/lib/adMetrics";
 import { adMetricsApi, adMetricsEnabled } from "@/lib/adMetricsApi";
 import { contentFields, contentPrefill, type ContentForm, type MarketingCampaign } from "@/lib/campaignLinks";
@@ -49,6 +50,8 @@ function explain(a: CampaignAnswer): string {
     case "executed": return "집행이 승인됐습니다.";
     case "video_fields_required":
     case "ends_on_in_past": return String((a.output ?? {}).message ?? "필수 입력이 빠졌습니다.");
+    case "already_started": return `이미 시작한 캠페인 번호라 다시 시작하지 않았습니다. 기획안 하나로는 한 번만 시작합니다. ${String((a.output ?? {}).campaign_id ?? "")}`.trim();
+    case "campaign_ledger_unavailable": return "캠페인 대장을 읽지 못해 같은 번호가 있는지 몰라 시작하지 않았습니다. 잠시 뒤 다시 요청하세요.";
     case "held": return "안전 관문의 금액 규칙(건당 50만 원 이상, 하루 합계 100만 원 이상)에 걸려 사람 승인을 기다립니다. 위 보류 큐에서 결정하세요.";
     // 예전 응답용. 지금은 재무가 막지 않고 의견만 내서 새 응답에는 나오지 않는다
     case "rejected_by_finance": return `이전 방식의 응답입니다. 재무 반대 의견으로 시작하지 않았습니다. ${reasons}`.trim();
@@ -120,8 +123,14 @@ export function CampaignControl() {
   const [left, setLeft] = useState<string | null>(null);
   // 마케팅 캠페인 대장: 결과 칸에 시작 때 카테고리·형식·제작비를 미리 채운다. 못 읽으면 빈 칸으로 둔다
   const [started, setStarted] = useState<Record<string, MarketingCampaign>>({});
+  // 받은 기획안: 고르면 번호가 cmp_<proposal_id>라 광고 숫자 칸과 묶인다. 못 읽으면 고를 수 없고 예전처럼 시작한다
+  const [proposals, setProposals] = useState<StoredBrief[]>([]);
+  const [proposalId, setProposalId] = useState("");
 
   const load = useCallback(async () => {
+    briefs.list()
+      .then((list) => setProposals(list.items))
+      .catch(() => setProposals([]));
     marketingCampaigns(true)
       .then((items) => setStarted(Object.fromEntries(items.map((c) => [c.campaign_id, c]))))
       .catch(() => setStarted({}));
@@ -153,20 +162,46 @@ export function CampaignControl() {
   const video = videoFields(videoUrl, videoKind);
   const form = { isVideo, category, format, production, endsOn };
   const missing = missingVideoFields(form);
+  const proposal = proposals.find((p) => p.proposal_id === proposalId) ?? null;
+  const conflict = proposal ? startedConflict(campaignIdForProposal(proposal.proposal_id), started) : null;
+  const pickProposal = (id: string) => {
+    setProposalId(id);
+    const picked = proposals.find((p) => p.proposal_id === id);
+    if (picked && !name.trim()) setName(picked.brief.title.slice(0, 100));
+  };
   const start = () => run(
-    () => campaigns.start({ campaign_id: `cmp_${Date.now()}`, campaign_name: name.trim(), channel: channel.trim(), budget_krw: Number(budget), ...video.fields, ...startFields(form) }),
-    () => { setName(""); setBudget(""); setVideoUrl(""); setVideoKind(null); setCategory(""); setFormat(""); setProduction(""); setEndsOn(""); },
+    () => campaigns.start({ campaign_id: startCampaignId(proposal?.proposal_id, Date.now()), campaign_name: name.trim(), channel: channel.trim(), budget_krw: Number(budget), ...video.fields, ...startFields(form) }),
+    () => { setProposalId(""); setName(""); setBudget(""); setVideoUrl(""); setVideoKind(null); setCategory(""); setFormat(""); setProduction(""); setEndsOn(""); },
   );
 
   return (
     <section className="card p-4 sm:p-5">
       <h2 className="text-base font-semibold text-ink-900">캠페인 집행</h2>
       <p className="mt-0.5 text-sm text-ink-500">재무는 예산에 의견만 내고 시작을 막지 않습니다. 시작은 안전 관문의 금액 규칙(건당 50만 원 이상, 하루 합계 100만 원 이상이면 사람 승인)을 지납니다. 광고 플랫폼 연결이 없어 실제 광고는 나가지 않고, 광고비는 보고서를 보고 적습니다. 판매액과 주문 수는 데이터 AI에서 불러오거나 직접 적습니다.{left ? ` 이달 예산 ${left}.` : ""}</p>
+      {proposals.length > 0 && (
+        <div className="mt-3 text-sm">
+          <label className="block"><span className="text-ink-700">받은 기획안(선택)</span>
+            <select className="field mt-0.5 w-full sm:w-auto" value={proposalId} onChange={(e) => pickProposal(e.target.value)}>
+              <option value="">기획안 없이 시작(새 번호)</option>
+              {proposals.map((p) => {
+                const id = campaignIdForProposal(p.proposal_id);
+                return <option key={p.proposal_id} value={p.proposal_id}>{p.brief.title} ({id}){started[id] ? " · 이미 시작함" : ""}</option>;
+              })}
+            </select>
+          </label>
+          <p className="mt-0.5 text-xs text-ink-500">
+            {proposal
+              ? `캠페인 번호는 ${campaignIdForProposal(proposal.proposal_id)}입니다. 광고 숫자 칸과 같은 번호라 결과 저장·자동 결과 전송이 적어 둔 광고비 합계를 씁니다.`
+              : "기획안을 고르면 광고 숫자 칸과 같은 번호(cmp_기획안 번호)로 시작합니다. 고르지 않으면 새 번호로 시작하고 광고 숫자와 묶이지 않습니다."}
+          </p>
+          {conflict && <p role="alert" className="mt-1 text-xs text-red-800">{conflict}</p>}
+        </div>
+      )}
       <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_160px_auto] sm:items-end">
         <label className="block text-sm"><span className="text-ink-700">캠페인 이름</span><input className="field mt-0.5 w-full" value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label className="block text-sm"><span className="text-ink-700">채널</span><input className="field mt-0.5 w-full" placeholder="예: 네이버 검색" value={channel} onChange={(e) => setChannel(e.target.value)} /></label>
         <label className="block text-sm"><span className="text-ink-700">예산(원)</span><input className="field mt-0.5 w-full" inputMode="numeric" value={budget} onChange={(e) => setBudget(e.target.value.replace(/[^0-9]/g, ""))} /></label>
-        <button className="btn-primary" disabled={busy || !humanTokenSet || !name.trim() || !channel.trim() || !Number(budget) || video.error !== null || missing.length > 0} onClick={start}>시작 요청</button>
+        <button className="btn-primary" disabled={busy || !humanTokenSet || !name.trim() || !channel.trim() || !Number(budget) || video.error !== null || missing.length > 0 || conflict !== null} onClick={start}>시작 요청</button>
       </div>
       <label className="mt-2 inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={isVideo} onChange={(e) => setIsVideo(e.target.checked)} />영상 캠페인(카테고리·형식·제작비·종료일 필수)</label>
       <div className="mt-2 grid gap-2 text-sm sm:grid-cols-[1fr_160px_160px_160px]">

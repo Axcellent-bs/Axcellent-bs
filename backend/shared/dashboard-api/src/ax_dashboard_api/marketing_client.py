@@ -899,12 +899,15 @@ VIDEO_REFUSALS = {
     "cover_not_candidate": (422, "COVER_NOT_CANDIDATE"),
     "cover_locked": (409, "COVER_LOCKED"),
     "cover_missing": (409, "COVER_MISSING"),
+    # 제작 기록 썸네일 후보 만들기: 회사 Higgsfield 계정도 키도 없음
+    "not_connected": (409, "HIGGSFIELD_NOT_CONNECTED"),
     "bad_asset": (422, "BAD_ASSET"),
     "file_missing": (409, "FILE_MISSING"),
     "gate_held": (409, "GATE_HELD"),
     "gate_rejected": (409, "GATE_REJECTED"),
     "gate_blocked": (409, "GATE_BLOCKED"),
     "unknown_campaign": (422, "UNKNOWN_CAMPAIGN"),
+    "rights_not_confirmed": (422, "RIGHTS_NOT_CONFIRMED"),
 }
 CREATIVE_FILES = {
     "sheet_image": ("sheet.jpg", "image/jpeg"),
@@ -934,6 +937,76 @@ async def creative_video_call(record_id: str, who: str | None) -> dict[str, Any]
     return await _creative_read("creative_video_request", payload)
 
 
+THUMB_ID = re.compile(r"^thm_[0-9a-f]{12}$")
+THUMB_DIR = "thumbs"
+
+
+async def creative_thumbnails_call(record_id: str, regenerate: bool, who: str) -> dict[str, Any]:
+    """제작 기록 영상 썸네일 후보 3장 만들기를 사람 결정에(`creative_thumbnails_request`, C).
+
+    승인 전에는 아무것도 만들지 않는다."""
+    payload = {"record_id": record_id, "regenerate": regenerate, "who": who}
+    return await _creative_read("creative_thumbnails_request", payload)
+
+
+async def creative_thumbnail_select_call(record_id: str, media_id: str, who: str) -> dict[str, Any]:
+    """제작 기록 썸네일 고르기(`creative_thumbnail_select`). 후보 밖 422, 올린 뒤 409."""
+    payload = {"record_id": record_id, "media_id": media_id, "who": who}
+    return await _creative_read("creative_thumbnail_select", payload)
+
+
+async def creative_thumbnail_file(record_id: str, media_id: str) -> Path:
+    """제작 기록 썸네일 후보 그림(AI 표시 포함 JPEG). 기록과 이름·해시가 같은 파일만(없으면 404).
+
+    기록은 요청 회사 것만 읽히므로(다른 회사 기록은 마케팅이 not_found) 다른 회사 그림도 404다."""
+    missing = ApiError(404, "NOT_FOUND", "썸네일 후보가 없다")
+    if not THUMB_ID.match(media_id):
+        raise missing
+    rec = await creative_record_call(record_id)
+    thumbs = (rec.get("render") or {}).get("thumbnails") or {}
+    found = next((c for c in thumbs.get("candidates") or [] if c.get("media_id") == media_id), None)
+    sha = found.get("sha256") if isinstance(found, dict) else None
+    raw_root = (os.getenv(MEDIA_DIR_ENV) or "").strip()
+    if not (isinstance(sha, str) and raw_root):
+        raise missing
+    root = Path(raw_root).resolve()
+    path = (creative_root(root) / record_id / THUMB_DIR / f"{media_id}.jpg").resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise missing
+    if hashlib.sha256(path.read_bytes()).hexdigest() != sha:  # 기록 뒤 바뀐 파일은 내주지 않는다
+        raise missing
+    return path
+
+
+def creative_root(root: Path) -> Path:
+    """미디어 폴더 안 요청 회사의 제작 기록 폴더(11/23, 마케팅 `creative_render.company_part`).
+
+    캣북스(세션 없음 포함)는 지금 자리 `creative/`,
+    다른 회사 세션은 `companies/<회사>/creative/`."""
+    company = tenant_meta().get("tenant_id")
+    return root / "companies" / company / "creative" if company else root / "creative"
+
+
+async def brand_characters_call() -> dict[str, Any]:
+    """요청 회사의 대표 캐릭터 목록(마케팅 `brand_characters_list`, read)."""
+    return await _creative_read("brand_characters_list", {})
+
+
+async def brand_character_mark_call(
+    record_id: str, rights_confirmed: bool, who: str
+) -> dict[str, Any]:
+    """제작 기록을 대표 캐릭터로 표시(마케팅 `brand_character_mark`).
+
+    권리 확인한 사람을 같이 보낸다."""
+    payload = {"record_id": record_id, "rights_confirmed": rights_confirmed, "who": who}
+    return await _creative_read("brand_character_mark", payload)
+
+
+async def brand_character_unmark_call(record_id: str, who: str) -> dict[str, Any]:
+    """대표 캐릭터 표시만 뗀다(마케팅 `brand_character_unmark`)."""
+    return await _creative_read("brand_character_unmark", {"record_id": record_id, "who": who})
+
+
 async def creative_asset(record_id: str, part: str) -> tuple[Path, str]:
     """제작 기록의 Higgsfield 결과 파일(경로, Content-Type). 기록된 sha256과 같은 파일만 내준다."""
     missing = ApiError(404, "NOT_FOUND", "결과 파일이 없다")
@@ -946,7 +1019,7 @@ async def creative_asset(record_id: str, part: str) -> tuple[Path, str]:
     if not (expected and isinstance(sha, str) and raw_root):
         raise missing
     root = Path(raw_root).resolve()
-    path = (root / "creative" / record_id / name).resolve()
+    path = (creative_root(root) / record_id / name).resolve()
     if not path.is_relative_to(root) or not path.is_file():
         raise missing
     digest = hashlib.sha256()
@@ -987,7 +1060,7 @@ async def creative_upload(
     kind = "video" if part in ("video", "final_video") else "image"
     limit = UPLOAD_MAX_BYTES[kind]
     root = Path(raw_root).resolve()
-    folder = (root / "creative" / record_id).resolve()
+    folder = (creative_root(root) / record_id).resolve()
     if not folder.is_relative_to(root):
         raise ApiError(422, "BAD_RECORD", "기록 번호가 올바르지 않다")
     folder.mkdir(parents=True, exist_ok=True)

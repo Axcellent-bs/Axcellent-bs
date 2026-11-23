@@ -469,6 +469,35 @@ async def decide(
     return {"data": {"ok": True}, "meta": {}}
 
 
+class BrandCharacterBody(BaseModel):
+    """홍보 영상 의뢰에 쓸 회사 대표 캐릭터(마케팅 제작 기록 번호). null이면 캐릭터 없이."""
+
+    record_id: str | None = None  # CR-<16진수 12자리>. 모양은 실행기가 본다(아니면 422)
+
+
+@app.post("/api/requests/{request_id}/brand-character")
+async def set_request_brand_character(
+    request_id: str, body: BrandCharacterBody, who: str = Depends(require_human)
+) -> dict:
+    """의뢰에 회사 캐릭터를 정한다(11/23). 사람 토큰, 같은 회사, 영상 준비 시작 전까지만.
+
+    캐릭터를 쓰면 영상은 만들기 전에 사람 승인(C)을 한 번 받는다. 값이 없으면 지금 흐름 그대로다.
+    """
+    runner = state.manager.request_runner if state.manager else None
+    outcome = (
+        runner.set_brand_character(request_id, body.record_id, by=who) if runner else "missing"
+    )
+    if outcome == "missing":
+        raise HTTPException(404, "없는 의뢰")
+    if outcome == "invalid":
+        raise HTTPException(422, "캐릭터 기록 번호가 맞지 않아요")
+    if outcome == "not_video":
+        raise HTTPException(422, "홍보 영상 의뢰가 아니에요")
+    if outcome == "started":
+        raise HTTPException(409, "영상 준비가 시작돼서 바꿀 수 없어요")
+    return {"data": {"ok": True, "record_id": body.record_id}, "meta": {}}
+
+
 @app.post("/api/requests/{request_id}/steps/{step_id}/decision")
 async def decide_request_step(
     request_id: str, step_id: str, body: Decision, who: str = Depends(require_human)

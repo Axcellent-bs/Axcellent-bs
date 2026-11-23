@@ -55,6 +55,7 @@ ACTION_KO = {
     "complete_manual_publish": "수동 게시 완료 기록",
     "generate_media": "이미지·영상 만들기",
     "generate_creative_video": "스토리보드 영상 만들기",
+    "generate_creative_thumbnails": "영상 썸네일 후보 만들기",
     "publish_youtube": "유튜브에 영상 올리기",
     "attach_creative_file": "제작 기록에 파일 올리기",
     "start_campaign": "캠페인 집행",

@@ -47,7 +47,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from ax_agent_template.llm import LLMSettings
 from data_agent import llm_budget
 from data_agent.data_chat_store import DataChatStore, make_title
 from data_agent.explain import _bad_numbers
@@ -860,8 +859,12 @@ def visible(th: dict[str, Any], who: str) -> dict[str, Any]:
 
 
 def default_llm() -> Any | None:
-    """`DATA_LLM_*`(없으면 `LLM_*`). 모델·주소가 없으면 None. 모델 이름은 코드에 없다."""
-    settings = LLMSettings.from_env("data")
+    """요청 회사의 AI 키·주소·모델, 없으면 `DATA_LLM_*`(없으면 `LLM_*`, `llm_settings.settings`).
+
+    모델·주소가 없으면 None. 모델 이름은 코드에 없다."""
+    from data_agent import llm_settings
+
+    settings = llm_settings.settings()
     if not (settings.model and settings.base_url):
         return None
     from data_agent.handlers import TimedLLMClient  # 하루 상한·중복 막기·장부 기록

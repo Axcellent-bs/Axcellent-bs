@@ -48,6 +48,12 @@ export function placeRequestCards(lines: TalkLine[]): { cardAt: Map<string, stri
 /** 카드를 그릴지: 사람 토큰이 있고 번호가 있을 때만 (없으면 지금 글만) */
 export const showRequestCard = (hasToken: boolean, requestId: string | null | undefined) => hasToken && !!requestId;
 
+/** 삭제한 의뢰(hidden_at)의 접힌 한 줄: 카드 대신 "삭제한 의뢰 · <제목> (<번호>)" + 사람 토큰이 있으면 [되돌리기]. 숨기지 않았으면 null(카드 전체) */
+export function hiddenRequestLine(row: { request_id: string; hidden_at?: string | null }, title: string, hasToken: boolean): { text: string; canUndo: boolean } | null {
+  if (!row.hidden_at) return null;
+  return { text: `삭제한 의뢰 · ${title} (${row.request_id})`, canUndo: hasToken };
+}
+
 // ---- 단계 줄
 
 export type StepDot = "ok" | "run" | "warn" | "gray";

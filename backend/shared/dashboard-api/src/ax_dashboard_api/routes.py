@@ -930,7 +930,8 @@ async def decide_org_change(change_id: str, body: OrgChangeDecisionBody) -> dict
 
 # ---------------------------------------------------------------- 캠페인 (사람 토큰 필요)
 class CampaignStartBody(BaseModel):
-    campaign_id: str = Field(pattern=r"^cmp_[A-Za-z0-9_-]{1,40}$")
+    # 받은 기획안으로 시작하면 cmp_<proposal_id>(제안 번호 64자까지)라 64자까지 받는다
+    campaign_id: str = Field(pattern=r"^cmp_[A-Za-z0-9_-]{1,64}$")
     campaign_name: str = Field(min_length=1, max_length=100)
     channel: str = Field(min_length=1, max_length=50)
     budget_krw: int = Field(gt=0)
@@ -1509,6 +1510,104 @@ async def marketing_creative_video(
         raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
     who = human_from_authorization(request.headers.get("authorization"))
     return ok(await marketing_client.creative_video_call(record_id, who))
+
+
+class CreativeThumbnailsBody(BaseModel):
+    # 후보가 이미 있으면 true일 때만 다시 만든다([다시 만들기])
+    regenerate: bool = False
+
+
+@router.post("/marketing/creative-records/{record_id}/thumbnails")
+async def marketing_creative_thumbnails(
+    body: CreativeThumbnailsBody,
+    request: Request,
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """영상 썸네일 후보 3장 만들기를 사람 결정(C generate_creative_thumbnails)에 올린다. 사람 토큰.
+
+    승인 전에는 Higgsfield를 부르지 않는다.
+    같은 주소에 GET은 없다(후보 그림은 `/thumbnails/{id}`)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.creative_thumbnails_call(record_id, body.regenerate, who))
+
+
+class CreativeThumbnailBody(BaseModel):
+    """썸네일 후보 중 하나(`render.thumbnails.candidates[].media_id`). 후보 밖 값은 422."""
+
+    media_id: str = Field(pattern=r"^thm_[0-9a-f]{12}$")
+
+
+@router.post("/marketing/creative-records/{record_id}/thumbnail")
+async def marketing_creative_thumbnail_select(
+    body: CreativeThumbnailBody,
+    request: Request,
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """제작 기록 썸네일을 고른다. 사람 토큰. 승인 대기 중에 바꾸면 그 승인은 무효다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "썸네일 고르기는 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.creative_thumbnail_select_call(record_id, body.media_id, who))
+
+
+@router.get("/marketing/creative-records/{record_id}/thumbnails/{media_id}")
+async def marketing_creative_thumbnail_image(
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+    media_id: str = Path(pattern=r"^thm_[0-9a-f]{12}$"),
+) -> FileResponse:
+    """썸네일 후보 그림(Higgsfield로 만든 AI 표시 포함 JPEG). 후보 기록과 같은 파일만."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    path = await marketing_client.creative_thumbnail_file(record_id, media_id)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+class BrandCharacterMarkBody(BaseModel):
+    # 사람이 "우리 회사가 쓸 권리가 있는 그림이에요"를 체크했는가. true가 아니면 422
+    rights_confirmed: bool = False
+
+
+@router.get("/marketing/brand-characters")
+async def marketing_brand_characters(request: Request) -> dict:
+    """로그인한 회사의 대표 캐릭터(최대 3개, 마지막 것이 기본).
+
+    사람 토큰이 필요하고, 다른 회사 기록은 보이지 않는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.brand_characters_call())
+
+
+@router.post("/marketing/brand-characters/{record_id}")
+async def marketing_brand_character_mark(
+    request: Request,
+    body: BrandCharacterMarkBody,
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """제작 기록을 회사 대표 캐릭터로 표시한다. 권리 확인(rights_confirmed=true)이 없으면 422.
+
+    확인한 사람은 사람 토큰에서 채워 기록에 남긴다(누가·언제)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    if not body.rights_confirmed:
+        raise ApiError(
+            422, "RIGHTS_NOT_CONFIRMED", "우리 회사가 쓸 권리가 있는 그림인지 확인해 주세요"
+        )
+    return ok(await marketing_client.brand_character_mark_call(record_id, True, who))
+
+
+@router.delete("/marketing/brand-characters/{record_id}")
+async def marketing_brand_character_unmark(
+    request: Request, record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$")
+) -> dict:
+    """대표 캐릭터 표시만 뗀다(제작 기록은 남는다)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.brand_character_unmark_call(record_id, who))
 
 
 @router.get("/marketing/creative-records/{record_id}/asset/{part}")

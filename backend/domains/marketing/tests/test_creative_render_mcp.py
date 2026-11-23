@@ -198,7 +198,9 @@ def _run(coro_fn, company: str = "catbooks"):  # noqa: ANN001, ANN202
 
 
 def _sheet(env: dict[str, Any], company: str = "catbooks") -> str:
-    rid = env["store"].add_sheet(SHEET, None, None)
+    # 제작 기록은 요청 회사 칸에 있다(#1636): 그 회사로 기록을 남기고 그 회사로 그린다
+    with company_scope.using(company):
+        rid = cr.store().add_sheet(SHEET, None, None)
 
     async def go() -> None:
         rr.start_sheet(env["ledger"], META, rid, SHEET, JPEG)
@@ -253,7 +255,8 @@ def test_connected_company_makes_the_sheet_with_its_own_account(
 
 def test_company_without_a_connection_keeps_the_api_key_path(env: dict[str, Any]) -> None:
     rid = _sheet(env, "nubi")
-    part = env["store"].get_render(rid)["sheet_image"]
+    with company_scope.using("nubi"):
+        part = cr.store().get_render(rid)["sheet_image"]
     assert part["route"] == "api"
     assert env["hf"].tools == []  # MCP는 부르지 않았다
     # 키 길은 예전처럼 우리 키 월 예산이 없으면 막힌다

@@ -25,6 +25,9 @@ const REFRESH_MS = 15_000;
 const SNS_ACTIONS = SNS_HOLD_ACTIONS;
 const fromMarketing = (requester: string) => requester === "coupon" || requester === "marketing";
 
+/** 계정 연결에서 돌아올 때 붙는 표시(유튜브 ?youtube=, Higgsfield ?higgsfield=finish, 인스타 ?instagram=) */
+export const OAUTH_RETURN_PARAMS = ["youtube", "higgsfield", "instagram"] as const;
+
 type View = "make" | "briefs" | "holds" | "accounts";
 const VIEWS: readonly View[] = ["make", "briefs", "holds", "accounts"];
 const isView = (v: string | null): v is View => v !== null && (VIEWS as readonly string[]).includes(v);
@@ -75,11 +78,14 @@ export function SnsMedia() {
 
   const [params, setParams] = useSearchParams();
   const asked = params.get("view");
-  const view: View = isView(asked) ? asked : params.get("youtube") ? "accounts" : "make";
+  // 계정 연결(유튜브·Higgsfield·인스타)에서 돌아오면 계정·연결 탭을 연다. 연결 마무리(complete)는 그 탭의
+  // SNS 계정 연결 카드가 한다(만들기 탭의 한 줄 요약은 하지 않는다). 11/23 Higgsfield가 만들기 탭으로 돌아와 연결이 안 되던 문제
+  const returning = OAUTH_RETURN_PARAMS.some((k) => params.get(k));
+  const view: View = isView(asked) ? asked : returning ? "accounts" : "make";
   const pick = (next: View) => setParams((cur) => {
     const out = new URLSearchParams(cur);
     out.set("view", next);
-    out.delete("youtube");
+    for (const k of OAUTH_RETURN_PARAMS) out.delete(k);
     return out;
   }, { replace: true });
   const tabs: { id: View; label: string; count?: number }[] = [

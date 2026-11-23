@@ -40,6 +40,13 @@ from ax_contracts.schemas.ad_metrics import (
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
 from ax_contracts.schemas.finance import ContentFormat
+from ax_contracts.schemas.marketing_brand import (
+    BrandCharacterMarkInput,
+    BrandCharacterMarkOutput,
+    BrandCharactersListInput,
+    BrandCharactersListOutput,
+    BrandCharacterUnmarkInput,
+)
 from ax_contracts.schemas.marketing_campaigns import (
     ListMarketingCampaignsInput,
     ListMarketingCampaignsOutput,
@@ -52,6 +59,10 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeRecordGetOutput,
     CreativeRecordsListInput,
     CreativeRecordsListOutput,
+    CreativeThumbnailSelectInput,
+    CreativeThumbnailSelectOutput,
+    CreativeThumbnailsOutput,
+    CreativeThumbnailsRequestInput,
     CreativeVideoRequestInput,
     CreativeVideoRequestOutput,
     CreativeYoutubeDraftInput,
@@ -90,7 +101,9 @@ from marketing_agent import (
 from marketing_agent import character_sheet as _character_sheet
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
+from marketing_agent import creative_thumbnails as _thumbs
 from marketing_agent import higgsfield_status as _higgsfield_status
+from marketing_agent import request_creative as _request_creative
 from marketing_agent import request_video_cover as _request_cover
 from marketing_agent import request_video_youtube as _request_youtube
 from marketing_agent import storyboard as _storyboard
@@ -825,6 +838,12 @@ async def creative_record_get(request: AgentRequest) -> AgentResult:
             await _youtube.check_upload(request.meta, data.record_id)
         except Exception:  # noqa: BLE001 - 진행 확인 실패는 읽기를 막지 않는다
             _render.logger.exception("제작 기록: 영상 승인 확인 실패")
+        try:  # 영상이 생겼으면 썸네일 후보 만들기를 사람 결정에 한 번 올리고, 승인됐으면 만든다
+            _thumbs.expire_stale(data.record_id)
+            await _thumbs.check(STATE.media_ledger, request.meta, data.record_id)
+            await _thumbs.request(STATE.media_ledger, request.meta, data.record_id, None, auto=True)
+        except Exception:  # noqa: BLE001 - 썸네일 확인 실패는 읽기를 막지 않는다
+            _thumbs.logger.exception("제작 기록: 썸네일 확인 실패")
     row = _creative.store().get(data.record_id)
     if row is None:
         return _result(
@@ -837,6 +856,75 @@ async def creative_record_get(request: AgentRequest) -> AgentResult:
         output=out.model_dump(mode="json"),
         evidence=_evidence(["creative_records"], f"제작 기록 {data.record_id}", []),
     )
+
+
+def _brand_done(
+    request: AgentRequest, record_id: str, marked: bool, dropped: str | None
+) -> AgentResult:
+    items = _creative.store().brand_characters()
+    out = BrandCharacterMarkOutput(record_id=record_id, marked=marked, dropped=dropped, items=items)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill], f"대표 캐릭터 {record_id} {'표시' if marked else '표시 뗌'}", []
+        ),
+    )
+
+
+async def brand_characters_list(request: AgentRequest) -> AgentResult:
+    """요청 회사의 대표 캐릭터(read). 다른 회사 기록은 보이지 않는다."""
+    data = _parse(request, BrandCharactersListInput)
+    if isinstance(data, AgentResult):
+        return data
+    items = _creative.store().brand_characters()
+    out = BrandCharactersListOutput.model_validate({"items": items})
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["brand_characters"], f"대표 캐릭터 {len(items)}개", []),
+    )
+
+
+async def brand_character_mark(request: AgentRequest) -> AgentResult:
+    """제작 기록을 회사 대표 캐릭터로 표시한다. 사람이 권리를 확인해야 한다(누가·언제 남김).
+
+    기록의 표시 칸만 바꾸는 기록 관리라(제작 기록 남기기와 같다) 외부로 나가는 일·비용이 없다.
+    """
+    data = _parse(request, BrandCharacterMarkInput)
+    if isinstance(data, AgentResult):
+        return data
+    if not data.rights_confirmed or not data.who:
+        message = "우리 회사가 쓸 권리가 있는 그림인지 확인해 주세요"
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="rights_not_confirmed",
+            output={"message": message},
+        )
+    dropped = _creative.store().mark_brand(data.record_id, data.who)
+    if dropped is False:
+        return _result(
+            request, TaskStatus.FAILED, outcome="not_found", output={"message": "기록이 없다"}
+        )
+    return _brand_done(request, data.record_id, True, dropped or None)
+
+
+async def brand_character_unmark(request: AgentRequest) -> AgentResult:
+    """대표 캐릭터 표시만 뗀다(제작 기록은 남는다)."""
+    data = _parse(request, BrandCharacterUnmarkInput)
+    if isinstance(data, AgentResult):
+        return data
+    if not _creative.store().unmark_brand(data.record_id):
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="not_found",
+            output={"message": "대표 캐릭터가 아니다"},
+        )
+    return _brand_done(request, data.record_id, False, None)
 
 
 def _safe_render(fn: Any) -> None:
@@ -877,6 +965,59 @@ async def creative_video_request(request: AgentRequest) -> AgentResult:
         output=out.model_dump(mode="json"),
         evidence=_evidence(
             ["creative_video_request"], f"영상 요청 {data.record_id}: {video.get('status')}", []
+        ),
+    )
+
+
+def _thumb_failed(request: AgentRequest, error: _thumbs.ThumbError) -> AgentResult:
+    return _result(request, TaskStatus.FAILED, outcome=error.code, output={"message": error.code})
+
+
+async def creative_thumbnails_request(request: AgentRequest) -> AgentResult:
+    """제작 기록 영상 썸네일 후보 3장 만들기를 사람 결정(C generate_creative_thumbnails)에."""
+    data = _parse(request, CreativeThumbnailsRequestInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        thumbs = await _thumbs.request(
+            STATE.media_ledger,
+            request.meta,
+            data.record_id,
+            data.who,
+            regenerate=data.regenerate,
+        )
+    except _thumbs.ThumbError as error:
+        return _thumb_failed(request, error)
+    out = CreativeThumbnailsOutput(record_id=data.record_id, thumbnails=thumbs)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill], f"썸네일 후보 요청 {data.record_id}: {thumbs.get('status')}", []
+        ),
+    )
+
+
+async def creative_thumbnail_select(request: AgentRequest) -> AgentResult:
+    """제작 기록 썸네일 후보 중 하나를 고른다. 승인 대기면 그 승인을 무효로 한다(기록만 바꿈)."""
+    data = _parse(request, CreativeThumbnailSelectInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        picked = _thumbs.select(data.record_id, data.media_id, data.who)
+    except _thumbs.ThumbError as error:
+        return _thumb_failed(request, error)
+    out = CreativeThumbnailSelectOutput.model_validate(picked)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill],
+            f"제작 기록 썸네일 {data.record_id}: {data.media_id}"
+            + (f" (승인 무효: {', '.join(out.approvals_reset)})" if out.approvals_reset else ""),
+            [data.record_id],
         ),
     )
 
@@ -1846,9 +1987,13 @@ async def check_sns_post_skill(request: AgentRequest) -> AgentResult:
 
 
 async def _generate_media_sync(request: AgentRequest) -> AgentResult:
-    result = await generate_media_flow(
-        request, ledger=STATE.media_ledger, from_decision=_from_decision
-    )
+    if isinstance(request.input, dict) and request.input.get(_request_creative.INPUT_KEY):
+        # 11/23 회사 캐릭터를 고른 홍보 영상 의뢰: 시트·스토리보드 그림(B) → 영상(C, 사람 승인)
+        result = await _request_creative.make_video(request, STATE.media_ledger)
+    else:
+        result = await generate_media_flow(
+            request, ledger=STATE.media_ledger, from_decision=_from_decision
+        )
     # 의뢰 영상 초안이면 완료 직전에 AI 라벨을 입혀 초안에 연결한다(동기·비동기 공통)
     return await request_video.attach_label_after_generate(request, result, store=STATE.sns)
 
@@ -2127,6 +2272,7 @@ async def start_campaign_skill(request: AgentRequest) -> AgentResult:
         brief_product_ids=product_ids,
         brief_content=content,
         on_started=STATE.campaigns.track,
+        started_status=STATE.campaigns.status,
     )
 
 
@@ -2204,6 +2350,11 @@ HANDLERS = {
     "youtube_video_stats": youtube_video_stats,
     "youtube_uploads_list": youtube_uploads_list,
     "creative_record_attach": creative_record_attach,
+    "creative_thumbnails_request": creative_thumbnails_request,
+    "creative_thumbnail_select": creative_thumbnail_select,
+    "brand_characters_list": brand_characters_list,
+    "brand_character_mark": brand_character_mark,
+    "brand_character_unmark": brand_character_unmark,
     "receive_campaign_brief": receive_campaign_brief,
     "record_campaign_ad_metrics": record_campaign_ad_metrics,
     "get_campaign_ad_metrics": get_campaign_ad_metrics,

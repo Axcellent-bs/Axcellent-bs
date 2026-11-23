@@ -79,3 +79,17 @@ export function handoffRequests(rows: WorkRequestRow[]): { row: WorkRequestRow; 
     .filter((x) => x.handoffs.length > 0)
     .sort((a, b) => Date.parse(b.row.created_at) - Date.parse(a.row.created_at));
 }
+
+// ---- 놓는 자리 (11/23): AI 오피스(넓은 칸)와 AI 대화방 왼쪽 칸(약 250px)
+
+/** sidebar: AI 대화방 왼쪽 칸. 카드에는 제목·상태·번호·⋯만 두고 단계 목록은 접는다. office: 지금 모양 그대로 */
+export type HandoffLayout = "office" | "sidebar";
+
+/** 단계 목록을 처음부터 펼쳐 둘까 (sidebar면 "단계 N개 보기"로 접는다) */
+export const stepsOpenByDefault = (layout: HandoffLayout) => layout !== "sidebar";
+
+/** 접힌 단계 목록 제목 */
+export const stepsSummary = (count: number) => `단계 ${count}개 보기`;
+
+/** 목록 열 수는 담긴 칸 너비로 정한다(화면 너비 기준 md:·lg:가 아님). 카드 하나가 16rem보다 좁아지지 않는다 */
+export const HANDOFF_GRID = "grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]";

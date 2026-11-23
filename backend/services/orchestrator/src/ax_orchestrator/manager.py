@@ -490,6 +490,11 @@ class IncidentManager:
                     f"안전 관문 결정({data.decision})을 확인하지 못해 무시: {data.review_id}"
                 )
             return "unverified", found[0] if found else None
+        videos = self.request_runner.held_videos(data.review_id) if found is None else []
+        if videos:  # 고객 의뢰의 영상 승인 대기(11/23): 같은 단계를 다시 보내 마케팅 관문이 정한다
+            for rid, sid, _review in videos:
+                self.request_runner.resume_video(rid, sid)
+            return "resumed", None
         if found is None:
             kept = self.engine.keep_early_review(data.review_id, outcome)
             return ("kept" if kept else "unmatched"), None

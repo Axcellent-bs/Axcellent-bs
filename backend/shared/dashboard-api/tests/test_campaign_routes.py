@@ -84,9 +84,17 @@ def test_start_passes_video_url_and_test_through(
     assert payload["video_url"] == url and payload["test"] is test_flag
 
 
+def test_start_takes_a_proposal_number_up_to_64_characters(client: TestClient, fake: Fake) -> None:
+    """받은 기획안으로 시작하면 cmp_<proposal_id>다. 제안 번호는 64자까지라 그대로 받는다."""
+    body = START | {"campaign_id": "cmp_" + "p" * 64}
+    assert client.post("/api/dashboard/campaigns/start", json=body).status_code == 200
+    assert fake.calls[0][1].input["campaign_id"] == body["campaign_id"]
+
+
 @pytest.mark.parametrize(
     "bad",
     [
+        START | {"campaign_id": "cmp_" + "p" * 65},
         START | {"budget_krw": 0},
         START | {"campaign_id": "../x"},
         START | {"channel": ""},
