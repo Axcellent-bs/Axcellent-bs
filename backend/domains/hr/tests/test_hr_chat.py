@@ -283,3 +283,30 @@ def test_room_id_must_be_1_to_64_chars(client: TestClient) -> None:
     for bad in ("", "x" * 65, 3):
         res = client.post("/api/hr/chat", json={"message": "안녕", "room_id": bad}, headers=A)
         assert res.status_code == 400
+
+
+def test_threads_are_kept_per_request_company(
+    svc: Services, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """인사 대화는 요청 회사 것만 보인다(11/24 회사 격리: 다른 회사 같은 이름이 대화를 안 섞이게).
+
+    캣북스(회사를 모름 포함)는 다른 회사로 등록된 줄만 빼고 본다(예전 줄은 그대로 캣북스)."""
+    import json as _json
+
+    from ax_agent_template import company_scope
+
+    companies = tmp_path / "companies.json"
+    rows = [
+        {"company_id": "catbooks", "name": "캣북스", "created_at": "2026-11-20T00:00:00Z"},
+        {"company_id": "nubi", "name": "누비", "created_at": "2026-11-20T00:00:00Z"},
+    ]
+    companies.write_text(_json.dumps({"companies": rows}), encoding="utf-8")
+    monkeypatch.setenv("AX_COMPANIES_FILE", str(companies))
+    cat = threads.create(svc, "캣북스 질문", "예진")
+    with company_scope.using("nubi"):
+        nubi = threads.create(svc, "누비 질문", "예진")  # 이름이 같아도
+        assert [t["id"] for t in threads.list_all(svc)] == [nubi["id"]]
+        assert threads.get(svc, cat["id"]) is None
+        assert threads.remove(svc, cat["id"], "예진") is False
+    assert [t["id"] for t in threads.list_all(svc)] == [cat["id"]]
+    assert threads.get(svc, nubi["id"]) is None

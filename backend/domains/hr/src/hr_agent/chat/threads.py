@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ax_agent_template import company_scope
+from ax_agent_template.companies import company_ids
 from ax_contracts.schemas import TENANT_ID_DEFAULT
 from hr_agent.services import Services
 
@@ -35,6 +37,26 @@ _ADDED_COLUMNS = ("removed_at", "removed_by", "room_id")
 _LIVE = "removed_at IS NULL"  # 숨긴 대화는 모든 조회에서 뺀다
 
 
+def _mine() -> tuple[str, tuple[str, ...]]:
+    """요청 회사의 대화만 보는 조건(11/24 회사 격리: 다른 회사에 같은 이름이 있어도 안 섞이게).
+
+    회사를 모르면(공용 토큰·캣북스 세션) 캣북스. 캣북스는 다른 회사로 등록된 줄만 빼고 본다
+    (예전 줄은 회사 값이 기본값·형식이 다른 값이라 예전처럼 캣북스 것으로 둔다)."""
+    cid = company_scope.scope_id(company_scope.active())
+    if cid == company_scope.CATBOOKS:
+        others = tuple(c for c in company_ids() if c != company_scope.CATBOOKS)
+        if not others:
+            return "1 = 1", ()
+        return f"tenant_id NOT IN ({', '.join('?' * len(others))})", others
+    return "tenant_id = ?", (cid,)
+
+
+def _tenant_value() -> str:
+    """새 대화에 적을 회사 값. 캣북스는 예전 값(shop-demo) 그대로."""
+    cid = company_scope.scope_id(company_scope.active())
+    return TENANT_ID_DEFAULT if cid == company_scope.CATBOOKS else cid
+
+
 def ensure(svc: Services) -> None:
     svc.store.execute(_DDL)
     have = {r["name"] for r in svc.store.all("PRAGMA table_info(hr_chat_threads)")}
@@ -61,15 +83,20 @@ def _view(row: dict[str, Any]) -> dict[str, Any]:
 
 def get(svc: Services, thread_id: str) -> dict[str, Any] | None:
     ensure(svc)
-    row = svc.store.one(f"SELECT * FROM hr_chat_threads WHERE id = ? AND {_LIVE}", (thread_id,))
+    where, args = _mine()
+    row = svc.store.one(
+        f"SELECT * FROM hr_chat_threads WHERE id = ? AND {_LIVE} AND {where}", (thread_id, *args)
+    )
     return _view(row) if row else None
 
 
 def list_all(svc: Services, limit: int = 100) -> list[dict[str, Any]]:
     ensure(svc)
+    where, args = _mine()
     rows = svc.store.all(
-        f"SELECT * FROM hr_chat_threads WHERE {_LIVE} ORDER BY updated_at DESC, seq DESC LIMIT ?",
-        (limit,),
+        f"SELECT * FROM hr_chat_threads WHERE {_LIVE} AND {where}"
+        " ORDER BY updated_at DESC, seq DESC LIMIT ?",
+        (*args, limit),
     )
     return [_view(r) for r in rows]
 
@@ -79,9 +106,11 @@ def remove(svc: Services, thread_id: str, by: str) -> bool:
 
     보이는 대화를 숨겼으면 True. 없거나 이미 숨겼으면 False이고 먼저 남긴 기록은 그대로다."""
     ensure(svc)
+    where, args = _mine()
     changed = svc.store.execute(
-        f"UPDATE hr_chat_threads SET removed_at = ?, removed_by = ? WHERE id = ? AND {_LIVE}",
-        (svc.clock().isoformat(), by, thread_id),
+        f"UPDATE hr_chat_threads SET removed_at = ?, removed_by = ?"
+        f" WHERE id = ? AND {_LIVE} AND {where}",
+        (svc.clock().isoformat(), by, thread_id, *args),
     )
     return changed > 0
 
@@ -95,9 +124,9 @@ def create(svc: Services, title: str, who: str | None,
     thread_id = f"hrchat-{seq}"
     svc.store.execute(
         "INSERT INTO hr_chat_threads"
-        "(id, seq, title, status, who, summary, messages, created_at, updated_at, room_id)"
-        " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?, ?)",
-        (thread_id, seq, title, who, now, now, room_id),
+        "(id, seq, title, status, who, summary, messages, created_at, updated_at, room_id,"
+        " tenant_id) VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?, ?, ?)",
+        (thread_id, seq, title, who, now, now, room_id, _tenant_value()),
     )
     return get(svc, thread_id) or {}
 
