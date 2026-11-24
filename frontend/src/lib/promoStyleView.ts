@@ -22,7 +22,7 @@ export interface PromoPick {
 // 시안 문구 그대로
 export const STYLE_ROW = {
   label: "홍보 영상 방향",
-  hint: "회사마다 고르고, 의뢰 문장에 \"책 소개 영상\"처럼 쓰면 그 의뢰만 바뀌어요",
+  hint: "회사마다 고르고, 의뢰 문장에 \"제품 소개 영상\"처럼 쓰면 그 의뢰만 바뀌어요",
   options: [
     { value: "fun_first", label: "재미 먼저 (브랜드는 끝에)" },
     { value: "product", label: "제품·업종 소개" },

@@ -438,7 +438,7 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
                   </div>
                 )}
                 <div className="grid gap-3 md:grid-cols-2">
-                  <input className="field" placeholder="설명 (예: 쇼핑몰 웹)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="설명" />
+                  <input className="field" placeholder="설명 (예: 회사 웹사이트)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} aria-label="설명" />
                   <textarea className="field" rows={2} placeholder="담당 경로 (예: shop-web/, src/)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} aria-label="담당 경로" />
                   <input className="field md:col-span-2" placeholder="회사 코드 위치 (예: shop-web/ · 레포가 회사 코드의 한 폴더일 때. 비우면 레포 루트)" value={form.mount} onChange={(e) => setForm({ ...form, mount: e.target.value })} aria-label="회사 코드 위치" />
                 </div>

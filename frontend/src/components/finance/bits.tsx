@@ -17,7 +17,7 @@ export const TONE = {
 /** 목 모드 응답이면 "예시 데이터" 표시 */
 export function MockBadge({ meta }: { meta: FinanceMeta | null | undefined }) {
   if (!meta?.mock) return null;
-  return <span className="chip bg-violet-50 text-sm text-violet-700" title="실제 쇼핑몰 자료가 아니라 연습용 예시 자료입니다">예시 데이터</span>;
+  return <span className="chip bg-violet-50 text-sm text-violet-700" title="실제 회사 사이트 자료가 아니라 연습용 예시 자료입니다">예시 데이터</span>;
 }
 
 /** 받은 시각과 못 받은 값 안내 */

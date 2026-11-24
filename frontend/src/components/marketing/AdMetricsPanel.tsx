@@ -137,7 +137,7 @@ function CampaignAdMetrics({ campaignId }: { campaignId: string }) {
           </label>
           <button className="btn-primary" disabled={locked || busy || problem !== null} onClick={() => void save()}>{busy ? "저장 중" : "저장"}</button>
         </div>
-        <p className="mt-1 text-xs text-ink-500">비우면 모름, 0을 쓰면 0원(0회)으로 저장합니다. 쇼핑몰 안(onsite) 줄은 광고비를 0으로 채워 두지만 바꿀 수 있습니다. 같은 날짜·source·medium을 다시 적으면 고쳐 씁니다.</p>
+        <p className="mt-1 text-xs text-ink-500">비우면 모름, 0을 쓰면 0원(0회)으로 저장합니다. 사이트 안(onsite) 줄은 광고비를 0으로 채워 두지만 바꿀 수 있습니다. 같은 날짜·source·medium을 다시 적으면 고쳐 씁니다.</p>
         {problem && form.source && <p className="mt-1 text-xs text-red-800">{problem}</p>}
       </fieldset>
       {message && <p role={message.ok ? "status" : "alert"} className={`rounded-xl px-4 py-2 text-sm ${message.ok ? "bg-brand-50 text-brand-700" : "bg-red-50 text-red-800"}`}>{message.text}</p>}

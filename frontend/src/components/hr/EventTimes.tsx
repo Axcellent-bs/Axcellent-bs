@@ -13,7 +13,7 @@ export default function EventTimes({ inc }: { inc: OrchIncident & { timeline?: T
     { label: "감지", at: t.detected_at, span: null },
     { label: "원인 후보 나옴(AI)", at: t.cause_candidate_at, span: seg.evidence, note: t.cause_candidate_at ? undefined : "AI가 원인 후보를 내놓지 못함" },
     { label: "사람에게 넘김", at: t.human_work_started_at, span: secondsBetween(t.detected_at, t.human_work_started_at), note: t.human_work_started_at ? undefined : "넘기지 않고 AI가 처리함" },
-    { label: "정상 복귀", at: t.recovered_at, span: seg.total, note: t.recovered_at ? undefined : "쇼핑몰이 정상 복귀를 알리면 채워집니다" },
+    { label: "정상 복귀", at: t.recovered_at, span: seg.total, note: t.recovered_at ? undefined : "회사 사이트가 정상 복귀를 알리면 채워집니다" },
   ];
   return (
     <section className="card space-y-3 p-6">

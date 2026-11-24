@@ -245,7 +245,7 @@ export function favoritesView(out: SegmentFavoritesOutput, itemNoun: string = DE
   const ext = externalSummary(out.external);
   return {
     kind: "ok",
-    header: `우리 쇼핑몰 · ${who} ${count} (${periodLabel(out.period)})`,
+    header: `회사 사이트 · ${who} ${count} (${periodLabel(out.period)})`,
     genres: { title: "특히 많이 사는 장르", rows: genres.map(favoriteRow) },
     products: { title: `많이 산 ${itemNoun}`, rows: products.map(favoriteRow) },
     external: ext.shown,

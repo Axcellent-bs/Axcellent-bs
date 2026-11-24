@@ -299,7 +299,7 @@ export default function FinancePage() {
 
       {exampleMode && (
         <p role="status" className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-800">
-          <b>예시 데이터</b>를 보고 있습니다. 재무 AI를 연습용 예시 장부로 돌린 결과이며 실제 쇼핑몰 숫자가 아닙니다.
+          <b>예시 데이터</b>를 보고 있습니다. 재무 AI를 연습용 예시 장부로 돌린 결과이며 실제 회사 사이트 숫자가 아닙니다.
           여기서 누른 결정(결산 확정·메모·승인)은 이 화면 안에서만 바뀌고 서버에는 보내지 않습니다. 새로고침하면 처음으로 돌아갑니다.
         </p>
       )}

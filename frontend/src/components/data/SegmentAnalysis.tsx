@@ -175,7 +175,7 @@ function Ask({ options }: { options: OptionsView }) {
   };
 
   return (
-    <Section id="seg-ask" title="물어보기" hint="집단을 고르면 우리 쇼핑몰에서 많이 산 것과 바깥 시장 인기를 나란히 봅니다." badge={view?.kind === "ok" ? view.badge : null} calc={calc}>
+    <Section id="seg-ask" title="물어보기" hint="집단을 고르면 회사 사이트에서 많이 산 것과 바깥 시장 인기를 나란히 봅니다." badge={view?.kind === "ok" ? view.badge : null} calc={calc}>
       <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); void readQuestion(); }}>
         <label className="sr-only" htmlFor="seg-question">질문</label>
         <input id="seg-question" className="field min-w-0 flex-1" maxLength={200} value={text} onChange={(e) => setText(e.target.value)}

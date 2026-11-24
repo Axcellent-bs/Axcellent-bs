@@ -58,7 +58,7 @@ function InquiryLink({ r }: { r: SupportCostRecord }) {
   return (
     <>
       {link}
-      <span className="whitespace-nowrap text-sm text-ink-500" title={`주문 ${r.order_id}이 판매 서버에 없어요. 판매 서버 자료가 바뀌기 전 옛 문의라 문의 진단에 보상 후보·결제 진단이 나오지 않아요.`}> · 주문 기록 없음</span>
+      <span className="whitespace-nowrap text-sm text-ink-500" title={`주문 ${r.order_id}이 사이트 서버에 없어요. 사이트 서버 자료가 바뀌기 전 옛 문의라 문의 진단에 보상 후보·결제 진단이 나오지 않아요.`}> · 주문 기록 없음</span>
     </>
   );
 }

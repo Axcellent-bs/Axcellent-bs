@@ -22,6 +22,7 @@ from ax_agent_template import config as template_config
 from ax_agent_template.llm import LLMClient, LLMSettings
 from planning_agent import spec_template
 from planning_agent.spec_writer import MAX_LEN, MAX_PARAS
+from planning_agent.video_plan import company_info
 
 FILL_TIMEOUT_SECONDS = 45.0
 
@@ -104,7 +105,8 @@ def parse(md: str) -> Filled:
     return out
 
 
-FILL_PROMPT = """너는 고객사(온라인 서점) 사내 기획 담당 AI다.
+FILL_PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업종·소개는 데이터의 company에 있다
+(비어 있으면 업종을 짐작하지 않고 어느 업종에도 맞는 말로 쓴다).
 사람이 기획서의 자유 작성 칸에 쓴 글을 읽고, 맥락을 파악해 기획서 양식의 칸을 채운다.
 
 데이터:
@@ -128,7 +130,8 @@ FILL_PROMPT = """너는 고객사(온라인 서점) 사내 기획 담당 AI다.
 """
 
 
-SUGGEST_PROMPT = """너는 고객사(온라인 서점) 사내 기획 담당 AI다.
+SUGGEST_PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업종·소개는 데이터의 company에 있다
+(비어 있으면 업종을 짐작하지 않고 어느 업종에도 맞는 말로 쓴다).
 기획서 양식에서 아직 비어 있는 칸(empty_fields)에 무엇을 쓰면 좋을지 안을 제안한다.
 사람이 보고 고르는 "제안"이다. 확정된 사실처럼 쓰지 않는다.
 
@@ -138,7 +141,7 @@ SUGGEST_PROMPT = """너는 고객사(온라인 서점) 사내 기획 담당 AI�
 
 규칙:
 - empty_fields에 있는 칸만 쓴다. 나머지 칸은 빈 문자열(목록은 빈 배열)
-- 제목·자유 작성·근거·채워진 칸과 맞는 안을 쓴다. 회사는 온라인 서점이다
+- 제목·자유 작성·근거·채워진 칸과 맞는 안을 쓴다. 회사 업종은 company를 따른다
 - 근거에 없는 숫자를 쓸 때는 앞에 "예:"를 붙여 예시임을 드러낸다
 - 목록 칸(requirements·done_criteria)은 2~3개
 - 각 칸은 짧고 바로 쓸 수 있게, "~한다" 문장, 160자 이하
@@ -182,6 +185,7 @@ class SpecFiller:
             for x in spec_template.sections(template)
         ]
         data = {
+            "company": company_info(),
             "title": title,
             "template": {"name": template, "sections": sections},
             "free_text": md[:8000],
@@ -217,6 +221,7 @@ class SpecFiller:
         template: str = "plan",
     ) -> Filled | None:
         data = {
+            "company": company_info(),
             "title": title,
             "template": {"name": template, "sections": _sections_for(template)},
             "free_text": md[:8000],

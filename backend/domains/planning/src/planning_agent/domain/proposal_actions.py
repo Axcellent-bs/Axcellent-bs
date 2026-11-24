@@ -426,7 +426,7 @@ class ProposalMixin:
                 product_ids=inp.product_ids,
                 content_category=inp.content_category, content_format=inp.content_format,
                 promo_style=inp.promo_style, brand_exposure=inp.brand_exposure,
-                audience=inp.audience, shorts_format=inp.shorts_format,
+                audience=inp.audience, shorts_format=video_plan.shorts_only(inp.shorts_format),
                 body_md=inp.body_md, idea=draft.idea, why=draft.why, target=target,
                 format=asked or draft.format, written_by=draft.written_by, warnings=draft.warnings,
                 created_at=self.clock(), follow_of=follow.id if follow else None,
