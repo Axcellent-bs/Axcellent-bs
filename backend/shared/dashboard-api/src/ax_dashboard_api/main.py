@@ -28,6 +28,7 @@ from ax_dashboard_api import (
 )
 from ax_dashboard_api.accounts import router as accounts_router
 from ax_dashboard_api.connection_keys import router as connection_keys_router
+from ax_dashboard_api.connection_keys import signup_router as connection_keys_signup_router
 from ax_dashboard_api.cost_limit_routes import router as cost_limit_router
 from ax_dashboard_api.envelope import SessionCompanyMiddleware, install_error_handlers, is_mock
 from ax_dashboard_api.higgsfield_mcp_oauth import router as higgsfield_mcp_router
@@ -159,6 +160,7 @@ app.include_router(office_room.router)
 # 시스템 관리 > 회사 연결 (고객사 판매 서버 주소, 읽기·쓰기 모두 사람 토큰)
 app.include_router(company_connection.router)
 app.include_router(connection_keys_router)
+app.include_router(connection_keys_signup_router)  # 로그인 전: 회사 전용 키로 첫 관리자 가입
 # 계정·로그인: 사람마다 다른 세션 토큰 (로그인은 토큰 없이, 나머지는 세션 토큰)
 app.include_router(accounts_router)
 # 로그인 전 화면이 읽는 공개 정보 (설치된 회사 이름만, 토큰 없이. auth.PUBLIC_ROUTES)

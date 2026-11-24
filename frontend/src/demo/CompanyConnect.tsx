@@ -1,24 +1,24 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { DangerRow, Facts, PageHead, SectionHead, StatusChip, Tabs, TONE_DOT, type Tone } from '@/components/connect/parts'
 import CompanyAiTools from '@/components/connect/CompanyAiTools'
 import BrandPromoSettings from '@/components/connect/BrandPromoSettings'
 import type { ConnectionState } from '@/lib/companyConnection'
-import { privateIp, useHosts } from './store'
+import { useHosts } from './store'
 import { SERVICES } from './services'
-import { checkKey, connectWithKey, disconnect, updateCompanyInfo, useCompany, useKeys, type CompanyInfo, type IssuedKey } from './company'
+import { DEFAULT_INDUSTRY, INDUSTRIES, checkKey, connectWithKey, disconnect, moveCompany, updateCompanyInfo, useCompany, type CompanyInfo, type IssuedKey } from './company'
+import { sessionFromLogin, setSession } from '@/lib/humanSession'
 import SiteConnect from './SiteConnect'
 import { useSession } from './session'
 
 // 회사 연결 (고객사 시스템 관리자). 맨 위: 연결 지도(이 서버 → 회사 → 판매 서버 → 사내 PC 상태 한 줄),
 // 아래: AXcellent 연결, 사이트 연결(플랫폼·직접 만든 사이트, 회사가 연결된 뒤에만).
 // AXcellent 연결은 키를 넣어 확인하고 → 회사 정보를 직접 입력하면 → 이 워크스페이스가 그 회사로 연결된다.
-// 키에는 회사 정보가 없다(연결 권한만). 키 발급은 AXcellent 운영팀이 하고, 연결·끊기는 여기서 고객사가 한다.
-const STEPS = ['회사 정보 저장', '사내망 확인', '첫 상태 신호 보내기', '연결 완료'] as const
-const STEP_MS = 1100
-const INDUSTRIES = ['온라인 쇼핑몰', '오프라인 유통', '여행사', '카페 체인', '병원', '제조', '기타']
-/** 이 서버가 있는 사내망 (설치할 때 찾은 값이라 가정) */
-const DETECTED_NETWORK = '192.168.30.0/24'
-const DEMO_INFO: CompanyInfo = { name: '새벽커피', industry: '카페 체인', network: DETECTED_NETWORK }
+// 키 발급은 AXcellent 운영팀이 하고, 연결·끊기는 여기서 고객사가 한다. 회사 전용 키(발급 때 회사를 등록한 키)는
+// 그 회사에서만 연결된다. 지금 회사 연결을 끊은 관리자가 다른 회사 전용 키를 넣으면 "회사 옮기기"로 간다:
+// 나와 내가 연결한 일반회원이 그 회사로 옮기고, 지금 회사 기록은 그대로 남는다(로드맵 7단계 B안).
+// 회사는 계정으로 정한다. 사내망·PC IP는 쓰지 않아 화면에 묻지 않는다(노예진 11/24).
+/** 사내망은 쓰지 않는다(회사는 계정으로 정한다). 서버 칸은 빈 값으로 둔다 */
+const NO_NETWORK = ''
 
 // 탭: 사이트·API 연결(예전 이 화면 전체) / 공통 AI 도구 연결(회사 AI 모델·키·예산, 회사 AI 연결 설계)
 // 11/24 브랜드: 홍보 영상 방향(재미 먼저·제품 소개)·브랜드 노출 (BrandPromoSettings)
@@ -29,22 +29,20 @@ const readTab = (): TabId => {
   return t === 'ai' || t === 'brand' ? t : 'site'
 }
 
-type Phase = { at: 'key' } | { at: 'info'; key: IssuedKey } | { at: 'run'; key: IssuedKey; info: CompanyInfo }
+type Phase = { at: 'key' } | { at: 'move'; key: IssuedKey } | { at: 'info'; key: IssuedKey }
 
-const validNetwork = (v: string) => /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(v.trim()) && privateIp(v.trim().split('/')[0])
 const when = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('ko-KR', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
 
 export default function CompanyConnect() {
   const company = useCompany()
-  const keys = useKeys()
   const { account } = useSession()
   const [tab, setTab] = useState<TabId>(readTab)
   const [phase, setPhase] = useState<Phase>({ at: 'key' })
   const [input, setInput] = useState('')
-  const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: INDUSTRIES[0], network: DETECTED_NETWORK })
+  const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: DEFAULT_INDUSTRY, network: NO_NETWORK })
   const [error, setError] = useState<string | null>(null)
-  const [step, setStep] = useState(0)
+  const [connecting, setConnecting] = useState(false)
   const [confirmOff, setConfirmOff] = useState(false)
   const [editing, setEditing] = useState(false)
   const [showKey, setShowKey] = useState(false)
@@ -52,63 +50,68 @@ export default function CompanyConnect() {
   /** 판매 서버 연결 상태 (아래 판매 서버 구역이 받아 온 값을 연결 지도도 같이 쓴다) */
   const [shop, setShop] = useState<ConnectionState | 'error' | null>(null)
 
-  // 연결 단계를 하나씩 진행하고, 끝나면 회사를 연결한다
-  useEffect(() => {
-    if (phase.at !== 'run') return
-    if (step >= STEPS.length - 1) {
-      void connectWithKey(phase.key, phase.info).catch((x: Error) => setError(x.message))
-      const t = setTimeout(() => { setPhase({ at: 'key' }); setInput(''); setShowKey(false) }, 900)
-      return () => clearTimeout(t)
-    }
-    const t = setTimeout(() => setStep((s) => s + 1), STEP_MS)
-    return () => clearTimeout(t)
-  }, [phase, step])
-
   const submitKey = async (e: FormEvent) => {
     e.preventDefault()
     let r: Awaited<ReturnType<typeof checkKey>>
     try { r = await checkKey(input) } catch (x) { return setError((x as Error).message) }
-    if (!r.ok) return setError(r.reason)
+    if (!r.ok) {
+      // 다른 회사 전용 키: 지금 회사 연결이 없으면 회사 옮기기로, 있으면 먼저 끊어야 한다고 알린다
+      const other = await checkKey(input, true).catch(() => null)
+      if (other?.ok && other.issued.forCompany && other.issued.signup) {
+        if (company) return setError(`${other.issued.company?.name ?? '다른 회사'} 전용 키예요. 그 회사로 옮기려면 지금 회사 연결을 먼저 끊어 주세요. 지금 회사 기록은 그대로 남아요.`)
+        setError(null)
+        return setPhase({ at: 'move', key: other.issued })
+      }
+      return setError(r.reason)
+    }
     setError(null)
     // 같은 키로 다시 연결하면 지난번에 입력한 회사 정보를 미리 채운다
     const prev = r.issued.company
-    setInfo(prev ? { name: prev.name, industry: prev.industry, network: prev.network, siteUrl: prev.siteUrl } : { name: '', industry: INDUSTRIES[0], network: DETECTED_NETWORK, siteUrl: '' })
+    setInfo(prev ? { name: prev.name, industry: prev.industry, network: prev.network, siteUrl: prev.siteUrl } : { name: '', industry: DEFAULT_INDUSTRY, network: NO_NETWORK, siteUrl: '' })
     setPhase({ at: 'info', key: r.issued })
   }
+  const [moving, setMoving] = useState(false)
+  const confirmMove = async () => {
+    if (phase.at !== 'move') return
+    setMoving(true)
+    try {
+      const r = await moveCompany(phase.key.key)
+      const session = sessionFromLogin(r.login)
+      if (!session) throw new Error('옮겼는데 로그인 정보를 받지 못했어요. 다시 로그인해 주세요.')
+      setSession(session) // 새 회사 세션으로 바꾸면 회사·키 목록을 다시 읽는다
+      const c = phase.key.company
+      setInfo({ name: c?.name ?? '', industry: INDUSTRIES.includes(c?.industry ?? '') ? c!.industry : DEFAULT_INDUSTRY, network: NO_NETWORK, siteUrl: c?.siteUrl ?? '' })
+      setError(null)
+      setPhase({ at: 'info', key: phase.key })
+    } catch (x) {
+      setError((x as Error).message)
+    } finally {
+      setMoving(false)
+    }
+  }
+
   const submitInfo = (e: FormEvent) => {
     e.preventDefault()
     if (phase.at !== 'info') return
     if (!info.name.trim()) return setError('회사 이름을 입력하세요.')
-    if (!validNetwork(info.network)) return setError('사내망 주소를 192.168.30.0/24 같은 형태로 입력하세요. 사내 IP 대역만 돼요.')
     if (info.siteUrl?.trim() && !/^https?:\/\/\S+$/.test(info.siteUrl.trim())) return setError('사이트 주소는 http:// 또는 https://로 시작해야 해요.')
     setError(null)
-    setStep(0)
-    setPhase({ at: 'run', key: phase.key, info: { ...info, name: info.name.trim(), network: info.network.trim() } })
+    // 서버에 바로 연결한다(꾸민 진행 단계 없음). 실패하면 이 단계에 머물러 오류를 보여 준다
+    const key = phase.key
+    setConnecting(true)
+    void connectWithKey(key, { ...info, name: info.name.trim(), network: NO_NETWORK, siteUrl: info.siteUrl?.trim() })
+      .then(() => { setPhase({ at: 'key' }); setInput(''); setShowKey(false) })
+      .catch((x: Error) => setError(x.message))
+      .finally(() => setConnecting(false))
   }
 
   const saveInfo = (e: FormEvent) => {
     e.preventDefault()
     if (!info.name.trim()) return setError('회사 이름을 입력하세요.')
-    if (!validNetwork(info.network)) return setError('사내망 주소를 192.168.30.0/24 같은 형태로 입력하세요. 사내 IP 대역만 돼요.')
     if (info.siteUrl?.trim() && !/^https?:\/\/\S+$/.test(info.siteUrl.trim())) return setError('사이트 주소는 http:// 또는 https://로 시작해야 해요.')
     setError(null)
     void updateCompanyInfo({ ...info, name: info.name.trim(), network: info.network.trim() }).catch((x: Error) => setError(x.message))
     setEditing(false)
-  }
-
-  // 데모 편의: 아직 안 쓴 키를 한 글자씩 넣는다
-  // 아직 어느 회사도 쓴 적 없는 키를 먼저 고른다
-  // 키는 서버에 있고 목록에는 가린 키만 와서 미리 채울 수 없다(발급받은 키를 직접 넣는다)
-  const demoKey: IssuedKey | undefined = keys.length < 0 ? keys[0] : undefined
-  const fillDemoKey = () => {
-    if (!demoKey) return
-    setError(null)
-    let i = 0
-    const t = setInterval(() => {
-      i += 1
-      setInput(demoKey.key.slice(0, i))
-      if (i >= demoKey.key.length) clearInterval(t)
-    }, 45)
   }
 
   const online = hosts.filter((h) => h.status === 'online').length
@@ -155,7 +158,7 @@ export default function CompanyConnect() {
 
               {editing ? (
                 <form onSubmit={saveInfo} className="space-y-3 border-t border-ink-100 pt-5">
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-2">
                     <label className="block space-y-1 text-sm">
                       <span className="text-ink-700">회사 이름</span>
                       <input className="field" value={info.name} onChange={(e) => setInfo({ ...info, name: e.target.value })} />
@@ -165,10 +168,6 @@ export default function CompanyConnect() {
                       <select className="field" value={info.industry} onChange={(e) => setInfo({ ...info, industry: e.target.value })}>
                         {[...new Set([info.industry, ...INDUSTRIES])].map((x) => <option key={x}>{x}</option>)}
                       </select>
-                    </label>
-                    <label className="block space-y-1 text-sm">
-                      <span className="text-ink-700">사내망 주소</span>
-                      <input className="field font-mono" value={info.network} onChange={(e) => setInfo({ ...info, network: e.target.value })} />
                     </label>
                   </div>
                   <label className="block space-y-1 text-sm">
@@ -184,7 +183,6 @@ export default function CompanyConnect() {
               ) : (
                 <div className="grid gap-6 border-t border-ink-100 pt-5 lg:grid-cols-[3fr_2fr]">
                   <Facts cols={2} items={[
-                    ['사내망 주소', <span className="font-mono">{company.network}</span>],
                     ['연결 키', <span className="font-mono">{company.key ? `${company.key.slice(0, 8)}••••-••••` : '—'}</span>],
                     ['사용 중인 서비스', `${SERVICES.length}개`],
                     ['연결된 사내 PC', `${online} / ${hosts.length}대`],
@@ -222,7 +220,7 @@ export default function CompanyConnect() {
           <div className="card">
             <ol className="flex border-b border-ink-100 text-sm" aria-label="연결 순서">
               {['키 넣기', '회사 정보 입력', '연결'].map((label, i) => {
-                const idx = phase.at === 'key' ? 0 : phase.at === 'info' ? 1 : 2
+                const idx = phase.at === 'key' || phase.at === 'move' ? 0 : connecting ? 2 : 1
                 const state = i === idx ? 'now' : i < idx ? 'done' : 'next'
                 return (
                   <li key={label} aria-current={state === 'now' ? 'step' : undefined}
@@ -238,10 +236,22 @@ export default function CompanyConnect() {
 
             {phase.at === 'key' && (
               <div className="space-y-4 p-6">
-                <SectionHead as="h3" title="연결 키 넣기" desc="키는 AXcellent 운영자가 발급해요. 키에는 회사 정보가 없고, 다음 단계에서 직접 입력해요." />
+                <SectionHead as="h3" title="연결 키 넣기" desc="AXcellent에서 발급받은 회사 전용 키를 넣어요. 다른 회사 전용 키를 넣으면 그 회사로 옮기는 단계로 가요." />
                 {keyForm}
                 {error && <p className="text-sm text-red-700">{error}</p>}
-                {demoKey && <button type="button" className="btn-quiet px-0 text-xs" onClick={fillDemoKey}>데모: 발급된 키 넣기</button>}
+              </div>
+            )}
+
+            {phase.at === 'move' && (
+              <div className="space-y-4 p-6">
+                <SectionHead as="h3" title={`${phase.key.company?.name ?? '새 회사'}로 옮기기`}
+                  desc="이 키는 다른 회사 전용이에요. 옮기면 나와 내가 연결한 일반회원이 그 회사로 가요. 지금 회사의 기록은 그대로 남고, 다시 연결하면 돌아와요." />
+                <p className="text-sm text-ink-700">다른 관리자와 그 관리자가 연결한 회원은 지금 회사에 남아요. 옮긴 회원은 다시 로그인하면 새 회사로 들어가요.</p>
+                {error && <p className="text-sm text-red-700">{error}</p>}
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn-primary px-5" disabled={moving} onClick={() => void confirmMove()}>{moving ? '옮기는 중…' : '이 회사로 옮기기'}</button>
+                  <button type="button" className="btn-quiet" onClick={() => { setPhase({ at: 'key' }); setError(null) }}>취소</button>
+                </div>
               </div>
             )}
 
@@ -262,42 +272,17 @@ export default function CompanyConnect() {
                   </label>
                 </div>
                 <label className="block space-y-1 text-sm">
-                  <span className="text-ink-700">사내망 주소 <span className="text-xs text-ink-500">(이 서버에서 찾은 값, 다르면 고치세요)</span></span>
-                  <input className="field font-mono" value={info.network} onChange={(e) => setInfo({ ...info, network: e.target.value })} />
-                </label>
-                <label className="block space-y-1 text-sm">
                   <span className="text-ink-700">사이트 주소 <span className="text-xs text-ink-500">(선택 · 머리글에 사이트 아이콘과 링크로 보여요)</span></span>
                   <input className="field font-mono" value={info.siteUrl ?? ''} placeholder="https://www.example.com" onChange={(e) => setInfo({ ...info, siteUrl: e.target.value })} />
                 </label>
                 {error && <p className="text-sm text-red-700">{error}</p>}
                 <div className="flex flex-wrap items-center gap-2">
-                  <button className="btn-primary px-5">연결</button>
+                  <button className="btn-primary px-5" disabled={connecting}>{connecting ? '연결하는 중…' : '연결'}</button>
                   <button type="button" className="btn-quiet" onClick={() => { setPhase({ at: 'key' }); setError(null) }}>키 다시 넣기</button>
-                  <button type="button" className="btn-quiet ml-auto px-0 text-xs" onClick={() => setInfo(DEMO_INFO)}>데모: 회사 정보 채우기</button>
                 </div>
               </form>
             )}
 
-            {phase.at === 'run' && (
-              <div className="space-y-4 p-6" aria-live="polite">
-                <SectionHead as="h3" title={`${phase.info.name} 연결하는 중`} />
-                <ol className="space-y-1">
-                  {STEPS.map((s, i) => {
-                    const done = i < step || (i === step && step === STEPS.length - 1)
-                    const now = i === step && !done
-                    return (
-                      <li key={s} className={`flex items-center gap-3 px-4 py-2.5 text-sm ${now ? 'bg-brand-50 font-semibold text-brand-700' : done ? 'text-ink-900' : 'text-ink-500'}`}>
-                        <span className={`grid h-6 w-6 place-items-center text-xs ${done ? 'bg-emerald-700 text-white' : now ? 'animate-pulse bg-brand-600 text-white motion-reduce:animate-none' : 'bg-ink-100 text-ink-500'}`}>{done ? '✓' : i + 1}</span>
-                        {s}
-                        {done && i === 0 && <span className="ml-auto text-xs font-normal text-ink-500">{phase.info.name} · {phase.info.industry}</span>}
-                        {done && i === 1 && <span className="ml-auto font-mono text-xs font-normal text-ink-500">{phase.info.network}</span>}
-                        {done && i === 2 && <span className="ml-auto text-xs font-normal text-ink-500">상태 신호만 보내요</span>}
-                      </li>
-                    )
-                  })}
-                </ol>
-              </div>
-            )}
           </div>
         )}
       </section>

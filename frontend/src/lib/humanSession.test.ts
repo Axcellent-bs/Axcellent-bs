@@ -139,3 +139,16 @@ test("비밀번호 초기화 권한: 운영자는 다른 모든 계정, 고객�
   assert.equal(canResetPassword(admin, op), false);
   assert.equal(canResetPassword(member, { id: "m2", role: "member" }), false);
 });
+
+test("소속 회사가 빈 고객사 계정 로그인은 연결 대기(noCompany), 운영자·소속 있는 계정은 아니다", () => {
+  const member = { id: "acc-m", name: "회원", email: "m@example.com", role: "member" };
+  const none = sessionFromLogin({ token: "axs1.a.b", expires_at: NOW + 60, account: member, companies: [] }, NOW);
+  assert.equal(none?.noCompany, true);
+  const linked = sessionFromLogin(
+    { token: "axs1.a.b", expires_at: NOW + 60, account: member, companies: [{ company_id: "nubi", role: "member" }] },
+    NOW,
+  );
+  assert.equal(linked?.noCompany, undefined);
+  const op = { id: "acc-o", name: "운영", email: "o@example.com", role: "operator" };
+  assert.equal(sessionFromLogin({ token: "axs1.a.b", expires_at: NOW + 60, account: op, companies: [] }, NOW)?.noCompany, undefined);
+});
