@@ -14,7 +14,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Header, Path, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
@@ -1564,9 +1564,7 @@ async def marketing_creative_script_save(
     script = {
         "title_ko": body.title_ko.strip() or body.title_ko,
         "cta_ko": body.cta_ko.strip(),
-        "scenes": [
-            {"no": i, **s.model_dump()} for i, s in enumerate(body.scenes, start=1)
-        ],
+        "scenes": [{"no": i, **s.model_dump()} for i, s in enumerate(body.scenes, start=1)],
     }
     return ok(await marketing_client.creative_script_save_call(record_id, script, who))
 
@@ -2849,20 +2847,22 @@ def communications(
 
 # ------------------------------------ AI 대화방: 총괄 사건·안전 관문 기록 (읽기 전용 중계)
 @router.get("/incidents")
-async def incidents() -> dict:
-    """총괄이 다루는 사건(단계·이벤트·사람 결정 대기). 사람 결정은 안전 관문 보류 큐에서 한다."""
-    items = relay.mock_incidents() if is_mock() else await relay.incidents()
+async def incidents(authorization: str | None = Header(None)) -> dict:
+    """총괄이 다루는 사건(단계·이벤트·사람 결정 대기). 사람 결정은 안전 관문 보류 큐에서 한다.
+
+    로그인 세션 토큰은 총괄에 그대로 넘겨 그 회사 사건만 받는다(누비투어 연결 11/24)."""
+    items = relay.mock_incidents() if is_mock() else await relay.incidents(authorization)
     return ok(items, total=len(items))
 
 
 @router.get("/incidents/{context_id}")
-async def incident(context_id: str) -> dict:
+async def incident(context_id: str, authorization: str | None = Header(None)) -> dict:
     if is_mock():
         found = next((i for i in relay.mock_incidents() if i["context_id"] == context_id), None)
         if found is None:
             raise ApiError(404, "NOT_FOUND", f"사건 {context_id}를 찾을 수 없다")
         return ok(found)
-    return ok(await relay.incident(context_id))
+    return ok(await relay.incident(context_id, authorization))
 
 
 @router.get("/executions")

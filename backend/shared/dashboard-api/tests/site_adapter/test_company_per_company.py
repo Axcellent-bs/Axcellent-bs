@@ -633,3 +633,28 @@ def test_shop_relay_follows_the_session_company(
         "http://dash:8020/site-adapter/api/shop/banners",
         "http://dash:8020/site-adapter/api/shop/banners",
     ]
+
+
+def test_other_screen_paths_read_the_session_company(
+    client: TestClient, people: dict[str, dict[str, str]]
+) -> None:
+    """회사 연결 화면 밖의 경로(주문·회원·사이트 중계)도 다른 회사 세션이면 그 회사로 읽는다(11/24).
+
+    시험용 경로로 그 요청에 걸린 회사를 본다. 캣북스 세션·공용 토큰은 예전 그대로(걸지 않음)."""
+    from ax_agent_template import company_scope
+    from ax_dashboard_api.main import app
+
+    if not any(getattr(r, "path", "") == "/api/dashboard/_test/whose" for r in app.routes):
+
+        @app.get("/api/dashboard/_test/whose")
+        def _whose() -> dict:
+            return {"data": {"company": company_scope.active()}}
+
+    def whose(headers: dict[str, str] | None = None) -> Any:
+        return client.get("/api/dashboard/_test/whose", headers=headers or {}).json()["data"][
+            "company"
+        ]
+
+    assert whose(people["nubi"]) == "nubi"
+    assert whose(people["cat"]) is None
+    assert whose() is None

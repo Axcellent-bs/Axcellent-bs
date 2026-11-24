@@ -87,4 +87,12 @@ class CompanyRouteMiddleware:
             with company_scope.using(session_company()):
                 await self.app(scope, receive, send)
             return
+        # 그 밖의 화면 경로(주문·회원·사이트 자료 중계 등): 다른 회사 세션이면 그 회사로 읽는다.
+        # 걸지 않으면 연결·사이트 주소가 설치 회사(캣북스) 것으로 골라졌다(11/24 누비투어 연결).
+        # 캣북스 세션·공용 토큰·세션 없음은 예전 그대로(걸지 않음)
+        company = session_company()
+        if company and company_scope.scope_id(company) != company_scope.CATBOOKS:
+            with company_scope.using(company):
+                await self.app(scope, receive, send)
+            return
         await self.app(scope, receive, send)
