@@ -52,6 +52,7 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from ax_contracts.schemas.chat import ChatRemoveOutput
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 from ax_contracts.schemas.data import (
     AccuracyReportInput,
     ActivityReportInput,
@@ -427,6 +428,23 @@ def use_sales_store(store: SalesStore | None) -> None:
     _sales_store = store
 
 
+def sales_tenant(given: str, meta: str | None) -> str | None:
+    """판매 skill이 읽을 회사. 다른 회사 판매 기록은 읽지 않는다(None = invalid_input).
+
+    정식 회사 ID로 비교한다(shop-demo = catbooks). 입력의 회사 칸이 기본값(캣북스)이고 요청 회사가
+    다르면 입력을 비운 것으로 보고 요청 회사를 따른다(화면은 meta.tenant_id만 싣는다, 11/24).
+    캣북스는 입력에 온 값 그대로 돌려준다(판매 저장소의 옛 회사 값을 바꾸지 않게)."""
+    from ax_agent_template.companies import canonical_company_id
+
+    want = canonical_company_id(given) or TENANT_ID_CATBOOKS
+    asked = canonical_company_id(meta) or TENANT_ID_CATBOOKS
+    if want == asked:
+        return given
+    if want == TENANT_ID_CATBOOKS:
+        return meta
+    return None
+
+
 async def sales_analysis(request: AgentRequest) -> AgentResult:
     """매출 분석. 표준 판매 저장소만 읽는다. LLM 없음, 상태를 바꾸지 않는다(grade read).
 
@@ -435,8 +453,10 @@ async def sales_analysis(request: AgentRequest) -> AgentResult:
     data = _parse(request, SalesAnalysisInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:  # 다른 고객사 판매 기록은 읽지 않는다
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:  # 다른 고객사 판매 기록은 읽지 않는다
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     cat = metric_catalog.current()
     now = datetime.now(UTC)
     got = await asyncio.to_thread(
@@ -460,8 +480,10 @@ async def segment_options(request: AgentRequest) -> AgentResult:
     data = _parse(request, SegmentOptionsInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     cat = metric_catalog.current()
     now = datetime.now(UTC)
     got = await asyncio.to_thread(
@@ -493,8 +515,10 @@ async def segment_question_skill(request: AgentRequest) -> AgentResult:
     data = _parse(request, SegmentQuestionInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     cat = metric_catalog.current()
     now = datetime.now(UTC)
     parsed = await segment_question.parse(data.text, cat.sales, get_llm())
@@ -520,8 +544,10 @@ async def segment_profile(request: AgentRequest) -> AgentResult:
     data = _parse(request, SegmentProfileInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     cat = metric_catalog.current()
     now = datetime.now(UTC)
     got = await asyncio.to_thread(
@@ -542,8 +568,10 @@ async def segment_favorites(request: AgentRequest) -> AgentResult:
     data = _parse(request, SegmentFavoritesInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     cat = metric_catalog.current()
     now = datetime.now(UTC)
     store = get_sales_store()
@@ -570,8 +598,10 @@ async def basket_pairs_skill(request: AgentRequest) -> AgentResult:
     data = _parse(request, BasketPairsInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     cat = metric_catalog.current()
     now = datetime.now(UTC)
     got = await asyncio.to_thread(
@@ -592,8 +622,10 @@ async def market_coverage(request: AgentRequest) -> AgentResult:
     data = _parse(request, MarketCoverageInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     cat = metric_catalog.current()
     now = datetime.now(UTC)
     store = get_sales_store()
@@ -618,8 +650,10 @@ async def retention_skill(request: AgentRequest) -> AgentResult:
     data = _parse(request, RetentionInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     cat = metric_catalog.current()
     now = datetime.now(UTC)
     got = await asyncio.to_thread(
@@ -640,8 +674,10 @@ async def channel_value_skill(request: AgentRequest) -> AgentResult:
     data = _parse(request, ChannelValueInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     cat = metric_catalog.current()
     now = datetime.now(UTC)
     got = await asyncio.to_thread(
@@ -740,8 +776,10 @@ async def event_proposal_skill(request: AgentRequest) -> AgentResult:
     data = _parse(request, EventProposalInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     cat = metric_catalog.current()
     now = datetime.now(UTC)
     past, past_note = await get_past_campaigns()
@@ -784,8 +822,10 @@ async def event_proposal_send(request: AgentRequest) -> AgentResult:
     data = _parse(request, EventProposalSendInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     now = datetime.now(UTC)
     sent = await event_proposal.send_proposal(
         get_event_proposal_store(), data.tenant_id, data.proposal_id, request.meta, now,
@@ -1218,8 +1258,10 @@ async def instagram_memo_add(request: AgentRequest) -> AgentResult:
     data = _parse(request, InstagramMemoAddInput)
     if isinstance(data, AgentResult):
         return data
-    if data.tenant_id != request.meta.tenant_id:
+    tenant = sales_tenant(data.tenant_id, request.meta.tenant_id)
+    if tenant is None:
         return _result(request, TaskStatus.FAILED, outcome="invalid_input")
+    data = data.model_copy(update={"tenant_id": tenant})
     out = await instagram.memo_add(data, request.meta, env=os.environ,
                                    gate=get_instagram_memo_gate())  # fmt: skip
     status = TaskStatus.COMPLETED if out.outcome == "added" else TaskStatus.REJECTED
