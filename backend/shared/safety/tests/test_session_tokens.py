@@ -85,3 +85,32 @@ def test_shared_token_is_refused_once_switched_off(
     url = _held_url(client, coupon, monkeypatch)
     bad = client.post(url, json={"decision": "approved"}, headers=_bearer("shared-secret"))
     assert bad.status_code == 403
+
+
+def test_pending_approvals_are_kept_per_session_company(
+    client: Any, coupon: Any, session: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """격리 시험 5번: 다른 회사 세션은 캣북스 승인 대기를 목록·상세·결정 어디서도 못 본다(11/24).
+
+    캣북스 세션·공용 토큰은 예전 그대로 본다."""
+    url = _held_url(client, coupon, monkeypatch)  # 캣북스(기본 회사) 건
+    review_url = url.removesuffix("/decision")
+    review_id = review_url.rsplit("/", 1)[1]
+    nubi = human_auth.issue_session(
+        account_id="acc-n", name="누비관리", role="admin", company_id="nubi", company_role="admin"
+    )[0]
+
+    def ids(headers: dict[str, str]) -> list[str]:
+        rows = client.get("/api/safety/reviews?status=pending", headers=headers).json()["data"]
+        return [r["review_id"] for r in rows]
+
+    assert review_id not in ids(_bearer(nubi))
+    assert client.get(review_url, headers=_bearer(nubi)).status_code == 404
+    refused = client.post(url, json={"decision": "approved"}, headers=_bearer(nubi))
+    assert refused.status_code == 404
+    assert client.get(review_url).json()["data"]["status"] == "pending"  # 그대로
+    assert review_id in ids(_bearer(session))  # 대조: 캣북스 세션은 본다
+    no_company = human_auth.issue_session(
+        account_id="acc-x", name="끊긴회원", role="member", no_company=True
+    )[0]
+    assert ids(_bearer(no_company)) == []  # 소속 없는 계정은 아무것도 못 본다

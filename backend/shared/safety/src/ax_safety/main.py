@@ -113,6 +113,33 @@ def _log_refusal(request: ExecuteRequest, reason_code: str) -> None:
     )
 
 
+def _review_scope(authorization: str | None) -> Any:
+    """승인 대기를 회사로 거르는 함수(11/24 회사 격리, 격리 시험 5번).
+
+    - 다른 회사 로그인 세션: 그 회사 건만
+    - 캣북스 세션: 다른 회사로 등록된 건만 빼고(예전 건은 회사 값이 기본값이라 그대로 캣북스)
+    - 공용 토큰·토큰 없음: 예전처럼 전부(운영 도구·옮기는 동안)
+    """
+    from ax_agent_template.companies import canonical_company_id, company_ids
+
+    token = human_auth.bearer(authorization)
+    company: str | None = None
+    if token and human_auth.is_session_token(token):
+        try:
+            company = human_auth.verify_session(token).company_id
+        except human_auth.HumanAuthError as err:
+            if err.code == "NO_COMPANY":  # 소속 회사가 없는 계정은 아무 회사 건도 못 본다
+                return lambda _tenant: False
+            company = None
+    if company is None:
+        return lambda _tenant: True
+    mine = canonical_company_id(company) or "catbooks"
+    if mine != "catbooks":
+        return lambda tenant: canonical_company_id(tenant) == mine
+    others = {c for c in company_ids() if c != "catbooks"}
+    return lambda tenant: canonical_company_id(tenant) not in others
+
+
 def create_app(
     gate: Gate | None = None,
     *,
@@ -241,15 +268,25 @@ def create_app(
     @app.get("/api/safety/reviews")
     async def list_reviews(
         status: Literal["pending", "approved", "rejected", "expired"] | None = None,
+        authorization: str | None = Header(default=None),
     ) -> dict:
         await gate.expire_reviews()
-        return _ok([r.model_dump(mode="json") for r in gate.store.list_reviews(status)])
+        sees = _review_scope(authorization)
+        return _ok(
+            [
+                r.model_dump(mode="json")
+                for r in gate.store.list_reviews(status)
+                if sees(r.tenant_id)
+            ]
+        )
 
     @app.get("/api/safety/reviews/{review_id}", response_model=None)
-    async def get_review(review_id: str) -> dict | JSONResponse:
+    async def get_review(
+        review_id: str, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
         await gate.expire_reviews()
         review = gate.store.get_review(review_id)
-        if review is None:
+        if review is None or not _review_scope(authorization)(review.tenant_id):
             return _error(404, "NOT_FOUND", "보류 건이 없다")
         return _ok(review.model_dump(mode="json"))
 
@@ -263,6 +300,9 @@ def create_app(
             person = human_from_token(bearer(authorization))
         except PermissionError as exc:
             return _error(403, "HUMAN_ONLY", str(exc))
+        found = gate.store.get_review(review_id)
+        if found is not None and not _review_scope(authorization)(found.tenant_id):
+            return _error(404, "NOT_FOUND", "보류 건이 없다")  # 다른 회사 승인 대기는 없는 것처럼
         try:
             review = await gate.decide_review(
                 review_id, body.decision, person, body.note, body.decided_as

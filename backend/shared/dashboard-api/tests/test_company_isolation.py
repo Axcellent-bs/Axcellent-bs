@@ -434,12 +434,13 @@ def test_5_a_sees_no_b_office_thread(client: TestClient, people: Any) -> None:
 @pytest.mark.skip(
     reason=(
         "dashboard-api에 승인 대기 경로가 없다(/reviews는 목 전용). 화면이 안전 관문 "
-        "/api/safety/reviews를 바로 읽고, 안전 관문 목록은 회사로 거르지 않는다 — "
-        f"안전 관문 담당 {STAGE4}에서 이 시험을 채운다"
+        "/api/safety/reviews를 바로 읽는다. 회사 거르기는 안전 관문 쪽 시험이 맡는다: "
+        "shared/safety/tests/test_session_tokens.py::"
+        "test_pending_approvals_are_kept_per_session_company"
     )
 )
 def test_5_a_sees_no_b_pending_approval() -> None:
-    raise AssertionError("경로가 생기면 채운다")
+    raise AssertionError("안전 관문 쪽 시험이 맡는다")
 
 
 # ---- 6. m(A 일반회원) 토큰으로 B 데이터 → 404 (회사 바꾸기 길은 없다) ----
