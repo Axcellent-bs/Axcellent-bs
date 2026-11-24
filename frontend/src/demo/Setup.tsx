@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { checkKey, connectWithKey, signupWithKey, useCompany, type CompanyInfo, type IssuedKey } from './company'
+import { INDUSTRIES, checkKey, connectWithKey, signupWithKey, useCompany, type CompanyInfo, type IssuedKey } from './company'
 import { sessionFromLogin, setSession } from '@/lib/humanSession'
 import { emailTaken, homeOf, registerAccount, useSession } from './session'
 
@@ -26,7 +26,7 @@ export default function Setup() {
   const [keyInput, setKeyInput] = useState(() => new URLSearchParams(window.location.search).get('key') ?? '')
   const [key, setKey] = useState<IssuedKey | null>(null)
   const [admin, setAdmin] = useState({ name: '', email: '', password: '' })
-  const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: '', network: '' })
+  const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: INDUSTRIES[0], network: '' })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -57,7 +57,7 @@ export default function Setup() {
       try { r = await checkKey(keyInput, serverMode && !account) } catch (x) { return setError((x as Error).message) }
       if (!r.ok) return setError(r.reason)
       setKey(r.issued)
-      if (r.issued.company) setInfo((prev) => ({ ...prev, name: r.issued.company?.name || prev.name, siteUrl: r.issued.company?.siteUrl }))
+      if (r.issued.company) setInfo((prev) => ({ ...prev, name: r.issued.company?.name || prev.name, industry: INDUSTRIES.includes(r.issued.company?.industry ?? '') ? r.issued.company!.industry : prev.industry, siteUrl: r.issued.company?.siteUrl }))
     }
     if (stage === 1 && serverMode && keySignup) {
       // 회사 전용 키로 그 회사의 첫 관리자 가입 → 받은 세션으로 이어서 연결
@@ -167,8 +167,11 @@ export default function Setup() {
           {stage === 2 && (
             <form onSubmit={next} className="space-y-3">
               <h1 className="text-lg font-semibold">회사 정보 입력</h1>
-              <div className="grid gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <input className="field" placeholder="회사 이름" value={info.name} onChange={(e) => setInfo({ ...info, name: e.target.value })} aria-label="회사 이름" />
+                <select className="field" value={info.industry} onChange={(e) => setInfo({ ...info, industry: e.target.value })} aria-label="업종">
+                  {INDUSTRIES.map((x) => <option key={x}>{x}</option>)}
+                </select>
               </div>
               <p className="text-xs text-ink-500">회사 이름은 직원 화면 상단 "AXcellent with ○○"에 나와요. AXcellent에는 회사 이름과 상태 신호만 전달돼요.</p>
               {error && <p className="text-sm text-red-700">{error}</p>}
