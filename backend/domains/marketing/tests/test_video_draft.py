@@ -292,3 +292,10 @@ def test_reprepare_keeps_an_already_attached_video() -> None:
     assert again["post_draft_id"] == first["post_draft_id"]
     kept = store.get(first["post_draft_id"])
     assert kept.asset_ref == "t/c/m/labeled.mp4" and kept.asset_sha256 == "a" * 64
+
+
+def test_concept_describing_sharing_is_not_engagement_bait() -> None:
+    # 11/24 PROP-22: 콘셉트의 "공유할 … 밈"은 설명 문장이라 영상 초안 준비가 막히지 않는다
+    concept = "이십대가 웃으며 공유할 책 읽는 일상 밈"
+    body = _call({"proposal_id": "PROP-22", "video_plan": _plan(concept=concept)})
+    assert body["status"] == "completed", body
