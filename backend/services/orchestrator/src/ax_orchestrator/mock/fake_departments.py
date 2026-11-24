@@ -278,11 +278,12 @@ ALT_OUTPUTS: dict[tuple[str, str], Callable[[AgentRequest], dict[str, Any]]] = {
     ("diagnose_incident", "undetermined"): lambda r: _ok(
         status="undetermined", suspects=[], impact_scope=["payment"]
     ),
-    # 같은 유형 과거 장애가 장애 상태 해제로 풀렸다(유사도 0.92, low는 0.80)
-    ("find_similar_cases", "past_release"): lambda r: _past_release(0.92),
-    ("find_similar_cases", "past_release_low"): lambda r: _past_release(0.80),
-    # 같은 유형 과거 장애가 잘못된 배포를 되돌려 풀렸다(유사도 0.92)
-    ("find_similar_cases", "past_rollback"): lambda r: _past_release(0.92, "rollback_deployment"),
+    # 같은 유형 과거 장애가 장애 상태 해제로 풀렸다(유사도 0.97, low는 0.90)
+    # low는 예전 기준 0.85는 넘고 지금 기준 0.95는 못 넘는다
+    ("find_similar_cases", "past_release"): lambda r: _past_release(0.97),
+    ("find_similar_cases", "past_release_low"): lambda r: _past_release(0.90),
+    # 같은 유형 과거 장애가 잘못된 배포를 되돌려 풀렸다(유사도 0.97)
+    ("find_similar_cases", "past_rollback"): lambda r: _past_release(0.97, "rollback_deployment"),
     # 감시는 이상인데 장애 스위치는 꺼져 있다(예: 결제사 지연): 인프라가 해제하지 않는다
     ("release_fault", "switch_off"): lambda r: _ok(
         message="결제 서버는 이상이지만 장애 스위치가 꺼져 있어 해제할 것이 없다(다른 원인)",
