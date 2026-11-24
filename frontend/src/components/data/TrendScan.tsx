@@ -17,6 +17,7 @@ import { KeywordSummaryCards, KeywordTrend } from "@/components/data/KeywordTren
 import { IgAudioSummaryCard, InstagramAudio, KEY_LATER, igKeyMissing } from "@/components/data/InstagramAudio";
 import { InstagramRadar } from "@/components/data/InstagramRadar";
 import InstagramRadarSetup from "@/components/data/InstagramRadarSetup";
+import YoutubeMemeKeywordsSetup from "@/components/data/YoutubeMemeKeywordsSetup";
 import { InstagramMemo } from "@/components/data/InstagramMemo";
 import { okOut, useSkill, type SkillState } from "@/components/data/useSkill";
 import { Basis, Sources, when } from "@/components/data/Sources";
@@ -207,7 +208,13 @@ function PlatformViews({ searchExtra }: { searchExtra?: ReactNode }) {
       <div hidden={view === "search" || view === "instagram"}>
         <TrendMemes focus={view} summaryCards={<><KeywordSummaryCards state={kw.state} /><IgAudioSummaryCard state={igMusic.state} /></>} />
       </div>
-      {view === "youtube" && <VideoExplorer />}
+      {view === "youtube" && (
+        <>
+          <VideoExplorer />
+          {/* 요즘 유행·밈의 쇼츠 검색이 찾을 키워드 */}
+          <YoutubeMemeKeywordsSetup />
+        </>
+      )}
       {view === "instagram" && (
         <section aria-label="인스타그램" className="space-y-4">
           {igKeyLine !== null ? (

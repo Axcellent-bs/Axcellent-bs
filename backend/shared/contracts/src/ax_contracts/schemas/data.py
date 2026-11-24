@@ -4047,6 +4047,37 @@ class TrendMeme(AxModel):
     judged_by: Literal["share", "count"] = "count"
 
 
+class MemeShortsVideo(AxModel):
+    """밈 키워드 쇼츠 검색 결과 하나 (search.list 최근 7일·short·KR·조회수 순 → videos·channels)."""
+
+    video_id: str = Field(min_length=1)
+    keyword: str  # 이 영상을 찾은 회사 밈 키워드 (여러 키워드면 처음 것)
+    title: str | None = None  # untrusted: 화면에는 텍스트로만
+    channel_id: str | None = None
+    channel_title: str | None = None
+    published_at: UtcDatetime | None = None
+    views: int | None = Field(default=None, ge=0)
+    subscribers: int | None = Field(default=None, ge=0)  # 숨김·모르면 None
+    views_per_subscriber: float | None = Field(default=None, ge=0)  # 조회 ÷ 구독자
+    big_channel: bool = False  # 구독자 10만 이상 (따로 표시)
+    video_url: str | None = None
+    thumbnail_url: str | None = None
+
+
+class MemeShortsSearch(AxModel):
+    # known = 오늘(또는 마지막) 검색 저장분, unknown = 검색 못 함(이유), not_set = 키워드 없음
+    status: Literal["known", "unknown", "not_set"] = "not_set"
+    reason: str | None = None
+    day: dt.date | None = None  # 검색한 날 (한국)
+    keywords: list[str] = Field(default_factory=list)  # 회사 밈 키워드 (최대 10개)
+    searched: list[str] = Field(default_factory=list)  # 실제로 검색한 키워드
+    limits: list[str] = Field(default_factory=list)  # 건너뛴 키워드·이유 (쿼터 30% 등)
+    units: int = Field(default=0, ge=0)  # 그 검색이 쓴 YouTube 단위
+    items: list[MemeShortsVideo] = Field(default_factory=list)  # 구독자 대비 조회 배수 순
+    removed: list[MemeSkipped] = Field(default_factory=list)  # 실존 인물·사건 분류로 뺀 영상
+    searched_at: UtcDatetime | None = None
+
+
 class MemeSkipped(AxModel):
     """유행에서 뺀 단위와 이유."""
 
@@ -4089,6 +4120,8 @@ class TrendMemesOutput(AxModel):
     limits: list[str] = Field(default_factory=list)
     generated_at: UtcDatetime | None = None
     summary: str = ""
+    # 11/24 밈 소스: 회사 밈 키워드로 찾은 쇼츠 (하루 1번 수집 저장분). 키워드가 없으면 not_set
+    shorts_search: MemeShortsSearch | None = None
 
 
 # ---------- keyword_trend (검색 트렌드 · 도서 분야, 11/18) ----------
@@ -4311,6 +4344,9 @@ class InstagramRadarInput(AxModel):
     pass
 
 
+IgSourceKind = Literal["benchmark", "meme"]
+
+
 class InstagramRadarPost(AxModel):
     """터진 게시물 하나 (계정 이름·게시 링크·지표, 캡션 일부는 untrusted 텍스트)."""
 
@@ -4330,6 +4366,13 @@ class InstagramRadarPost(AxModel):
     media_type: str | None = None  # IMAGE · VIDEO · CAROUSEL_ALBUM
     # 계정 평소와 가장 크게 다른 점 한 줄 (코드 템플릿, LLM 없음). 다른 점이 없으면 None
     standout: str | None = None
+    # 11/24 밈 소스: 레이더 계정 종류 (benchmark = 기업·경쟁사 계정, meme = 밈·크리에이터 계정)
+    source_kind: IgSourceKind = "benchmark"
+    # 팔로워 대비 반응 = (좋아요 + 댓글) ÷ 팔로워 (business_discovery followers_count, 같은 호출).
+    # 팔로워·좋아요를 모르면 None (0으로 채우지 않음)
+    followers: int | None = Field(default=None, ge=0)
+    comments: int | None = Field(default=None, ge=0)
+    follower_engagement: float | None = Field(default=None, ge=0)
 
 
 class InstagramRadarGroup(AxModel):
@@ -4363,6 +4406,10 @@ class InstagramRadarOutput(AxModel):
     limits: list[str] = Field(default_factory=list)
     sources: list[InstagramSource] = Field(default_factory=list)
     generated_at: UtcDatetime | None = None
+    # 11/24 밈 소스: accounts_total 중 밈·크리에이터 계정 수, 그 계정들의 뜬 게시물
+    # (묶음과 상관없이 평소 대비 배수 순, 최대 12개. 밈 계정은 같은 해시태그로 잘 안 묶인다)
+    meme_accounts_total: int = Field(default=0, ge=0)
+    meme_posts: list[InstagramRadarPost] = Field(default_factory=list)
 
 
 MemoKind = Literal["audio", "format", "hashtag", "other"]

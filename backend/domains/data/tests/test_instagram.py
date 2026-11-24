@@ -102,9 +102,10 @@ def test_business_discovery_fields_and_empty_is_no_data() -> None:
     assert fields.startswith("business_discovery.username(agelimited){username,media.limit(20){")
     # 2026-11-18 사양 변경: 썸네일용 media_type·media_url·thumbnail_url을 요청한다 (호출 수는 같음)
     # 2026-11-19: 계정 표시 이름(name)도 같은 호출에서 받는다 (호출 수 그대로)
+    # 2026-11-24: 팔로워 수(followers_count)도 같은 호출에서 (밈 소스, 호출 수 그대로)
     assert fields.endswith(
         "{id,media_product_type,timestamp,like_count,comments_count,view_count,caption,"
-        "permalink,media_type,media_url,thumbnail_url},name}"
+        "permalink,media_type,media_url,thumbnail_url},name,followers_count}"
     )
 
 

@@ -908,6 +908,19 @@ async def trend_memes(
         f"{span} 숏츠 {out.current_videos}개(표본 {out.sample_videos}개)에서 유행 {len(items)}개."
         f" 게시 시각 모름 {out.unknown_published}개 제외." + before
     )
+    # 11/24 밈 소스: 회사 밈 키워드 쇼츠 검색 저장분 (새로 검색하지 않는다, 분류만)
+    from data_agent import meme_shorts
+
+    try:
+        out.shorts_search = await meme_shorts.shorts_search(
+            env, now, llm, category_cache=category_cache, context_id=context_id)  # fmt: skip
+        if out.shorts_search.status != "not_set":
+            queries.append("meme_shorts.db (회사 밈 키워드 쇼츠 검색 저장분)")
+    except Exception as error:  # noqa: BLE001 - 쇼츠 검색 칸이 실패해도 유행 결과는 그대로
+        from ax_contracts.schemas.data import MemeShortsSearch
+
+        why = f"쇼츠 검색 저장분을 읽지 못함 ({type(error).__name__})"
+        out.shorts_search = MemeShortsSearch(status="unknown", reason=why)
     lines = [out.summary, *out.limits]
     if out.reason:
         lines.append(out.reason)

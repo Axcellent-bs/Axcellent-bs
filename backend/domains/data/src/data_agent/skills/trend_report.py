@@ -11,7 +11,8 @@
    이번 7일 터진(instagram `bursts` 기준) 게시물 수. 이번 7일 3곳 이상, 상위 10개.
    표기용 태그(`HIDDEN_TAGS`)는 세지 않고 매거진(프리셋 `media_accounts`)은 쓴 계정에서 뺀다
 3. content: 의뢰 계정의 터진 게시물 상위 8개(배수 순, 썸네일·standout) + trend_memes 저장 결과 중
-   광고 재료 "ok" 3개
+   광고 재료 "ok" 3개. 11/24: 의뢰에 밈·유행 말이 있으면(`wants_memes`) 인스타 레이더 저장분의
+   밈·크리에이터 계정 게시물(`meme_posts`)을 먼저 두고, 추천 재료도 그 근거를 쓴 것을 먼저
 4. competitors: 경쟁사마다 주당 게시 수(최근 20개 기간), 릴스 비율, 릴스 조회수 중앙값, 최고 게시물
    배수, 잘 된 게시물(지표 상위 5개)의 공통점(instagram_why `compare_facts`: 형식·첫 줄 질문·
    캡션 길이·시간대 중 평소와 차이 큰 것 최대 2개, 코드 템플릿 문장)
@@ -634,14 +635,48 @@ def memes_from(stored: Any) -> tuple[list[TrendReportMeme], str | None]:
     return out, None if out else "같이 뜬 밈: 광고 재료로 쓸 수 있는(ok) 밈이 없음"
 
 
+MEME_WORDS = ("밈", "유행", "짤", "meme")
+
+
+def wants_memes(brief: TrendReportBrief) -> bool:
+    """의뢰(brief 칸)에 밈·유행 말이 있나 (11/24 밈 소스를 먼저 쓸지)."""
+    text = " ".join([brief.product or "", brief.format or "", brief.goal or "",
+                     brief.theme or "", *brief.format_parts, *brief.keywords]).lower()  # fmt: skip
+    return any(w in text for w in MEME_WORDS)
+
+
+def meme_source_posts(stored: Any) -> list[InstagramRadarPost]:
+    """instagram_radar 저장 결과([결과, 출력, 근거])의 밈·크리에이터 계정 뜬 게시물 (배수 순)."""
+    output = stored[1] if isinstance(stored, list | tuple) and len(stored) > 1 else None
+    rows = output.get("meme_posts") if isinstance(output, dict) else None
+    out: list[InstagramRadarPost] = []
+    for row in rows if isinstance(rows, list) else []:
+        try:
+            post = InstagramRadarPost.model_validate(row)
+        except ValueError:
+            continue
+        if post.source_kind == "meme":
+            out.append(post)
+    return out
+
+
 def content_section(posts: Sequence[InstagramRadarPost], read_any: bool, stored_memes: Any,
-                    why_none: str | None, read_count: int | None = None,
+                    why_none: str | None, read_count: int | None = None, *,
+                    meme_first: Sequence[InstagramRadarPost] = (),
                     ) -> tuple[TrendContentSection, list[str]]:  # fmt: skip
-    """터진 게시물·ok 밈. 계정을 읽었는데 둘 다 없으면 empty(봤지만 없음), 못 읽었으면 unknown."""
+    """터진 게시물·ok 밈. 계정을 읽었는데 둘 다 없으면 empty(봤지만 없음), 못 읽었으면 unknown.
+
+    `meme_first`(의뢰에 밈·유행 말이 있을 때 레이더 밈·크리에이터 계정 게시물)가 있으면 그것을
+    먼저 두고 의뢰 계정 게시물을 뒤에 둔다(같은 게시물은 한 번, 합쳐 8개). 벤치마크(경쟁사)는
+    경쟁사 섹션에 그대로 있다."""
     out = TrendContentSection(status="running")
     memes, meme_why = memes_from(stored_memes)
-    out.posts, out.memes = list(posts[:MAX_POSTS]), memes
+    merged = list({p.media_id: p for p in [*meme_first, *posts]}.values())
+    out.posts, out.memes = merged[:MAX_POSTS], memes
     limits = [meme_why] if meme_why else []
+    if meme_first:
+        limits.append(f"의뢰에 밈·유행 말이 있어 밈·크리에이터 계정 게시물 {len(meme_first)}개를"
+                      " 먼저 씀 (인스타 레이더 저장분)")  # fmt: skip
     where = f"읽은 계정 {read_count}곳에" if read_count else "읽은 계정에"
     no_burst = f"{where} 이번 7일 터진 게시물이 없음"
     if out.posts or out.memes:
@@ -845,9 +880,10 @@ def evidence_catalog(report: TrendReport) -> Catalog:
         extra = f" · {p.standout}" if p.standout else ""
         # 추천 LLM에 넘기는 말(word)에는 캡션을 넣지 않는다(외부 글. 11/20 콘티에 경쟁사 캡션의
         # "펀딩 소식"이 들어감). 캡션 발췌는 보고서 화면 콘텐츠 칸에만 있다
+        who_p = f"밈·크리에이터 계정 {p.account}" if p.source_kind == "meme" else p.account
         out[f"content:{n}"] = (
-            f"{p.account} {_fmt_word(p)}: {metric} {p.value:,} · 평소의 {p.ratio:g}배{extra}",
-            f"{p.account}의 {_fmt_word(p)}가 평소보다 크게 뜸",
+            f"{who_p} {_fmt_word(p)}: {metric} {p.value:,} · 평소의 {p.ratio:g}배{extra}",
+            f"{who_p}의 {_fmt_word(p)}가 평소보다 크게 뜸",
             short_of(f"{p.account} {_fmt_word(p)} {metric} ×{p.ratio:g}"))  # fmt: skip
     for n, m in enumerate(s.content.memes, start=1):
         desc = f": {m.description}" if m.description else ""
@@ -995,8 +1031,10 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
     if brief.theme:  # 11/20: 결론이 의뢰 주제를 다루게
         data["의뢰_주제"] = brief.theme
     data.update({f"근거_{k}": word for k, (_, word, _) in catalog.items()})
+    memes = meme_ids(report) if wants_memes(brief) else set()
+    prompt = _PROMPT + (_MEME_TEXT if memes else "")
     try:
-        answer = await llm.structured(_PROMPT, _Recommendation, untrusted=data,
+        answer = await llm.structured(prompt, _Recommendation, untrusted=data,
                                       context_id=context_id)  # fmt: skip
     except LLMNotConfiguredError as error:
         out.status, out.reason = "unknown", f"{no_llm(error)} 추천을 만들지 못함"
@@ -1011,6 +1049,8 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
     calls = 1
     out.conclusion, why = check_conclusion(answer.conclusion, brief)
     out.materials, dropped, partial = pick_materials(answer.materials, catalog)
+    if memes:  # 11/24: 밈 소스 근거를 쓴 재료를 먼저 (나머지 순서는 그대로)
+        out.materials = meme_materials_first(out.materials, memes)
     limits += partial
     if dropped:
         limits.append("버린 재료: " + "; ".join(dropped))
@@ -1037,6 +1077,24 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
     else:
         out.status, out.reason = "unknown", "근거가 있는 재료가 하나도 없음"
     return out, calls, limits
+
+
+_MEME_TEXT = (
+    "\n- 의뢰가 밈·유행을 다룬다: 밈·크리에이터 계정 근거를 먼저 재료로 쓸 것"
+    " (경쟁사 근거는 형식 참고로만)"
+)
+
+
+def meme_ids(report: TrendReport) -> set[str]:
+    """콘텐츠 섹션에서 밈·크리에이터 계정 게시물의 근거 id (content:n)."""
+    posts = report.sections.content.posts
+    return {f"content:{n}" for n, p in enumerate(posts, start=1) if p.source_kind == "meme"}
+
+
+def meme_materials_first(materials: Sequence[TrendMaterial],
+                         ids: set[str]) -> list[TrendMaterial]:  # fmt: skip
+    """밈 소스 근거 id를 쓴 재료를 앞으로 (안정 정렬, 그 밖 순서는 그대로)."""
+    return sorted(materials, key=lambda m: not any(e.id in ids for e in m.evidence_items))
 
 
 def pick_materials(
@@ -1089,6 +1147,8 @@ class Deps:
     search: Any
     shopping: Any
     memes: Callable[[], Any] | None = None  # trend_memes 저장 결과 (없으면 None)
+    # 11/24 밈 소스: instagram_radar 저장 결과 (meme_posts). 의뢰에 밈·유행 말이 있을 때만 쓴다
+    radar: Callable[[], Any] | None = None
     age_store: Any = None
     searchad: Any = None  # 검색광고 키워드 도구 (월 검색량, 없으면 안 부름)
     pool_path: Any = None  # keyword_pool DB (그날 값이 있으면 월 검색량 재사용)
@@ -1263,7 +1323,12 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
 
     async def run_content() -> None:
         stored = deps.memes() if deps.memes is not None else None
-        section, more = content_section(posts, bool(ig.media), stored, why_none, len(ig.media))
+        # 11/24: 의뢰에 밈·유행 말이 있으면 레이더 밈·크리에이터 계정 게시물을 먼저
+        first: list[InstagramRadarPost] = []
+        if wants_memes(report.brief) and deps.radar is not None:
+            first = meme_source_posts(deps.radar())
+        section, more = content_section(posts, bool(ig.media), stored, why_none, len(ig.media),
+                                        meme_first=first)  # fmt: skip
         report.sections.content = section
         limits.extend(more)
 

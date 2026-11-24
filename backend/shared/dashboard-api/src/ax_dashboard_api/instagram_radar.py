@@ -5,7 +5,8 @@
   회사 설정 파일의 계정 수. 자동 목록은 `tenant.ig_radar_auto_accounts()`로만 읽는다
   (data를 import 하지 않음)
 - `POST /api/dashboard/instagram-radar/save`: 목록 저장(사람 토큰).
-  `@`·공백은 떼고 중복은 하나로, 최대 200곳
+  `@`·공백은 떼고 중복은 하나로, 최대 200곳. 11/24: `meme_accounts`(밈·크리에이터 계정)도 같은
+  파일에 둔다. 벤치마크와 합쳐 200곳, 두 칸에 같은 계정은 안 됨. 안 보내면 저장해 둔 밈 목록 그대로
 - `POST /api/dashboard/instagram-radar/clear`: 화면 저장 목록을 지우고 회사 설정 파일로 돌아간다
 
 저장 파일은 `ax_agent_template.tenant.ig_radar_file()`(회사 연결 파일 옆).
@@ -37,9 +38,11 @@ router = APIRouter(prefix="/api/dashboard/instagram-radar", dependencies=[Depend
 
 class SaveIn(BaseModel):
     accounts: list[str] = Field(max_length=1000)
+    # 11/24 밈·크리에이터 계정. 안 보내면(None) 저장해 둔 밈 목록을 그대로 둔다
+    meme_accounts: list[str] | None = Field(default=None, max_length=1000)
 
 
-def _tenant_accounts() -> list[str]:
+def _tenant_list(key: str) -> list[str]:
     path = tenant.setting("DATA_TREND_CONFIG")
     if not path or not Path(path).is_file():
         return []
@@ -48,8 +51,12 @@ def _tenant_accounts() -> list[str]:
             raw = tomllib.load(f).get("instagram") or {}
     except (OSError, tomllib.TOMLDecodeError):
         return []
-    listed = raw.get("radar_accounts", []) if isinstance(raw, dict) else []
+    listed = raw.get(key, []) if isinstance(raw, dict) else []
     return [str(a).strip().lstrip("@") for a in listed if str(a).strip()]
+
+
+def _tenant_accounts() -> list[str]:
+    return _tenant_list("radar_accounts")
 
 
 def _state() -> dict[str, Any]:
@@ -64,13 +71,36 @@ def _state() -> dict[str, Any]:
         source, accounts = "auto", auto
     else:
         source, accounts = "none", []
+    # 밈·크리에이터 계정: 화면 저장(같은 파일 meme_accounts) > 회사 설정 radar_meme_accounts > 없음
+    saved_meme = tenant.ig_radar_meme_accounts()
+    meme_tenant = _tenant_list("radar_meme_accounts")
+    if saved_meme is not None:
+        meme_source, meme = "screen", saved_meme
+    elif meme_tenant:
+        meme_source, meme = "tenant", meme_tenant
+    else:
+        meme_source, meme = "none", []
+    accounts = accounts[:MAX_ACCOUNTS]
+    lower = {a.lower() for a in accounts}
+    meme = [a for a in meme if a.lower() not in lower][: max(0, MAX_ACCOUNTS - len(accounts))]
     return {
-        "accounts": accounts[:MAX_ACCOUNTS],
+        "accounts": accounts,
         "source": source,
         "tenant_count": len(from_tenant),
+        "meme_accounts": meme,
+        "meme_source": meme_source,
+        "meme_tenant_count": len(meme_tenant),
         "max": MAX_ACCOUNTS,
         "editable": tenant.ig_radar_file() is not None,
     }
+
+
+def _saved_file(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _clean(raw: list[str]) -> list[str]:
@@ -109,9 +139,24 @@ def get_radar() -> dict:
 def save_radar(body: SaveIn) -> dict:
     path = _path()
     accounts = _clean(body.accounts)
+    data: dict[str, Any] = {"accounts": accounts}
+    if body.meme_accounts is not None:
+        meme = _clean(body.meme_accounts)
+    else:
+        kept = _saved_file(path).get("meme_accounts")
+        meme = [a for a in kept if isinstance(a, str) and a] if isinstance(kept, list) else None
+    if meme is not None:
+        both = sorted({a.lower() for a in accounts} & {a.lower() for a in meme})
+        if both:
+            shown = ", ".join(both[:5])
+            raise ApiError(422, "DUPLICATE_HANDLE", f"두 칸에 같은 계정이 있어요: {shown}")
+        if len(accounts) + len(meme) > MAX_ACCOUNTS:
+            raise ApiError(422, "TOO_MANY", f"레이더 계정은 합쳐서 {MAX_ACCOUNTS}곳까지예요"
+                           f" ({len(accounts) + len(meme)}곳)")  # fmt: skip
+        data["meme_accounts"] = meme
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps({"accounts": accounts}, ensure_ascii=False, indent=2), "utf-8")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
     os.replace(tmp, path)
     return ok(_state())
 
