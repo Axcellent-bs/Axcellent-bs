@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from ax_contracts.data_access.sales_aggregates import (
+    AggCompareRow,
     AggRowBase,
     AggRun,
     AtRiskRow,
@@ -113,6 +114,11 @@ CREATE TABLE IF NOT EXISTS agg_channel_value (
     horizon_orders INTEGER, repeaters INTEGER, excluded_incomplete INTEGER NOT NULL,
     horizon_days INTEGER NOT NULL,
     PRIMARY KEY (tenant_id, as_of, period, source_label)
+);
+CREATE TABLE IF NOT EXISTS agg_compare (
+    tenant_id TEXT NOT NULL, as_of TEXT NOT NULL, target TEXT NOT NULL, same INTEGER NOT NULL,
+    diffs TEXT NOT NULL DEFAULT '[]', compared_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, as_of, target)
 );
 CREATE TABLE IF NOT EXISTS agg_runs (
     run_id TEXT NOT NULL PRIMARY KEY, tenant_id TEXT NOT NULL, as_of TEXT NOT NULL,
@@ -450,6 +456,26 @@ class AggregateStore:
             f"SELECT * FROM {table} WHERE tenant_id = ? AND as_of = ?",
             (tenant_id, as_of.isoformat()),
         ).fetchall()
+
+    def replace_compare(self, tenant_id: str, as_of: date, rows: Sequence[AggCompareRow]) -> None:
+        """병행 비교 결과를 그 기준일만 바꿔 넣는다 (설계 6.3)."""
+        a = as_of.isoformat()
+        with self._tx() as conn:
+            conn.execute("DELETE FROM agg_compare WHERE tenant_id = ? AND as_of = ?", (tenant_id, a))
+            conn.executemany(
+                "INSERT INTO agg_compare (tenant_id, as_of, target, same, diffs, compared_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [(tenant_id, a, r.target, int(r.same), json.dumps(r.diffs, ensure_ascii=False),
+                  _iso(r.compared_at)) for r in rows],
+            )  # fmt: skip
+
+    def compare_rows(self, tenant_id: str, as_of: date | None = None) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM agg_compare WHERE tenant_id = ?"
+        args: list[str] = [tenant_id]
+        if as_of is not None:
+            sql += " AND as_of = ?"
+            args.append(as_of.isoformat())
+        return self._conn.execute(sql + " ORDER BY as_of, target", args).fetchall()
 
     def snapshot_days(self, tenant_id: str) -> list[str]:
         sql = "SELECT DISTINCT as_of FROM agg_buyers_period WHERE tenant_id = ? ORDER BY as_of"
