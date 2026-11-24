@@ -83,15 +83,27 @@ async def _get(
         raise ApiError(502, "UPSTREAM_ERROR", f"{target} 응답 형식이 다르다") from exc
 
 
-async def incidents() -> list[dict[str, Any]]:
-    data = await _get("orchestrator", "/api/incidents")
+def _session_headers(authorization: str | None) -> dict[str, str] | None:
+    """세션 토큰이면 그대로 넘긴다(총괄이 같은 회사 사건만 보게). 공용 토큰·없음은 안 넘긴다."""
+    from ax_agent_template import human_auth
+
+    token = human_auth.bearer(authorization)
+    if token and human_auth.is_session_token(token):
+        return {"Authorization": f"Bearer {token}"}
+    return None
+
+
+async def incidents(authorization: str | None = None) -> list[dict[str, Any]]:
+    data = await _get("orchestrator", "/api/incidents", headers=_session_headers(authorization))
     if not isinstance(data, list):
         raise ApiError(502, "UPSTREAM_ERROR", "orchestrator 응답 형식이 다르다")
     return scrub(data)
 
 
-async def incident(context_id: str) -> dict[str, Any]:
-    data = await _get("orchestrator", f"/api/incidents/{context_id}")
+async def incident(context_id: str, authorization: str | None = None) -> dict[str, Any]:
+    data = await _get(
+        "orchestrator", f"/api/incidents/{context_id}", headers=_session_headers(authorization)
+    )
     if not isinstance(data, dict):
         raise ApiError(502, "UPSTREAM_ERROR", "orchestrator 응답 형식이 다르다")
     return scrub(data)
