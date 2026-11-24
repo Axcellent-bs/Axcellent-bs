@@ -227,6 +227,10 @@ async def test_recovery_reruns_impact_to_the_recovery_time(harness, monkeypatch)
         return fd._ok(affected_customer_ids=more, affected_customer_count=len(more))
 
     monkeypatch.setitem(fd.DEFAULT_OUTPUTS, "impact_analysis", impact)
+    # 시계 해상도가 거친 환경(Windows 약 15ms)에서는 두 시각이 같을 수 있다.
+    # 다시 계산하는 시점의 시계를 첫 분석이 끝난 시각 5초 뒤로 고정한다.
+    later = first_finished + timedelta(seconds=5)
+    monkeypatch.setattr("ax_orchestrator.engine.now", lambda: later)
     recovered_at = inc.opened_at + timedelta(seconds=40)
     await manager.process(event(EventType.SHOP_RECOVERED, "evt_rec_1", at=recovered_at))
 
