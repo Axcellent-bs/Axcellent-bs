@@ -49,3 +49,9 @@ class HiggsfieldStatusOutput(AxModel):
     source: HiggsfieldSource | None = None
     credits: float | None = Field(default=None, ge=0)
     plan: str | None = Field(default=None, max_length=40)
+    # 아래는 예전 응답은 없다 (11/24). 실패 사유 코드(network·timeout·http_<n>·refresh_failed·
+    # tool_error·bad_response·rpc_error·client_error·unauthorized·reconnect_needed·not_connected·
+    # client_id_missing 등)와 Higgsfield가 준 문장을 정리한 것(주소·토큰 모양 가림, 120자).
+    # connection 값은 그대로라 옛 화면은 지금처럼 보인다. 성공이면 둘 다 None
+    reason_code: str | None = Field(default=None, max_length=60)
+    detail_ko: str | None = Field(default=None, max_length=160)

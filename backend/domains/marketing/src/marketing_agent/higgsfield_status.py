@@ -53,8 +53,12 @@ def _out(
     source: HiggsfieldSource | None = None,
     credits: float | None = None,
     plan: str | None = None,
+    reason: str | None = None,
+    detail: str | None = None,
 ) -> HiggsfieldStatusOutput:
     return HiggsfieldStatusOutput(
+        reason_code=reason[:60] if reason else None,
+        detail_ko=detail[:160] if detail else None,
         key_configured=key,
         connection=connection,
         http_status=code,
@@ -67,10 +71,46 @@ def _out(
     )
 
 
+UNREACHABLE_KO = "Higgsfield에 닿지 못했어요"
+
+
+def mcp_failure(d: dict[str, object]) -> tuple[HiggsfieldConnection, str]:
+    """회사 계정 연결 확인이 실패했을 때 (connection, message_ko).
+
+    사유별 문구는 화면 시안 표 그대로.
+
+    connection 값은 예전과 같다(invalid_key = 다시 연결, 그 밖 unreachable). 옛 화면 호환."""
+    code = str(d.get("reason") or "")
+    status, tool = d.get("status"), d.get("tool") or "도구"
+    detail, stage = d.get("detail"), d.get("stage") or "요청"
+    if code == "client_id_missing":
+        return "unreachable", "서버에 Higgsfield 연결 설정(CLIENT_ID)이 없어요"
+    if code in ("reconnect_needed", "not_connected"):
+        return "invalid_key", "Higgsfield 계정 연결이 끊겼어요. 다시 연결해 주세요"
+    if code == "unauthorized":
+        return "invalid_key", "Higgsfield가 연결을 거절했어요. 다시 연결해 주세요"
+    if code in ("network", "timeout"):
+        return "unreachable", "서버에서 Higgsfield까지 가지 못했어요(네트워크·시간 초과)"
+    if code.startswith("http_"):
+        return "unreachable", f"Higgsfield가 {code.removeprefix('http_')} 오류를 돌려줬어요"
+    if code == "refresh_failed":
+        got = f"({status})" if status else ""
+        return "unreachable", f"연결 토큰을 새로 받지 못했어요{got}. 계속되면 다시 연결해 주세요"
+    if code == "tool_error":
+        said = f': "{detail}"' if detail else ""
+        return "unreachable", f"계정에는 닿았는데 {tool}가 오류로 답했어요{said}"
+    if code in ("bad_response", "rpc_error"):
+        return "unreachable", "Higgsfield 응답을 읽지 못했어요(우리 쪽 확인 필요)"
+    if code == "client_error":
+        what = detail or d.get("error") or "오류"
+        return "unreachable", f"요청을 보내기 전에 막혔어요({stage}: {what})"
+    return "unreachable", UNREACHABLE_KO
+
+
 async def probe_mcp(cid: str, client: httpx.AsyncClient | None = None) -> HiggsfieldStatusOutput:
     """회사 계정 연결에 `balance`를 한 번 물어 본다(크레딧을 쓰지 않는다)."""
     from marketing_agent import creative_mcp
-    from marketing_agent.higgsfield_mcp import McpError
+    from marketing_agent.higgsfield_mcp import McpError, describe, log_line
     from marketing_agent.higgsfield_mcp_auth import McpAuthError
 
     key = bool(higgsfield_key())
@@ -80,27 +120,16 @@ async def probe_mcp(cid: str, client: httpx.AsyncClient | None = None) -> Higgsf
                 credits, plan = await creative_mcp.balance(creative_mcp.Higgsfield(own, cid))
         else:
             credits, plan = await creative_mcp.balance(creative_mcp.Higgsfield(client, cid))
-    except McpAuthError as exc:
-        logger.warning("Higgsfield 계정 연결 확인 실패: %s", exc)
-        if str(exc) == "client_id_missing":
-            return _out(
-                key, "unreachable", "서버에 Higgsfield 연결 설정(CLIENT_ID)이 없어요", source="mcp"
-            )
-        if str(exc) in ("reconnect_needed", "not_connected"):
-            return _out(
-                key, "invalid_key", "Higgsfield 계정 연결이 끊겼어요. 다시 연결해 주세요",
-                source="mcp",
-            )  # fmt: skip
-        return _out(key, "unreachable", "Higgsfield에 닿지 못했어요", source="mcp")
-    except (McpError, httpx.HTTPError, ValueError) as exc:
-        code = str(exc) if isinstance(exc, McpError) else type(exc).__name__
-        logger.warning("Higgsfield 계정 연결 확인 실패: %s", code)
-        if code == "unauthorized":
-            return _out(
-                key, "invalid_key", "Higgsfield가 연결을 거절했어요. 다시 연결해 주세요",
-                source="mcp",
-            )  # fmt: skip
-        return _out(key, "unreachable", "Higgsfield에 닿지 못했어요", source="mcp")
+    except (McpAuthError, McpError, httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
+        # 11/24: 사유·단계·도구·예외 종류·정리한 문장·시각을 남긴다 (값 없이)
+        logger.warning("%s", log_line("higgsfield_status: Higgsfield 계정 연결 확인", exc, cid))
+        d = describe(exc)
+        if isinstance(exc, ValueError):  # 응답 칸 모양이 달라 읽지 못함
+            d = {**d, "reason": "bad_response"}
+        connection, message = mcp_failure(d)
+        detail = d.get("detail")
+        return _out(key, connection, message[:200], source="mcp", reason=str(d["reason"]),
+                    detail=str(detail) if detail else None)  # fmt: skip
     message = "Higgsfield 회사 계정에 연결돼 있어요(구독 크레딧)"
     return _out(key, "ok", message, source="mcp", credits=credits, plan=plan)
 
@@ -136,14 +165,20 @@ async def probe(client: httpx.AsyncClient | None = None) -> HiggsfieldStatusOutp
                 response = await own.get(PROBE_URL, headers=headers)
         else:
             response = await client.get(PROBE_URL, headers=headers, timeout=TIMEOUT_S)
-    except httpx.HTTPError as exc:
-        logger.warning("Higgsfield 연결 확인 실패: %s", type(exc).__name__)
-        return _out(True, "unreachable", "Higgsfield에 닿지 못했어요(시간 초과·네트워크)")
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
+        from marketing_agent.higgsfield_mcp import from_http_error, log_line
+
+        got = from_http_error(exc, stage=None, tool=None)
+        logger.warning("%s", log_line("higgsfield_status: Higgsfield 키 확인", got))
+        return _out(True, "unreachable", "Higgsfield에 닿지 못했어요(시간 초과·네트워크)",
+                    reason=got.code, detail=got.detail)  # fmt: skip
     code = response.status_code
     if code in (401, 403):
-        return _out(True, "invalid_key", "Higgsfield가 키를 거절했어요", code)
+        return _out(True, "invalid_key", "Higgsfield가 키를 거절했어요", code,
+                    reason="unauthorized")  # fmt: skip
     if code >= 500:
-        return _out(True, "unreachable", f"Higgsfield가 {code} 오류를 돌려줬어요", code)
+        return _out(True, "unreachable", f"Higgsfield가 {code} 오류를 돌려줬어요", code,
+                    reason=f"http_{code}")  # fmt: skip
     return _out(True, "ok", "Higgsfield에 연결돼 있어요", code)
 
 
