@@ -1,4 +1,5 @@
-import { failureError } from "./apiError";
+import { ApiError, failureError } from "./apiError";
+import { sheetBody, uploadErrorMessage } from "./characterRefs.ts";
 import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 
 // 마케팅 › SNS·미디어 › 캐릭터 시트 프롬프트. 올린 캐릭터 이미지 한 장으로 같은 캐릭터의
@@ -97,18 +98,28 @@ export type UploadKind = "real_photo" | "virtual_human" | "illustration";
 export const REFERENCE_SIDES = [2048, 1536, MAX_SIDE];
 export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
+/** 참조 여러 장: 정면(대표) 말고 더 올린 이미지. 최대 3장 */
+export type ExtraLabel = "full" | "side" | "face" | "other";
+export interface ExtraImage { media_type: string; data_base64: string; label: ExtraLabel }
+/** 저장된 회사 캐릭터의 참조 이미지 정보 (index 0 = 대표). 서버가 주는 것만 쓴다 */
+export interface CharacterReference { index: number; label: string; width: number; height: number }
+
+/** 추가 이미지(전신·옆·표정): 긴 변 1536px, 2MB를 넘으면 1024px로 다시 줄인다 */
+export async function shrinkExtra(file: File): Promise<Awaited<ReturnType<typeof shrinkImage>>> {
+  const first = await shrinkImage(file, 1536);
+  return base64Bytes(first.data_base64) <= MAX_IMAGE_BYTES ? first : shrinkImage(file, MAX_SIDE);
+}
+
 export async function makeCharacterSheet(image: { media_type: string; data_base64: string }, note: string, thumb?: string,
-  opts: { kind?: UploadKind; virtualConfirmed?: boolean } = {}): Promise<CharacterSheetResult> {
+  opts: { kind?: UploadKind; virtualConfirmed?: boolean; extras?: readonly ExtraImage[] } = {}): Promise<CharacterSheetResult> {
   const res = await fetch(`${DASHBOARD_API_URL}${PATH}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...dashboardAuth() },
-    body: JSON.stringify({
-      image, note: note.trim() || undefined, thumbnail_base64: thumb || undefined,
-      ...(opts.kind && opts.kind !== "real_photo" ? { kind: opts.kind, virtual_confirmed: !!opts.virtualConfirmed } : {}),
-    }),
+    body: JSON.stringify(sheetBody(image, note, thumb, opts)),
     cache: "no-store",
   });
   const parsed: unknown = await res.json().catch(() => undefined);
+  if (res.status === 413) throw new ApiError(uploadErrorMessage(413, undefined, ""), 413);
   if (!res.ok) throw failureError(parsed, res.status, "캐릭터 시트 프롬프트를 만들지 못했어요");
   return (parsed as { data: CharacterSheetResult }).data;
 }
