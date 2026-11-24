@@ -1,5 +1,6 @@
 import { ApiError } from "./apiError";
 import { DATA_A2A_PLACEHOLDER, DATA_A2A_TOKEN, DATA_A2A_URL } from "./env";
+import { sessionCompanyId } from "./humanSession";
 import type { OrchIncident, OrchStep } from "./agentChat";
 
 // 데이터분석 AI 화면(/data)의 자료.
@@ -2937,7 +2938,8 @@ async function sendData<T>(skill: string, what: string, input: Record<string, un
   const body = {
     // 화면 조회는 사건·요청 밖(ctx_ui_). 예전 "ctx_req_dashboard"는 AI 대화방이 변경 요청 안의 일로 봐서
     // data가 같은 context로 부른 부서 조회 줄(고객지원 book_issue_stats 등)이 의뢰 옆에 끼었다 (11/20)
-    meta: { context_id: UI_CONTEXT, token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + deadlineMs).toISOString() },
+    // 로그인한 사람의 회사로 묻는다. 없으면 data가 설치 회사(캣북스)로 본다(회사 연결 7단계, 11/24)
+    meta: { context_id: UI_CONTEXT, token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + deadlineMs).toISOString(), ...(sessionCompanyId() ? { tenant_id: sessionCompanyId() } : {}) },
     skill,
     input,
   };
