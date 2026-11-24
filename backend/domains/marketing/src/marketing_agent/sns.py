@@ -29,6 +29,7 @@ import sqlite3
 import threading
 import unicodedata
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -47,9 +48,41 @@ DRAFT_DB_ENV = "MARKETING_SNS_DRAFT_DB"
 # 필수 문구. 승인 전 자리표시이며 코드 한 곳에서만 바꾼다
 AI_LABEL_TEXT = "이 글과 이미지는 AI로 만들었습니다."
 AI_LABEL_TEXT_REEL = "이 글과 영상은 AI로 만들었습니다."
-DEMO_TEXT = "캣북스는 시연용 가상 서비스이며 실제 거래·배송이 없습니다."
-TERMS_TEXT = "주문·결제·환불 등은 캣북스 이용약관·구매자 이용약관에 따릅니다."
-HASHTAGS = ("#캣북스",)
+# 시연 안내·약관 안내·브랜드 태그는 요청 회사 설정에서 읽는다(11/24, 캣북스 고정을 없앴다):
+# 시연 안내 = tenant.toml `[brand] demo_notice`(없으면 넣지 않음), 약관 = 회사 이름으로,
+# 브랜드 태그 = `[brand] hashtags`(없으면 "#" + 회사 이름). `demo_text()`·`terms_text()`·
+# `brand_hashtags()`
+DEMO_NOTICE_MAX = 200
+TERMS_TEMPLATE = "주문·결제·환불 등은 {name} 이용약관·구매자 이용약관에 따릅니다."
+
+
+def demo_text() -> str | None:
+    """요청 회사의 시연 안내 한 줄 (`[brand] demo_notice`). 없거나 쓸 수 없는 값이면 None."""
+    from ax_agent_template import tenant
+
+    raw = tenant.brand_section().get("demo_notice")
+    if not isinstance(raw, str):
+        return None
+    text = " ".join(unicodedata.normalize("NFKC", raw).split())
+    return text if text and len(text) <= DEMO_NOTICE_MAX else None
+
+
+def terms_text() -> str:
+    """요청 회사 이름으로 쓴 약관 안내 한 줄."""
+    return TERMS_TEMPLATE.format(name=company_scope.company_name())
+
+
+def notice_texts() -> list[str]:
+    """캡션에 늘 넣는 안내(시연 안내가 있으면 그것, 그리고 약관). 순서 = 캡션 순서."""
+    demo = demo_text()
+    return [*([demo] if demo else []), terms_text()]
+
+
+def brand_hashtags() -> tuple[str, ...]:
+    """요청 회사의 브랜드 태그 (`sns_hashtags.brand_tags`, 검사는 `tag_check`)."""
+    return sns_hashtags.brand_tags(tag_check)
+
+
 # 참여 조건부 게시 금지(체크리스트 1절): 조건을 거는 말이 캡션에 있으면 막는다
 FORBIDDEN_PHRASES = ("좋아요", "팔로우", "공유", "댓글")
 # 팀 마케팅 규칙: 성과 과장·인력 대체·시연 숫자를 실제 성과처럼 쓰는 표현을 캡션에서 막는다.
@@ -488,9 +521,10 @@ def content_id(
     return f"spd_{_sha(canonical)[:16]}"
 
 
-def _compose(body: str, media_kind: str, hashtags: tuple[str, ...] = HASHTAGS) -> str:
-    tags = " ".join(hashtags)
-    return f"{body}\n\n{ai_label_text(media_kind)}\n{DEMO_TEXT}\n{TERMS_TEXT}\n\n{tags}"
+def _compose(body: str, media_kind: str, hashtags: tuple[str, ...] | None = None) -> str:
+    tags = " ".join(brand_hashtags() if hashtags is None else hashtags)
+    notices = "\n".join([ai_label_text(media_kind), *notice_texts()])
+    return f"{body}\n\n{notices}" + (f"\n\n{tags}" if tags else "")
 
 
 PRODUCT_NOTICE_KINDS: frozenset[str] = frozenset({"product_created"})
@@ -509,7 +543,8 @@ def is_product_promotion(draft: SnsPostDraft) -> bool:
 
 
 def _coupon_body(facts: SnsCouponFacts) -> str:
-    lines = [f"캣북스 공개 쿠폰 안내: {facts.unit_value:,}원 쿠폰", "", "제약 사항"]
+    name = company_scope.company_name()
+    lines = [f"{name} 공개 쿠폰 안내: {facts.unit_value:,}원 쿠폰", "", "제약 사항"]
     lines += [f"- {CONSTRAINT_LABELS[c.code]}: {c.text}" for c in facts.constraints]
     return "\n".join(lines)
 
@@ -525,7 +560,8 @@ class SourceParts:
     constraints: list[CouponConstraint]
     notice_kind: NoticeKind | None = None  # 공지 출처일 때 그 공지의 종류
     caption_source: dict[str, Any] | None = None  # 기획안 출처 메타(`draft.caption_source`)
-    hashtags: tuple[str, ...] = HASHTAGS  # 기획안이면 주제 태그가 더해진다(`sns_hashtags`)
+    # 요청 회사의 브랜드 태그. 기획안이면 주제 태그가 더해진다(`sns_hashtags`)
+    hashtags: tuple[str, ...] = dataclass_field(default_factory=brand_hashtags)
     needs_confirmation: tuple[str, ...] = ()  # 주제 문장 초안의 확인 필요 항목
 
 
@@ -678,7 +714,7 @@ def _topic_parts(request: AgentRequest, data: DraftSnsPostInput) -> SourceParts 
         "topic",
         f"topic_{_sha(topic)[:12]}",
         topic,
-        [topic, DEMO_TEXT, TERMS_TEXT],
+        [topic, *notice_texts()],
         [],
         caption_source=meta,
         needs_confirmation=("basis_unverified", *confirm),
@@ -702,9 +738,7 @@ def source_parts(
         if view.status != "published":  # 끝난 공지를 다시 올리지 않는다
             return _result(request, TaskStatus.FAILED, outcome="notice_not_active")
         body = view.public_text
-        return SourceParts(
-            "notice", data.notice_id, body, [body, DEMO_TEXT, TERMS_TEXT], [], view.kind
-        )
+        return SourceParts("notice", data.notice_id, body, [body, *notice_texts()], [], view.kind)
     if data.proposal_id is not None:
         if briefs is None:
             return _result(request, TaskStatus.FAILED, outcome="brief_not_found")
@@ -722,14 +756,14 @@ def source_parts(
             return _result(request, TaskStatus.FAILED, outcome="forbidden_claim")
         body, source_meta = _brief_body_and_source(stored)
         tags, tag_meta = sns_hashtags.select_hashtags(
-            stored.brief, sns_hashtags.table(tag_check, HASHTAG_MAX), HASHTAG_MAX
+            stored.brief, sns_hashtags.table(tag_check, HASHTAG_MAX), HASHTAG_MAX, brand_hashtags()
         )
         source_meta["hashtags"] = tag_meta  # 어떤 태그를 어떤 필드에서 골랐는지
         return SourceParts(
             "brief",
             data.proposal_id,
             body,
-            [body, DEMO_TEXT, TERMS_TEXT],
+            [body, *notice_texts()],
             [],
             caption_source=source_meta,
             hashtags=tags,
@@ -751,7 +785,7 @@ def source_parts(
         "coupon",
         facts.campaign_id,
         _coupon_body(facts),
-        [f"{facts.unit_value:,}원 쿠폰", DEMO_TEXT, TERMS_TEXT],
+        [f"{facts.unit_value:,}원 쿠폰", *notice_texts()],
         facts.constraints,
     )
 

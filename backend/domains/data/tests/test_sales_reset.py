@@ -72,7 +72,7 @@ def test_reset_backs_up_and_refills_from_the_start(
     finally:
         old.close()
     assert f"전체 주문 {len(mock_rows())}건" in out
-    assert "판매 서버에 고객 내보내기 없음" in out  # 목 출처는 고객 내보내기가 없다
+    assert "사이트 서버에 고객 내보내기 없음" in out  # 목 출처는 고객 내보내기가 없다
     assert "어제까지 7일(" in out and "결제 완료" in out
     assert "유입 출처별 주문 (전체): " in out and "naver" in out and "없음" in out
 

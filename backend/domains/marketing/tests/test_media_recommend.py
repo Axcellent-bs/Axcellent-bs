@@ -1,13 +1,19 @@
 """기획안 → 미디어 종류·필드 추천 규칙(`media_recommend.py`). 순수 계산, 외부 호출 없음."""
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
 from ax_contracts.schemas.planning import CampaignBriefInput
 from marketing_agent.brief_handoff import template_fields_by_kind
 from marketing_agent.media.prompts import check_field_value
-from marketing_agent.media_recommend import recommend, recommend_fields, recommend_kind
+from marketing_agent.media_recommend import (
+    company_categories,
+    recommend,
+    recommend_fields,
+    recommend_kind,
+)
 
 NOVEMBER = datetime(2026, 11, 13, 3, 0, tzinfo=UTC)
 FIELDS = ("season", "color_theme", "category")
@@ -157,6 +163,35 @@ def test_category_is_never_invented() -> None:
     assert _notes(idea="그림책 신간을 알린다")["category"].value == "그림책"
     assert _notes(products=["어린이 과학 전집"])["category"].value == "과학"
     assert _notes(title="에세이 기획전", idea="소설도 함께")["category"].value == "에세이"
+
+
+def _trip_company(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, brand: str = "") -> None:
+    folder = tmp_path / "tenants" / "trip"
+    folder.mkdir(parents=True)
+    (folder / "tenant.toml").write_text(f'name = "여행 하루"\n[brand]\n{brand}', encoding="utf-8")
+    monkeypatch.setenv("AX_TENANTS_DIR", str(tmp_path / "tenants"))
+    monkeypatch.setenv("AX_TENANT", "trip")
+
+
+def test_categories_come_from_the_company_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # 캣북스: tenant.toml [brand] categories (예전 책 분류 목록 그대로)
+    assert "그림책" in company_categories() and "어린이책" in company_categories()
+    # 다른 회사(여행사): 그 회사 분류만. 책 분류("그림책")로 판단하지 않는다
+    _trip_company(monkeypatch, tmp_path, 'categories = ["패키지", "자유여행", "허니문"]\n')
+    assert company_categories() == ("패키지", "자유여행", "허니문")
+    assert _notes(idea="허니문 패키지 그림책")["category"].value == "허니문"
+    assert _notes(idea="그림책 신간을 알린다")["category"].value is None
+
+
+def test_company_without_categories_never_guesses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _trip_company(monkeypatch, tmp_path)
+    note = _notes(idea="그림책 신간을 알린다")["category"]
+    assert note.value is None and note.source == "undecided"
+    assert note.reason == "회사 설정에 분류 목록이 없어 미정(지어내지 않음)"
 
 
 def test_recommended_values_pass_the_scene_template_whitelist() -> None:

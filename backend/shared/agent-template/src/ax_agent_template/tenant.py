@@ -249,15 +249,30 @@ def brand() -> dict[str, str]:
     """지금 회사의 영상 브랜드 5칸(character_en·character_ko·setting_en·setting_ko·style_en).
 
     회사가 없거나 `[brand]`가 없거나 칸이 금칙·길이에 걸리면 그 칸은 `BRAND_DEFAULTS`."""
-    name = current()
-    raw = (_read(tenants_dir() / name) or {}) if name else {}
-    given = raw.get("brand")
+    return brand_values(brand_section())
+
+
+def brand_values(given: Any) -> dict[str, str]:
+    """`[brand]` 섹션(dict)에서 영상 브랜드 5칸. 칸이 없거나 금칙·길이에 걸리면 그 칸은 기본값.
+
+    회사 설정 파일을 따로 읽는 쪽(data `DATA_TENANT_CONFIG`)도 같은 검사를 쓰게 한다."""
     given = given if isinstance(given, dict) else {}
     out = {}
     for key, default in BRAND_DEFAULTS.items():
         value = given.get(key)
         out[key] = " ".join(str(value).split()) if _brand_ok(key, value) else default
     return out
+
+
+def brand_section(name: str | None = None) -> dict[str, Any]:
+    """회사 설정 tenant.toml `[brand]` 섹션 그대로 (회사가 없거나 섹션이 없으면 빈 dict).
+
+    영상 브랜드 5칸(`brand()`)·홍보 방향 2칸(`promo()`) 밖의 칸(SNS 해시태그 `hashtags`·시연 안내
+    `demo_notice`·홍보 소재 `promo_words` 등)은 검사하지 않고 넘긴다. 쓰는 쪽이 칸마다 검사한다."""
+    name = name if name is not None else current()
+    raw = (_read(tenants_dir() / name) or {}) if name else {}
+    given = raw.get("brand")
+    return dict(given) if isinstance(given, dict) else {}
 
 
 # ---------------------------------------------------------------- 홍보 영상 방향 (11/24)

@@ -19,17 +19,26 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ax_agent_template import company_files
-from ax_agent_template.companies import canonical_company_id
+from ax_agent_template import company_scope as request_scope
+from ax_agent_template.companies import canonical_company_id, default_company_id, get_company
 from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 
 TENANT_COLUMN = "tenant_id"
 # SQLite 딸린 파일. 꺼질 때 남은 되돌림 기록(-journal)도 같이 옮겨야 DB가 깨지지 않는다
 SQLITE_EXTRAS = ("-journal", "-wal", "-shm")
+# 회사 이름을 모를 때 글에 쓰는 말
+UNKNOWN_COMPANY_NAME = "우리 회사"
 
 
 def scope_id(company_id: str | None) -> str:
     """저장소가 쓸 정식 회사 ID. 없거나 맞지 않으면 캣북스."""
     return canonical_company_id(company_id) or TENANT_ID_CATBOOKS
+
+
+def company_name() -> str:
+    """그 요청 회사의 이름(회사 목록). 요청 밖이면 기본 회사, 이름을 모르면 "우리 회사"."""
+    company = get_company(request_scope.active() or default_company_id())
+    return company.name if company is not None and company.name else UNKNOWN_COMPANY_NAME
 
 
 def ensure_tenant_column(conn: sqlite3.Connection, table: str) -> None:

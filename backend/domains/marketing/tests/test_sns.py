@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +10,9 @@ from marketing_agent.main import app, load_card
 
 CTX = "ctx_inc_0001"
 client = TestClient(app)
+# 캣북스 회사 설정(config/tenants/catbooks/tenant.toml)에서 오는 안내 (11/24 전에는 코드 상수)
+CATBOOKS_DEMO = "캣북스는 시연용 가상 서비스이며 실제 거래·배송이 없습니다."
+CATBOOKS_TERMS = "주문·결제·환불 등은 캣북스 이용약관·구매자 이용약관에 따릅니다."
 
 
 @pytest.fixture(autouse=True)
@@ -81,13 +85,60 @@ def test_notice_draft_has_required_wording_and_no_state_change() -> None:
     out = result["output"]
     public_text = _call("get_notice", {"notice_id": notice_id})["output"]["public_text"]
     assert public_text in out["caption"]
-    for text in (sns.AI_LABEL_TEXT, sns.DEMO_TEXT, sns.TERMS_TEXT):
+    # 캣북스 회사 설정(tenant.toml [brand] demo_notice·hashtags)으로 예전 캡션 그대로 (11/24)
+    for text in (sns.AI_LABEL_TEXT, CATBOOKS_DEMO, CATBOOKS_TERMS):
         assert text in out["caption"]
+    assert out["caption"] == (
+        f"{public_text}\n\n{sns.AI_LABEL_TEXT}\n{CATBOOKS_DEMO}\n{CATBOOKS_TERMS}\n\n#캣북스"
+    )
     assert out["is_ai_generated"] is True
     assert out["post_draft_id"].startswith("spd_")
     assert notice_id in result["evidence"]["ref_ids"]
     assert len(events.MOCK_PUBLISHED) == published  # 읽기 전용
     assert _call("draft_sns_post", {"notice_id": notice_id})["output"] == out  # 결정적
+
+
+def test_other_company_draft_uses_its_own_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """캣북스가 아닌 회사: 시연 안내가 없으면 넣지 않고, 약관·브랜드 태그는 그 회사 이름으로."""
+    from ax_agent_template import companies
+
+    folder = tmp_path / "tenants" / "trip"
+    folder.mkdir(parents=True)
+    (folder / "tenant.toml").write_text('name = "여행 하루"\n', encoding="utf-8")
+    monkeypatch.setenv("AX_TENANTS_DIR", str(tmp_path / "tenants"))
+    monkeypatch.setenv("AX_TENANT", "trip")
+    trip = companies.CATBOOKS.model_copy(update={"company_id": "trip", "name": "여행 하루"})
+    monkeypatch.setattr("marketing_agent.company_scope.get_company", lambda _cid: trip)
+    assert sns.demo_text() is None
+    assert sns.notice_texts() == [
+        "주문·결제·환불 등은 여행 하루 이용약관·구매자 이용약관에 따릅니다."
+    ]
+    notice_id = _notice_id()
+    out = _call("draft_sns_post", {"notice_id": notice_id})["output"]
+    assert "캣북스" not in out["caption"] and CATBOOKS_DEMO not in out["caption"]
+    assert out["caption"].endswith(
+        f"{sns.AI_LABEL_TEXT}\n주문·결제·환불 등은 여행 하루 이용약관·구매자 이용약관에 따릅니다."
+        "\n\n#여행하루"
+    )
+    assert out["hashtags"] == ["#여행하루"]
+    assert _check(out)["output"]["verdict"] == "approved"
+
+
+def test_demo_notice_comes_from_company_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    folder = tmp_path / "tenants" / "trip"
+    folder.mkdir(parents=True)
+    (folder / "tenant.toml").write_text(
+        'name = "여행 하루"\n[brand]\ndemo_notice = "여행 하루는 시연용 가상 여행사입니다."\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AX_TENANTS_DIR", str(tmp_path / "tenants"))
+    monkeypatch.setenv("AX_TENANT", "trip")
+    assert sns.demo_text() == "여행 하루는 시연용 가상 여행사입니다."
+    assert sns.notice_texts()[0] == "여행 하루는 시연용 가상 여행사입니다."
 
 
 def test_draft_needs_published_notice() -> None:
@@ -252,9 +303,9 @@ def _stored_draft(store: sns.SnsStore, kind: str | None, extra: str) -> sns.SnsP
         platform="instagram",
         media_kind="image",
         caption=caption,
-        hashtags=list(sns.HASHTAGS),
+        hashtags=list(sns.brand_hashtags()),
         caption_sha256=sns._sha(caption),
-        required_text=[body, sns.DEMO_TEXT, sns.TERMS_TEXT],
+        required_text=[body, *sns.notice_texts()],
         context_id=CTX,
     )
     store.save(draft)

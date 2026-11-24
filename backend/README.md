@@ -201,6 +201,7 @@ tests/tenants/
 | 커넥터 | `connector` 값. 카탈로그의 `connector`와 같아야 한다 | data가 어디서 읽을지: 이름 → 구현은 data `clients/shop_client.py`의 `CONNECTORS` (`domains/data/README.md` "커넥터") |
 | 조직도 | `org` 값(회사 폴더 기준, 기본 `org.yaml`) | 꺼진 서비스로 가는 일을 맡을 부서·담당자 ("업무 요청 라우터"). **서비스 14개를 모두 적는다**. 빠진 서비스로 가는 일은 `no_assignee`로 실패한다 |
 | 회사 소개 | `tenant.toml` `[profile] about` (덮어쓰기는 `[profile.override]`) | data 도메인 프로필(업종·상품군·씨앗 키워드)의 재료. **회사 소개는 AI가 사실로 읽는다. 분위기 문장·별명은 쓰지 말고, 카탈로그와 맞게** (소개에 없는 상품군이 카탈로그에 있으면 프로필에 경고) |
+| 브랜드 | `tenant.toml` `[brand]` (모두 선택) | 영상 주인공·배경·화풍(`character_en/ko`·`setting_en/ko`·`style_en`, 걸리면 기본값), 홍보 방향(`promo_style`·`brand_exposure`). 11/24 더함: SNS 브랜드 태그 `hashtags`(없으면 `#` + 회사 이름, 공백 뺌), 캡션 시연 안내 `demo_notice`(가상 회사만, 없으면 넣지 않음), 마케팅 미디어 추천 분류 `categories`(없으면 분류는 늘 미정), data 홍보 영상 아이디어 소재 `promo_words`·고정 틀 장면 `[brand.promo_scenes]`(형식 → 장면)·`promo_scene`(없으면 `[brand]` 배경·주인공과 카탈로그 품목 이름으로 만든 중립 장면). 코드에 회사 이름·업종 낱말을 두지 않는다 (캣북스 값은 `config/tenants/catbooks/tenant.toml`) |
 
 ### 예시: 냉장 물류 (테스트 전용 가짜 회사)
 

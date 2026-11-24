@@ -2,7 +2,8 @@
 
 - 근거로 치지 않음: 가격만, 검색 줄어듦(1.0 미만), 캣북스가 팔지 않는 상품군 → 넘기지 않고 이유
 - 숏츠 형식: 시간당 조회 1.6배·최근 3일 6개 → 홍보 영상, 1.6배여도 3일 2개 → 반짝이라 넘기지 않음
-- LLM 없이(고정 틀) 돌린다
+- LLM 없이(고정 틀) 돌린다. 회사는 캣북스(`AX_TENANT=catbooks`): 회사 이름·고정 틀 장면은 캣북스
+  회사 설정(tenant.toml `[brand]`)에서 온다 (11/24, 코드에 캣북스·책 고정을 없앴다)
 - 관문 켬 (평가 정의 PR #913은 관찰만: dev 모두 0.0)
 """
 
@@ -125,7 +126,9 @@ def observe(tmp_path: Path) -> tuple[dict[str, float], dict]:
 GATES = dict.fromkeys(score.METRICS, 1.0)  # 모두 맞아야 함 (평가 정의 PR #913 dev: 0.0 / 0.0)
 
 
-def test_insight_gate_passes_the_gates(tmp_path: Path) -> None:
+def test_insight_gate_passes_the_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 케이스는 캣북스 시연 가게를 흉내 낸다: 회사 이름·고정 틀 장면이 캣북스 회사 설정에서 온다
+    monkeypatch.setenv("AX_TENANT", "catbooks")
     metrics, got = observe(tmp_path)
     print("insight_gate eval:", json.dumps(metrics, ensure_ascii=False))
     print("insight_gate cases:", json.dumps(got, ensure_ascii=False, default=str))

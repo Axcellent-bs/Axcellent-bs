@@ -34,7 +34,7 @@ from marketing_agent import request_video as _rv
 from marketing_agent import request_video_cover as _cover
 from marketing_agent import sns_media
 from marketing_agent import youtube as _yt
-from marketing_agent.sns import DEMO_TEXT, TERMS_TEXT, SnsPostDraft, SnsStore, ai_label_text
+from marketing_agent.sns import SnsPostDraft, SnsStore, ai_label_text, notice_texts
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,9 @@ def _plan_text(draft: SnsPostDraft) -> str:
     if draft.required_text and draft.required_text[0].strip():
         return draft.required_text[0].strip()
     body = draft.caption.split(f"\n\n{ai_label_text('reel')}")[0]
-    return body.replace(DEMO_TEXT, "").replace(TERMS_TEXT, "").strip()
+    for notice in notice_texts():  # 요청 회사의 시연 안내·약관 안내
+        body = body.replace(notice, "")
+    return body.strip()
 
 
 def _video_prompt(draft: SnsPostDraft) -> str:

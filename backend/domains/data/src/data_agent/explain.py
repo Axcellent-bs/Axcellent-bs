@@ -304,7 +304,7 @@ def _template(kind: str, facts: dict[str, int | float | str]) -> str:
         return _kpi_template(facts)
     if kind == "keyword_trend":  # 검색 트렌드 (11/18): LLM을 못 쓰면 숫자만으로 한 줄
         head = (
-            f"도서 분야 키워드 {_fmt(facts.get('판정한 키워드 수'))}개 중 급상승 "
+            f"회사 분야 키워드 {_fmt(facts.get('판정한 키워드 수'))}개 중 급상승 "
             f"{_fmt(facts.get('급상승 수'))}개"
         )
         top = facts.get("급상승1")

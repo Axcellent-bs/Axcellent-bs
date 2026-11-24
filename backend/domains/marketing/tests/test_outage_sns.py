@@ -69,7 +69,10 @@ def test_apology_draft_explains_confirmed_cause_in_plain_words() -> None:
 
 def test_draft_keeps_ai_label_and_demo_notice() -> None:
     caption = _apology()["output"]["caption"]
-    for text in (sns.AI_LABEL_TEXT, sns.DEMO_TEXT, sns.TERMS_TEXT, "#캣북스"):
+    # 캣북스 회사 설정(tenant.toml [brand] demo_notice·hashtags)의 예전 문구 그대로 (11/24)
+    demo = "캣북스는 시연용 가상 서비스이며 실제 거래·배송이 없습니다."
+    terms = "주문·결제·환불 등은 캣북스 이용약관·구매자 이용약관에 따릅니다."
+    for text in (sns.AI_LABEL_TEXT, demo, terms, "#캣북스"):
         assert text in caption
 
 

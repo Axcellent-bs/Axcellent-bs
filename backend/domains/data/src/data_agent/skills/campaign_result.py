@@ -65,7 +65,7 @@ SECTIONS: dict[CampaignResultView, list[CampaignResultSection]] = {
 }
 CELL_LABELS = {
     "attribution": "귀속 (쿠폰·링크로 온 주문)",
-    "products": "상품 (캠페인 대상 책)",
+    "products": "상품 (캠페인 대상 상품)",
     "coupons": "쿠폰",
     "store": "전체 매장",
 }
@@ -370,7 +370,7 @@ async def campaign_result(
         if end - start < timedelta(hours=1):
             why = "캠페인 기간이 아직 1시간이 안 됨"
         elif connector is None:
-            why = "쇼핑몰 연결이 없음"
+            why = "회사 사이트 연결이 없음"
         else:
             insight = find_insight(env, out.insight_id) if out.insight_id else None
             products = [p.product_id for p in (insight.products if insight else [])][:10]
@@ -389,7 +389,7 @@ async def campaign_result(
                     f" 관련 상품 {len(products)}개"
                 )
             except (ShopUnavailable, ConnectorUnavailable) as error:
-                why = f"쇼핑몰 주문을 읽지 못함: {error}"
+                why = f"회사 사이트 주문을 읽지 못함: {error}"
     sales, alerts = judge(effect, mine, name, why)
     out.status = "known"
     out.videos = mine

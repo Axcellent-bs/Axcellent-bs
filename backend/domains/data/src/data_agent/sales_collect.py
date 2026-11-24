@@ -82,7 +82,7 @@ from data_agent.sales_store import (
 EVERY_ENV = "DATA_SALES_SYNC_SECONDS"
 TENANT_ENV = "DATA_SALES_TENANT_ID"
 SOURCE_ENV = "DATA_SALES_SOURCE"  # 비움 = 실제 판매 서버, "fake" = 가짜 출처(데모 전용)
-NO_CUSTOMERS_EXPORT = "판매 서버에 고객 내보내기 없음"
+NO_CUSTOMERS_EXPORT = "사이트 서버에 고객 내보내기 없음"
 NOT_ALL = "한 번에 다 받지 못함 (다음 수집에 이어서)"
 DEFAULT_EVERY_SECONDS = 300
 MIN_EVERY_SECONDS = 60  # 판매 서버에 부담 주지 않게

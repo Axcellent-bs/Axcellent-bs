@@ -82,6 +82,9 @@ from data_agent.skills.promo_video import (
     format_signals,
     write_ideas,
 )
+from data_agent.skills.promo_video import (
+    company as promo_company,
+)
 from data_agent.skills.topic_category import CategoryResult, TopicInput, classify_topics
 from data_agent.skills.trend_scan import TREND_CONFIG_ENV
 from data_agent.video_links import video_url
@@ -1926,7 +1929,9 @@ async def _make_brief(
         out.limits += notes
         # 기준(근거 없으면 안 넘김): 기획용 트렌드 인사이트도 같은 기준,
         # 못 넘으면 참고용 + held_back.
-        # 그다음 실제로 오르는 숏츠 형식을 빌린 캣북스 홍보 영상(promo)
+        # 그다음 실제로 오르는 숏츠 형식을 빌린 요청 회사 홍보 영상(promo).
+        # 회사 이름·소재 단어·고정 틀 장면은 회사 설정에서 (promo_video.company)
+        co = promo_company(env, terms)
         gate = gate_of(config)
         signals = format_signals(shorts)
         price_only = {
@@ -1934,15 +1939,16 @@ async def _make_brief(
             and not any(e.status == "known" for e in card.search_interest)
             for c, card in zip(from_cards, out.opportunities, strict=True)
         }  # fmt: skip
-        held = apply_gate(out.insights, signals, gate, not_sold=warned.has, price_only=price_only)
+        held = apply_gate(out.insights, signals, gate, not_sold=warned.has, price_only=price_only,
+                          co=co)  # fmt: skip
         trends = [i for i in out.insights if not i.classification_pending]
         promos, promo_held = build_promos(
-            signals, trends, gate, insight_id=lambda t: stable_insight_id(tenant, t)
+            signals, trends, gate, insight_id=lambda t: stable_insight_id(tenant, t), co=co
         )
-        book = ("책", "독서", "서점", "캣북스")
+        # 회사 소재가 든 이름은 "다른 이름"이 아니다 (회사 이름·소재 단어, promo_video.company)
         banned = sorted({x for i in out.insights for x in [i.topic, *i.aliases, *i.entity_names]
-                         if x and not any(w in x for w in book)})  # fmt: skip
-        await write_ideas(promos, llm, context_id, queries, banned)
+                         if x and not any(w in x for w in co.words)})  # fmt: skip
+        await write_ideas(promos, llm, context_id, queries, banned, co)
         out.held_back = [*promo_held, *held]
         out.gate = BriefGate(
             vs_all_ratio=gate.vs_all_ratio, naver_ratio=gate.naver_ratio,
