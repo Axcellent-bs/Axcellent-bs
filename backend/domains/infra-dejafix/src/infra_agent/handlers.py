@@ -633,7 +633,7 @@ async def release_fault(request: AgentRequest) -> AgentResult:
         state = await rt.shop.fault_state()
     except Exception as exc:  # noqa: BLE001 - 상태를 모르면 해제하지 않는다(fail-closed)
         return _failed(
-            request, "server_unknown", f"판매 사이트 상태 조회 실패: {type(exc).__name__}"
+            request, "server_unknown", f"사이트 상태 조회 실패: {type(exc).__name__}"
         )
     if server_state(state) != "fault":
         return _release_not_needed(request, state, "결제 서버가 지금 이상이 아니라 해제하지 않았다")
@@ -744,7 +744,7 @@ async def verify_recovery(request: AgentRequest) -> AgentResult:
             infra_note = f"장애 주입 {state.get('active')}, 감시 이상 {state.get('degraded')}"
         except Exception as exc:
             infra_ok = False
-            infra_note = f"판매 사이트 상태 조회 실패({type(exc).__name__})"
+            infra_note = f"사이트 상태 조회 실패({type(exc).__name__})"
         now = rt.clock()
         business_ok, business_note = await rt.data.payment_metrics_ok(request.meta, inp.since, now)
         notes.append(f"{tried}회차 {_iso(now)}: 서버 {infra_note} / 업무 지표 {business_note}")
