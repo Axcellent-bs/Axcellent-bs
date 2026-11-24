@@ -209,7 +209,8 @@ async def draft_outage_sns_post(
     hits = forbidden_terms(body)
     if hits or any(phrase in body for phrase in sns.FORBIDDEN_PHRASES):
         return _failed(request, "forbidden_term", terms=hits)
-    caption = sns._compose(body, data.media_kind)
+    tags = sns.brand_hashtags()  # 요청 회사의 브랜드 태그 (회사 설정)
+    caption = sns._compose(body, data.media_kind, tags)
     if len(caption) > sns.CAPTION_MAX:
         return _failed(request, "caption_too_long")
 
@@ -223,9 +224,9 @@ async def draft_outage_sns_post(
         platform="instagram",
         media_kind=data.media_kind,
         caption=caption,
-        hashtags=list(sns.HASHTAGS),
+        hashtags=list(tags),
         caption_sha256=caption_sha,
-        required_text=[body, sns.DEMO_TEXT, sns.TERMS_TEXT],
+        required_text=[body, *sns.notice_texts()],
         context_id=request.meta.context_id,
         platform_options=options,
         outage_trigger=data.trigger,

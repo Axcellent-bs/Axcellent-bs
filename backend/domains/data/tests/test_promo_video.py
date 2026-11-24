@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
 
 from ax_agent_template.llm import LLMNotConfiguredError
 from ax_contracts.schemas.data import (
@@ -18,6 +21,8 @@ from data_agent.skills.shorts_stats import ShortsConfig, _Short, group_stats, ov
 
 AT = datetime(2026, 11, 9, 6, 0, tzinfo=UTC)
 GATE = pv.Gate()
+# 회사 이름으로 쓴 이유 (11/24 전에는 코드 상수 "캣북스가 팔지 않는 상품군")
+NOT_SOLD = "캣북스가 팔지 않는 상품군"
 
 
 def _shorts(*groups: ShortsGroup, base: float = 100.0) -> ShortsStatsOutput:
@@ -104,7 +109,8 @@ def test_gate_price_only_and_not_sold() -> None:
     assert pv.judge(GATE, vs_all_ratio=None, search_ratio=None, recent=None, recent_days=3,
                     price_only=True) == (False, pv.PRICE_ONLY)  # fmt: skip
     assert pv.judge(GATE, vs_all_ratio=2.0, search_ratio=2.0, recent=9, recent_days=3,
-                    not_sold=True) == (False, pv.NOT_SOLD)  # fmt: skip
+                    not_sold=True) == (False, NOT_SOLD)  # fmt: skip
+    assert pv.not_sold_reason() == NOT_SOLD  # 회사 이름(시험 기본 회사 = 캣북스)으로
 
 
 def test_gate_below_threshold_and_small_sample_say_why() -> None:
@@ -180,7 +186,7 @@ def test_apply_gate_turns_weak_trend_insights_into_reference() -> None:
     assert [(h.topic, h.reason) for h in held] == [
         ("니체 철학", "최근 3일 같은 형식 숏츠 2개 (기준 5개, 반짝)"),
         ("겨울 다이어리", "검색이 작년 같은 달의 0.8배(줄어듦)"),
-        ("문구 하울", pv.NOT_SOLD),
+        ("문구 하울", NOT_SOLD),
         ("책추천", pv.PRICE_ONLY),
     ]
 
@@ -188,21 +194,94 @@ def test_apply_gate_turns_weak_trend_insights_into_reference() -> None:
 # ------------------------------------------------------------------ 아이디어 한 줄
 
 
-def test_fixed_idea_uses_the_right_particle() -> None:
+@pytest.fixture
+def catbooks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """캣북스 설치(AX_TENANT=catbooks): 책 소재·장면이 회사 설정 tenant.toml [brand]에서 온다."""
+    monkeypatch.setenv("AX_TENANT", "catbooks")
+
+
+def _travel(tmp_path: Path, brand: str = "") -> dict[str, str]:
+    """책을 팔지 않는 회사(여행사)의 회사 설정·카탈로그 (env의 DATA_TENANT_CONFIG로 읽는다)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    cfg = tmp_path / "tenant.toml"
+    cfg.write_text(
+        'name = "여행 하루"\n[profile]\nabout = "여행 하루는 국내 패키지 여행을 파는 여행사다."\n'
+        f"[brand]\n{brand}",
+        encoding="utf-8",
+    )
+    return {"DATA_TENANT_CONFIG": str(cfg), "DATA_TENANT_CATALOG": "nubi"}
+
+
+def test_fixed_idea_uses_the_right_particle(catbooks: None) -> None:
+    # 캣북스 회사 설정([brand.promo_scenes])으로 예전 고정 틀 그대로
     assert pv.fixed_idea("리액션") == "리액션으로 캣북스의 책 속 반전을 읽는 순간의 표정 보여 주기"
     assert pv.fixed_idea("브이로그") == "브이로그로 캣북스의 하루 독서 시간 보여 주기"
     assert pv.fixed_idea("밈 패러디") == "밈 패러디로 캣북스의 책 읽는 고양이 장면 보여 주기"
     assert pv.fixed_idea("상황극·스케치").startswith("상황극·스케치로 ")
+    assert pv.fixed_idea("새 형식") == "새 형식으로 캣북스의 책 읽는 장면 보여 주기"  # promo_scene
 
 
-def test_idea_rules() -> None:
+def test_idea_rules(catbooks: None) -> None:
     assert pv.idea_problem("반전 표정으로 캣북스 신간을 읽는 장면", []) is None
+    assert pv.idea_problem("독서 챌린지 도전", []) is None
+    assert pv.idea_problem("서점 나들이 브이로그", []) is None
     assert pv.idea_problem("독서 챌린지 3일 도전", []) == "숫자를 씀 (숫자 지어내기 금지)"
     assert pv.idea_problem("반전 표정 리액션 영상", []) == "캣북스·책·독서 소재가 없음"
     assert pv.idea_problem("리그오브레전드 밈으로 책 읽기", ["리그오브레전드"]) == (
         "다른 이름('리그오브레전드')을 씀"
     )
     assert pv.idea_problem("책" * 61, []) == "60자를 넘음 (61자)"
+
+
+def test_catbooks_company_words_come_from_its_settings(catbooks: None) -> None:
+    co = pv.company()
+    assert co.name == "캣북스"
+    assert co.words[:4] == ("캣북스", "책", "독서", "서점")  # 이름 → [brand] promo_words
+    assert {"도서", "문구"} <= set(co.words)  # 카탈로그 [sales.categories]
+    assert "IT 학습서" not in co.words  # 회사 소개 글은 그대로 단어로 쓰지 않는다
+
+
+def test_other_company_gets_its_own_brand_words_and_scenes(tmp_path: Path) -> None:
+    """책을 팔지 않는 회사는 책 장면·책 소재로 판단하지 않는다 (11/24)."""
+    env = _travel(tmp_path, 'setting_ko = "바닷가 여행지"\ncharacter_ko = "원본 일러스트 여행자"\n'
+                            'promo_words = ["여행", "패키지"]\n')  # fmt: skip
+    co = pv.company(env)
+    assert co.name == "여행 하루"
+    assert co.words == ("여행 하루", "여행", "패키지", "여행지", "여행자")
+    assert not any(w in co.words for w in ("책", "독서", "서점", "캣북스"))
+    idea = pv.fixed_idea("브이로그", co)
+    assert idea == "브이로그로 여행 하루의 바닷가 여행지의 하루 보여 주기"
+    assert pv.fixed_idea("밈 패러디", co) == (
+        "밈 패러디로 여행 하루의 원본 일러스트 여행자가 나오는 장면 보여 주기"
+    )
+    assert pv.fixed_idea("새 형식", co) == "새 형식으로 여행 하루의 바닷가 여행지 장면 보여 주기"
+    assert all("책" not in pv.fixed_idea(f, co) for f in pv.FORMATS)
+    # 책 소재는 이 회사 소재가 아니다. 여행 소재는 통과
+    assert pv.idea_problem("책 읽는 고양이 챌린지", [], co) == "여행 하루·여행·패키지 소재가 없음"
+    assert pv.idea_problem("바닷가 패키지 여행 브이로그", [], co) is None
+    assert pv.idea_problem("캣북스 여행 챌린지", ["캣북스"], co) == "다른 이름('캣북스')을 씀"
+    assert pv.not_sold_reason(co) == "여행 하루가 팔지 않는 상품군"
+    prompt = pv.idea_prompt(co)
+    assert "여행 하루" in prompt and "캣북스" not in prompt and "책" not in prompt
+    assert "여행 하루는 국내 패키지 여행을 파는 여행사다." in prompt  # [profile] about
+
+
+def test_company_without_brand_settings_gets_neutral_scenes(tmp_path: Path) -> None:
+    co = pv.company(_travel(tmp_path))  # [brand] 없음, 카탈로그 품목 이름 없음(기본 "상품")
+    assert co.words == ("여행 하루",)
+    assert pv.fixed_idea("리액션", co) == (
+        "리액션으로 여행 하루의 상품을 처음 만난 순간의 표정 보여 주기"
+    )
+    assert pv.fixed_idea("새 형식", co) == "새 형식으로 여행 하루의 상품 장면 보여 주기"
+    # 회사 설정 장면 칸에 숫자·기호가 있으면 쓰지 않고 중립 틀
+    bad = pv.company(_travel(tmp_path / "b", '[brand.promo_scenes]\n"리액션" = "1등 여행 http"\n'))
+    assert bad.scenes == pv._neutral_scenes("상품", None, None)
+
+
+def test_brief_terms_count_as_company_words(tmp_path: Path) -> None:
+    co = pv.company(_travel(tmp_path), terms=["제주 패키지", "7일 여행"])
+    assert "제주 패키지" in co.words and "7일 여행" not in co.words  # 숫자 든 키워드는 뺀다
+    assert pv.idea_problem("제주 패키지 브이로그", [], co) is None
 
 
 class _NoLLM:
@@ -221,6 +300,7 @@ def _promo(name: str) -> TrendInsight:
                         promo_recent_count=6, promo_recent_days=3)  # fmt: skip
 
 
+@pytest.mark.usefixtures("catbooks")
 def test_write_ideas_falls_back_to_the_fixed_frame(monkeypatch, tmp_path) -> None:  # noqa: ANN001
     from data_agent import line_store
 
@@ -235,6 +315,32 @@ def test_write_ideas_falls_back_to_the_fixed_frame(monkeypatch, tmp_path) -> Non
     asyncio.run(pv.write_ideas([b], _BadLLM(), None, queries))  # type: ignore[arg-type]
     assert b.promo_idea_fallback  # 책·독서 소재가 없는 답은 쓰지 않는다
     assert any("캣북스·책·독서 소재가 없음" in x for x in b.limits)
+
+
+class _TravelLLM:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def structured(self, prompt, schema, **k):  # noqa: ANN001, ANN003, ANN202
+        self.prompts.append(prompt)
+        return schema(items=[{"format": "브이로그", "idea": "바닷가 패키지 여행 브이로그"},
+                             {"format": "리액션", "idea": "책 속 반전을 읽는 표정"}])  # fmt: skip
+
+
+def test_write_ideas_follow_the_request_company(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from data_agent import line_store
+
+    monkeypatch.setattr(line_store, "LINES", line_store.LineStore(str(tmp_path / "lines.db")))
+    co = pv.company(_travel(tmp_path, 'promo_words = ["여행", "패키지"]\n'))
+    llm = _TravelLLM()
+    vlog, react = _promo("브이로그"), _promo("리액션")
+    asyncio.run(pv.write_ideas([vlog, react], llm, None, [], co=co))  # type: ignore[arg-type]
+    assert "여행 하루" in llm.prompts[0] and "캣북스" not in llm.prompts[0]
+    assert vlog.promo_idea == "바닷가 패키지 여행 브이로그" and not vlog.promo_idea_fallback
+    # 책 소재 답은 이 회사 소재가 아니라 고정 틀 (책 장면이 아닌 회사 틀)
+    assert react.promo_idea_fallback and react.promo_idea == pv.fixed_idea("리액션", co)
+    assert "책" not in (react.promo_idea or "")
+    assert any("여행 하루·여행·패키지 소재가 없음" in x for x in react.limits)
 
 
 # ------------------------------------------------------------------ 숏츠 통계 recent_count

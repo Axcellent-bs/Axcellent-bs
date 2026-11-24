@@ -352,7 +352,8 @@ def prepare_video_draft(
         )
 
     body, meta = _caption_body(plan, data.proposal_id)
-    caption = sns._compose(body, DRAFT_MEDIA_KIND)  # noqa: SLF001
+    tags = sns.brand_hashtags()  # 요청 회사의 브랜드 태그 (회사 설정)
+    caption = sns._compose(body, DRAFT_MEDIA_KIND, tags)  # noqa: SLF001
     if len(caption) > sns.CAPTION_MAX:
         return _fail(request, "caption_too_long")
     options_meta = {"share_to_feed": True}
@@ -371,9 +372,9 @@ def prepare_video_draft(
         platform="instagram",
         media_kind=DRAFT_MEDIA_KIND,
         caption=caption,
-        hashtags=list(sns.HASHTAGS),
+        hashtags=list(tags),
         caption_sha256=caption_sha,
-        required_text=[body, sns.DEMO_TEXT, sns.TERMS_TEXT],
+        required_text=[body, *sns.notice_texts()],
         context_id=request.meta.context_id,
         platform_options=options_meta,
         caption_source=meta,

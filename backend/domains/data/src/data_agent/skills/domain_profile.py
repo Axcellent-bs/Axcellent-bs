@@ -103,10 +103,12 @@ class TenantProfile:
     name: str | None = None
     about: str = ""
     override: Mapping[str, Any] = field(default_factory=dict)
+    # `[brand]` 섹션 그대로 (홍보 영상 소재·고정 틀 장면, promo_video가 칸마다 검사한다)
+    brand: Mapping[str, Any] = field(default_factory=dict)
 
 
 def load_tenant(env: Mapping[str, str]) -> TenantProfile:
-    """`tenant.toml`의 이름·`[profile] about`·`[profile.override]`. 없으면 빈 값."""
+    """`tenant.toml`의 이름·`[profile] about`·`[profile.override]`·`[brand]`. 없으면 빈 값."""
     path = env.get(TENANT_CONFIG_ENV) or tenant_setting(TENANT_CONFIG_ENV)
     if not path or not Path(path).is_file():
         return TenantProfile()
@@ -117,10 +119,12 @@ def load_tenant(env: Mapping[str, str]) -> TenantProfile:
         return TenantProfile()
     profile = raw.get("profile") or {}
     override = profile.get("override") if isinstance(profile, dict) else None
+    brand = raw.get("brand")
     return TenantProfile(
         name=str(raw["name"]) if raw.get("name") else None,
         about=str(profile.get("about") or "").strip() if isinstance(profile, dict) else "",
         override=override if isinstance(override, dict) else {},
+        brand=brand if isinstance(brand, dict) else {},
     )
 
 

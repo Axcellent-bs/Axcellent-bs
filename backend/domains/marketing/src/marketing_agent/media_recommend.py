@@ -1,7 +1,8 @@
 """기획안에서 미디어 종류와 장면 템플릿 필드를 추천한다. 프레임워크 무관, 순수 계산.
 
 - 읽는 것은 보관된 기획안에 이미 있는 글(title·idea·why·note·format·body_md·근거 항목 이름·상품)과
-  받은 시각뿐이다. 외부 호출·LLM이 없고 같은 기획안이면 언제 계산해도 같은 답이다.
+  받은 시각, 그리고 요청 회사 설정의 분류 목록(`[brand] categories`)뿐이다. 외부 호출·LLM이 없고
+  같은 회사·같은 기획안이면 언제 계산해도 같은 답이다.
 - 판정은 아래 결정적 규칙이다(위에서부터, 먼저 맞는 것이 이긴다). 추천마다 근거 한 줄(`reason`)과
   규칙 코드(`rule`)를 남긴다.
   1. `format`이 영상(숏폼·릴스 등)·캐러셀을 말한다 → 그 종류
@@ -14,7 +15,8 @@
   8. 아무 신호도 없다 → image(가장 싼 기본값), 확신 낮음
   "영상 없이"·"영상 대신"처럼 부정하는 말이 바로 뒤에 오면 그 신호는 세지 않는다.
 - 필드는 지어내지 않는다. 기획안에 근거가 있으면 `brief`, 없으면 이유를 적은 안전한 기본값
-  (`default`: 계절 = 받은 날짜의 계절, 색 = 계절 기본 색) 또는 미정(`undecided`: 책 분류)이다.
+  (`default`: 계절 = 받은 날짜의 계절, 색 = 계절 기본 색) 또는 미정
+  (`undecided`: 회사 설정 `[brand] categories`의 분류)이다.
   값은 장면 템플릿 화이트리스트 검사(`prompts.check_field_value`)를 통과한 것만 쓴다.
 - 여기서 정한 것은 추천일 뿐이다. 관리자가 고른 종류·필드가 있으면 그것이 우선한다
   (`brief_handoff.build_media_request`). 미디어 생성·게시는 하지 않는다.
@@ -118,35 +120,25 @@ _SEASON_COLOR = {
     "autumn": "sunset orange",
     "winter": "warm cream",
 }
-# 책 분류. 긴 말을 먼저 본다(예: "그림책"이 "책"보다 먼저)
-_CATEGORIES = (
-    "자기계발",
-    "그림책",
-    "동화책",
-    "에세이",
-    "참고서",
-    "문제집",
-    "만화",
-    "웹툰",
-    "소설",
-    "시집",
-    "동화",
-    "인문",
-    "과학",
-    "역사",
-    "경제",
-    "경영",
-    "요리",
-    "여행",
-    "육아",
-    "예술",
-    "철학",
-    "추리",
-    "판타지",
-    "로맨스",
-    "수험서",
-    "어린이책",
-)
+# 분류 목록은 요청 회사 설정 tenant.toml `[brand] categories`에서 읽는다(11/24, 책 분류 고정을
+# 없앴다. 캣북스는 그 칸에 책 분류를 적었다). 없으면 분류는 늘 미정이다(회사와 상관없는 분류로
+# 판단하지 않는다). 같은 자리면 긴 말이 먼저다(예: "그림책"이 "책"보다 먼저)
+CATEGORY_MAX = 30  # 장면 템플릿 field.category max_len과 같다
+
+
+def company_categories() -> tuple[str, ...]:
+    """요청 회사의 분류 목록 (`[brand] categories`). 글이 아니거나 빈 값·긴 값은 뺀다."""
+    from ax_agent_template import tenant
+
+    raw = tenant.brand_section().get("categories")
+    if not isinstance(raw, list):
+        return ()
+    out: list[str] = []
+    for value in raw:
+        word = " ".join(value.split()) if isinstance(value, str) else ""
+        if word and len(word) <= CATEGORY_MAX and word not in out:
+            out.append(word)
+    return tuple(out)
 
 
 class FieldNote(AxModel):
@@ -334,9 +326,16 @@ def _color(brief: CampaignBriefInput, season: str | None) -> FieldNote:
 
 
 def _category(brief: CampaignBriefInput) -> FieldNote:
+    categories = company_categories()
+    if not categories:
+        return FieldNote(
+            field="category",
+            source="undecided",
+            reason="회사 설정에 분류 목록이 없어 미정(지어내지 않음)",
+        )
     texts = [*_texts(brief), *brief.products]
     for text in texts:
-        found = [(at, -len(word), word) for word in _CATEGORIES if (at := _find(text, word)) >= 0]
+        found = [(at, -len(word), word) for word in categories if (at := _find(text, word)) >= 0]
         if found:
             word = min(found)[2]
             return FieldNote(
@@ -345,7 +344,7 @@ def _category(brief: CampaignBriefInput) -> FieldNote:
     return FieldNote(
         field="category",
         source="undecided",
-        reason="기획안에 책 분류 언급이 없어 미정(지어내지 않음)",
+        reason="기획안에 회사 분류 언급이 없어 미정(지어내지 않음)",
     )
 
 

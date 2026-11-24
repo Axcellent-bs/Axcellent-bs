@@ -74,12 +74,14 @@ def _check(draft: dict, caption: str) -> dict:
 
 
 def test_default_table_is_valid() -> None:
-    assert _tbl().brand == ("#캣북스",)
+    # 기본 표에는 브랜드 태그를 적지 않는다(회사 설정 [brand] hashtags에서 온다, 11/24)
+    assert _tbl().brand == ()
+    assert sns_hashtags.brand_tags(sns.tag_check) == ("#캣북스",)  # 캣북스 tenant.toml
 
 
 def test_unmapped_brief_keeps_brand_only() -> None:
     tags, meta = _select()
-    assert tags == ("#캣북스",) == sns.HASHTAGS and meta["topic"] == []
+    assert tags == ("#캣북스",) == sns.brand_hashtags() and meta["topic"] == []
     out = _draft()
     assert out["output"]["hashtags"] == ["#캣북스"]
     assert out["output"]["caption"].endswith("\n\n#캣북스")
@@ -156,7 +158,44 @@ def test_check_accepts_unchanged_and_rejects_edited_hashtags() -> None:
 
 
 def test_outage_hashtags_unchanged() -> None:
-    assert sns.HASHTAGS == ("#캣북스",)  # outage_sns는 이 상수 그대로 쓴다
+    assert sns.brand_hashtags() == ("#캣북스",)  # outage_sns는 회사 브랜드 태그 그대로 쓴다
+
+
+def _company(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, brand: str = "") -> None:
+    """회사 폴더 하나(tmp)를 지금 회사로: 누비투어 같은 가상 여행사."""
+    folder = tmp_path / "tenants" / "trip"
+    folder.mkdir(parents=True)
+    (folder / "tenant.toml").write_text(f'name = "여행 하루"\n[brand]\n{brand}', encoding="utf-8")
+    monkeypatch.setenv("AX_TENANTS_DIR", str(tmp_path / "tenants"))
+    monkeypatch.setenv("AX_TENANT", "trip")
+
+
+def test_other_company_uses_its_own_brand_tags(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _company(monkeypatch, tmp_path, 'hashtags = ["#여행하루", "#trip_day"]\n')
+    assert sns.brand_hashtags() == ("#여행하루", "#trip_day")
+    tags, meta = _select()
+    assert tags == ("#여행하루", "#trip_day") and meta["brand"] == ["#여행하루", "#trip_day"]
+    assert "#캣북스" not in tags
+
+
+def test_brand_tag_default_is_company_name_without_spaces(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from ax_agent_template import companies
+
+    _company(monkeypatch, tmp_path)  # [brand] hashtags 없음
+    trip = companies.CATBOOKS.model_copy(update={"company_id": "trip", "name": "여행 하루"})
+    monkeypatch.setattr("marketing_agent.company_scope.get_company", lambda _cid: trip)
+    assert sns.brand_hashtags() == ("#여행하루",)
+
+
+def test_bad_company_brand_tags_fall_back_to_company_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _company(monkeypatch, tmp_path, 'hashtags = ["#좋아요"]\n')  # 참여 조건 금칙어
+    assert sns.brand_hashtags() == ("#캣북스",)  # 회사 목록 이름(시험 기본 회사 = 캣북스)
 
 
 @pytest.mark.parametrize(

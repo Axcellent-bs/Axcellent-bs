@@ -96,7 +96,7 @@ def _draft(ctx: str = CTX, starts: list[float] | None = None) -> sns.SnsPostDraf
         caption=caption,
         hashtags=[],
         caption_sha256=sns._sha(caption),  # noqa: SLF001
-        required_text=[PLAN, sns.DEMO_TEXT, sns.TERMS_TEXT],
+        required_text=[PLAN, *sns.notice_texts()],
         context_id=ctx,
         scene_starts_s=starts or [],
         plan_duration_s=10.0 if starts else None,

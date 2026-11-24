@@ -63,7 +63,9 @@ def test_topic_only_makes_draft_with_basis_and_ai_label() -> None:
     assert o["topic_ignored"] is False
     assert o["caption"].startswith("신간 그림책 소개\n\n")
     assert sns.AI_LABEL_TEXT in o["caption"] and o["is_ai_generated"] is True
-    assert sns.DEMO_TEXT in o["caption"] and sns.TERMS_TEXT in o["caption"]
+    assert all(text in o["caption"] for text in sns.notice_texts())
+    demo = "캣북스는 시연용 가상 서비스이며 실제 거래·배송이 없습니다."  # 캣북스 회사 설정
+    assert demo in o["caption"]
     assert o["hashtags"] == ["#캣북스"]
     assert out["fallback"] is True  # 고정 템플릿, LLM 없음
 
