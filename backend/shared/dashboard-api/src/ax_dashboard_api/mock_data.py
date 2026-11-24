@@ -275,7 +275,7 @@ CONVERSATIONS = [
     Conversation(
         id=1,
         customer_name="김하늘",
-        subject="책 표지가 찢어져 왔어요",
+        subject="상품 포장이 찢어져 왔어요",
         category="refund",
         sentiment="frustrated",
         urgency="high",

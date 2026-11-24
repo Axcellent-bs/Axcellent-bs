@@ -291,7 +291,7 @@ async def test_a_handed_over_incident_is_recorded_as_resolved_when_the_shop_reco
     await manager.process(recovered("evt_rec_h", at, **how))
     later = resolution_calls(harness)[1]
     assert later["outcome"] == "resolved" and later["only_if_unresolved"] is True
-    assert later["action"] == "사람(쇼핑몰 운영자)이 결제 장애 상태를 해제해 정상화"
+    assert later["action"] == "사람(사이트 운영자)이 결제 장애 상태를 해제해 정상화"
     assert later["minutes_to_resolve"] == 4
     await manager.process(recovered("evt_rec_h2", at, **how))  # 같은 복구가 다시 와도 한 번
     assert len(resolution_calls(harness)) == 2

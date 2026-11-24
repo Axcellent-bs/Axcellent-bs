@@ -246,7 +246,7 @@ TASKS: tuple[TaskDef, ...] = (
         "customer_segment",
         "고객층 분석",
         "연령·성별 같은 고객층의 구성이나 선호를 분석해 달라는 의뢰.",
-        ("20대 여성은 뭘 많이 사요", "30대 남성이 즐겨 사는 책 알려 주세요"),
+        ("20대 여성은 뭘 많이 사요", "30대 남성이 즐겨 사는 상품 알려 주세요"),
         "data",
         "segment_question",
         fill="customer_text",

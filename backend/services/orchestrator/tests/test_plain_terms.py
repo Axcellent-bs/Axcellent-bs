@@ -9,7 +9,7 @@ from ax_orchestrator.naming import plain_terms
 def test_metric_and_component_codes_become_korean() -> None:
     text = "payment_fail_rate 이상 직후 payment 문의가 급증했다 (shop-api)"
     out = plain_terms(text)
-    assert out == "결제 실패율 이상 직후 결제 문의가 급증했다 (쇼핑몰 서버)"
+    assert out == "결제 실패율 이상 직후 결제 문의가 급증했다 (사이트 서버)"
 
 
 def test_words_inside_other_names_are_left_alone() -> None:

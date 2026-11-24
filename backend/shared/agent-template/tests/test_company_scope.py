@@ -113,3 +113,23 @@ def test_scoped_wrapper_still_works() -> None:
         return company_scope.active()
 
     assert asyncio.run(company_scope.scoped(handler)(_Req())) == "studyon"
+
+
+def test_prompt_line_reads_name_and_industry_from_company_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        {"company_id": "nubitour", "name": "누비투어", "industry": "여행",
+         "created_at": "2026-11-20T00:00:00Z"},
+        {"company_id": "studyon", "name": "스터디\n온", "created_at": "2026-11-20T00:00:00Z"},
+    ]  # fmt: skip
+    path = tmp_path / "companies2.json"
+    path.write_text(json.dumps({"companies": rows}), encoding="utf-8")
+    monkeypatch.setenv("AX_COMPANIES_FILE", str(path))
+    assert company_scope.prompt_line() == ""  # 요청 밖은 회사를 모른다
+    with company_scope.using("nubitour"):
+        assert company_scope.prompt_line() == "이 회사: 누비투어 (업종: 여행)\n"
+    with company_scope.using("studyon"):  # 업종이 없으면 지어내지 않고, 줄바꿈은 지운다
+        assert company_scope.prompt_line() == "이 회사: 스터디 온\n"
+    with company_scope.using("catbooks"):  # 회사 목록에 없는 회사
+        assert company_scope.prompt_line() == ""

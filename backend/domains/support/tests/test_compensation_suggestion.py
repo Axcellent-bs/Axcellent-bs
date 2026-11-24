@@ -265,7 +265,7 @@ def test_a_missing_order_says_the_order_is_missing_not_the_inquiry() -> None:
     result = call(inquiry_id)
     assert result["outcome"] == "not_found"
     message = result["output"]["message"]
-    assert "판매 서버에 없다" in message and "ord_0001" in message
+    assert "사이트 서버에 없다" in message and "ord_0001" in message
     assert "찾을 수 없다" not in message
 
 

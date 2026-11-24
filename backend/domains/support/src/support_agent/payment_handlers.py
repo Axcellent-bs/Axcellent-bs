@@ -181,8 +181,8 @@ async def diagnose_payment(request: AgentRequest) -> AgentResult:
         return h._done(
             request,
             {
-                "message": f"문의 {inquiry.id}의 주문 {inquiry.order_id}이 판매 서버에 없다"
-                "(판매 서버 자료가 바뀌기 전 문의일 수 있다)"
+                "message": f"문의 {inquiry.id}의 주문 {inquiry.order_id}이 사이트 서버에 없다"
+                "(사이트 서버 자료가 바뀌기 전 문의일 수 있다)"
             },
             outcome="not_found",
         )

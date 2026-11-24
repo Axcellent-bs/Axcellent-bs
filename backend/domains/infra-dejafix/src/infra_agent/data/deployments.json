@@ -16,7 +16,7 @@
       "version": "v2.4.0",
       "deployed_at": "2026-10-18T02:00:00Z",
       "components": ["api"],
-      "change_summary": "도서 상세 페이지 개선",
+      "change_summary": "상품 상세 페이지 개선",
       "irreversible": []
     },
     {
