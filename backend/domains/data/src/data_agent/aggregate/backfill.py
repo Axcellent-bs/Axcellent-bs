@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta
 from ax_contracts.data_access.sales_aggregates import AggRun
 from ax_contracts.schemas.data import CatalogSales
 from data_agent.aggregate.build_day import build_day
+from data_agent.aggregate.build_snapshots import build_snapshots
 from data_agent.aggregate.store import AggregateStore
 from data_agent.sales_quality import kst_day
 from data_agent.sales_store import SalesStore, iso
@@ -74,10 +75,20 @@ def backfill(  # noqa: PLR0913 - 두 저장소·회사·카탈로그·시각·�
                 days += 1
         keep_from, drop_before = retention_bounds(as_of)
         merged, dropped = agg.roll_up(tenant_id, keep_from, drop_before)
+        rows = {"days": days, "agg_sales_daily": len(agg.days(tenant_id)),
+                "rolled_up_daily_rows": merged, "dropped_monthly_rows": dropped}  # fmt: skip
+        if (
+            cfg is not None and first is not None
+        ):  # 카탈로그 [sales]가 없으면 k도 속성도 몰라 안 만든다
+            buyers, cohorts, at_risk = build_snapshots(
+                sales, tenant_id, as_of, cfg, run.run_id, now, source_cursor=run.source_cursor
+            )
+            agg.replace_snapshots(tenant_id, as_of, buyers, cohorts, at_risk)
+            rows |= {"agg_buyers_period": len(buyers), "agg_cohorts": len(cohorts),
+                     "agg_at_risk": len(at_risk),
+                     "pruned_snapshot_rows": agg.prune_snapshots(tenant_id, as_of)}  # fmt: skip
         done = run.model_copy(update={
-            "status": "done", "finished_at": datetime.now(now.tzinfo),
-            "rows": {"days": days, "agg_sales_daily": len(agg.days(tenant_id)),
-                     "rolled_up_daily_rows": merged, "dropped_monthly_rows": dropped},
+            "status": "done", "finished_at": datetime.now(now.tzinfo), "rows": rows,
         })  # fmt: skip
     except Exception as exc:  # noqa: BLE001 - 실패도 계산 기록에 남긴다
         done = run.model_copy(update={
