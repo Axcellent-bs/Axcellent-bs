@@ -37,7 +37,7 @@ export const FLOW: { key: string; label: string; stepId: string }[] = [
 
 /** 사건을 처음 연 신호의 출처(총괄 detected_by.source) → 화면 이름. 표에 없으면 받은 값 그대로 */
 export const DETECTOR_KO: Record<string, string> = {
-  "shop-api": "쇼핑몰 모니터", // shop-api monitor.py가 보내는 shop.degraded
+  "shop-api": "사이트 모니터", // shop-api monitor.py가 보내는 shop.degraded
   infra: "Zabbix", // infra-dejafix dejafix_watch.py가 DejaFix(Zabbix) 장애를 옮긴 infra.anomaly_detected
   dejafix: "Zabbix",
   data: "데이터 AI 지표 감시", // data monitor.py의 metric.anomaly (심각도 높음 이상만 사건을 연다)

@@ -21,7 +21,7 @@ export const ACTION_KO: Record<string, string> = {
   find_active_incident: "진행 중인 이슈 찾기", create_inquiry: "고객 문의 접수", list_inquiries: "문의 목록 조회",
   get_inquiry: "문의 조회", inquiry_overview: "문의 현황 조회", list_claims: "클레임 목록 조회", claim_stats: "클레임 통계",
   claim_queue: "보상 대기열 조회", process_claim_queue: "보상 대기열 처리", customer_signals: "고객 이상 신호 조회",
-  release_fault_injection: "쇼핑몰 장애 해제", receive_change_result: "변경 결과 받기",
+  release_fault_injection: "사이트 장애 해제", receive_change_result: "변경 결과 받기",
   ledger_record: "장부에 기록", closing_report: "기간 손익 정리", record_incident_finance: "장애 비용 장부 기록",
   // 고객 의뢰(홍보 영상) 흐름 (11/20 대화방에 영어 id가 그대로 나왔다)
   generate_media: "영상 제작", prepare_video_draft_from_plan: "영상 초안 준비", trend_report_create: "트렌드 분석 보고서",

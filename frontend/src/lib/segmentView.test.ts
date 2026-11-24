@@ -146,11 +146,11 @@ test("선택지는 segment_options에서만 읽고, 없는 속성을 가리키�
   assert.equal(filterLabel({ age_band: "20s", gender: "f", region: "x" }, o.attributes), "20대 · 여성");
 });
 
-test("물어보기: 우리 쇼핑몰 순위와 바깥 시장(키 필요·한도) 칸", () => {
+test("물어보기: 회사 사이트 순위와 바깥 시장(키 필요·한도) 칸", () => {
   const v = favoritesView(FAVORITES, "책");
   assert.equal(v.kind, "ok");
   if (v.kind !== "ok") return;
-  assert.equal(v.header, "우리 쇼핑몰 · 20대 · 여성 구매자 412명 (최근 3개월)");
+  assert.equal(v.header, "회사 사이트 · 20대 · 여성 구매자 412명 (최근 3개월)");
   assert.equal(v.genres.title, "특히 많이 사는 장르");
   assert.deepEqual(v.genres.rows[0], { label: "소설", detail: "구매자의 31% · 전체 대비 1.4배 · 128명", suppressed: false, high: true });
   assert.deepEqual(v.genres.rows[1], { label: "시", detail: "표본 부족", suppressed: true, high: false });

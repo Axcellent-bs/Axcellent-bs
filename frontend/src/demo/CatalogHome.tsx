@@ -139,7 +139,7 @@ export default function CatalogHome() {
             </li>
             <li className="rounded-2xl bg-surface p-5 ring-1 ring-ink-100">
               <p className="font-semibold">회사 서비스와 연결</p>
-              <p className="mt-1 text-sm text-ink-700">쇼핑몰·앱의 주소와 API 키를 넣으면 주문·문의 같은 데이터를 받아와요.</p>
+              <p className="mt-1 text-sm text-ink-700">회사 사이트·앱의 주소와 API 키를 넣으면 주문·문의 같은 데이터를 받아와요.</p>
             </li>
           </ul>
         </section>

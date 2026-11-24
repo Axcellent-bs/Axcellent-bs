@@ -26,8 +26,8 @@ const REASON_LABELS: Record<string, string> = { ...RULE_KO, ...CLAIM_REASON_KO }
 
 const PULL_REFRESH_MS = 15_000;
 const PULL_ERROR_KO: Record<string, string> = {
-  UNAVAILABLE: "판매 서버에 연결할 수 없습니다", INGEST_FAILED: "읽어 온 문의를 처리하지 못한 건이 있습니다",
-  NO_SERVICE_KEY: "이 서비스의 판매 서버 연결 키가 설정돼 있지 않습니다(AX_SHOP_CLIENT_KEYS의 서비스 이름을 확인하세요)",
+  UNAVAILABLE: "사이트 서버에 연결할 수 없습니다", INGEST_FAILED: "읽어 온 문의를 처리하지 못한 건이 있습니다",
+  NO_SERVICE_KEY: "이 서비스의 사이트 서버 연결 키가 설정돼 있지 않습니다(AX_SHOP_CLIENT_KEYS의 서비스 이름을 확인하세요)",
 };
 
 // 고객 문의는 판매 서버(문의함)에 저장되고 고객지원이 정해진 간격으로 읽어 옵니다. 못 읽으면 조용히 비지 않고 여기에 보입니다.
@@ -47,13 +47,13 @@ function InquiryPullBanner() {
     <>
     <p role={alert ? "alert" : "status"} className={`rounded-xl px-4 py-2 text-xs font-medium ${alert ? "bg-red-50 text-red-800" : "bg-surface text-ink-700 ring-1 ring-ink-100"}`}>
       {s.connected === null
-        ? "판매 서버 문의함·클레임함을 아직 읽지 않았습니다."
+        ? "사이트 서버 문의함·클레임함을 아직 읽지 않았습니다."
         : down
-          ? `판매 서버 문의·클레임 연결 끊김: ${PULL_ERROR_KO[s.last_error ?? ""] ?? s.last_error ?? "원인을 알 수 없습니다"}.${left ? ` 판매 서버에 문의 ${s.pending ?? 0}건·클레임 ${s.claims_pending ?? 0}건이 남아 있습니다.` : ""} 새 접수가 늦게 들어올 수 있습니다.`
+          ? `사이트 서버 문의·클레임 연결 끊김: ${PULL_ERROR_KO[s.last_error ?? ""] ?? s.last_error ?? "원인을 알 수 없습니다"}.${left ? ` 사이트 서버에 문의 ${s.pending ?? 0}건·클레임 ${s.claims_pending ?? 0}건이 남아 있습니다.` : ""} 새 접수가 늦게 들어올 수 있습니다.`
           : claimsDown
-            ? `판매 서버 문의함 연결 정상 · ${s.read_only ? "관찰 모드(읽기만 하고 판매 서버에는 쓰지 않습니다) · " : ""}${s.interval_seconds}초마다 읽습니다. 클레임 서버에 닿지 못해 클레임함·반품 입고 상태를 알 수 없습니다(0건이 아닙니다). 클레임이 쌓여도 여기서 보이지 않으니 클레임 서버를 확인해 주세요.`
-          : `판매 서버 문의함·클레임함 연결 정상 · ${s.read_only ? "관찰 모드(읽기만 하고 판매 서버에는 쓰지 않습니다) · " : ""}${s.interval_seconds}초마다 읽습니다${left ? ` · 남은 문의 ${s.pending ?? 0}건·클레임 ${s.claims_pending ?? 0}건` : ""}.`}
-      {keyReadOnly && " 주의: 판매 서버가 이 설치의 연결 키를 읽기 전용(read) 키로 알려 와 관찰 모드로 바뀌었습니다. 읽음 표시·되돌려 쓰기를 하지 않으니, 이 설치가 의도한 관찰용이 아니면 연결 키를 확인해 주세요."}
+            ? `사이트 서버 문의함 연결 정상 · ${s.read_only ? "관찰 모드(읽기만 하고 사이트 서버에는 쓰지 않습니다) · " : ""}${s.interval_seconds}초마다 읽습니다. 클레임 서버에 닿지 못해 클레임함·반품 입고 상태를 알 수 없습니다(0건이 아닙니다). 클레임이 쌓여도 여기서 보이지 않으니 클레임 서버를 확인해 주세요.`
+          : `사이트 서버 문의함·클레임함 연결 정상 · ${s.read_only ? "관찰 모드(읽기만 하고 사이트 서버에는 쓰지 않습니다) · " : ""}${s.interval_seconds}초마다 읽습니다${left ? ` · 남은 문의 ${s.pending ?? 0}건·클레임 ${s.claims_pending ?? 0}건` : ""}.`}
+      {keyReadOnly && " 주의: 사이트 서버가 이 설치의 연결 키를 읽기 전용(read) 키로 알려 와 관찰 모드로 바뀌었습니다. 읽음 표시·되돌려 쓰기를 하지 않으니, 이 설치가 의도한 관찰용이 아니면 연결 키를 확인해 주세요."}
       {stuck > 0 && ` 여러 번 처리에 실패해 따로 빼 둔 접수가 ${stuck}건 있습니다 (문의 ${s.inbox_failed ?? 0}·클레임 ${s.claims_inbox_failed ?? 0}). 아래 목록에서 확인하고 다시 시도해 주세요.`}
     </p>
     <StuckIntakeList count={stuck} />
@@ -76,7 +76,7 @@ function StuckIntakeList({ count }: { count: number }) {
     setBusy(key); setNote(null);
     try {
       const r = await api.admin.retryStuckIntake(it.kind, it.seq);
-      setNote(r.requeued ? `${STUCK_KIND_KO[it.kind]} #${it.seq}을 다시 읽는 차례로 돌렸습니다.` : `${STUCK_KIND_KO[it.kind]} #${it.seq}을 다시 올리지 못했습니다${r.error === "READ_ONLY" ? " — 읽기 전용(관찰 모드) 설치라 판매 서버를 바꾸지 않습니다" : r.error ? ` (${r.error})` : ""}.`);
+      setNote(r.requeued ? `${STUCK_KIND_KO[it.kind]} #${it.seq}을 다시 읽는 차례로 돌렸습니다.` : `${STUCK_KIND_KO[it.kind]} #${it.seq}을 다시 올리지 못했습니다${r.error === "READ_ONLY" ? " — 읽기 전용(관찰 모드) 설치라 사이트 서버를 바꾸지 않습니다" : r.error ? ` (${r.error})` : ""}.`);
       await load();
     } catch { setNote("다시 시도하지 못했습니다. 잠시 뒤 다시 눌러 주세요."); }
     finally { setBusy(null); }

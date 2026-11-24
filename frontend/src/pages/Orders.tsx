@@ -163,7 +163,7 @@ export default function OrdersPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">주문 관리</h1>
           <p className="mt-1 text-sm text-ink-500">
-            <CompanyName />의 판매 서버에 있는 주문을 최신순으로 봅니다. 취소와 부분·전체 환불도 위 탭으로 따로 볼 수 있습니다.
+            <CompanyName />의 사이트 서버에 있는 주문을 최신순으로 봅니다. 취소와 부분·전체 환불도 위 탭으로 따로 볼 수 있습니다.
             보기만 하며, 취소·환불 처리는 클레임에서 합니다.
           </p>
         </div>
@@ -220,7 +220,7 @@ export default function OrdersPage() {
         {users.error && <ErrorBox message={`구매자 이름을 받지 못했습니다. 구매자 번호로는 찾을 수 있어요. ${users.error}`} onRetry={users.reload} />}
 
         {!page ? (
-          list.error ? <ErrorBox message={`판매 서버에서 주문을 읽지 못했습니다. ${list.error}`} onRetry={list.reload} /> : <Skeleton label="주문을 불러오는 중…" stats={0} lines={6} />
+          list.error ? <ErrorBox message={`사이트 서버에서 주문을 읽지 못했습니다. ${list.error}`} onRetry={list.reload} /> : <Skeleton label="주문을 불러오는 중…" stats={0} lines={6} />
         ) : (
           <>
             {list.error && <ErrorBox message={`새로 받지 못해 이전 값을 보여 줍니다. ${list.error}`} onRetry={list.reload} />}

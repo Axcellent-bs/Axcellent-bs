@@ -83,8 +83,8 @@ function RollbackDetail({ step }: { step: StepRow }) {
 
 /** 진행 기록 한 줄 */
 function eventKo(message: string, inc: OrchIncident): string {
-  if (message.startsWith("이벤트 수신: shop.degraded")) return "회사 쇼핑몰에서 장애 신호를 받음";
-  if (message.startsWith("이벤트 수신: shop.recovered")) return "회사 쇼핑몰에서 복구 신호를 받음";
+  if (message.startsWith("이벤트 수신: shop.degraded")) return "회사 사이트에서 장애 신호를 받음";
+  if (message.startsWith("이벤트 수신: shop.recovered")) return "회사 사이트에서 복구 신호를 받음";
   if (message.startsWith("이벤트 수신: support.inquiry_resolved")) return "고객지원 AI에서 문의 해결 신호를 받음";
   // 예전에 저장된 기록은 "이벤트"로 남아 있어 둘 다 받는다
   if (/^이(슈|벤트) 시작:/.test(message)) return `이슈 시작: ${incidentTitle(inc)}`;
@@ -94,7 +94,7 @@ function eventKo(message: string, inc: OrchIncident): string {
   const named = message
     .replace(/notice_id 보관 \([^)]*\)/, "게시한 공지 번호를 기록함")
     .replace(/안전 관문 결정 수신: (승인|거절)(?: \([^)]*\))? — rev_\w+(?: \(evt_\w+\))?/, "안전 확인에서 $1 결정을 받음")
-    .replace(/정상 복귀 신호 받음 \(shop-api, [^)]*\)/, "정상 복귀 신호를 받음 (쇼핑몰)")
+    .replace(/정상 복귀 신호 받음 \(shop-api, [^)]*\)/, "정상 복귀 신호를 받음 (회사 사이트)")
     .replace(/[A-C] 등급 보류 — 승인 대기열에 올림/, "사람 승인이 필요해 승인 대기함에 올림")
     .replace(/사람이 (승인|거절)\(공용\) — 재개/, "사람이 $1함, 이어서 진행")
     .replace(/사람이 (승인|거절)\(공용\)/, "사람이 $1함")
@@ -256,7 +256,7 @@ export function IncidentDetail({ incident }: { incident: OrchIncident }) {
           <span className={`chip ${record.tone}`}>{record.label}</span>
           {!!shared.length && shared.map(([key, value]) => (
             <span key={key} className="chip bg-emerald-50 text-emerald-700" title={`${key} = ${String(value)}`}>
-              {key === "notice_id" ? "점검 공지를 쇼핑몰에 게시함" : key === "recovered_notice_id" ? "정상화 공지를 쇼핑몰에 게시함" : "그 밖의 기록"}
+              {key === "notice_id" ? "점검 공지를 회사 사이트에 게시함" : key === "recovered_notice_id" ? "정상화 공지를 회사 사이트에 게시함" : "그 밖의 기록"}
             </span>
           ))}
         </p>

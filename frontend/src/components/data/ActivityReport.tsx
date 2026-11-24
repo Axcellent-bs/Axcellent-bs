@@ -82,7 +82,7 @@ function Company({ o }: { o: ActivityReportOutput }) {
   const r = (key: string) => ({ reasons: reasonsFor(o.unknown_sections, `company.${key}`), previousReasons: reasonsFor(o.unknown_sections, `company.previous_period.${key}`) });
   const money = (v: number | null) => (isNum(v) ? won(v) : null);
   return (
-    <Panel id="data-report-company" title="회사 현황" hint="매출·주문·결제는 재무 AI와 쇼핑몰 기록, 사건 수는 공통 로그에서 받은 값입니다.">
+    <Panel id="data-report-company" title="회사 현황" hint="매출·주문·결제는 재무 AI와 회사 사이트 기록, 사건 수는 공통 로그에서 받은 값입니다.">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <CompanyCell label="총거래액" figure={c.gmv} show={money} {...r("gmv")}>
           {c.gmv.note && <p className="mt-1 text-[11px] leading-relaxed text-ink-500">{c.gmv.note}</p>}

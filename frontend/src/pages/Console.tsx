@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 import { LEGACY_HINT, LEGACY_LABEL } from "@/lib/legacyIntake";
 import { STATUS_KO, tenantName } from "@/lib/labels";
 import type { Conversation, ConversationListItem, Kpi } from "@/lib/types";
+import { useCompany } from "@/demo/company";
 
 export default function ConsolePage() {
   return <Suspense><Console /></Suspense>;
@@ -22,6 +23,7 @@ export default function ConsolePage() {
 
 function Console() {
   const params = useSearchParams();
+  const connected = useCompany();
   const [list, setList] = useState<ConversationListItem[]>([]);
   const [conv, setConv] = useState<Conversation | null>(null);
   const [kpi, setKpi] = useState<Kpi | null>(null);
@@ -97,7 +99,7 @@ function Console() {
             <main className="card flex min-w-0 flex-1 flex-col overflow-hidden">
               <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink-100 bg-surface px-6 py-3">
                 <div className="min-w-[16rem] flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><h1 className="truncate text-base font-semibold">{conv.customer_name}</h1><span className="chip whitespace-nowrap bg-ink-100 text-ink-500">{STATUS_KO[conv.status]}</span><span className="chip whitespace-nowrap bg-indigo-50 text-indigo-800">{tenantName(conv.tenant_id)}</span>{conv.triage && <span className="chip whitespace-nowrap bg-amber-50 text-amber-800">{conv.triage.state === "done" ? `분류 완료${conv.triage.label ? ` · ${conv.triage.label}` : ""}` : "분류 필요"}</span>}{conv.legacy_intake && <span className="chip whitespace-nowrap bg-ink-100 text-ink-500" title={LEGACY_HINT}>{LEGACY_LABEL}</span>}</div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><h1 className="truncate text-base font-semibold">{conv.customer_name}</h1><span className="chip whitespace-nowrap bg-ink-100 text-ink-500">{STATUS_KO[conv.status]}</span><span className="chip whitespace-nowrap bg-indigo-50 text-indigo-800">{tenantName(conv.tenant_id, connected)}</span>{conv.triage && <span className="chip whitespace-nowrap bg-amber-50 text-amber-800">{conv.triage.state === "done" ? `분류 완료${conv.triage.label ? ` · ${conv.triage.label}` : ""}` : "분류 필요"}</span>}{conv.legacy_intake && <span className="chip whitespace-nowrap bg-ink-100 text-ink-500" title={LEGACY_HINT}>{LEGACY_LABEL}</span>}</div>
                   <p className="truncate text-xs text-ink-500">{conv.subject_display ?? conv.subject}{conv.order_no && ` · 주문 ${conv.order_no}`} · 문의 #{conv.id}</p>
                 </div>
                 <div className="ml-auto flex flex-wrap gap-2">

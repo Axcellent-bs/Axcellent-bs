@@ -125,9 +125,16 @@ export const PURGE_REASON_KO: Record<string, string> = {
   no_buyer: "구매자를 알 수 없음",
 };
 
-/** 회사(고객사) 이름표. 데모 쇼핑몰의 고객사 ID는 shop-demo(회사 폴더 catbooks)이고 캣북스다. 모르는 회사는 ID를 그대로 보여 준다 */
-export const TENANT_KO: Record<string, string> = { "shop-demo": "캣북스", catbooks: "캣북스" };
-export const tenantName = (id: string | undefined | null): string => (id ? TENANT_KO[id] ?? id : "회사 연결 안 됨");
+/** 회사(고객사) 이름표. 회사 이름은 박지 않고 연결된 회사(`useCompany`)를 따른다. 모르는 회사는 ID를 그대로 보여 준다 */
+export const TENANT_KO: Record<string, string> = {};
+/** 고객사 ID를 정하지 않은 설치의 기본 ID (서버 기본값 shop-demo, 회사 폴더 catbooks). 이 ID는 연결된 회사로 본다 */
+const DEFAULT_TENANT_IDS = new Set(["shop-demo", "catbooks"]);
+export const tenantName = (id: string | undefined | null, company?: { id: string; name: string } | null): string => {
+  if (!id) return "회사 연결 안 됨";
+  if (company && id === company.id) return company.name;
+  if (DEFAULT_TENANT_IDS.has(id)) return company?.name ?? "연결된 회사";
+  return TENANT_KO[id] ?? id;
+};
 
 /** 분류 필요가 된 까닭 */
 export const TRIAGE_REASON_KO: Record<string, string> = {
