@@ -28,6 +28,7 @@ skill은 `list_request_videos`(읽기)다.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -38,6 +39,7 @@ from pydantic import Field, ValidationError
 
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
 from ax_contracts.schemas.common import AxModel
+from ax_contracts.schemas.marketing_character import VIRTUAL_HUMAN_LABEL
 from marketing_agent import sns, sns_media
 from marketing_agent.media.audio_mix import Runner, subprocess_runner
 from marketing_agent.sns import SnsPostDraft, SnsStore
@@ -99,6 +101,20 @@ def _already_attached(draft: SnsPostDraft, labeled: Path) -> bool:
     )
 
 
+def disclosure(gen: dict[str, Any]) -> str | None:
+    """생성 결과가 AI 가상 인물로 만든 영상이면 표시 문구("AI 가상 인물"), 아니면 None."""
+    return VIRTUAL_HUMAN_LABEL if gen.get("ai_virtual_human") is True else None
+
+
+def with_disclosure(caption: str | None, note: str) -> str:
+    """캡션 끝에 "※ AI 가상 인물이 나오는 영상이에요" 한 줄 (이미 있으면 그대로)."""
+    text = caption or ""
+    line = f"※ {note}이 나오는 영상이에요 (실존 인물이 아니에요)"
+    if note in text:
+        return text
+    return f"{text.rstrip()}\n\n{line}" if text.strip() else line
+
+
 async def _attach(
     request: AgentRequest,
     draft: SnsPostDraft,
@@ -127,11 +143,15 @@ async def _attach(
     missing = preflight()
     if missing is not None:
         return _label_failed("post_tools_unavailable")
+    # 11/24 AI 가상 인물로 만든 영상: 라벨 문구 뒤에 "AI 가상 인물" 한 줄 + 캡션에도 한 줄
+    note = disclosure(gen)
     try:
         origin_sha = sns_media.sha256_file(asset)
-        _, label, reused = await asyncio.to_thread(
-            process, asset, asset.parent, "video", str(gen.get("model_id", "")), origin_sha, runner
-        )
+        args = (asset, asset.parent, "video", str(gen.get("model_id", "")), origin_sha, runner)
+        if note:
+            _, label, reused = await asyncio.to_thread(process, *args, note=note)
+        else:
+            _, label, reused = await asyncio.to_thread(process, *args)
     except PrepareError as error:
         return _label_failed(error.code)
     except (OSError, ValueError) as error:
@@ -139,14 +159,17 @@ async def _attach(
 
     labeled_ref = sns_media.asset_ref_for(label.labeled_path)
     latest = store.get(draft.post_draft_id) or draft
-    attached = latest.model_copy(
-        update={
-            "asset_ref": labeled_ref,
-            "asset_sha256": label.labeled_sha256,
-            "media_check": None,
-            "media_flow": None,
-        }
-    )
+    update: dict[str, Any] = {
+        "asset_ref": labeled_ref,
+        "asset_sha256": label.labeled_sha256,
+        "media_check": None,
+        "media_flow": None,
+    }
+    if note:
+        caption = with_disclosure(latest.caption, note)
+        update["caption"] = caption
+        update["caption_sha256"] = hashlib.sha256(caption.encode()).hexdigest()
+    attached = latest.model_copy(update=update)
     try:
         store.update_meta([attached])  # 초안 id는 그대로(내용 주소 id를 새로 만들지 않는다)
     except KeyError:

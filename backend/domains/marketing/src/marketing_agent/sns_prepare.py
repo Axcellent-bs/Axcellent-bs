@@ -340,11 +340,12 @@ def _reusable_label(
 
 
 def label_media(
-    prepared: Path, out_dir: Path, *, model: str, origin_sha: str, kind: str
-) -> tuple[sns_label.LabelResult, bool]:
-    """(결과, 재사용 여부). 실패는 `PrepareError("label", 코드)`."""
+    prepared: Path, out_dir: Path, *, model: str, origin_sha: str, kind: str,
+    note: str | None = None,
+) -> tuple[sns_label.LabelResult, bool]:  # fmt: skip
+    """(결과, 재사용 여부). 실패는 `PrepareError("label", 코드)`. `note`는 문구 뒤 한 줄."""
     try:
-        config = sns_label.load_config()
+        config = with_note(sns_label.load_config(), note)
         reused = _reusable_label(out_dir, kind, origin_sha, config)
         if reused is not None:
             return reused, True
@@ -869,11 +870,26 @@ async def _prepare_carousel(
 
 
 def _convert_and_label(
-    asset: Path, out_dir: Path, kind: str, model: str, origin_sha: str, runner: Runner
-) -> tuple[Converted, sns_label.LabelResult, bool]:
+    asset: Path, out_dir: Path, kind: str, model: str, origin_sha: str, runner: Runner,
+    note: str | None = None,
+) -> tuple[Converted, sns_label.LabelResult, bool]:  # fmt: skip
     converter = convert_image if kind == "image" else convert_video
     converted = converter(asset, out_dir, runner)
     label, reused = label_media(
-        converted.path, out_dir, model=model, origin_sha=origin_sha, kind=kind
+        converted.path, out_dir, model=model, origin_sha=origin_sha, kind=kind, note=note
     )
     return converted, label, reused
+
+
+def with_note(config: sns_label.LabelConfig, note: str | None) -> sns_label.LabelConfig:
+    """11/24: AI 라벨 문구 뒤에 한 줄 더 (예: "AI 가상 인물").
+
+    설정 지문도 바뀌어 예전 라벨을 재사용하지 않는다."""
+    if not note:
+        return config
+    from dataclasses import replace
+
+    sha = hashlib.sha256(f"{config.sha256}:{note}".encode()).hexdigest()
+    return replace(config, text_video=f"{config.text_video} · {note}",
+                   text_image=f"{config.text_image} · {note}",
+                   text_unknown=f"{config.text_unknown} · {note}", sha256=sha)  # fmt: skip

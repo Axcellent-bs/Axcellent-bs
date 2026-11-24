@@ -37,10 +37,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ax_contracts.schemas import AgentRequest, AgentResult, Evidence, TaskStatus
+from ax_contracts.schemas.marketing_character import VIRTUAL_HUMAN_LABEL
 from ax_contracts.schemas.marketing_storyboard import MAX_CHARACTER_EN, MAX_STYLE_EN
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import storyboard as _storyboard
+from marketing_agent.character_sheet import VIRTUAL_STYLE_EN
 from marketing_agent.media.ledger import MediaLedger
 
 logger = logging.getLogger("marketing.request_creative")
@@ -113,15 +115,23 @@ def plan_storyboard(plan: Any, sheet: dict[str, Any]) -> dict[str, Any] | None:
         for i, s in enumerate(scenes)
     ]
     concept = _cut(plan.concept, 80) or "홍보 영상"
+    # 11/24 AI 가상 인물: 회사 그림체(style_en, 예: flat illustration) 대신 실사·참조와 같은 사람
+    virtual = _creative.upload_kind(sheet) == "virtual_human"
+    style = VIRTUAL_STYLE_EN if virtual else getattr(plan, "style", None)
     read = _storyboard.StoryRead(
         title_ko=concept,
         logline_ko=_cut(plan.script, 300) or concept,
         shots=shots,
-        style_en=_cut(getattr(plan, "style", None), MAX_STYLE_EN),
+        style_en=_cut(style, MAX_STYLE_EN),
     )
     character = _cut(sheet.get("consistency_en"), MAX_CHARACTER_EN) or None
     out = _storyboard.build_output(read, character, read.style_en, len(shots))
-    return out.model_dump(mode="json")
+    board = out.model_dump(mode="json")
+    duration = getattr(plan, "duration_s", None)
+    # 영상 길이는 기획 제작안 길이 (상한은 서버 설정)
+    if isinstance(duration, int) and duration > 0:
+        board[_render.PLAN_DURATION_KEY] = duration
+    return board
 
 
 def prepare_storyboard(brand_id: str, context_id: str, plan: Any) -> tuple[str | None, str | None]:
@@ -246,6 +256,8 @@ def _write_meta(record_id: str, post_draft_id: str, video: dict[str, Any]) -> No
 
 def _generated(request: AgentRequest, record_id: str, video: dict[str, Any]) -> AgentResult:
     post_draft_id = str((request.input or {}).get("post_draft_id") or "")
+    rec = _creative.store().get(record_id) or {}
+    virtual = _creative.upload_kind(rec.get("sheet")) == "virtual_human"
     path = _render.asset_path(record_id, "video")
     try:
         _write_meta(record_id, post_draft_id, video)
@@ -268,6 +280,10 @@ def _generated(request: AgentRequest, record_id: str, video: dict[str, Any]) -> 
         usage_source="estimate",
         ai_generated=True,
         execution_id=video.get("execution_id"),
+        # 11/24 AI 가상 인물로 만든 영상: AI 라벨 단계가 "AI 가상 인물" 표시·캡션 한 줄을 더한다
+        ai_virtual_human=virtual,
+        ai_disclosure=VIRTUAL_HUMAN_LABEL if virtual else None,
+        seconds_clamped_from=video.get("seconds_clamped_from"),
     )
 
 

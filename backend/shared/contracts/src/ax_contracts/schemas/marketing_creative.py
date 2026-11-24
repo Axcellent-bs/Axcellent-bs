@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import Field
 
 from ax_contracts.schemas.common import AxModel
+from ax_contracts.schemas.marketing_character import CharacterUploadKind
 
 CREATIVE_RECORDS_LIST_SKILL = "creative_records_list"
 CREATIVE_RECORD_GET_SKILL = "creative_record_get"
@@ -36,6 +37,8 @@ class CreativeRecordSummary(AxModel):
     # 대본(11/23, 추가): 장면 수(없으면 0)와 저장 시각
     script_scenes: int = 0
     script_at: str | None = None
+    # 11/24 올린 이미지 종류 (marketing_character.CharacterUploadKind, 옛 기록은 real_photo)
+    kind: CharacterUploadKind = "real_photo"
 
 
 class CreativeRecordsListOutput(AxModel):

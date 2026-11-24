@@ -1422,6 +1422,17 @@ class CharacterSheetBody(BaseModel):
     # 제작 기록에 남길 작은 미리보기(긴 변 256px JPEG base64).
     # 없거나 이상하면 미리보기 없이 기록한다
     thumbnail_base64: str | None = Field(default=None, max_length=80_000)
+    # 11/24 올린 이미지 종류: real_photo(실제 사람 사진 → 그림체로, 기본) · virtual_human(AI 가상
+    # 인물 → 그대로 참조) · illustration(그림·일러스트 → 그대로). virtual_human은 "실존 인물이 아닌
+    # AI 가상 인물이고 우리 회사가 쓸 권리가 있다" 확인(virtual_confirmed)이 있어야 한다(없으면 422)
+    kind: Literal["real_photo", "virtual_human", "illustration"] = "real_photo"
+    virtual_confirmed: bool = False
+
+    @model_validator(mode="after")
+    def _virtual_needs_confirm(self) -> CharacterSheetBody:
+        if self.kind == "virtual_human" and not self.virtual_confirmed:
+            raise ValueError("AI 가상 인물은 실존 인물이 아니고 쓸 권리가 있다는 확인이 필요하다")
+        return self
 
 
 @router.post("/marketing/character-sheet")
@@ -1436,8 +1447,9 @@ async def marketing_character_sheet(body: CharacterSheetBody) -> dict:
     note = (body.note or "").strip() or None
     return ok(
         await marketing_client.character_sheet_call(
-            body.image.model_dump(), note, body.thumbnail_base64 or None
-        )
+            body.image.model_dump(), note, body.thumbnail_base64 or None,
+            kind=body.kind, virtual_confirmed=body.virtual_confirmed,
+        )  # fmt: skip
     )
 
 

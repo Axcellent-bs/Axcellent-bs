@@ -53,6 +53,7 @@ from ax_contracts.schemas.marketing_campaigns import (
     ListMarketingCampaignsOutput,
     MarketingCampaignItem,
 )
+from ax_contracts.schemas.marketing_character import REFERENCE_KINDS
 from ax_contracts.schemas.marketing_creative import (
     CreativeInstagramDraftInput,
     CreativeInstagramOutput,
@@ -1065,6 +1066,18 @@ def _safe_render(fn: Any) -> None:
         _render.logger.exception("Higgsfield 렌더를 시작하지 못함")
 
 
+def _save_original(request: AgentRequest, record_id: str) -> None:
+    """올린 원본(화면이 줄인 JPEG)을 그 회사 기록 폴더에 시트 그림으로 둔다.
+
+    실패해도 결과는 그대로."""
+    try:
+        image = _character_sheet.decode_image(request.untrusted.get("image"))
+        _render.save_original(record_id, image.data, image.mime_type)
+    except Exception:  # noqa: BLE001 - 기록은 부가 기능이라 결과를 막지 않는다
+        _creative.logger.exception("제작 기록: 올린 원본을 저장하지 못함")
+        _render._set(record_id, "sheet_image", status="failed", error="original_not_saved")  # noqa: SLF001
+
+
 def _start_sheet_render(request: AgentRequest, out: Any) -> None:
     ref: bytes | None = None
     try:
@@ -1409,9 +1422,20 @@ async def character_sheet_prompt(request: AgentRequest) -> AgentResult:
     from marketing_agent.chat import default_llm
 
     factory = CHARACTER_SHEET_LLM or default_llm
+    # 11/24 올린 이미지 종류(사람이 고름, input.kind). AI 가상 인물은 "실존 인물이 아니고 쓸 권리가
+    # 있다" 확인(input.virtual_confirmed)이 있어야 받는다
+    given = request.input if isinstance(request.input, dict) else {}
+    kind = str(given.get("kind") or "real_photo")
+    if kind not in _creative.UPLOAD_KINDS:
+        return _result(request, TaskStatus.FAILED, outcome="invalid_input",
+                       output={"message": f"모르는 이미지 종류 {kind}"})  # fmt: skip
+    if kind == "virtual_human" and given.get("virtual_confirmed") is not True:
+        why = "AI 가상 인물 확인(실존 인물 아님·쓸 권리)이 없다"
+        return _result(request, TaskStatus.FAILED, outcome="virtual_unconfirmed",
+                       output={"message": why})  # fmt: skip
     try:
         out = await _character_sheet.make_character_sheet(
-            request.untrusted, factory, context_id=request.meta.context_id
+            request.untrusted, factory, context_id=request.meta.context_id, kind=kind
         )
     except _character_sheet.CharacterSheetRefused as refused:
         return _result(
@@ -1421,7 +1445,10 @@ async def character_sheet_prompt(request: AgentRequest) -> AgentResult:
             output={"message": refused.message},
         )
     out = out.model_copy(update={"record_id": _record_sheet(out, request.untrusted)})
-    if out.record_id:  # Higgsfield로 이미지 시트 그림(키·모델이 없으면 기록에 이유만)
+    if out.record_id and kind in REFERENCE_KINDS:
+        # 11/24 가상 인물·일러스트: 시트 그림을 만들지 않고(크레딧 0) 올린 원본을 시트 그림 자리에
+        _save_original(request, out.record_id)
+    elif out.record_id:  # Higgsfield로 이미지 시트 그림(키·모델이 없으면 기록에 이유만)
         _start_sheet_render(request, out)
     return _result(
         request,

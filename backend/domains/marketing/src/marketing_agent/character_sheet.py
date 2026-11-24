@@ -32,6 +32,7 @@ from ax_contracts.schemas.common import AxModel
 from ax_contracts.schemas.marketing_character import (
     MAX_CHARACTER_IMAGE_BYTES,
     MAX_CHARACTER_NOTE,
+    REFERENCE_KINDS,
     SHEET_EXPRESSIONS,
     SHEET_VIEWS,
     CharacterSheetImage,
@@ -143,6 +144,9 @@ NEGATIVE = (
     "low resolution, multiple different characters"
 )
 PHOTO_NEGATIVE = "photorealistic, real person likeness, photograph"
+# 11/24 AI 가상 인물: 회사 그림체(style_en, 예: flat illustration) 대신 이 문장 (코드 상수)
+VIRTUAL_STYLE_EN = "photorealistic, same person as the reference image"
+REFERENCE_LINE_EN = "Use the reference image as is; keep the same face, hair and outfit."
 
 
 def decode_image(raw: Any) -> ImageInput:
@@ -181,8 +185,14 @@ def _palette_text(palette: list[PaletteColor]) -> str:
     return ", ".join(f"{c.name} {c.hex}" + (f" ({c.use})" if c.use else "") for c in palette)
 
 
-def build_output(read: CharacterRead, note: str | None) -> CharacterSheetPromptOutput:
-    """LLM이 읽은 외형으로 시트 칸과 프롬프트를 조립한다. 방향·표정 칸은 늘 다 들어간다."""
+def build_output(
+    read: CharacterRead, note: str | None, kind: str = "real_photo"
+) -> CharacterSheetPromptOutput:
+    """LLM이 읽은 외형으로 시트 칸과 프롬프트를 조립한다. 방향·표정 칸은 늘 다 들어간다.
+
+    11/24 `kind`(사람이 고른 올린 이미지 종류): virtual_human·illustration이면 그림체로 바꾸지 않고
+    원본을 그대로 참조로 쓴다(시트 그림은 만들지 않고 이 설명만 쓴다). virtual_human은 그림체가
+    `VIRTUAL_STYLE_EN`(실사, 참조 이미지와 같은 사람)이다."""
     palette = _clean_palette(read.palette)
     if len(palette) < 3:
         raise CharacterSheetRefused(
@@ -206,8 +216,9 @@ def build_output(read: CharacterRead, note: str | None) -> CharacterSheetPromptO
             "guessed_ko": _clean_list(read.guessed_ko, 12, 120),
         }
     )
-    stylized = read.real_person_photo
-    style = read.art_style_en
+    keep = kind in REFERENCE_KINDS  # 그대로 참조로 쓰는 종류 (사람이 고른 값이 먼저)
+    stylized = read.real_person_photo and not keep
+    style = VIRTUAL_STYLE_EN if kind == "virtual_human" else read.art_style_en
     if stylized:
         style = f"{style}, stylized illustrated character, not photorealistic"
     appearance = f"{read.face_en}; hair: {read.hair_en}; eyes: {read.eyes_en}; body: {read.body_en}"
@@ -221,6 +232,10 @@ def build_output(read: CharacterRead, note: str | None) -> CharacterSheetPromptO
     )
     if stylized:
         consistency += " Do not copy the likeness of the real person in the reference photo."
+    elif keep:
+        consistency += f" {REFERENCE_LINE_EN}"
+        if kind == "virtual_human":
+            consistency += f" Style: {VIRTUAL_STYLE_EN}."
 
     panels: list[CharacterSheetPanel] = []
     for vid, ko, en in SHEET_VIEWS:
@@ -302,11 +317,15 @@ def build_output(read: CharacterRead, note: str | None) -> CharacterSheetPromptO
         layout_ko=layout,
         prompt_en=prompt[:8000],
         negative_prompt_en=negative[:1000],
+        kind=kind if kind in ("real_photo", *REFERENCE_KINDS) else "real_photo",
     )
 
 
 async def make_character_sheet(
-    untrusted: dict[str, Any], llm_factory: Callable[[], Any], context_id: str | None = None
+    untrusted: dict[str, Any],
+    llm_factory: Callable[[], Any],
+    context_id: str | None = None,
+    kind: str = "real_photo",
 ) -> CharacterSheetPromptOutput:
     image = decode_image(untrusted.get("image"))
     note = clean_note(untrusted.get("note"))
@@ -349,4 +368,4 @@ async def make_character_sheet(
     logger.info("캐릭터 시트 프롬프트: %s, 메모 %s", image.describe(), "있음" if note else "없음")
     if not read.has_character:
         raise CharacterSheetRefused("no_character", "이미지에서 캐릭터를 찾지 못했다")
-    return build_output(read, note)
+    return build_output(read, note, kind)
