@@ -1,4 +1,4 @@
-"""ax-autodeploy 백엔드 단계(dry-run) 판정 분기 시험.
+"""ax-autodeploy 백엔드 단계(dry-run) 판정 분기 시험. 공용 도구(Harness)는 test_backend_on.py 도 쓴다.
 
 서버·네트워크 없이 돈다: 임시 git 저장소(origin/운영 트리/빌드 트리)와 가짜 curl(GitHub API 응답을 파일로 대신함)을 쓴다.
 실행: python -m unittest discover -s docs/ops/autodeploy/tests -v   (bash, git, python3 필요)
@@ -21,11 +21,16 @@ COMMIT_AT = int(datetime.datetime(2026, 11, 24, 11, 0, tzinfo=KST).timestamp())
 # BASH_ENV 로 불러오는 가짜 명령(함수라 실행 권한·PATH 에 상관없이 Windows 에서도 돈다).
 # flock/pgrep 은 항상 "잠금 얻음/다른 배포 없음", curl 은 마지막 인자(URL)로 픽스처 파일을 고르고 없으면 실패(22)처럼 군다.
 FAKE_SHIMS = r"""
-flock() { return 0; }
+flock() { [[ -z "${FAKE_FLOCK_BUSY:-}" ]]; }
 pgrep() { return 1; }
 curl() {
   local url="${@: -1}" d="${FAKE_API_DIR}" sha f
   case "${url}" in
+    https://hooks.fake.invalid/*)   # 가짜 슬랙 웹훅: 본문(JSON)을 파일에 쌓는다. FAKE_SLACK_FAIL 파일이 있으면 실패
+      [[ -e "${FAKE_SLACK_FAIL:-/nonexistent}" ]] && return 22
+      cat >> "${FAKE_SLACK_OUT}"; printf '
+' >> "${FAKE_SLACK_OUT}"; return 0 ;;
+    */fake-busy/*) f="${d}/busy-${url##*/}.json"; f="${f%%\?*}"; [[ -f "${f}" ]] && cat "${f}" && return 0; return 22 ;;
     */commits/*/check-runs*) sha="${url#*/commits/}"; sha="${sha%%/*}"; f="${d}/checks-${sha}.json"; [[ -f "${f}" ]] || f="${d}/checks.json" ;;
     */commits/*/pulls*)      sha="${url#*/commits/}"; sha="${sha%%/*}"; f="${d}/pulls-${sha}.json"; [[ -f "${f}" ]] || f="${d}/pulls.json" ;;
     *) return 22 ;;
@@ -46,7 +51,7 @@ def run(cmd, cwd=None, env=None):
     return subprocess.run(cmd, cwd=cwd, env=env, check=True, capture_output=True, text=True).stdout.strip()
 
 
-class BackendStageTest(unittest.TestCase):
+class Harness(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="axad-"))
         t = self.tmp
@@ -82,10 +87,11 @@ class BackendStageTest(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     # ---- 픽스처 ----
-    def checks(self, ci=("completed", "success"), be=("completed", "success")):
+    def checks(self, ci=("completed", "success"), be=("completed", "success"), de=("completed", "success")):
         runs = [{"id": 1, "name": "ci", "status": ci[0], "conclusion": ci[1]},
-                {"id": 2, "name": "backend", "status": be[0], "conclusion": be[1]},
-                {"id": 3, "name": "data-eval", "status": "in_progress", "conclusion": None}]  # 이 이름은 보지 않는다
+                {"id": 2, "name": "backend", "status": be[0], "conclusion": be[1]}]
+        if de is not None:
+            runs.append({"id": 3, "name": "data-eval", "status": de[0], "conclusion": de[1]})
         (self.api / "checks.json").write_text(json.dumps({"check_runs": runs}))
 
     def ok_checks(self):
@@ -112,29 +118,45 @@ class BackendStageTest(unittest.TestCase):
             "AX_DEPLOY_LOCK_FILE": str(self.tmp / "deploy.lock"),
             "AX_BACKEND_TZ": _kst_tz(), "AX_BACKEND_STAGE": stage, "AX_BACKEND_NOW": str(now),
             "AX_SUDO": "", "AX_GATE_BIN": str(self.tmp / "none"),
+            "AX_PAUSE_FILE": str(self.tmp / "autodeploy.pause"),
+            "AX_SLACK_WEBHOOK_FILE": str(self.tmp / "slack-webhook"), "FAKE_SLACK_OUT": str(self.tmp / "slack.out"),
+            "FAKE_SLACK_FAIL": str(self.tmp / "slack-fail"),
         })
         env.update(self.genv)
         env.update(extra_env or {})
         r = subprocess.run(["bash", str(SCRIPT), *args], env=env, capture_output=True, text=True)
         return r
 
+    def add_commit(self, files, at=COMMIT_AT, msg="more"):
+        """origin 에 커밋을 하나 더하고 빌드 트리(src)를 따라가게 한다. 새 대상 SHA 를 돌려준다."""
+        for rel, text in files.items():
+            f = self.origin / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(text)
+        run(["git", "add", "-A"], cwd=self.origin, env=self.genv)
+        cenv = dict(self.genv, GIT_COMMITTER_DATE=f"{at} +0900", GIT_AUTHOR_DATE=f"{at} +0900")
+        run(["git", "commit", "-q", "-m", msg], cwd=self.origin, env=cenv)
+        self.target = run(["git", "rev-parse", "HEAD"], cwd=self.origin, env=self.genv)
+        run(["git", "fetch", "-q", "origin", "dev"], cwd=self.src, env=self.genv)
+        return self.target
+
     def log_text(self):
         return self.log.read_text(encoding="utf-8") if self.log.exists() else ""
 
+
+
+class BackendStageTest(Harness):
     # ---- 시험 ----
     def test_off_by_default_does_nothing(self):
         r = self.run_script(stage="")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("backend-dry-run", self.log_text())
 
-    def test_on_is_blocked(self):
-        r = self.run_script(stage="on")
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("미구현: 게이트 의존", self.log_text())
-
-    def test_unknown_stage_is_blocked(self):
+    def test_unknown_stage_is_treated_as_off(self):
         r = self.run_script(stage="yes")
-        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("알 수 없는 값", self.log_text())
+        self.assertNotIn("backend-dry-run", self.log_text())
 
     def test_pass_would_deploy_and_notice_once(self):
         r = self.run_script()
@@ -173,10 +195,19 @@ class BackendStageTest(unittest.TestCase):
         self.run_script()
         self.assertIn("backend-dry-run: ci-pending", self.log_text())
 
-    def test_data_eval_not_required(self):
-        # setUp 의 data-eval 은 진행 중이지만 통과해야 한다
-        self.run_script()
-        self.assertIn("backend-dry-run: would-deploy", self.log_text())
+    def test_data_eval_in_progress_or_failed_holds_cancelled_or_missing_waits(self):
+        cases = [(("in_progress", None), "ci-hold"), (("completed", "failure"), "ci-fail"),
+                 (("completed", "cancelled"), "ci-pending"), (None, "ci-pending"), (("completed", "success"), "would-deploy")]
+        for de, key in cases:
+            with self.subTest(de=de):
+                self.checks(de=de)
+                vf = self.state / "backend-verdict"
+                if vf.exists():
+                    vf.unlink()
+                if self.log.exists():
+                    self.log.unlink()
+                self.run_script()
+                self.assertIn(f"backend-dry-run: {key}", self.log_text())
 
     def test_memo_section_holds_with_notice_once(self):
         self.pulls(body="## 배포 메모\nDB 이관 필요\n")
@@ -219,11 +250,11 @@ class BackendStageTest(unittest.TestCase):
 
     def test_outside_hours(self):
         late = int(datetime.datetime(2026, 11, 24, 23, 30, tzinfo=KST).timestamp())
-        self.run_script(now=late)
+        self.run_script(now=late, extra_env={"AX_ALLOW_HOURS": "9-22"})
         self.assertIn("backend-dry-run: outside-hours", self.log_text())
         early = int(datetime.datetime(2026, 11, 25, 8, 59, tzinfo=KST).timestamp())
         (self.state / "backend-verdict").unlink()
-        self.run_script(now=early)
+        self.run_script(now=early, extra_env={"AX_ALLOW_HOURS": "9-22"})
         self.assertEqual(self.log_text().count("outside-hours"), 2)
 
     def test_not_quiet(self):
