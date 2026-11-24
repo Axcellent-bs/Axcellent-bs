@@ -268,6 +268,14 @@ def test_one_llm_call_per_cycle_through_the_response_cache(
     monkeypatch.setattr(handlers, "get_llm", lambda: llm)
     monkeypatch.setattr(handlers, "get_category_cache", lambda: None)
     monkeypatch.setattr(handlers, "get_trend_connector", lambda: None)
+    # 레이더 시계를 시험 데이터 날짜(NOW)에 고정한다. 실제 시각으로 돌면 며칠 뒤 게시물이
+    # "최근 급상승" 기간 밖으로 밀려 묶음이 안 생기고 LLM도 안 부른다(11/24 CI가 그렇게 깨짐)
+    real_radar = igs.instagram_radar
+
+    async def radar_at_now(*args: Any, **kwargs: Any) -> Any:
+        return await real_radar(*args, **{**kwargs, "now": NOW})
+
+    monkeypatch.setattr(igs, "instagram_radar", radar_at_now)
     meta = RequestMeta(context_id="ctx_ig", token="x",
                        deadline=datetime.now(UTC) + timedelta(seconds=30))  # fmt: skip
     request = AgentRequest(meta=meta, skill="instagram_radar", input={})
