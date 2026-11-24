@@ -34,10 +34,7 @@ approved = ["naver_shopping"]
 # 홍보 영상 브랜드 (기획 영상 제작안·마케팅 영상 프롬프트). 모두 선택, 영문 120자·한글 60자 안.
 # 글자·실존 인물·실제 브랜드·숫자는 쓰지 않는다(걸리면 그 칸은 기본값)
 [brand]
-character_en = "a friendly original cartoon cat mascot"
-character_ko = "자체 제작 고양이 마스코트"
-setting_en = "a cozy independent bookstore"
-setting_ko = "아늑한 동네 책방"
+# 캐릭터·배경은 의뢰에서 고른 캐릭터(CR)나 기본값을 쓴다(11/24). 회사 고정 마스코트를 두려면 다시 적는다.
 style_en = "flat illustration style, soft natural light"
 # 홍보 영상 방향 (11/24, 선택). promo_style: fun_first(재미 먼저, 브랜드는 끝에) · product(제품·업종 소개)
 # brand_exposure(재미 먼저일 때): end_card(마지막 2~3초 채널 이름·로고) · prop(화면 속 소품) · caption(캡션·프로필에만)
