@@ -68,14 +68,17 @@ def test_idol_request_prompt_has_fan_culture_brand_and_topic(
     sent, plan = _sent(monkeypatch, "catbooks")
     assert "온라인 서점" not in sent  # 고정 글자 없음 (회사는 데이터 블록으로만)
     assert "응원봉" in sent and "포토카드" in sent and "팬 굿즈" in sent  # 팬 문화 지시
-    assert "등장인물은 자체 제작 고양이 마스코트" in sent  # 캣북스 [brand]
+    # 11/24 캣북스 [brand]에서 고양이 마스코트·책방을 뺐다: 캐릭터·배경은 기본값
+    assert "등장인물은 원본 일러스트 캐릭터" in sent
+    assert "고양이" not in sent and "책방" not in sent
     # 재미 먼저(기본)는 회사 배경에 묶지 않는다 (11/24 PROP-23). 배경 값은 "묶지 않는다" 줄에 남는다
-    assert "회사 배경 '아늑한 동네 책방'에 묶지 않는다" in sent
+    assert "회사 배경 '회사 상품에 어울리는 배경'에 묶지 않는다" in sent
     assert sent.index("캣북스") > sent.index("방향:")  # 회사 이름은 데이터 블록 안
     # 의뢰 주제·후보 이름은 제안 근거에 있던 값만
     assert '"topic": "아이돌"' in sent or "'topic': '아이돌'" in sent
     assert "별빛소년단" in sent and "달무리" in sent
-    assert plan.written_by == "llm" and "cat mascot" in plan.style
+    assert plan.written_by == "llm" and "original illustrated characters" in plan.style
+    assert "cat mascot" not in plan.style and "bookstore" not in plan.style
 
 
 def test_topic_comes_only_from_proposal_values() -> None:
@@ -198,13 +201,22 @@ def test_fan_culture_scene_without_names_keeps_llm_plan(monkeypatch: pytest.Monk
 @pytest.mark.parametrize(
     ("tenant_id", "who"),
     [
-        ("catbooks", "a friendly original cartoon cat mascot"),  # 단수
+        # 단수: 11/24 캣북스 고정 마스코트를 뺐으므로 마스코트를 적은 임시 회사로 본다
+        ("solo", "a friendly original cartoon fox mascot"),
         ("nubi", "original illustrated travelers, not real people"),  # 복수
+        ("catbooks", "original illustrated characters, not real people"),  # 기본값 (복수)
     ],
 )
 def test_rule_plan_sentences_fit_singular_and_plural(
-    monkeypatch: pytest.MonkeyPatch, tenant_id: str, who: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tenant_id: str, who: str
 ) -> None:
+    if tenant_id == "solo":
+        folder = tmp_path / "solo"
+        folder.mkdir()
+        (folder / "tenant.toml").write_text(
+            f'name = "솔로"\n[brand]\ncharacter_en = "{who}"\n', encoding="utf-8"
+        )
+        monkeypatch.setenv("AX_TENANTS_DIR", str(tmp_path))
     monkeypatch.setenv("AX_TENANT", tenant_id)
     plan = vp.rule_plan(_idol(), (vp.PRODUCT, vp.END_CARD))  # 상품 홍보 흐름
     first, last = plan.scenes[0].prompt, plan.scenes[-1].prompt

@@ -34,7 +34,8 @@ def test_catbooks_file_and_brand_five_fields_unchanged(monkeypatch: pytest.Monke
     assert tenant.promo() == {"promo_style": "fun_first", "brand_exposure": "end_card"}
     # 같은 [brand] 섹션에 두 칸을 더해도 영상 브랜드 5칸은 그대로
     assert set(tenant.brand()) == set(tenant.BRAND_DEFAULTS)
-    assert tenant.brand()["setting_ko"] == "아늑한 동네 책방"
+    assert tenant.brand()["setting_ko"] == tenant.BRAND_DEFAULTS["setting_ko"]  # 11/24 책방 뺌
+    assert tenant.brand()["style_en"] == "flat illustration style, soft natural light"
 
 
 def test_screen_save_beats_file_and_bad_values_fall_back(

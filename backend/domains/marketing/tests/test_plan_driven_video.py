@@ -106,10 +106,14 @@ def test_plan_story_video_is_chosen_with_scene_and_brand_fields() -> None:
     assert "light sticks" in prompt and "cat mascot" not in prompt and "bookstore" not in prompt
 
 
-def test_catbooks_brand_keeps_cat_and_nubi_has_none(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_catbooks_brand_uses_defaults_and_nubi_has_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 11/24 캣북스 [brand]에서 고양이 마스코트·책방을 뺐다: 캐릭터·배경은 기본값
     monkeypatch.setenv("AX_TENANT", "catbooks")
     cat = _prepare(PLAN).output["fields"]
-    assert cat["plan_character"] == "a friendly original cartoon cat mascot"
+    assert cat["plan_character"] == "original illustrated characters, not real people"
+    assert cat["plan_setting"] == "a setting that fits the company's products"
+    cat_prompt = render_prompt_detailed("plan_story_video", cat).prompt.lower()
+    assert "cat mascot" not in cat_prompt and "bookstore" not in cat_prompt
     monkeypatch.setenv("AX_TENANT", "nubi")
     nubi = _prepare(PLAN, ctx="ctx_wr_nubi0001").output["fields"]
     assert nubi["plan_setting"] == "scenic overseas travel destinations"

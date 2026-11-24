@@ -22,8 +22,9 @@ def test_no_tenant_gives_defaults() -> None:
 def test_catbooks_and_nubi_read_their_brand(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AX_TENANT", "catbooks")
     cat = tenant.brand()
-    assert cat["character_en"] == "a friendly original cartoon cat mascot"
-    assert cat["setting_ko"] == "아늑한 동네 책방"
+    # 11/24 캣북스 고정 마스코트·책방을 뺐다: 캐릭터·배경 4칸은 기본값, 화풍은 회사 값
+    for key in ("character_en", "character_ko", "setting_en", "setting_ko"):
+        assert cat[key] == tenant.BRAND_DEFAULTS[key], key
     assert cat["style_en"] == "flat illustration style, soft natural light"
     monkeypatch.setenv("AX_TENANT", "nubi")
     nubi = tenant.brand()
