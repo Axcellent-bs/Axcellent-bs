@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta
 from ax_contracts.data_access.sales_aggregates import AggRun
 from ax_contracts.schemas.data import CatalogSales
 from data_agent.aggregate.build_day import build_day
+from data_agent.aggregate.build_more import build_more
 from data_agent.aggregate.build_snapshots import build_snapshots
 from data_agent.aggregate.store import AggregateStore
 from data_agent.sales_quality import kst_day
@@ -33,6 +34,33 @@ def months_back(day: date, months: int) -> date:
 def retention_bounds(as_of: date) -> tuple[date, date]:
     """(일별 행을 두는 첫 날, 달 행을 두는 첫 달의 1일)."""
     return months_back(as_of, KEEP_DAILY_MONTHS - 1), months_back(as_of, KEEP_MONTHLY_MONTHS - 1)
+
+
+def month_ends(as_of: date, months: int) -> list[date]:
+    """기준일 달 앞의 `months`개 달 마지막 날, 오래된 달부터."""
+    return [months_back(as_of, n - 1) - timedelta(days=1) for n in range(months, 0, -1)]
+
+
+def snapshot_day(  # noqa: PLR0913 - 두 저장소·회사·기준일·카탈로그·계산 기록·시각
+    sales: SalesStore,
+    agg: AggregateStore,
+    tenant_id: str,
+    day: date,
+    cfg: CatalogSales,
+    run: AggRun,
+    now: datetime,
+) -> dict[str, int]:
+    """기준일 하루의 스냅샷 전부(구매자·코호트·떠날 위험·함께 산 상품·즐겨 사는 것·채널 가치)."""
+    cur = run.source_cursor
+    buyers, cohorts, at_risk = build_snapshots(sales, tenant_id, day, cfg, run.run_id, now,
+                                               source_cursor=cur)  # fmt: skip
+    agg.replace_snapshots(tenant_id, day, buyers, cohorts, at_risk)
+    pairs, profiles, channels = build_more(sales, tenant_id, day, cfg, run.run_id, now,
+                                           source_cursor=cur)  # fmt: skip
+    agg.replace_more(tenant_id, day, pairs, profiles, channels)
+    return {"agg_buyers_period": len(buyers), "agg_cohorts": len(cohorts),
+            "agg_at_risk": len(at_risk), "agg_pairs": len(pairs),
+            "agg_segment_profile": len(profiles), "agg_channel_value": len(channels)}  # fmt: skip
 
 
 def source_cursor(sales: SalesStore, tenant_id: str) -> str | None:
@@ -77,16 +105,16 @@ def backfill(  # noqa: PLR0913 - 두 저장소·회사·카탈로그·시각·�
         merged, dropped = agg.roll_up(tenant_id, keep_from, drop_before)
         rows = {"days": days, "agg_sales_daily": len(agg.days(tenant_id)),
                 "rolled_up_daily_rows": merged, "dropped_monthly_rows": dropped}  # fmt: skip
-        if (
-            cfg is not None and first is not None
-        ):  # 카탈로그 [sales]가 없으면 k도 속성도 몰라 안 만든다
-            buyers, cohorts, at_risk = build_snapshots(
-                sales, tenant_id, as_of, cfg, run.run_id, now, source_cursor=run.source_cursor
-            )
-            agg.replace_snapshots(tenant_id, as_of, buyers, cohorts, at_risk)
-            rows |= {"agg_buyers_period": len(buyers), "agg_cohorts": len(cohorts),
-                     "agg_at_risk": len(at_risk),
-                     "pruned_snapshot_rows": agg.prune_snapshots(tenant_id, as_of)}  # fmt: skip
+        if cfg is not None and first is not None:  # [sales]가 없으면 k도 속성도 몰라 안 만든다
+            # 기준일 + 지난 13개월 월말 기준일 (설계 5.4: 달 행 보관용, 첫 주문 달 뒤만)
+            ends = [d for d in month_ends(as_of, KEEP_DAILY_MONTHS) if d >= kst_day(first)]
+            for d in ends:  # 월말은 구매자·코호트·떠날 위험만 (함께 산 상품 등은 기준일부터 쌓인다)
+                b, c, r = build_snapshots(sales, tenant_id, d, cfg, run.run_id, now,
+                                          source_cursor=run.source_cursor)  # fmt: skip
+                agg.replace_snapshots(tenant_id, d, b, c, r)
+            counts = snapshot_day(sales, agg, tenant_id, as_of, cfg, run, now)
+            pruned = agg.prune_snapshots(tenant_id, as_of)
+            rows |= counts | {"month_end_snapshots": len(ends), "pruned_snapshot_rows": pruned}
         done = run.model_copy(update={
             "status": "done", "finished_at": datetime.now(now.tzinfo), "rows": rows,
         })  # fmt: skip
