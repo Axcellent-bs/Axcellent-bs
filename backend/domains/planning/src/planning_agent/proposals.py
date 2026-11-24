@@ -158,7 +158,8 @@ class ProposalDraft:
 def rule_draft(inp: ReceiveInsightInput) -> ProposalDraft:
     """LLM이 없을 때: 인사이트 제목을 할 일로, 근거 첫 두 줄을 이유로 인용한다 (목표 없음)."""
     why = " · ".join(f"{f.label} {f.value}" for f in inp.facts[:2])
-    return ProposalDraft(inp.title, why, None, None, "rule")
+    idea = video_plan.subject(inp.title, inp.summary) or inp.title
+    return ProposalDraft(idea, why, None, None, "rule")
 
 
 class ProposalWriter:
@@ -176,7 +177,7 @@ class ProposalWriter:
     async def draft(self, inp: ReceiveInsightInput, context_id: str) -> ProposalDraft | None:
         data = {
             "company": company_info(),
-            "title": inp.title,
+            "title": video_plan.subject_title(inp.title),  # 보고서 이름은 소재가 아니다
             "summary": inp.summary,
             "facts": [f.model_dump() for f in inp.facts],
             "products": inp.products,
@@ -203,7 +204,7 @@ class ProposalWriter:
         """사람이 고른 방향으로 할 일·이유·목표를 다시 쓴다 (후보·숫자는 받은 값만)."""
         data = {
             "company": company_info(),
-            "title": p.title,
+            "title": video_plan.subject_title(p.title),
             "summary": p.insight,
             "facts": [{"label": f.label, "value": f.value, "source": f.source} for f in p.facts],
             "products": p.products,
@@ -253,7 +254,7 @@ def _ref_facts(option: IdeaOption) -> list[InsightFact]:
 
 def rule_draft_for_angle(p: Proposal, option: IdeaOption) -> ProposalDraft:
     """LLM이 없을 때: 방향 이름 + 제목(+ 후보), 이유는 근거 두 줄 + 추천 이유."""
-    idea = f"{option.label}: {p.title}"
+    idea = f"{option.label}: {video_plan.subject_of(p) or p.title}"
     if option.refs:
         idea += " · 후보 " + ", ".join(r.topic for r in option.refs)
     why = " · ".join(f"{f.label} {f.value}" for f in p.facts[:2])
