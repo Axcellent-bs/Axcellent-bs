@@ -88,7 +88,7 @@ def test_request_flow_without_scope_uses_the_connected_company_account(
     action, params = env["gate"].calls[0]
     # 예전에는 provider "higgsfield"(키 길)로 안전 관문에 갔다
     assert action == "generate_media" and params["provider"] == rr.MCP_PROVIDER == "higgsfield_mcp"
-    assert params["billing"] == "company_subscription"
+    assert params["billing"] == "unlim"  # 11/24: 그림은 무제한
     assert "creative_render: route=mcp cid=catbooks part=sheet_image" in caplog.text
 
 

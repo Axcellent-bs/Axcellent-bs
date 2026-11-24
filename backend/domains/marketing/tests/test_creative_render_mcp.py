@@ -248,8 +248,11 @@ def test_connected_company_makes_the_sheet_with_its_own_account(
     action, gate_params = env["gate"].calls[0]
     assert action == "generate_media" and gate_params["media_kind"] == "image"
     assert gate_params["provider"] == "higgsfield_mcp" and gate_params["ai_generated"] is True
-    assert gate_params["billing"] == "company_subscription"
-    assert gate_params["credits_estimate"] == 2.0 and "구독 크레딧" in gate_params["summary"]
+    # 11/24: 그림은 무제한으로 만들어 기록·요약도 "무제한"
+    # (영상은 아래 테스트에서 구독 크레딧 그대로)
+    assert gate_params["billing"] == "unlim"
+    assert gate_params["credits_estimate"] == 2.0 and "Higgsfield 무제한" in gate_params["summary"]
+    assert "구독 크레딧" not in gate_params["summary"]
     for value in (REFRESH, ACCESS):
         assert value not in caplog.text and value not in json.dumps(part)
 
@@ -308,6 +311,7 @@ def test_video_is_approved_by_a_human_then_made_with_the_same_account(
     assert "generate_video_batch" not in env["hf"].names()  # 승인 전에는 만들지 않는다
     action, params = env["gate"].calls[-1]
     assert action == "generate_creative_video" and params["billing"] == "company_subscription"
+    assert "구독 크레딧" in params["summary"]  # 영상은 그대로 크레딧(사람 승인 뒤)
     assert params["provider"] == "higgsfield_mcp" and params["credits_estimate"] == 2.0
 
     env["gate"].status["generate_creative_video"] = "executed"  # 사람이 승인

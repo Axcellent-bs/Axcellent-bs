@@ -252,12 +252,13 @@ async def _preflight(cid: str | None, params: dict[str, Any]) -> float | None:
         raise McpAuthError("not_connected")
     async with _render.CLIENT() as client:
         hf = _mcp.Higgsfield(client, cid)
-        one = await _mcp.preflight(hf, "image", params)
+        one = await _mcp.preflight(hf, "image", params)  # 무제한 불가면 image_unlim_unavailable
         if one is None:
             return None
-        credits, _ = await _mcp.balance(hf)
-        if credits is not None and credits < one * COUNT:
-            raise McpError("credits_insufficient")
+        if not _mcp.uses_unlim(params):  # 11/24: 무제한이면 크레딧을 쓰지 않아 잔액으로 막지 않는다
+            credits, _ = await _mcp.balance(hf)
+            if credits is not None and credits < one * COUNT:
+                raise McpError("credits_insufficient")
         return one * COUNT
 
 
@@ -349,9 +350,8 @@ async def _request(
     cid = _mcp_auth.company() if via == _render.MCP else None
     credits: float | None = None
     if via == _render.MCP:
-        # 11/24: 썸네일은 지금처럼 크레딧(의뢰 영상의 시트·스토리보드 그림만 무제한)
-        params = _mcp.image_params(_render.mcp_image_model(), planned[0]["prompt"], "", aspect,
-                                   unlim=False)  # fmt: skip
+        # 11/24: 썸네일도 시트·스토리보드 그림과 같이 creative_mcp.image_unlim()을 따른다
+        params = _mcp.image_params(_render.mcp_image_model(), planned[0]["prompt"], "", aspect)
         try:
             credits = await _preflight(cid, params)
         except _ERRORS as error:
@@ -360,6 +360,7 @@ async def _request(
     key = f"{meta.context_id}:{ACTION}:{record_id}:{round_no}"
     seq = _reserve(ledger, key, via)
     title = (rec.get("storyboard") or {}).get("title_ko") or record_id
+    billing = _render.image_billing(via)  # 11/24: 무제한이면 unlim("Higgsfield 무제한")
     params = {
         "record_id": record_id,
         "provider": _render._provider(via),  # noqa: SLF001
@@ -374,10 +375,10 @@ async def _request(
         "auto_requested": auto,
         "requested_by": (who or "")[:80],
         "summary": f"영상 썸네일 후보 {COUNT}장 만들기({aspect}): {title} "
-        f"({_render._billing_ko(via)}, AI 생성)",  # noqa: SLF001
+        f"({_render._billing_ko(via, billing)}, AI 생성)",  # noqa: SLF001
     }
-    if via == _render.MCP:
-        params["billing"] = "company_subscription"
+    if billing:
+        params["billing"] = billing
         if credits is not None:
             params["credits_estimate"] = credits
     decision = await execute(
@@ -491,11 +492,17 @@ async def _one_api(
 async def _one_mcp(
     hf: _mcp.Higgsfield, prompt: str, negative: str, aspect: str, media: str | None
 ) -> str:
-    params = _mcp.image_params(_render.mcp_image_model(), prompt, negative, aspect, unlim=False)
+    params = _mcp.image_params(_render.mcp_image_model(), prompt, negative, aspect)
     if media:
         params = _mcp.with_media(params, media, _mcp.IMAGE_REF_ROLE)
-    job = await _mcp.submit(hf, "image", params)
-    return await _mcp.wait(hf, job, _render.SLEEP)
+    try:
+        job = await _mcp.submit(hf, "image", params)
+        return await _mcp.wait(hf, job, _render.SLEEP)
+    except McpError as error:
+        # 11/24: 무제한이 안 되면 크레딧으로 다시 시도하지 않고 멈춘다 (#1697과 같은 규칙)
+        if _mcp.uses_unlim(params) and (no := _mcp.unlim_unavailable(error)) is not None:
+            raise no from error
+        raise
 
 
 def _finish(raw: Path, folder: Path, model: str) -> dict[str, Any]:
@@ -554,8 +561,9 @@ async def _render_all(
                 done = _finish(raw, folder, model)
             except (*_ERRORS, sns_label.LabelError) as error:
                 errors.append(_render._code(error))  # noqa: SLF001
-                if isinstance(error, McpError) and error.code == "credits_insufficient":
-                    break  # 남은 장도 못 만든다
+                stop = ("credits_insufficient", _mcp.UNLIM_UNAVAILABLE)
+                if isinstance(error, McpError) and error.code in stop:
+                    break  # 남은 장도 못 만든다(무제한 불가면 크레딧으로 다시 시도하지 않는다)
                 continue
             if any(m["media_id"] == done["media_id"] for m in made):
                 continue  # 같은 그림은 한 번만
@@ -602,7 +610,10 @@ async def _make(ledger: MediaLedger, record_id: str, seq: int, decision: Execute
     if not made:
         logger.warning("썸네일 후보를 못 만듦: %s (%s)", errors, record_id)
         _render._safe(lambda: ledger.mark_failed(seq, _now()))  # noqa: SLF001
-        _set(record_id, status="failed", error=errors[0] if errors else "no_result")
+        first_error = errors[0] if errors else "no_result"
+        # 11/24: 무제한이 안 되면 실패가 아니라 멈춤(크레딧으로 다시 시도하지 않는다, #1697과 같게)
+        stopped = first_error == _mcp.UNLIM_UNAVAILABLE
+        _set(record_id, status="blocked" if stopped else "failed", error=first_error)
         return
     _render._safe(lambda: _write_meta(folder, made, model))  # noqa: SLF001
     _render._safe(  # noqa: SLF001
