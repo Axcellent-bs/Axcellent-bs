@@ -1,6 +1,7 @@
 import { SCREEN_KEEP_OUTCOMES, chatLanes, closedTimes, isBackgroundRead, mergeClosed, requestClosedTimes } from "./commFilter";
 import { DEV_HOLD_ACTIONS, FOLDED_HOLD_ACTIONS, MARKETING_HOLD_ACTIONS, SNS_HOLD_ACTIONS, SNS_HOLD_PAGE, PLANNING_HOLD_ACTION, SETTLEMENT_HOLD_ACTION, SUPPORT_DELETION_HOLD_ACTIONS, type ExecutionRecord } from "./finance";
 import { COMM_OUTCOME_KO } from "./labels";
+import { replyLogIds } from "./commReply.ts";
 import { isRedeployFailed } from "./rollbackResult";
 export type { Redeploy, RollbackView } from "./rollbackResult";
 import type { CommLine, CommOutcome } from "./types";
@@ -229,7 +230,9 @@ export type ChatItem =
       /** 이 말풍선에 합친 안전 확인 통과 줄 ("🛡 안전 확인 통과" 칩, 눌러서 펼침) */
       safety?: FoldLine[]
       /** 작업 기록 줄 (lib/commFilter.ts chatLane). 대화 칸에서 접히고 펼치면 회색 작은 말풍선. 안 읽은 수·방 미리보기에서 뺀다 */
-      lane?: "log" }
+      lane?: "log"
+      /** 문장 뒤 작은 표시 (부서가 긴 작업으로 받았다고 답한 줄: "긴 작업 진행 중", lib/commReply.ts) */
+      note?: string }
   | { kind: "system"; id: string; at: string; room: string; text: string }
   | { kind: "hold"; id: string; at: string; room: string; title: string; detail: string; state: "pending" | "approved" | "rejected" | "timeout"; contextId?: string; stepId?: string; link?: string; decideAt?: string
       /** 결정을 기다리는 부서 (사건 단계가 없을 때만) */
@@ -560,7 +563,7 @@ function coveredByIncident(line: CommLine, inc: OrchIncident | undefined): boole
  * 공통 로그 한 줄 → 말풍선. 문장은 skill·결과 값으로만 만든다(payload는 dashboard-api가 이미 뺐다).
  * `execution_id`가 안전 관문 기록과 같으면 `dupOf`에 그 id를 넣는다 — 전체 방에서는 빼고, 이슈 방에서는 연결 표시만 단다.
  */
-export function commItem(line: CommLine, room: string, safetyIds: ReadonlySet<string>): Extract<ChatItem, { kind: "msg" }> & { dupOf?: string } {
+export function commItem(line: CommLine, room: string, safetyIds: ReadonlySet<string>, reply = false): Extract<ChatItem, { kind: "msg" }> & { dupOf?: string } {
   const skill = line.skill ?? "무슨 일인지 기록 없음";
   const label = COMM_OUTCOME_KO[line.outcome] ?? line.outcome;
   const dupOf = line.execution_id && safetyIds.has(line.execution_id) ? line.execution_id : undefined;
@@ -572,24 +575,28 @@ export function commItem(line: CommLine, room: string, safetyIds: ReadonlySet<st
     line.context_id,
   );
   const holdHint = line.outcome === "held" && !dupOf ? ` — 안전 관문 보류 큐(${holdPage(line.skill)})에서 결정` : "";
+  // 받았다는 답장(같은 일·같은 의뢰의 A → B 부탁에 B → A 진행 중)은 부탁이 아니다: "받았어요" + 작은 표시, 걸어가지 않게 tone muted
+  const answered = reply && line.outcome === "in_progress" && line.from_agent !== "safety";
   return {
     kind: "msg", id: `log:${line.log_id}`, at: line.occurred_at, room,
     from: speaker(line.from_agent), to: line.to_agent ? speaker(line.to_agent) : "받는 쪽 미기록",
     fromKey: line.from_agent, central: line.from_agent === CENTRAL, ...(line.to_agent ? { toKey: line.to_agent } : {}),
-    text: `${commSentence(line.skill ? skillKo(line.skill) : skill, line.outcome, label, line.from_agent)}${holdHint}`, tag, raw, tone: COMM_TONE[line.outcome] ?? "muted", facts: [], dupOf,
+    text: `${commSentence(line.skill ? skillKo(line.skill) : skill, line.outcome, label, line.from_agent, answered)}${holdHint}`, tag, raw,
+    tone: answered ? "muted" : COMM_TONE[line.outcome] ?? "muted", facts: [], dupOf,
     ...(line.execution_id ? { execId: line.execution_id } : {}),
+    ...(answered ? { note: "긴 작업 진행 중" } : {}),
   };
 }
 
 /** 공통 로그 한 줄을 대화체로. 요청은 부탁, 결과는 알림 */
-function commSentence(what: string, outcome: string, label: string, from?: string | null): string {
+function commSentence(what: string, outcome: string, label: string, from?: string | null, reply = false): string {
   // 안전 관문 기록은 "부탁"이 아니라 실행해도 되는지 판정하는 쪽이다
   if (from === "safety") {
     if (outcome === "in_progress") return `${what} — 실행해도 되는지 확인하고 있어요`;
     if (outcome === "completed") return `${what} — 실행해도 돼요`;
   }
   switch (outcome) {
-    case "in_progress": return `${what} 부탁해요`;
+    case "in_progress": return reply ? `${what} 받았어요` : `${what} 부탁해요`;
     case "completed": return `${what} 끝났어요`;
     case "rejected": return `${what} — 할 수 없어서 거절했어요`;
     case "held": return `${what} — 보류했어요 (사람 결정 대기)`;
@@ -625,11 +632,13 @@ export function commItems(comms: CommLine[], incidents: OrchIncident[], executio
   const closedAt = mergeClosed(closedTimes(incidents), requestClosedTimes(requests));
   const kept = comms.filter((line) => !CHAT_READ_SKILL.test(line.skill ?? "") && !isScreenRead(line) && !isBackgroundRead(line, closedAt));
   const lanes = chatLanes(kept, { cardContexts });
+  // 답장 짝은 거르기 전 전체 줄에서 찾는다 (앞의 부탁 줄이 화면에서 빠져도 답장은 답장이다)
+  const replies = replyLogIds(comms);
   return kept
     .map((line) => ({ line, room: commRoom(line, ids) }))
     .filter(({ line, room }) => !coveredByIncident(line, byId.get(room)))
     .map(({ line, room }) => {
-      const it = commItem(line, room, safetyIds);
+      const it = commItem(line, room, safetyIds, replies.has(line.log_id));
       return lanes.get(line.log_id) === "log" ? { ...it, lane: "log" as const } : it;
     });
 }

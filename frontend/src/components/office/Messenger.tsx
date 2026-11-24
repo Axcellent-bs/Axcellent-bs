@@ -140,6 +140,7 @@ function Bubble({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: Off
       <p className={direct ? "whitespace-pre-wrap break-words" : "break-words"}>
         {showTo && <span className={`mr-1 text-[11px] font-bold ${mine ? "text-white/80" : "text-brand-700"}`}>{atName(m.to)}</span>}
         {mine ? "" : TONE_ICON[m.tone]}{say(m.text)}
+        {m.note && <NoteChip text={m.note} />}
       </p>
       {cardLike && (
         <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 border-t border-ink-100 pt-1.5 text-xs">
@@ -161,6 +162,11 @@ function Bubble({ m, talk }: { m: Extract<ChatItem, { kind: "msg" }>; talk?: Off
       {m.chatCard && <ChatCardView card={m.chatCard.card} messageId={m.chatCard.messageId} threadId={m.chatCard.threadId} />}
     </div>
   );
+}
+
+/** 문장 뒤 작은 표시 (예: 부서가 받았다고 답한 줄의 "긴 작업 진행 중") */
+function NoteChip({ text }: { text: string }) {
+  return <span className="ml-1.5 inline-block rounded-full bg-amber-50 px-1.5 py-px align-middle text-[10.5px] font-medium text-amber-800 ring-1 ring-amber-100">{text}</span>;
 }
 
 /** 합친 안전 확인 통과 줄: 칩 하나, 누르면 펼친다 */
@@ -231,6 +237,7 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label, panes = 1 }
         <li key={it.id} data-chat-id={it.id} className={`flex max-w-[85%] items-baseline gap-1.5 pl-11 text-[11.5px] text-ink-500 ${pop}`}>
           <span className="chat-pill min-w-0 bg-ink-900/[.05] px-2.5 py-0.5" title={[it.tag, it.raw].filter(Boolean).join(" · ") || undefined}>
             <b className="font-medium text-ink-700">{it.from}</b>{it.to && it.to !== "받는 쪽 미기록" ? <> → {it.to}</> : null} · {TONE_ICON[it.tone]}{say(it.text)}
+            {it.note && <NoteChip text={it.note} />}
             {it.repeat ? <span className="ml-1 font-semibold">×{it.repeat}</span> : null}
           </span>
           <time dateTime={it.at} className="shrink-0 tabular-nums">{hhmm(it.at)}</time>
