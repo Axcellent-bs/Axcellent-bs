@@ -2934,12 +2934,19 @@ function askData<T>(skill: string, what: string, input: Record<string, unknown> 
 /** 데이터 화면이 data A2A를 부를 때의 고정 context (다른 화면 호출의 ctx_ui_ 접두사와 같다) */
 export const UI_CONTEXT = "ctx_ui_dashboard";
 
+/** data 요청 meta에 실을 회사. 캣북스는 싣지 않는다: data skill은 입력 tenant_id(기본 shop-demo)와 meta를 견주는데
+ *  정식 id "catbooks"를 싣으면 어긋나 invalid_input이 된다(11/24 고객·시장 분석 전부 실패). 다른 회사만 싣는다 */
+function dataTenant(): { tenant_id?: string } {
+  const id = sessionCompanyId();
+  return id && id !== "catbooks" ? { tenant_id: id } : {};
+}
+
 async function sendData<T>(skill: string, what: string, input: Record<string, unknown>, deadlineMs: number): Promise<A2AResult<T>> {
   const body = {
     // 화면 조회는 사건·요청 밖(ctx_ui_). 예전 "ctx_req_dashboard"는 AI 대화방이 변경 요청 안의 일로 봐서
     // data가 같은 context로 부른 부서 조회 줄(고객지원 book_issue_stats 등)이 의뢰 옆에 끼었다 (11/20)
     // 로그인한 사람의 회사로 묻는다. 없으면 data가 설치 회사(캣북스)로 본다(회사 연결 7단계, 11/24)
-    meta: { context_id: UI_CONTEXT, token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + deadlineMs).toISOString(), ...(sessionCompanyId() ? { tenant_id: sessionCompanyId() } : {}) },
+    meta: { context_id: UI_CONTEXT, token: DATA_A2A_TOKEN, path: [], deadline: new Date(Date.now() + deadlineMs).toISOString(), ...dataTenant() },
     skill,
     input,
   };
