@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ACCEPT, makeCharacterSheet, shrinkImage, shrinkReference } from "@/lib/characterSheet";
+import { ACCEPT, makeCharacterSheet, shrinkExtra, shrinkImage, shrinkReference, type ExtraLabel } from "@/lib/characterSheet";
+import { MULTI_HINT, buildExtras, referenceChip, slotsFor } from "@/lib/characterRefs";
 import { listBrandCharacters, markBrandCharacter, type BrandCharacter } from "@/lib/brandCharacters";
 import { thumbSrc } from "@/lib/creativeRecords";
 import { orchestrator } from "@/lib/orchestrator";
@@ -41,6 +42,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
   const [file, setFile] = useState<File | null>(null);
   const [rights, setRights] = useState(false);
   const [kind, setKind] = useState<UploadKind>("real_photo");
+  const [extras, setExtras] = useState<Partial<Record<ExtraLabel, { media_type: string; data_base64: string; preview: string }>>>({});
   const [virtualOk, setVirtualOk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +72,14 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
       .finally(() => setBusy(false));
   };
 
+  const pickExtra = (key: ExtraLabel, f: File) => {
+    setError(null);
+    shrinkExtra(f).then(
+      (r) => setExtras((x) => ({ ...x, [key]: { media_type: r.media_type, data_base64: r.data_base64, preview: r.preview } })),
+      (e: unknown) => setError(errText(e)),
+    );
+  };
+
   const send = () => {
     if (!file || !canUploadKind(true, kind, rights, virtualOk)) return;
     setBusy(true);
@@ -77,7 +87,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
     // 가상 인물·일러스트는 원본을 참조로 쓰므로 긴 변 2048px까지 (실제 사람 사진은 지금처럼 1024px)
     (isReferenceKind(kind) ? shrinkReference(file) : shrinkImage(file))
       .then((img) => makeCharacterSheet({ media_type: img.media_type, data_base64: img.data_base64 }, "", img.thumb_base64,
-        { kind, virtualConfirmed: kind === "virtual_human" && virtualOk }))
+        { kind, virtualConfirmed: kind === "virtual_human" && virtualOk, extras: isReferenceKind(kind) ? buildExtras(extras) : [] }))
       .then((sheet) => {
         if (!sheet.record_id) throw new Error("이미지 시트 기록을 남기지 못했어요. 다시 올려 주세요");
         return markBrandCharacter(sheet.record_id).then(() => sheet.record_id as string);
@@ -86,7 +96,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
         void loadSaved(true).then(setSaved, () => undefined);
         return orchestrator.setBrandCharacter(row.request_id, recordId);
       })
-      .then(() => { setUpload(false); setChange(false); setFile(null); setRights(false); setVirtualOk(false); setKind("real_photo"); void refreshWorkRequests(); })
+      .then(() => { setUpload(false); setChange(false); setFile(null); setExtras({}); setRights(false); setVirtualOk(false); setKind("real_photo"); void refreshWorkRequests(); })
       .catch((e: unknown) => setError(errText(e)))
       .finally(() => setBusy(false));
   };
@@ -99,6 +109,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
         <span className="min-w-0 flex-1">
           <b className="block truncate text-[13px] text-ink-900">{c.name}</b>
           {c.kind === "virtual_human" && <span className="chip text-[11px]">{VIRTUAL_HUMAN_LABEL}</span>}
+          {referenceChip(c) && <span className="chip ml-1 text-[11px]">{referenceChip(c)}</span>}
           <small className="block truncate text-xs tabular-nums text-ink-500">{savedLine(c)}</small>
         </span>
       </div>
@@ -163,10 +174,31 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
                 ))}
               </fieldset>
               <label className="block cursor-pointer rounded-xl border-[1.5px] border-dashed border-brand-500 bg-surface px-3 py-2.5 text-center text-xs text-ink-700">
-                {file ? file.name : "캐릭터 이미지를 눌러서 고르기"}
-                <small className="block text-ink-500">{kind === "real_photo" ? UPLOAD_HINT : "PNG·JPG 한 장 · 9:16 권장 · 올린 이미지를 그대로 참조로 써요"}</small>
+                {file ? file.name : kind === "real_photo" ? "캐릭터 이미지를 눌러서 고르기" : "정면 (대표) 이미지를 눌러서 고르기"}
+                <small className="block text-ink-500">{kind === "real_photo" ? UPLOAD_HINT : "PNG·JPG · 9:16 권장 · 올린 이미지를 그대로 참조로 써요"}</small>
                 <input type="file" accept={ACCEPT} className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
               </label>
+              {slotsFor(kind).length > 1 && (
+                <div className="space-y-1">
+                  <p className="text-xs text-ink-500">{MULTI_HINT}</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {slotsFor(kind).slice(1).map((s) => {
+                      const key = s.key as ExtraLabel;
+                      const got = extras[key];
+                      return (
+                        <div key={s.key} className="relative">
+                          <label className="flex h-20 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-ink-200 bg-surface text-center text-[11px] text-ink-700">
+                            {got ? <img src={got.preview} alt={s.label} className="h-full w-full object-contain" /> : <span>{s.label}<small className="block text-ink-500">눌러서 고르기</small></span>}
+                            <input type="file" accept={ACCEPT} className="sr-only" disabled={busy}
+                              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) pickExtra(key, f); }} />
+                          </label>
+                          {got && <button type="button" className="absolute right-1 top-1 rounded-full bg-surface px-1.5 text-[11px] text-ink-700 shadow" disabled={busy} aria-label={`${s.label} 빼기`} onClick={() => setExtras((x) => ({ ...x, [key]: undefined }))}>빼기</button>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {kind === "virtual_human" ? (
                 <>
                   <label className="flex items-start gap-1.5 text-xs text-ink-700">
@@ -183,7 +215,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
               )}
               <span className="flex flex-wrap gap-1.5">
                 <button type="button" className="btn-primary btn-card" disabled={!canUploadKind(!!file, kind, rights, virtualOk, busy)} onClick={send}>{busy ? "올리는 중…" : "올리기"}</button>
-                <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => { setUpload(false); setFile(null); setRights(false); setVirtualOk(false); setKind("real_photo"); }}>취소</button>
+                <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => { setUpload(false); setFile(null); setExtras({}); setRights(false); setVirtualOk(false); setKind("real_photo"); }}>취소</button>
               </span>
               <p className="chip self-start bg-amber-50 text-[11px] text-amber-800">{CHARACTER_NOTE}</p>
             </div>
