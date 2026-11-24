@@ -44,7 +44,13 @@ from ax_contracts.schemas import (
 from ax_orchestrator import request_inputs, request_tasks
 from ax_orchestrator.engine import TRANSFER_CODES, Engine
 from ax_orchestrator.models import now
-from ax_orchestrator.work_requests import OPEN_STATES, STEP_WAITING, WorkRequests, ready_steps
+from ax_orchestrator.work_requests import (
+    OPEN_STATES,
+    RESTART_UNCONFIRMED,
+    STEP_WAITING,
+    WorkRequests,
+    ready_steps,
+)
 
 HUMAN_GRADE = request_tasks.HUMAN_GRADE
 
@@ -859,6 +865,8 @@ class RequestRunner:
         - 사람 확인 단계: 승인하면 완료로 닫고 뒤 단계를 이어 시킨다. 거절하면 `rejected_by_human`.
         - 승인 대기(상태를 바꾸는 일): 승인하면 시킬 수 있게 되돌린다(부서의 안전 관문은
           따로 거친다). 거절하면 `rejected_by_human`.
+        - 재시작으로 멈춤(`restart_unconfirmed`, 11/24): 보냈는지 몰라 멈춘 단계. 승인하면 같은
+          멱등 키로 다시 보낸다(pending). 거절하면 `rejected_by_human`.
         어느 쪽이든 뒤 단계는 앞 단계가 성공해야만 시킨다.
         """
         row = self._requests.get(request_id)
@@ -868,6 +876,7 @@ class RequestRunner:
         if step["status"] != "waiting_human" or step["reason_code"] not in (
             HUMAN_CHECK,
             NEEDS_APPROVAL,
+            RESTART_UNCONFIRMED,
         ):
             return "not_waiting"
         who = f" ({by})" if by else ""
@@ -887,6 +896,16 @@ class RequestRunner:
                 status="completed",
                 note=f"사람이 확인했다{who}",
                 finished_at=done,
+            )
+        elif step["reason_code"] == RESTART_UNCONFIRMED:
+            # running까지 갔던 단계라 사람 승인이 필요한 일이면 이미 승인을 받았다
+            # (APPROVED로 둬 다시 묻지 않는다)
+            self._update(
+                request_id,
+                step_id,
+                status="pending",
+                reason_code=APPROVED,
+                note=f"재시작으로 멈춘 단계를 사람이 다시 보내기로 했다{who}",
             )
         else:
             self._update(

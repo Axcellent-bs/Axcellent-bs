@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useAuthedMedia } from "@/lib/authedMedia";
+import { renderErrorText } from "@/lib/creativeCardView";
 import { InstagramPanel } from "./InstagramPanel";
 import { HIGGSFIELD_URL, acceptFor, isVideoPart, pickDropped, storyboardVideoPrompt, uploadProblem } from "@/lib/higgsfieldWeb";
 import { ThumbnailPicker } from "./ThumbnailPicker";
@@ -20,20 +21,8 @@ const STATUS_KO: Record<string, string> = {
   running: "만드는 중", done: "완료", failed: "실패", blocked: "막힘", unavailable: "설정 없음",
   awaiting_approval: "사람 승인 대기", rejected: "거절됨",
 };
-const ERROR_KO: Record<string, string> = {
-  higgsfield_key_missing: "Higgsfield 키가 서버에 없어요",
-  model_not_configured: "Higgsfield 모델 경로가 서버에 설정되지 않았어요",
-  quota_exceeded: "이번 달 사용량 예산을 넘었어요",
-  quota_not_configured: "월 사용량 예산이 설정되지 않았어요",
-  sheet_image_missing: "이미지 시트 그림이 없어 만들 수 없어요",
-  interrupted: "서버가 다시 켜져 중단됐어요",
-  // 회사 Higgsfield 계정 연결(구독 크레딧)로 만들 때
-  credits_insufficient: "Higgsfield 계정의 크레딧이 모자라요. Higgsfield에서 크레딧을 채운 뒤 다시 해 주세요",
-  higgsfield_reconnect_needed: "Higgsfield 계정 연결이 끊겼어요. SNS 계정 연결에서 다시 연결해 주세요",
-  higgsfield_not_connected: "Higgsfield 계정 연결이 없어요(승인 기다리는 사이 끊겼을 수 있어요)",
-  higgsfield_app_missing: "서버에 Higgsfield 연결 설정(CLIENT_ID)이 없어요",
-};
-const errorText = (code?: string | null) => (code ? ERROR_KO[code] ?? code : null);
+// 오류 코드 말은 대화방 카드(CreativeChatCard)와 같이 쓴다 (lib/creativeCardView.ts)
+const errorText = renderErrorText;
 
 function Status({ part }: { part?: RenderPart | null }) {
   const s = part?.status || "";

@@ -48,7 +48,8 @@ function useRequest(requestId: string): { row: WorkRequestRow | null; hasToken: 
     setAsked(true);
     orchestrator.workRequest(requestId).then(setSingle).catch(() => { /* 못 읽으면 카드 없이 글만 */ });
   }, [hasToken, listed, asked, rows, requestId]);
-  return { row: listed ?? single, hasToken, tasks };
+  // 따로 읽은 값은 그 번호일 때만 (같은 자리에서 번호가 바뀌어도 앞 의뢰를 보이지 않는다, 11/24 ①)
+  return { row: listed ?? (single?.request_id === requestId ? single : null), hasToken, tasks };
 }
 
 /** 보고서 칸: 진행 중이면 진행 카드, 끝나면 완료 카드 (보고서에서 요약·근거 3개) */
@@ -291,6 +292,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                 {isInsight && proposal && !plan && (
                   <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(planDocPath({ id: proposal, request: row.request_id }))}>기획 제안 열기</button>
                 )}
+                {s.decide && !decided.has(s.stepId) && s.notice && <p className="mt-1 text-xs text-amber-800">{s.notice}</p>}
                 {s.decide && !decided.has(s.stepId) && unansweredNotice(row, s.stepId) && (
                   <p className="mt-1 text-xs text-amber-800">{unansweredNotice(row, s.stepId)}</p>
                 )}

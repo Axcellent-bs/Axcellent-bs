@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 대화방 의뢰 진행 카드: 번호 찾기(총괄 문장만) · 단계 칩·버튼 · 같은 의뢰 알림 줄 숨김 · 보고서·제안 잇기 · 토큰 없으면 카드 없음.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { madeVideo, noticeIdOf, perfStep, placeRequestCards, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, requestIdOf, resultStep, showRequestCard, stepRows } from "./requestCards.ts";
+import { attachRequestCards, directItemId, madeVideo, noticeIdOf, perfStep, placeRequestCards, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, requestIdOf, resultStep, showRequestCard, stepRows } from "./requestCards.ts";
 import { progressKeepPolling } from "./chatCards.ts";
 import type { StepStatus, WorkRequestRow } from "./workRequests.ts";
 
@@ -33,6 +33,50 @@ test("카드는 번호가 처음 나온 총괄 줄 아래 하나, 같은 의뢰�
   assert.deepEqual([...hidden].sort(), ["o2", "o4"]);
 });
 
+// 11/24 ① 같은 전체 대화방에 홍보 영상 의뢰 4개: 대화마다 메시지 id가 m1·m2…로 다시 시작해 접수 말풍선 id가 모두 같았고,
+// id 키(cardAt)로 붙이던 카드가 마지막 의뢰 번호(wr_7bc5…)로 덮였다
+const FOUR = ["wr_aa06000001", "wr_cb45000002", "wr_e783000003", "wr_7bc5000004"];
+type Item = { id: string; room: string; text: string; orch: boolean; requestCard?: string };
+const attach = (items: Item[]) => attachRequestCards(items,
+  (it) => ({ id: it.id, room: it.room, text: it.text, fromOrchestrator: it.orch }),
+  (it, requestCard) => ({ ...it, requestCard }));
+
+test("같은 방 의뢰 4개 → 카드 4개가 각자 번호 (대화 id를 넣은 말풍선 id)", () => {
+  const items: Item[] = FOUR.flatMap((rid, i) => [
+    { id: directItemId("orchestrator", `t${i}`, "m1"), room: "all", text: "홍보 영상 만들어 줘", orch: false },
+    { id: directItemId("orchestrator", `t${i}`, "m2"), room: "all", text: `의뢰를 접수했어요 (번호 ${rid})`, orch: true },
+  ]);
+  assert.equal(new Set(items.map((it) => it.id)).size, items.length); // 대화가 달라 id가 겹치지 않는다
+  const out = attach(items);
+  assert.deepEqual(out.filter((it) => it.requestCard).map((it) => it.requestCard), FOUR);
+  for (const it of out) if (it.requestCard) assert.ok(it.text.includes(it.requestCard), it.id);
+});
+
+test("말풍선 id가 같아도(예전 direct:orchestrator:m2) 카드 번호가 섞이지 않고, 알림 줄 숨김도 제 줄만", () => {
+  const same = "direct:orchestrator:m2";
+  const items: Item[] = [
+    ...FOUR.map((rid) => ({ id: same, room: "all", text: `의뢰를 접수했어요 (번호 ${rid})`, orch: true })),
+    { id: same, room: "all", text: `[의뢰 ${FOUR[0]}] 기획이 받았어요`, orch: true },
+  ];
+  const out = attach(items);
+  assert.deepEqual(out.map((it) => it.requestCard), FOUR); // 알림 줄은 빠지고 접수 4줄이 각자 번호
+  const { cards, skip } = placeRequestCards(items.map((it) => ({ id: it.id, room: it.room, text: it.text, fromOrchestrator: it.orch })));
+  assert.deepEqual(cards, [...FOUR, null]);
+  assert.deepEqual(skip, [false, false, false, false, true]);
+});
+
+test("1:1(DirectChat)도 줄 위치로: 한 대화에 의뢰 2개면 각자 번호, 같은 번호 카드는 하나", () => {
+  const msgs = [
+    { id: "m2", room: "direct", text: `의뢰를 접수했어요 (번호 ${FOUR[0]})`, fromOrchestrator: true },
+    { id: "m4", room: "direct", text: `의뢰를 접수했어요 (번호 ${FOUR[3]})`, fromOrchestrator: true },
+    { id: "m5", room: "direct", text: `[의뢰 ${FOUR[0]}] 영상 제작안이 나왔어요`, fromOrchestrator: true },
+    { id: "m6", room: "direct", text: `[의뢰 ${FOUR[3]}] 영상 제작안이 나왔어요`, fromOrchestrator: true },
+  ];
+  const { cards, skip } = placeRequestCards(msgs);
+  assert.deepEqual(cards, [FOUR[0], FOUR[3], null, null]);
+  assert.deepEqual(skip, [false, false, true, true]);
+});
+
 const step = (status: StepStatus, over: Record<string, unknown> = {}) => ({
   status, attempts: 1, grade: null, note: "", reason_code: null as string | null, result_ref: null as string | null, review_id: null,
   handoff_task_id: null, async_task_id: null, started_at: null, finished_at: null, ...over,
@@ -58,6 +102,16 @@ test("단계 → 칩·점·버튼: 사람 확인은 '<다음 단계> 진행' · 
   assert.equal(rows[0].decide, null);
   // 부서 대기(재시작 확인 등)는 사람이 정하는 단계가 아니다
   assert.equal(stepRows(row({ s4: step("waiting_human", { reason_code: "restart_check" }) }))[3].decide, null);
+  // 11/24 ③ 재시작으로 멈춘 단계(restart_unconfirmed, wr_a8f5aaa32f): "재시작으로 멈춤" 칩 + 안내 + [다시 보내기][여기서 멈추기]
+  const stuck = stepRows(row({
+    s1: step("completed", { result_ref: "tr_86f1aa" }), s2: step("completed"),
+    s3: step("waiting_human", { reason_code: "restart_unconfirmed", note: "재시작으로 보냄 여부를 알 수 없어 다시 보내지 않았다 (사람이 확인 필요)" }),
+  }))[2];
+  assert.deepEqual(stuck.chip, { label: "재시작으로 멈춤", tone: "bg-amber-50 text-amber-800" });
+  assert.deepEqual(stuck.decide, { approve: "다시 보내기", stop: "여기서 멈추기" });
+  assert.equal(stuck.notice, "서버가 다시 켜지면서 이 단계를 보냈는지 몰라 멈췄어요. 같은 일이 두 번 될 수 있으니 담당 부서 화면에서 이미 됐는지 보고 눌러 주세요.");
+  assert.equal(stuck.dot, "warn");
+  assert.equal(rows[3].notice, undefined); // 사람 확인 단계에는 재시작 안내가 없다
   const failed = stepRows(row({ s1: step("failed", { note: "인스타 한도에 닿아 멈춤" }), s2: step("skipped") }));
   assert.equal(failed[0].muted, "인스타 한도에 닿아 멈춤");
   assert.equal(failed[1].muted, "건너뜀");
