@@ -48,7 +48,10 @@ def test_a_forged_payload_or_signature_is_refused() -> None:
     payload["role"] = "operator"
     payload["name"] = "다른 사람"
     forged = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
-    for bad in (f"{prefix}.{forged}.{sig}", f"{prefix}.{body}.{sig[:-2]}AA", f"{prefix}.{body}"):
+    # 서명 끝 두 글자를 "AA"로 바꾸면 원래 끝이 "AA"일 때(약 4096분의 1) 서명이 그대로라 거절되지 않았다.
+    # 첫 글자를 반드시 다른 글자로 바꿔 어떤 토큰에서도 서명이 달라지게 한다.
+    tampered_sig = ("B" if sig[0] == "A" else "A") + sig[1:]
+    for bad in (f"{prefix}.{forged}.{sig}", f"{prefix}.{body}.{tampered_sig}", f"{prefix}.{body}"):
         with pytest.raises(ha.HumanAuthError) as err:
             ha.verify_session(bad, now=1_000_001)
         assert err.value.code == "HUMAN_TOKEN_INVALID"
