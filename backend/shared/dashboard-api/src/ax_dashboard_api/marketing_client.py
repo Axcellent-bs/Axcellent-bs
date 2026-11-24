@@ -720,6 +720,8 @@ CHARACTER_SHEET_REFUSALS = {
     "no_image": (422, "NO_IMAGE"),
     "invalid_image": (422, "INVALID_IMAGE"),
     "image_too_large": (413, "IMAGE_TOO_LARGE"),
+    "extra_images_not_allowed": (422, "EXTRA_IMAGES_NOT_ALLOWED"),
+    "too_many_images": (422, "TOO_MANY_IMAGES"),
     "no_character": (422, "NO_CHARACTER"),
     "virtual_unconfirmed": (422, "VIRTUAL_UNCONFIRMED"),
     "llm_not_configured": (409, "LLM_NOT_CONFIGURED"),
@@ -732,6 +734,7 @@ CHARACTER_SHEET_DEADLINE_SECONDS = 120  # 이미지를 읽는 LLM 호출이라 �
 async def character_sheet_call(
     image: dict[str, Any], note: str | None, thumbnail: str | None = None, *,
     kind: str = "real_photo", virtual_confirmed: bool = False,
+    extra_images: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:  # fmt: skip
     """캐릭터 시트 프롬프트 skill.
 
@@ -742,6 +745,8 @@ async def character_sheet_call(
     untrusted: dict[str, Any] = {"image": image}
     if note:
         untrusted["note"] = note
+    if extra_images:  # 11/25 같은 인물 추가 참조 이미지(없으면 키 자체를 안 보낸다)
+        untrusted["extra_images"] = extra_images
     if thumbnail:  # 제작 기록에 남길 작은 미리보기(원본은 저장하지 않는다)
         untrusted["thumbnail"] = thumbnail
     request = AgentRequest(

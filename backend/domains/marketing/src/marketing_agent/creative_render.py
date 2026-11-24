@@ -716,6 +716,7 @@ async def _mcp_render(
     params: dict[str, Any],
     ref: bytes | None,
     role: str | None = None,
+    extra_refs: list[bytes] | None = None,
 ) -> str:
     """회사 계정으로: 참조 올리기 → 만들기 → 기다리기 → 내려받기. 돌려주는 값은 sha256.
 
@@ -729,7 +730,14 @@ async def _mcp_render(
         name = f"{record_id}-{part}-ref.{'png' if png else 'jpg'}"
         media = await _mcp.upload(hf, ref, name, "image/png" if png else "image/jpeg")
         role = role or (_mcp.IMAGE_REF_ROLE if kind == "image" else _mcp.VIDEO_START_ROLE)
-        params = _mcp.with_media(params, media, role)
+        ids = [media]
+        for i, extra in enumerate(extra_refs or [], start=1):  # 11/25 대표 다음 추가 참조 순서대로
+            png_x = extra.startswith(b"\x89PNG")
+            ext = "png" if png_x else "jpg"
+            ids.append(await _mcp.upload(hf, extra, f"{record_id}-{part}-ref{i}.{ext}",
+                                         "image/png" if png_x else "image/jpeg"))  # fmt: skip
+        params = (_mcp.with_medias(params, ids, role) if len(ids) > 1
+                  else _mcp.with_media(params, media, role))  # fmt: skip
     try:
         job = await _mcp.submit(hf, kind, params)
         _set(record_id, part, request_id=job)
@@ -968,10 +976,14 @@ async def _render_video(
             part, role = video_reference(rec, mcp_video_model())
             ref = _ref_bytes(record_id, part, cid, rec)
             params = _video_mcp_params(rec, seconds)
+            extras: list[bytes] = []
+            if role == _mcp.IMAGE_REF_ROLE:  # 11/25 참조 여러 장(모델 상한 안으로 자름)
+                room = _mcp.max_image_references(mcp_video_model()) - 1
+                extras = extra_reference_bytes(record_id, rec, cid)[:max(room, 0)]
             await _mcp_preflight(cid, "video", params)  # 승인 사이에 크레딧이 줄었을 수 있다
             async with CLIENT() as client:
                 sha = await _mcp_render(client, cid, record_id, "video", "video", params, ref,
-                                        role=role)  # fmt: skip
+                                        role=role, extra_refs=extras)  # fmt: skip
         else:
             ref = asset_path(record_id, "board_image", cid).read_bytes()
             async with CLIENT() as client:
@@ -1068,7 +1080,35 @@ def save_original(record_id: str, data: bytes, mime_type: str, cid: str | None =
          source=ORIGINAL_SOURCE, company_id=cid or _request_company.active())  # fmt: skip
 
 
-PLAN_DURATION_KEY = "plan_duration_s"  # 의뢰 스토리보드에 남긴 기획 제작안 길이 (request_creative)
+def save_extra(record_id: str, index: int, data: bytes, mime_type: str, cid: str | None = None
+               ) -> None:  # fmt: skip
+    """추가 참조 이미지(1~3번)를 그 회사 기록 폴더에 `ref_<번호>.jpg`(PNG는 .png)로 저장한다."""
+    magic, _ = _MAGIC.get(mime_type, (b"", ""))
+    if not 1 <= index <= 3 or not magic or not data.startswith(magic):
+        raise RenderError("bad_asset")
+    path = _dir(record_id, cid) / f"ref_{index}.{'png' if mime_type == 'image/png' else 'jpg'}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def extra_reference_bytes(record_id: str, rec: dict[str, Any], cid: str | None) -> list[bytes]:
+    """기록 `sheet.references`의 추가 이미지(1번~)를 순서대로. 파일이 없으면 건너뛴다."""
+    out: list[bytes] = []
+    refs = sorted(((rec.get("sheet") or {}).get("references") or []),
+                  key=lambda r: int(r.get("index") or 0))  # fmt: skip
+    for ref in refs:
+        index = int(ref.get("index") or 0)
+        if index < 1:
+            continue
+        for ext in ("jpg", "png"):
+            path = _dir(record_id, cid) / f"ref_{index}.{ext}"
+            if path.is_file():
+                out.append(path.read_bytes())
+                break
+    return out
+
+
+PLAN_DURATION_KEY = "plan_duration_s" # 의뢰 스토리보드에 남긴 기획 제작안 길이 (request_creative)
 
 
 def _ref_bytes(record_id: str, part: str, cid: str | None, rec: dict[str, Any]) -> bytes:

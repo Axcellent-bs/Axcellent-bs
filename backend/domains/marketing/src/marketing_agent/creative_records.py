@@ -96,6 +96,12 @@ def upload_kind(sheet: dict[str, Any] | None) -> str:
     return kind if kind in UPLOAD_KINDS else "real_photo"
 
 
+def references_of(sheet: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """시트 기록의 참조 이미지 목록(11/25). 옛 기록은 빈 목록 = 대표만."""
+    refs = (sheet or {}).get("references")
+    return [r for r in refs if isinstance(r, dict)] if isinstance(refs, list) else []
+
+
 def clean_thumbnail(raw: Any) -> str | None:
     """JPEG base64 미리보기만 받는다. 크거나 깨졌으면 버린다(기록은 미리보기 없이 남긴다)."""
     if not isinstance(raw, str) or not raw or len(raw) > MAX_THUMB_BASE64:
@@ -225,6 +231,7 @@ class CreativeRecords:
                     "script_scenes": len(script.get("scenes") or []) if script else 0,
                     "script_at": script.get("at") if script else None,
                     "kind": upload_kind(sheet),
+                    "references": references_of(sheet),
                 }
             )
         return out
@@ -295,6 +302,7 @@ class CreativeRecords:
                     "thumbnail_base64": r["thumbnail"],
                     "preview_part": "sheet_image" if done else None,
                     "kind": upload_kind(sheet),
+                    "references": references_of(sheet),
                     "saved_at": brand.get("marked_at") or "",
                     "is_default": i == 0,
                     "marked_by": brand.get("marked_by"),
