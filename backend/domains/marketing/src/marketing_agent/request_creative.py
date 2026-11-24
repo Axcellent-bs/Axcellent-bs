@@ -225,7 +225,7 @@ async def _ensure_images(
             prompt,
             negative,
             _thumb_ref(rec),
-            _render.SHEET_ASPECT,
+            _render.image_aspect(_render.SHEET_ASPECT, cid),
             via,
             cid,
         )

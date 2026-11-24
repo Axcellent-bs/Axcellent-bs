@@ -209,6 +209,18 @@
       "priority": "optional"
     },
     {
+      "id": "render_settings_options",
+      "description": "만들기 설정 화면용: 회사 Higgsfield 연결의 models_explore(읽기, 하루 기억)로 찾은 그림·영상 모델 목록(영상은 최소·최대 초와 비율, 모르면 빈 값)과 서버 설정 기본값. 연결이 없거나 실패하면 아는 모델과 서버 설정 모델만. 크레딧을 쓰지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_render_settings.py#RenderSettingsOptionsInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_render_settings.py#RenderSettingsOptionsOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "brand_characters_list",
       "description": "요청 회사(meta.tenant_id)의 대표 캐릭터 목록(최대 3개, 마지막에 표시한 것이 기본). 이름·제작 기록 번호(CR-…)·작은 미리보기·시트 그림 유무·저장 시각·권리 확인한 사람과 때. 다른 회사 기록은 보이지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_brand.py#BrandCharactersListInput",

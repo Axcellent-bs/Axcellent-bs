@@ -59,13 +59,12 @@ from marketing_agent import company_scope as _company_scope
 from marketing_agent import creative_mcp as _mcp
 from marketing_agent import creative_records as _creative
 from marketing_agent import higgsfield_mcp_auth as _mcp_auth
+from marketing_agent import render_settings as _settings
 from marketing_agent.higgsfield_mcp import McpError, log_line
 from marketing_agent.higgsfield_mcp_auth import McpAuthError
 from marketing_agent.media import usage as usage_mod
 from marketing_agent.media.config import (
     HIGGSFIELD_IMAGE_MODEL_ENV,
-    HIGGSFIELD_MCP_IMAGE_MODEL_ENV,
-    HIGGSFIELD_MCP_VIDEO_MODEL_ENV,
     HIGGSFIELD_VIDEO_MODEL_ENV,
     MediaSettings,
 )
@@ -108,6 +107,7 @@ VIDEO_FIELDS = {
     "duration": "duration",
 }
 SHEET_ASPECT, BOARD_ASPECT, VIDEO_ASPECT = "16:9", "3:4", "9:16"
+IMAGE_CREDITS_DISABLED = "image_credits_disabled"  # 회사 만들기 설정: 그림에 크레딧을 쓰지 않음
 
 PARTS = ("sheet_image", "board_image", "video")
 FILES = {"sheet_image": "sheet.jpg", "board_image": "board.jpg", "video": "video.mp4"}
@@ -186,12 +186,24 @@ def video_seconds() -> int:
     return max(1, min(n, MAX_VIDEO_S))
 
 
-def mcp_image_model() -> str:
-    return os.getenv(HIGGSFIELD_MCP_IMAGE_MODEL_ENV, "").strip()
+def mcp_image_model(cid: str | None = None) -> str:
+    """회사 만들기 설정(11/25)의 그림 모델. 비어 있으면 서버 설정(MCP_IMAGE_MODEL)."""
+    return _settings.effective(cid).image_model
 
 
-def mcp_video_model() -> str:
-    return os.getenv(HIGGSFIELD_MCP_VIDEO_MODEL_ENV, "").strip()
+def mcp_video_model(cid: str | None = None) -> str:
+    """회사 만들기 설정의 영상 모델. 비어 있으면 서버 설정(MCP_VIDEO_MODEL)."""
+    return _settings.effective(cid).video_model
+
+
+def image_aspect(default: str, cid: str | None = None) -> str:
+    """그림 비율. 회사 설정이 "plan"·빈 값이면 `default`, 아니면 영상과 같은 비율."""
+    aspect = _settings.effective(cid).aspect
+    return default if aspect == "plan" else aspect
+
+
+def video_aspect(cid: str | None = None) -> str:
+    return image_aspect(VIDEO_ASPECT, cid)
 
 
 def route(cid: str | None = None) -> str:
@@ -201,9 +213,9 @@ def route(cid: str | None = None) -> str:
     return MCP if _mcp_auth.connected(cid) else API
 
 
-def _model(kind: str, via: str) -> str:
+def _model(kind: str, via: str, cid: str | None = None) -> str:
     if via == MCP:
-        return mcp_image_model() if kind == "image" else mcp_video_model()
+        return mcp_image_model(cid) if kind == "image" else mcp_video_model(cid)
     return image_model() if kind == "image" else video_model()
 
 
@@ -245,8 +257,11 @@ def _code(error: Exception) -> str:
 
 def configured(kind: str, via: str | None = None, cid: str | None = None) -> str | None:
     """만들 수 없는 이유 코드. 되면 None. `cid`는 그 회사(없으면 지금 요청 회사)."""
+    # 11/25 회사가 그림에 크레딧을 쓰지 않게 했으면 그림 단계는 멈춘다(예약·호출 없음)
+    if kind == "image" and not _settings.effective(cid).image_credits_ok:
+        return IMAGE_CREDITS_DISABLED
     if (via or route(cid)) == MCP:
-        return None if _model(kind, MCP) else "model_not_configured"
+        return None if _model(kind, MCP, cid) else "model_not_configured"
     if not _key(cid):  # 공백만 있는 키도 없는 것으로 본다
         return "higgsfield_key_missing"
     if not (image_model() if kind == "image" else video_model()):
@@ -447,8 +462,11 @@ async def _gate_image(
     part: str,
     via: str = API,
     credits: float | None = None,
+    cid: str | None = None,
 ) -> tuple[ExecuteDecision | None, int | None, str | None]:
     """(결정, 장부 seq, 막힌 이유). 막히면 결정·seq는 None."""
+    if not _settings.effective(cid).image_credits_ok:  # 11/25 회사 설정: 예약 전에 멈춘다
+        return None, None, IMAGE_CREDITS_DISABLED
     settings = MediaSettings.from_env()
     expected = usage_mod.planned("image", None)
     applies = _quota_applies(settings, via)
@@ -463,7 +481,7 @@ async def _gate_image(
             month=now.strftime("%Y-%m"),
             media_kind="image",
             provider=_provider(via),
-            model_id=_model("image", via),
+            model_id=_model("image", via, cid),
             usage=expected,
             monthly_cap=cap,
             now=now,
@@ -529,8 +547,9 @@ def start_sheet(
     negative = str(sheet.get("negative_prompt_en") or "")
     _spawn(
         _render_image(
-            ledger, meta, record_id, "sheet_image", prompt, negative, ref, SHEET_ASPECT, via, cid
-        )
+            ledger, meta, record_id, "sheet_image", prompt, negative, ref,
+            image_aspect(SHEET_ASPECT, cid), via, cid,
+        )  # fmt: skip
     )
 
 
@@ -586,7 +605,7 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
             str(board_out.get("sheet_prompt_en") or ""),
             str(board_out.get("negative_prompt_en") or ""),
             ref,
-            BOARD_ASPECT,
+            image_aspect(BOARD_ASPECT, cid),
             via,
             cid,
         )
@@ -607,7 +626,12 @@ async def _render_image(
 ) -> None:
     # 회사는 부른 쪽이 정한 값(뒤에서 돌 때 company_scope가 비어도 같은 회사). 없으면 예전 그대로
     cid = cid or request_company(meta)
-    params = _mcp.image_params(mcp_image_model(), prompt, negative, aspect)
+    if not _settings.effective(cid).image_credits_ok:  # 11/25: 미리 보기·예약 전에 멈춘다
+        _set(record_id, part, status="blocked", error=IMAGE_CREDITS_DISABLED)
+        if part == "sheet_image":
+            maybe_start_board(ledger, meta, record_id, cid)
+        return
+    params = _mcp.image_params(mcp_image_model(cid), prompt, negative, aspect)
     credits: float | None = None
     if via == MCP:
         try:
@@ -620,7 +644,7 @@ async def _render_image(
             if part == "sheet_image":
                 maybe_start_board(ledger, meta, record_id, cid)
             return
-    decision, seq, blocked = await _gate_image(ledger, meta, record_id, part, via, credits)
+    decision, seq, blocked = await _gate_image(ledger, meta, record_id, part, via, credits, cid)
     if blocked or decision is None or seq is None:
         _set(record_id, part, status="blocked", error=blocked)
         if part == "sheet_image":
@@ -648,7 +672,7 @@ async def _render_image(
     _safe(
         lambda: ledger.settle(
             seq,
-            model_id=_model("image", via),
+            model_id=_model("image", via, cid),
             usage=usage,
             usage_source="estimate",
             result_json=f'{{"provider":"{_provider(via)}"}}',
@@ -769,8 +793,10 @@ async def request_video(
         raise RenderError(why)
     settings = MediaSettings.from_env()
     # 11/24 기획 제작안 길이 → 서버 설정·모델 상한 안으로 (기획 길이가 없으면 지금 규칙)
+    model = _model("video", via, cid)
+    shown = _settings.effective(cid)  # 11/25 회사 만들기 설정: 길이 plan|정수, 비율, 영상 모델
     seconds, clamped = plan_seconds(
-        (rec.get("storyboard") or {}).get(PLAN_DURATION_KEY), _model("video", via)
+        (rec.get("storyboard") or {}).get(PLAN_DURATION_KEY), model, shown.video_seconds
     )
     expected = usage_mod.UsageAmount("seconds", seconds)
     applies = _quota_applies(settings, via)
@@ -780,7 +806,7 @@ async def request_video(
     credits: float | None = None
     if via == MCP:
         try:
-            credits = await _mcp_preflight(cid, "video", _video_mcp_params(rec, seconds))
+            credits = await _mcp_preflight(cid, "video", _video_mcp_params(rec, seconds, cid))
         except _ERRORS as error:
             raise RenderError(_code(error)) from None
     key = f"{meta.context_id}:{VIDEO_ACTION}:{record_id}"
@@ -791,7 +817,7 @@ async def request_video(
             month=now.strftime("%Y-%m"),
             media_kind="video",
             provider=_provider(via),
-            model_id=_model("video", via),
+            model_id=model,
             usage=expected,
             monthly_cap=cap,
             now=now,
@@ -804,6 +830,20 @@ async def request_video(
         raise RenderError("in_progress")
     seq = res.row.seq
     title = (rec.get("storyboard") or {}).get("title_ko") or record_id
+    aspect = video_aspect(cid) if via == MCP else VIDEO_ASPECT
+    # 11/25 승인 화면용 요약 (보류일 때부터 기록 render.video.summary에 들어 있다)
+    summary = {
+        "model": model,
+        "seconds": seconds,
+        "seconds_clamped_from": clamped,
+        "aspect": aspect,
+        "reference": "character_original"
+        if video_reference(rec, model)[0] == "sheet_image" else "storyboard_image",
+        "credits_estimate": credits,
+    }
+    extra_ko = f", {model or '모델 미정'}, 비율 {aspect}"
+    if credits is not None:
+        extra_ko += f", 예상 {credits:g} 크레딧"
     params: dict[str, Any] = {
         "record_id": record_id,
         "provider": _provider(via),
@@ -812,7 +852,8 @@ async def request_video(
         "usage_amount": seconds,
         "ai_generated": True,
         "requested_by": (who or "")[:80],
-        "summary": f"스토리보드 영상 {seconds}초 만들기: {title} ({_billing_ko(via)}, AI 생성)",
+        "summary": f"스토리보드 영상 {seconds}초 만들기: {title} "
+        f"({_billing_ko(via)}{extra_ko}, AI 생성)",
     }
     if via == MCP:
         params["billing"] = BILLING_SUBSCRIPTION  # 영상은 그대로 구독 크레딧(사람 승인 뒤)
@@ -833,6 +874,7 @@ async def request_video(
         "params": params,
         "route": via,
         "company_id": cid,
+        "summary": summary,
     }
     if clamped is not None:
         base["seconds_clamped_from"] = clamped
@@ -948,8 +990,8 @@ def _video_prompt(rec: dict[str, Any]) -> str:
     return storyboard_video_prompt(board.get("style_en"), shots, board.get("cta_ko"))
 
 
-def _video_mcp_params(rec: dict[str, Any], seconds: int) -> dict[str, Any]:
-    return _mcp.video_params(mcp_video_model(), _video_prompt(rec), VIDEO_ASPECT, seconds)
+def _video_mcp_params(rec: dict[str, Any], seconds: int, cid: str | None = None) -> dict[str, Any]:
+    return _mcp.video_params(mcp_video_model(cid), _video_prompt(rec), video_aspect(cid), seconds)
 
 
 async def _render_video(
@@ -965,9 +1007,9 @@ async def _render_video(
             if not cid or not _mcp_auth.connected(cid):
                 raise McpAuthError("not_connected")  # 키 길로 바꾸지 않는다
             # 11/24 가상 인물 원본(image_references를 받는 모델) 또는 스토리보드 그림(start_image)
-            part, role = video_reference(rec, mcp_video_model())
+            part, role = video_reference(rec, mcp_video_model(cid))
             ref = _ref_bytes(record_id, part, cid, rec)
-            params = _video_mcp_params(rec, seconds)
+            params = _video_mcp_params(rec, seconds, cid)
             await _mcp_preflight(cid, "video", params)  # 승인 사이에 크레딧이 줄었을 수 있다
             async with CLIENT() as client:
                 sha = await _mcp_render(client, cid, record_id, "video", "video", params, ref,
@@ -985,7 +1027,7 @@ async def _render_video(
     _safe(
         lambda: ledger.settle(
             seq,
-            model_id=_model("video", via),
+            model_id=_model("video", via, cid),
             usage=usage_mod.UsageAmount("seconds", seconds),
             usage_source="estimate",
             result_json=f'{{"provider":"{_provider(via)}"}}',
@@ -1097,7 +1139,14 @@ def video_reference(rec: dict[str, Any], model: str) -> tuple[str, str]:
     return "board_image", _mcp.VIDEO_START_ROLE
 
 
-def plan_seconds(plan_s: Any, model: str) -> tuple[int, int | None]:
+def plan_seconds(plan_s: Any, model: str, setting: Any = "plan") -> tuple[int, int | None]:
+    # 11/25 회사 설정 `setting`이 정수면 기획 길이 대신 그 초(같은 상한 규칙), "plan"이면 기획 길이
+    if isinstance(setting, int) and not isinstance(setting, bool) and setting >= 1:
+        plan_s = setting
+    return _plan_seconds(plan_s, model)
+
+
+def _plan_seconds(plan_s: Any, model: str) -> tuple[int, int | None]:
     """(만들 초, 줄였으면 원래 초). 11/24: 기획 제작안 길이(`video_plan.duration_s`)를 쓰고,
     서버 설정 `MARKETING_HIGGSFIELD_VIDEO_DURATION_S`는 상한으로만, 모델 상한도 같이 본다.
     기획 길이가 없으면 지금 규칙(`video_seconds`)."""

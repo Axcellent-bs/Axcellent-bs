@@ -84,6 +84,7 @@ from ax_contracts.schemas.marketing_creative import (
     RequestVideoYoutubeRequestInput,
     YoutubeStatusOutput,
 )
+from ax_contracts.schemas.marketing_render_settings import RenderSettingsOptionsInput
 from ax_contracts.schemas.marketing_script import (
     CreativeScriptInput,
     CreativeScriptOutput,
@@ -118,6 +119,7 @@ from marketing_agent import creative_script as _script
 from marketing_agent import creative_thumbnails as _thumbs
 from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import instagram_post as _instagram
+from marketing_agent import render_settings as _render_settings
 from marketing_agent import request_creative as _request_creative
 from marketing_agent import request_video_cover as _request_cover
 from marketing_agent import request_video_youtube as _request_youtube
@@ -1002,6 +1004,20 @@ def _brand_done(
         evidence=_evidence(
             [request.skill], f"대표 캐릭터 {record_id} {'표시' if marked else '표시 뗌'}", []
         ),
+    )
+
+
+async def render_settings_options(request: AgentRequest) -> AgentResult:
+    """만들기 설정 화면용 모델 목록·서버 설정 기본값(read). 크레딧을 쓰지 않는다."""
+    data = _parse(request, RenderSettingsOptionsInput)
+    if isinstance(data, AgentResult):
+        return data
+    out = await _render_settings.options(_render.request_company(request.meta))
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(["render_settings_options"], f"모델 목록 출처 {out.models_source}", []),
     )
 
 
@@ -2641,6 +2657,7 @@ HANDLERS = {
     "creative_record_attach": creative_record_attach,
     "creative_thumbnails_request": creative_thumbnails_request,
     "creative_thumbnail_select": creative_thumbnail_select,
+    "render_settings_options": render_settings_options,
     "brand_characters_list": brand_characters_list,
     "brand_character_mark": brand_character_mark,
     "brand_character_unmark": brand_character_unmark,
