@@ -695,6 +695,11 @@ class ReceiveInsightInput(AxModel):
     # 아래는 예전 요청은 없다. 총괄 의뢰(홍보 영상)의 고객 문장 그대로 (11/23 재현 님: "30초 이내"가
     # 제작안에 안 갔다). untrusted라 기획은 LLM에 넘기지 않고 길이 같은 숫자만 코드로 읽는다
     request_text: str | None = Field(default=None, max_length=4000)
+    # 아래는 예전 요청은 없다. 홍보 영상 방향 (11/24 재현 님 "재미 먼저, 브랜드는 끝에"). 데이터가
+    # 회사 브랜드 설정(tenant.brand)과 의뢰 문장("책 소개"면 product)으로 정한 최종값을 보낸다.
+    # None이면 기획은 fun_first·end_card로 본다
+    promo_style: Literal["fun_first", "product"] | None = None
+    brand_exposure: Literal["end_card", "prop", "caption"] | None = None
 
 
 class ReceiveInsightOutput(AxModel):
