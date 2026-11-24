@@ -22,17 +22,21 @@
       menu.focus();
     });
   }
-  // 콘텐츠 칸 인스타 게시물: 3개를 넘으면 처음엔 3개만 보이고, 화살표 버튼으로 나머지를 펼치고 접는다
+  // 콘텐츠 칸 인스타 게시물(3개)·홍보 영상(2개): 처음엔 앞의 몇 개만 보이고, 화살표 버튼으로 나머지를 펼치고 접는다
   document.querySelectorAll(".posts-wrap").forEach(function (wrap) {
-    var list = wrap.querySelector(".posts");
+    var list = wrap.querySelector(".posts, .vposts");
     var more = wrap.querySelector(".posts-more");
     if (!list || !more) return;
+    var moreLabel = more.getAttribute("data-more") || "게시물 더 보기";
+    var lessLabel = more.getAttribute("data-less") || "게시물 접기";
     list.classList.add("is-collapsed");
     more.hidden = false;
     more.addEventListener("click", function () {
       var collapsed = list.classList.toggle("is-collapsed");
+      // 접을 때 재생 중이던 숨겨지는 영상은 멈춘다
+      if (collapsed) list.querySelectorAll("video").forEach(function (v) { if (!v.offsetParent) v.pause(); });
       more.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      more.setAttribute("aria-label", collapsed ? "게시물 더 보기" : "게시물 접기");
+      more.setAttribute("aria-label", collapsed ? moreLabel : lessLabel);
     });
   });
   // 지금 보고 있는 구역을 메뉴에 표시한다
