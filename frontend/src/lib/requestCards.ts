@@ -1,7 +1,7 @@
 // 대화방 "의뢰 진행" 카드(components/office/RequestProgressCard.tsx)의 순수 계산. node --test (requestCards.test.ts).
 // 전체 대화방·이슈 방(useOfficeTalk)과 총괄 1:1(DirectChat)은 총괄 글 한 줄("의뢰를 접수했어요 (번호 wr_…)" · "[의뢰 wr_…] …")만 보였다.
 // 의뢰 번호가 처음 나온 총괄 말풍선 아래에 카드 하나를 붙이고, 같은 의뢰의 다음 알림 줄("[의뢰 wr_…] …")은 그 방에서 숨긴다(원본 대화는 그대로).
-import { STEP_STATUS, canDecide, requestContext, type StepStatus, type WorkRequestPlanStep, type WorkRequestRow, type WorkRequestStep } from "./workRequests.ts";
+import { STEP_STATUS, canDecide, isRestartStuck, requestContext, type StepStatus, type WorkRequestPlanStep, type WorkRequestRow, type WorkRequestStep } from "./workRequests.ts";
 import { planId } from "./format.ts";
 import { planDocPath } from "./planDoc.ts";
 import { videoPlanSummary, type VideoPlanView } from "./videoPlan.ts";
@@ -20,29 +20,64 @@ export function requestIdOf(text: string | null | undefined): string | null {
 /** 같은 의뢰의 진행 알림 줄 "[의뢰 wr_…] …"이면 그 번호 */
 export const noticeIdOf = (text: string | null | undefined): string | null => NOTICE.exec(text ?? "")?.[1] ?? null;
 
+/** 단톡방 대화 말풍선 id. 서버 메시지 id(m1·m2…)는 대화마다 다시 시작해서 대화 id를 같이 넣는다 (11/24 ①: 의뢰 4개의 접수 말풍선 id가 같았다) */
+export const directItemId = (agent: string, threadId: string, messageId: string) => `direct:${agent}:${threadId}:${messageId}`;
+
 export interface TalkLine { id: string; room: string; text: string; fromOrchestrator: boolean }
 
 /**
  * 방마다: 의뢰 번호가 처음 나온 총괄 줄 id → 그 의뢰 번호(카드를 붙일 자리), 숨길 줄 id(같은 의뢰의 다음 알림 줄).
  * 사람 말(fromOrchestrator=false)에서는 찾지 않는다. 시각순으로 넘긴다
  */
-export function placeRequestCards(lines: TalkLine[]): { cardAt: Map<string, string>; hidden: Set<string> } {
+export function placeRequestCards(lines: TalkLine[]): {
+  cardAt: Map<string, string>; hidden: Set<string>;
+  /** 줄 순서 그대로: i번째 줄에 붙일 카드 번호(없으면 null)·숨길지. 줄 id가 겹쳐도(대화마다 m1·m2…) 섞이지 않는다 (11/24 ①) */
+  cards: (string | null)[]; skip: boolean[];
+} {
   const cardAt = new Map<string, string>();
   const hidden = new Set<string>();
+  const cards: (string | null)[] = lines.map(() => null);
+  const skip: boolean[] = lines.map(() => false);
   const seen = new Set<string>(); // room|request
-  for (const l of lines) {
-    if (!l.fromOrchestrator) continue;
+  lines.forEach((l, i) => {
+    if (!l.fromOrchestrator) return;
     const rid = requestIdOf(l.text);
-    if (!rid) continue;
+    if (!rid) return;
     const key = `${l.room}|${rid}`;
     if (!seen.has(key)) {
       seen.add(key);
       cardAt.set(l.id, rid);
-      continue;
+      cards[i] = rid;
+      return;
     }
-    if (noticeIdOf(l.text) === rid) hidden.add(l.id);
-  }
-  return { cardAt, hidden };
+    if (noticeIdOf(l.text) === rid) {
+      hidden.add(l.id);
+      skip[i] = true;
+    }
+  });
+  return { cardAt, hidden, cards, skip };
+}
+
+/**
+ * 항목 목록에 카드를 붙이고 같은 의뢰의 다음 알림 줄을 뺀다. 줄 위치로 고르므로 항목 id가 겹쳐도 각자 번호다.
+ * line: 카드 후보 줄이면 TalkLine, 아니면 null(말풍선이 아닌 항목). put: 그 항목에 카드 번호를 단다
+ */
+export function attachRequestCards<T>(items: T[], line: (it: T) => TalkLine | null, put: (it: T, requestId: string) => T): T[] {
+  const idx: number[] = [];
+  const lines: TalkLine[] = [];
+  items.forEach((it, i) => {
+    const l = line(it);
+    if (l) { idx.push(i); lines.push(l); }
+  });
+  const { cards, skip } = placeRequestCards(lines);
+  const card = new Map<number, string>();
+  const drop = new Set<number>();
+  idx.forEach((at, k) => {
+    if (cards[k]) card.set(at, cards[k] as string);
+    if (skip[k]) drop.add(at);
+  });
+  if (card.size === 0 && drop.size === 0) return items;
+  return items.flatMap((it, i) => (drop.has(i) ? [] : [card.has(i) ? put(it, card.get(i) as string) : it]));
 }
 
 /** 카드를 그릴지: 사람 토큰이 있고 번호가 있을 때만 (없으면 지금 글만) */
@@ -69,7 +104,13 @@ export interface StepRow {
   decide: { approve: string; stop: string } | null;
   /** 실패·건너뜀이면 회색 + 의뢰 note(코드 문장) */
   muted: string | null;
+  /** 버튼 위 안내 한 줄 (재시작으로 멈춘 단계) */
+  notice?: string;
 }
+
+export const RESTART_CHIP = { label: "재시작으로 멈춤", tone: "bg-amber-50 text-amber-800" };
+export const RESTART_APPROVE = "다시 보내기";
+export const RESTART_NOTICE = "서버가 다시 켜지면서 이 단계를 보냈는지 몰라 멈췄어요. 같은 일이 두 번 될 수 있으니 담당 부서 화면에서 이미 됐는지 보고 눌러 주세요.";
 
 const DOT: Record<StepStatus, StepDot> = {
   pending: "gray", running: "run", waiting_async: "run", completed: "ok", failed: "gray", skipped: "gray", rejected_by_human: "gray",
@@ -90,9 +131,17 @@ export function stepRows(r: Pick<WorkRequestRow, "plan" | "steps">): StepRow[] {
     const s: WorkRequestStep | undefined = r.steps[p.step_id];
     const status: StepStatus = s?.status ?? "pending";
     const next = nextLabel(r.plan, p.step_id);
-    const decide = s && canDecide(s) ? { approve: next ? `${next} 진행` : "진행", stop: "여기서 멈추기" } : null;
+    const restart = !!s && isRestartStuck(s);
+    // 재시작으로 멈춘 단계(11/24 ③): 승인 = 같은 단계를 다시 보낸다, 거절 = 여기서 멈춤 (같은 decideRequestStep)
+    const decide = s && canDecide(s)
+      ? { approve: restart ? RESTART_APPROVE : next ? `${next} 진행` : "진행", stop: "여기서 멈추기" }
+      : null;
     const muted = status === "failed" || status === "skipped" ? (stepNoteText(s?.note) || STEP_STATUS[status].label) : null;
-    return { stepId: p.step_id, dept: p.dept, label: p.label, skill: p.skill, status, chip: STEP_STATUS[status], dot: DOT[status], decide, muted };
+    return {
+      stepId: p.step_id, dept: p.dept, label: p.label, skill: p.skill, status,
+      chip: restart ? RESTART_CHIP : STEP_STATUS[status], dot: DOT[status], decide, muted,
+      ...(restart ? { notice: RESTART_NOTICE } : {}),
+    };
   });
 }
 

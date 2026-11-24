@@ -6,7 +6,7 @@ import { POLL_MS, classifyFailure, isAnswering } from "@/lib/directChat";
 import { ROOM_POLL_MS, listOfficeRoom, touchOfficeRoom, type OfficeEntry } from "@/lib/officeRoom";
 import { loadOwners, saveOwner } from "@/lib/directThreads";
 import { notThreadOwner, officeSendBody, ownsThread, roomCardField, senderName, threadDisplay } from "@/lib/officeTalkView";
-import { placeRequestCards } from "@/lib/requestCards";
+import { attachRequestCards, directItemId } from "@/lib/requestCards";
 import { SAFETY_HUMAN_TOKEN } from "@/lib/env";
 import { useSession, type Account } from "@/demo/session";
 
@@ -103,7 +103,7 @@ export function useOfficeTalk(): OfficeTalk {
     if (!a?.talk || reading.current.has(k)) return;
     reading.current.add(k);
     a.talk.get(entry.threadId).then((t) => {
-      if (firstKeys.current.has(k)) { for (const m of t.messages) quiet.current.add(`direct:${entry.agent}:${m.id}`); firstKeys.current.delete(k); }
+      if (firstKeys.current.has(k)) { for (const m of t.messages) quiet.current.add(directItemId(entry.agent, t.id, m.id)); firstKeys.current.delete(k); }
       setLoaded((cur) => {
         // 그사이 내가 보낸 답(더 새 대화)이 들어왔으면 덮지 않는다
         const prev = cur[k];
@@ -256,7 +256,7 @@ export function useOfficeTalk(): OfficeTalk {
       const goId = mine && t.status === "talking" && last?.role === "assistant" && last.kind === "plan" && last.plan ? last.id : null;
       for (const m of t.messages) {
         const at = m.at || t.updatedAt;
-        const id = `direct:${a.key}:${m.id}`;
+        const id = directItemId(a.key, t.id, m.id);
         if (m.role === "user") {
           out.push({ kind: "msg", id, at, room, from: who, to: a.name, fromKey: "human", central: false, human: mine, text: m.text, tone: "request", facts: [],
             ...(m.card?.kind === "creative" ? { creative: m.card } : {}) });
@@ -290,10 +290,10 @@ export function useOfficeTalk(): OfficeTalk {
  */
 export function withRequestCards(items: ChatItem[], hasToken = SAFETY_HUMAN_TOKEN.length > 0): ChatItem[] {
   if (!hasToken) return items;
-  const { cardAt, hidden } = placeRequestCards(items.flatMap((it) =>
-    it.kind === "msg" ? [{ id: it.id, room: it.room, text: it.text, fromOrchestrator: it.fromKey === "orchestrator" && !it.human }] : []));
-  if (cardAt.size === 0) return items;
-  return items.filter((it) => !hidden.has(it.id)).map((it) => (it.kind === "msg" && cardAt.has(it.id) ? { ...it, requestCard: cardAt.get(it.id) } : it));
+  // 줄 위치로 붙인다: 예전에는 id(Map 키)로 붙여, 대화마다 다시 시작하는 메시지 id(m1·m2…)가 겹치면 마지막 의뢰 번호로 덮였다 (11/24 ①)
+  return attachRequestCards(items,
+    (it) => (it.kind === "msg" ? { id: it.id, room: it.room, text: it.text, fromOrchestrator: it.fromKey === "orchestrator" && !it.human } : null),
+    (it, requestCard) => (it.kind === "msg" ? { ...it, requestCard } : it));
 }
 
 /** 계획 카드의 "이대로 진행": 같은 방의 같은 대화에 "진행해"를 보낸다 */

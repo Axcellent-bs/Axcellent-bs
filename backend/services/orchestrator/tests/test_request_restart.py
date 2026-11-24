@@ -131,6 +131,67 @@ async def test_a_state_changing_step_cut_off_mid_call_is_never_sent_twice(tmp_pa
     assert fake.calls == []  # 이미 처리됐을 수 있어 다시 보내지 않는다
 
 
+def _restart_stuck(tmp_path, *, gated: bool = False) -> tuple[str, WorkRequests]:
+    """상태를 바꾸는 단계를 부르던 중 꺼졌다가 켠 의뢰 (11/24 wr_a8f5aaa32f): 재시작으로 멈춤."""
+    path = str(tmp_path / "orc.db")
+    first = boot(path)
+    extra = {"human_gate": True} if gated else {}
+    rid = new_request(first, one_step_plan("A", **extra))
+    first.update_step(rid, "a", status="running", grade="A", reason_code="approved")
+    second = boot(path)
+    step = second.get(rid)["steps"]["a"]
+    assert step["status"] == "waiting_human" and step["reason_code"] == "restart_unconfirmed"
+    return rid, second
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gated", [False, True])
+async def test_a_restart_stuck_step_is_sent_again_when_a_person_approves(
+    tmp_path, gated: bool
+) -> None:
+    rid, reqs = _restart_stuck(tmp_path, gated=gated)
+    fake = Fake({"s_a": entry("data", "s_a", "A")}, {"s_a": result()})
+    runner = RequestRunner(reqs, lambda: fake, scope_check=lambda *_: True)
+    assert runner.decide(rid, "a", True, "준하") == "ok"
+    step = reqs.get(rid)["steps"]["a"]
+    assert step["reason_code"] == "approved"  # 승인이 필요한 일도 다시 묻지 않는다
+    assert "다시 보내기로 했다 (준하)" in step["note"]
+    await runner.wait_idle()
+    assert len(fake.calls) == 1  # 다시 보냈다 (사람 승인 대기로 되돌아가지 않음)
+    assert fake.calls[0].meta.idempotency_key == f"{rid}:s_a:a"  # 처음 보낸 것과 같은 멱등 키
+    assert reqs.get(rid)["steps"]["a"]["status"] == "completed"
+    assert reqs.get(rid)["status"] == "done"
+
+
+def test_a_restart_stuck_step_goes_back_to_pending_on_approval(tmp_path) -> None:
+    rid, reqs = _restart_stuck(tmp_path)
+    fake = Fake({"s_a": entry("data", "s_a", "A")}, {"s_a": result()})
+    runner = RequestRunner(reqs, lambda: fake, scope_check=lambda *_: True)
+    runner.start = lambda *_a, **_k: None  # 이어 시키기를 막고 되돌린 상태만 본다
+    assert runner.decide(rid, "a", True) == "ok"
+    assert reqs.get(rid)["steps"]["a"]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_a_restart_stuck_step_stops_when_a_person_rejects(tmp_path) -> None:
+    rid, reqs = _restart_stuck(tmp_path)
+    fake = Fake({"s_a": entry("data", "s_a", "A")}, {"s_a": result()})
+    runner = RequestRunner(reqs, lambda: fake, scope_check=lambda *_: True)
+    assert runner.decide(rid, "a", False, "준하") == "ok"
+    await runner.wait_idle()
+    assert reqs.get(rid)["steps"]["a"]["status"] == "rejected_by_human"
+    assert fake.calls == []
+
+
+def test_other_waiting_human_reasons_are_still_not_decidable(tmp_path) -> None:
+    reqs = boot(str(tmp_path / "orc.db"))
+    rid = new_request(reqs, one_step_plan("A"))
+    reqs.update_step(rid, "a", status="waiting_human", reason_code="something_else")
+    runner = RequestRunner(reqs, lambda: Fake({}, {}), scope_check=lambda *_: True)
+    assert runner.decide(rid, "a", True) == "not_waiting"
+    assert reqs.get(rid)["steps"]["a"]["status"] == "waiting_human"
+
+
 @pytest.mark.asyncio
 async def test_an_approval_wait_survives_a_restart_and_the_approval_still_continues(
     tmp_path,
