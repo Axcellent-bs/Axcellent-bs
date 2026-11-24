@@ -18,6 +18,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from ax_agent_template import company_scope as request_scope
 from planning_agent import company_folder
 
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
@@ -41,7 +42,8 @@ CREATE TABLE IF NOT EXISTS planning_chat_threads (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   removed_at TEXT,
-  removed_by TEXT
+  removed_by TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'catbooks'
 )
 """
 # 숨김 처리(소프트 삭제): 행은 지우지 않고 removed_at·removed_by만 적는다.
@@ -68,7 +70,25 @@ class ChatStore:
             for col in _REMOVED_COLUMNS:
                 if col not in have:
                     self._db.execute(f"ALTER TABLE planning_chat_threads ADD COLUMN {col} TEXT")
+            if "tenant_id" not in have:  # 옛 줄은 캣북스(회사별 전에는 캣북스뿐이었다)
+                self._db.execute(
+                    "ALTER TABLE planning_chat_threads"
+                    " ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'catbooks'"
+                )
             self._db.commit()
+
+    @staticmethod
+    def _company() -> str:
+        """요청 회사. 회사가 안 걸린 요청(캣북스 세션·공용 토큰)은 캣북스."""
+        return request_scope.scope_id(request_scope.active())
+
+    def _mine(self, everywhere: bool = False) -> tuple[str, tuple[str, ...]]:
+        """요청 회사의 대화만 보는 조건 (11/24 회사 격리: 다른 회사에 같은 이름이 있어도 안 섞이게).
+
+        `everywhere`는 스스로 도는 정리 루틴(오래 쉰 대화 끝내기·켤 때 되살리기)만 쓴다."""
+        if everywhere:
+            return "1 = 1", ()
+        return "tenant_id = ?", (self._company(),)
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
         with self._lock:
@@ -90,18 +110,20 @@ class ChatStore:
             "updated_at": row["updated_at"],
         }
 
-    def get(self, thread_id: str) -> dict[str, Any] | None:
+    def get(self, thread_id: str, *, everywhere: bool = False) -> dict[str, Any] | None:
+        where, args = self._mine(everywhere)
         rows = self._rows(
-            "SELECT * FROM planning_chat_threads WHERE id = ? AND removed_at IS NULL",
-            (thread_id,),
+            f"SELECT * FROM planning_chat_threads WHERE id = ? AND removed_at IS NULL AND {where}",
+            (thread_id, *args),
         )
         return self._view(rows[0]) if rows else None
 
     def list_all(self, limit: int = 100) -> list[dict[str, Any]]:
+        where, args = self._mine()
         rows = self._rows(
-            "SELECT * FROM planning_chat_threads WHERE removed_at IS NULL"
+            f"SELECT * FROM planning_chat_threads WHERE removed_at IS NULL AND {where}"
             " ORDER BY updated_at DESC, seq DESC LIMIT ?",
-            (limit,),
+            (*args, limit),
         )
         return [self._view(r) for r in rows]
 
@@ -115,9 +137,9 @@ class ChatStore:
             thread_id = f"planchat-{seq}"
             self._db.execute(
                 "INSERT INTO planning_chat_threads"
-                "(id, seq, title, status, who, summary, messages, created_at, updated_at)"
-                " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?)",
-                (thread_id, seq, title, who, now, now),
+                "(id, seq, title, status, who, summary, messages, created_at, updated_at,"
+                " tenant_id) VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?, ?)",
+                (thread_id, seq, title, who, now, now, self._company()),
             )
             self._db.commit()
         return self.get(thread_id) or {}
@@ -127,10 +149,11 @@ class ChatStore:
         thread_id: str,
         mutate: Callable[[dict[str, Any], list[dict[str, Any]], str], Status | None],
         summary: str | None = None,
+        everywhere: bool = False,
     ) -> dict[str, Any] | None:
         """읽고 → 바꾸고 → 쓰기를 잠금 안에서 한다. `mutate`가 None을 돌려주면 쓰지 않는다."""
         with self._lock:
-            th = self.get(thread_id)
+            th = self.get(thread_id, everywhere=everywhere)
             if th is None:
                 return None
             now = self.clock().isoformat()
@@ -150,7 +173,7 @@ class ChatStore:
                 ),
             )
             self._db.commit()
-            return self.get(thread_id)
+            return self.get(thread_id, everywhere=everywhere)
 
     @staticmethod
     def _add(msgs: list[dict[str, Any]], role: str, text: str, kind: str, at: str) -> None:
@@ -180,7 +203,13 @@ class ChatStore:
         return ("missing", None) if th is None else (outcome, th)
 
     def finish_turn(
-        self, thread_id: str, text: str, summary: str | None = None, kind: str = "text"
+        self,
+        thread_id: str,
+        text: str,
+        summary: str | None = None,
+        kind: str = "text",
+        *,
+        everywhere: bool = False,
     ) -> dict[str, Any] | None:
         """AI 답을 붙이고 `talking`으로 돌린다(그 사이 끝났으면 `closed` 그대로)."""
 
@@ -188,11 +217,11 @@ class ChatStore:
             self._add(msgs, "assistant", text, kind, at)
             return "closed" if th["status"] == "closed" else "talking"
 
-        return self._update(thread_id, mutate, summary)
+        return self._update(thread_id, mutate, summary, everywhere)
 
-    def close(self, thread_id: str) -> dict[str, Any] | None:
+    def close(self, thread_id: str, *, everywhere: bool = False) -> dict[str, Any] | None:
         """끝낸다. 요약이 비어 있으면 첫 질문 일부를 요약으로 남긴다."""
-        th = self.get(thread_id)
+        th = self.get(thread_id, everywhere=everywhere)
         if th is None:
             return None
         summary = th["summary"] or self._first_question(th["messages"])
@@ -200,7 +229,7 @@ class ChatStore:
         def mutate(th: dict[str, Any], _msgs: list[dict[str, Any]], _at: str) -> Status | None:
             return None if th["status"] == "closed" else "closed"
 
-        return self._update(thread_id, mutate, summary)
+        return self._update(thread_id, mutate, summary, everywhere)
 
     def hide(self, thread_id: str, by: str | None) -> bool:
         """대화를 숨긴다(행은 남기고 removed_at·removed_by만 적는다).
@@ -210,10 +239,11 @@ class ChatStore:
         답하는 중이어도 숨긴다. 뒤늦은 답은 `_update`가 `get`으로 못 찾아 무시한다.
         """
         with self._lock:
+            where, args = self._mine()
             cur = self._db.execute(
                 "UPDATE planning_chat_threads SET removed_at = ?, removed_by = ?"
-                " WHERE id = ? AND removed_at IS NULL",
-                (self.clock().isoformat(), by, thread_id),
+                f" WHERE id = ? AND removed_at IS NULL AND {where}",
+                (self.clock().isoformat(), by, thread_id, *args),
             )
             self._db.commit()
             return cur.rowcount > 0
@@ -232,7 +262,7 @@ class ChatStore:
             (cut,),
         )
         for r in rows:
-            self.close(r["id"])
+            self.close(r["id"], everywhere=True)  # 모든 회사 (정리 루틴)
         return [r["id"] for r in rows]
 
     def recover_orphans(self) -> list[str]:
@@ -241,7 +271,7 @@ class ChatStore:
             "SELECT id FROM planning_chat_threads WHERE status = 'answering' AND removed_at IS NULL"
         )
         for r in rows:
-            self.finish_turn(r["id"], INTERRUPTED, kind="error")
+            self.finish_turn(r["id"], INTERRUPTED, kind="error", everywhere=True)
         return [r["id"] for r in rows]
 
 
