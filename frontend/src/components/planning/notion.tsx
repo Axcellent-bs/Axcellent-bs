@@ -4,6 +4,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { notionApi, type NotionConnection } from '@/lib/planning'
 import { SectionHead, StatusChip, type Tone } from '@/components/connect/parts'
+import { InlineConfirm } from '@/components/InlineConfirm'
 
 const BACK: Record<string, string> = {
   ok: '노션 계정을 연결했어요.',
@@ -26,6 +27,7 @@ export function NotionConnect({ readOnly = false }: { readOnly?: boolean } = {})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [offline, setOffline] = useState(false)
+  const [askRemove, setAskRemove] = useState(false) // 11/24 확인은 화면 안 상자(InlineConfirm)
 
   const [back, setBack] = useState<string | null>(null) // 노션 계정 연결에서 돌아온 결과
   useEffect(() => {
@@ -69,9 +71,13 @@ export function NotionConnect({ readOnly = false }: { readOnly?: boolean } = {})
           {!readOnly && conn?.connected && <button type="button" className="btn-ghost" disabled={busy} onClick={() => void act(() => notionApi.check())}>연결 확인</button>}
           {!readOnly && conn?.connected && conn.source === 'saved' && (
             <button type="button" className="btn-quiet" disabled={busy}
-              onClick={() => { if (window.confirm('노션 토큰을 지울까요? 기획의 "노션에서 가져오기"가 멈춰요.')) void act(() => notionApi.remove()) }}>지우기</button>
+              onClick={() => setAskRemove(true)}>지우기</button>
           )}
         </>} />
+      {askRemove && (
+        <InlineConfirm danger confirmLabel="지우기" busy={busy} message={'노션 토큰을 지울까요? 기획의 "노션에서 가져오기"가 멈춰요. 되돌릴 수 없어요.'}
+          onConfirm={() => { setAskRemove(false); void act(() => notionApi.remove()) }} onCancel={() => setAskRemove(false)} />
+      )}
       {conn?.workspace && (
         <div>
           <p className="text-xs text-ink-500">연결된 워크스페이스</p>

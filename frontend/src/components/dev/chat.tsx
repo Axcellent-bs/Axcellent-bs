@@ -14,6 +14,7 @@ import { Tag } from '@/components/planning-common/parts'
 import { humanizePlanIds } from '@/lib/format'
 import { canClose, chatNotice, mergeThreads, needsTools, pollInterval, sendErrorText, stampKey } from '@/lib/devChatView'
 import { useSession } from '@/demo/session'
+import { InlineConfirm } from '@/components/InlineConfirm'
 
 const api = chatApi(DEV_API)
 
@@ -113,6 +114,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   const [setting, setSetting] = useState<CodingSettings | null>(null) // 본인 Claude 연결·서버 AI 체험 한도
   const [connsRead, setConnsRead] = useState(false) // 레포 연결 목록을 읽었나 (못 읽으면 "없음"이라 하지 않는다)
   const [acting, setActing] = useState(false) // 끝내기·숨기기 보내는 중
+  const [askRemove, setAskRemove] = useState(false) // 11/24 숨기기 확인은 화면 안 상자(InlineConfirm)
   const box = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
 
@@ -208,7 +210,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   // 끝내기(closed)·숨기기: 띄운 작업은 그대로 돈다
   const act = async (kind: 'close' | 'remove') => {
     if (!cur || acting) return
-    if (kind === 'remove' && !window.confirm('이 대화를 목록에서 숨길까요? 띄운 작업은 그대로 돌아요.')) return
+    setAskRemove(false)
     setActing(true)
     try {
       if (kind === 'close') chat.upsert(await api.close(cur.id, needAccount(chat.account)))
@@ -241,8 +243,14 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
         </select>
         <button type="button" className="btn-ghost" onClick={() => chat.select(null)} disabled={!!pending || !cur}>새 대화</button>
         <button type="button" className="btn-ghost" onClick={() => void act('close')} disabled={!!pending || acting || !canClose(cur)} title="대화를 끝내요. 띄운 작업은 그대로 돌아요">끝내기</button>
-        <button type="button" className="btn-ghost" onClick={() => void act('remove')} disabled={!!pending || acting || !cur} title="목록에서 숨겨요. 띄운 작업은 그대로 돌아요">숨기기</button>
+        <button type="button" className="btn-ghost" onClick={() => setAskRemove(true)} disabled={!!pending || acting || !cur} title="목록에서 숨겨요. 띄운 작업은 그대로 돌아요">숨기기</button>
       </div>
+      {askRemove && cur && (
+        <div className="px-3">
+          <InlineConfirm message="이 대화를 목록에서 숨길까요? 띄운 작업은 그대로 돌아요." confirmLabel="숨기기" busy={acting}
+            onConfirm={() => void act('remove')} onCancel={() => setAskRemove(false)} />
+        </div>
+      )}
       {conns.length > 1 && (
         <div className="chat-drawer-bar">
           <span className="muted small">레포</span>
