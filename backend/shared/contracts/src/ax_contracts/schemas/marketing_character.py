@@ -73,6 +73,16 @@ class CharacterSheetPanel(AxModel):
     prompt_en: str = Field(min_length=1, max_length=400)
 
 
+# 11/24 올린 이미지 종류 (사람이 고른다). 옛 기록은 real_photo로 읽는다.
+# - real_photo: 실제 사람 사진 → 그림체 캐릭터로 바꾼다 (지금 방식, 원본은 저장하지 않는다)
+# - virtual_human: AI로 만든 가상 인물 → 그대로 참조로 쓴다 (원본 저장, 시트 그림 안 만듦,
+#   "AI 가상 인물" 표시. 올릴 때 "실존 인물이 아니고 쓸 권리가 있다" 확인이 필요하다)
+# - illustration: 그림·일러스트 캐릭터 → 그대로 참조로 쓴다 (원본 저장, 시트 그림 안 만듦)
+CharacterUploadKind = Literal["real_photo", "virtual_human", "illustration"]
+REFERENCE_KINDS: tuple[str, ...] = ("virtual_human", "illustration")  # 원본을 그대로 참조로
+VIRTUAL_HUMAN_LABEL = "AI 가상 인물"
+
+
 class CharacterSheetPromptOutput(AxModel):
     summary_ko: str = Field(min_length=1, max_length=300)  # 캐릭터 특징 요약
     personality_ko: str | None = Field(default=None, max_length=200)  # 이미지에서 느껴지는 성격
@@ -92,3 +102,4 @@ class CharacterSheetPromptOutput(AxModel):
     prompt_en: str = Field(min_length=1, max_length=8000)  # 이미지 생성기에 바로 붙이는 프롬프트
     negative_prompt_en: str = Field(min_length=1, max_length=1000)
     record_id: str | None = None  # 제작 기록 번호(CR-…). 기록을 못 남기면 None
+    kind: CharacterUploadKind = "real_photo"  # 11/24 올린 이미지 종류 (옛 기록은 real_photo)

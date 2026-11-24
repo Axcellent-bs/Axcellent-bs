@@ -721,6 +721,7 @@ CHARACTER_SHEET_REFUSALS = {
     "invalid_image": (422, "INVALID_IMAGE"),
     "image_too_large": (413, "IMAGE_TOO_LARGE"),
     "no_character": (422, "NO_CHARACTER"),
+    "virtual_unconfirmed": (422, "VIRTUAL_UNCONFIRMED"),
     "llm_not_configured": (409, "LLM_NOT_CONFIGURED"),
     "llm_failed": (502, "LLM_FAILED"),
     "invalid_input": (400, "INVALID_INPUT"),
@@ -729,11 +730,13 @@ CHARACTER_SHEET_DEADLINE_SECONDS = 120  # 이미지를 읽는 LLM 호출이라 �
 
 
 async def character_sheet_call(
-    image: dict[str, Any], note: str | None, thumbnail: str | None = None
-) -> dict[str, Any]:
+    image: dict[str, Any], note: str | None, thumbnail: str | None = None, *,
+    kind: str = "real_photo", virtual_confirmed: bool = False,
+) -> dict[str, Any]:  # fmt: skip
     """캐릭터 시트 프롬프트 skill.
 
-    이미지·메모는 사람이 올린 것이라 untrusted로만 넘긴다(저장 안 함).
+    이미지·메모는 사람이 올린 것이라 untrusted로만 넘긴다. 11/24: 종류(`kind`)·가상 인물 확인은
+    사람이 고른 값이라 input으로. 가상 인물·일러스트는 마케팅이 원본을 회사 폴더에 저장한다.
     """
     config.set_agent_name(AGENT_NAME)
     untrusted: dict[str, Any] = {"image": image}
@@ -750,7 +753,9 @@ async def character_sheet_call(
             **tenant_meta(),
         ),
         skill="character_sheet_prompt",
-        input={},
+        # 기본(real_photo)은 지금처럼 빈 input. 다른 종류만 사람이 고른 값을 싣는다
+        input={} if kind == "real_photo" else {"kind": kind,
+                                               "virtual_confirmed": virtual_confirmed},  # fmt: skip
         untrusted=untrusted,
     )
     result = await SEND(TARGET, request)

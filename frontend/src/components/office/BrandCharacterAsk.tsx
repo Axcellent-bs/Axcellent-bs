@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { ACCEPT, makeCharacterSheet, shrinkImage } from "@/lib/characterSheet";
+import { ACCEPT, makeCharacterSheet, shrinkImage, shrinkReference } from "@/lib/characterSheet";
 import { listBrandCharacters, markBrandCharacter, type BrandCharacter } from "@/lib/brandCharacters";
 import { thumbSrc } from "@/lib/creativeRecords";
 import { orchestrator } from "@/lib/orchestrator";
 import {
-  CHARACTER_NOTE, CHARACTER_QUESTION, PLAN_OUTDATED_LINE, RIGHTS_HINT, RIGHTS_LABEL, SPACE_NOTE, UPLOAD_HINT,
-  askMode, canUpload, chatCharacterLine, isPromoVideo, planOutdated, savedLine, type CharacterRow,
+  CHARACTER_NOTE, CHARACTER_QUESTION, KIND_OPTIONS, PLAN_OUTDATED_LINE, RIGHTS_HINT, RIGHTS_LABEL, SPACE_NOTE,
+  UPLOAD_HINT, VIRTUAL_CONFIRM_LABEL, VIRTUAL_HUMAN_LABEL, VIRTUAL_NOTE,
+  askMode, canUploadKind, chatCharacterLine, isPromoVideo, isReferenceKind, planOutdated, savedLine,
+  type CharacterRow, type UploadKind,
 } from "@/lib/requestCharacter";
 import { refreshWorkRequests } from "@/components/office/useWorkRequests";
 
@@ -38,6 +40,8 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
   const [change, setChange] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [rights, setRights] = useState(false);
+  const [kind, setKind] = useState<UploadKind>("real_photo");
+  const [virtualOk, setVirtualOk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const shown = askMode(row, saved);
@@ -67,11 +71,13 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
   };
 
   const send = () => {
-    if (!file || !rights) return;
+    if (!file || !canUploadKind(true, kind, rights, virtualOk)) return;
     setBusy(true);
     setError(null);
-    shrinkImage(file)
-      .then((img) => makeCharacterSheet({ media_type: img.media_type, data_base64: img.data_base64 }, "", img.thumb_base64))
+    // 가상 인물·일러스트는 원본을 참조로 쓰므로 긴 변 2048px까지 (실제 사람 사진은 지금처럼 1024px)
+    (isReferenceKind(kind) ? shrinkReference(file) : shrinkImage(file))
+      .then((img) => makeCharacterSheet({ media_type: img.media_type, data_base64: img.data_base64 }, "", img.thumb_base64,
+        { kind, virtualConfirmed: kind === "virtual_human" && virtualOk }))
       .then((sheet) => {
         if (!sheet.record_id) throw new Error("이미지 시트 기록을 남기지 못했어요. 다시 올려 주세요");
         return markBrandCharacter(sheet.record_id).then(() => sheet.record_id as string);
@@ -80,7 +86,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
         void loadSaved(true).then(setSaved, () => undefined);
         return orchestrator.setBrandCharacter(row.request_id, recordId);
       })
-      .then(() => { setUpload(false); setChange(false); setFile(null); setRights(false); void refreshWorkRequests(); })
+      .then(() => { setUpload(false); setChange(false); setFile(null); setRights(false); setVirtualOk(false); setKind("real_photo"); void refreshWorkRequests(); })
       .catch((e: unknown) => setError(errText(e)))
       .finally(() => setBusy(false));
   };
@@ -92,6 +98,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
         {src ? <img src={src} alt="" className="h-11 w-11 shrink-0 rounded-lg object-contain" /> : <span className="h-11 w-11 shrink-0 rounded-lg bg-ink-100" aria-hidden="true" />}
         <span className="min-w-0 flex-1">
           <b className="block truncate text-[13px] text-ink-900">{c.name}</b>
+          {c.kind === "virtual_human" && <span className="chip text-[11px]">{VIRTUAL_HUMAN_LABEL}</span>}
           <small className="block truncate text-xs tabular-nums text-ink-500">{savedLine(c)}</small>
         </span>
       </div>
@@ -143,18 +150,40 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
           )}
           {upload && (
             <div className="space-y-1.5">
+              <fieldset className="space-y-1.5" aria-label="올릴 이미지 종류">
+                {KIND_OPTIONS.map((o) => (
+                  <label key={o.kind} className={`flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2 text-xs ${kind === o.kind ? "border-brand-500 bg-brand-50" : "border-ink-100 bg-surface"}`}>
+                    <input type="radio" name={`upload-kind-${row.request_id}`} className="mt-0.5" checked={kind === o.kind} onChange={() => setKind(o.kind)} />
+                    <span className="min-w-0">
+                      <b className="text-ink-900">{o.label}</b>
+                      {o.isNew && <span className="chip ml-1.5 bg-emerald-50 text-[11px] text-emerald-700">새로</span>}
+                      <small className="block text-ink-500">{o.hint}</small>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
               <label className="block cursor-pointer rounded-xl border-[1.5px] border-dashed border-brand-500 bg-surface px-3 py-2.5 text-center text-xs text-ink-700">
                 {file ? file.name : "캐릭터 이미지를 눌러서 고르기"}
-                <small className="block text-ink-500">{UPLOAD_HINT}</small>
+                <small className="block text-ink-500">{kind === "real_photo" ? UPLOAD_HINT : "PNG·JPG 한 장 · 9:16 권장 · 올린 이미지를 그대로 참조로 써요"}</small>
                 <input type="file" accept={ACCEPT} className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
               </label>
-              <label className="flex items-start gap-1.5 text-xs text-ink-700">
-                <input type="checkbox" className="mt-0.5" checked={rights} onChange={(e) => setRights(e.target.checked)} />
-                <span>{RIGHTS_LABEL} <small className="text-ink-500">{RIGHTS_HINT}</small></span>
-              </label>
+              {kind === "virtual_human" ? (
+                <>
+                  <label className="flex items-start gap-1.5 text-xs text-ink-700">
+                    <input type="checkbox" className="mt-0.5" checked={virtualOk} onChange={(e) => setVirtualOk(e.target.checked)} />
+                    <span>{VIRTUAL_CONFIRM_LABEL} <small className="text-ink-500">{RIGHTS_HINT}</small></span>
+                  </label>
+                  <p className="text-xs text-ink-500">{VIRTUAL_NOTE}</p>
+                </>
+              ) : (
+                <label className="flex items-start gap-1.5 text-xs text-ink-700">
+                  <input type="checkbox" className="mt-0.5" checked={rights} onChange={(e) => setRights(e.target.checked)} />
+                  <span>{RIGHTS_LABEL} <small className="text-ink-500">{RIGHTS_HINT}</small></span>
+                </label>
+              )}
               <span className="flex flex-wrap gap-1.5">
-                <button type="button" className="btn-primary btn-card" disabled={!canUpload(!!file, rights, busy)} onClick={send}>{busy ? "올리는 중…" : "올리기"}</button>
-                <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => { setUpload(false); setFile(null); setRights(false); }}>취소</button>
+                <button type="button" className="btn-primary btn-card" disabled={!canUploadKind(!!file, kind, rights, virtualOk, busy)} onClick={send}>{busy ? "올리는 중…" : "올리기"}</button>
+                <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => { setUpload(false); setFile(null); setRights(false); setVirtualOk(false); setKind("real_photo"); }}>취소</button>
               </span>
               <p className="chip self-start bg-amber-50 text-[11px] text-amber-800">{CHARACTER_NOTE}</p>
             </div>

@@ -60,6 +60,8 @@ export function planOutdated(r: CharacterRow): boolean {
 export interface SavedCharacter {
   record_id: string;
   name: string;
+  /** 11/24 올린 이미지 종류 (옛 서버·옛 기록은 없음 = real_photo) */
+  kind?: "real_photo" | "virtual_human" | "illustration";
   thumbnail_base64?: string | null;
   preview_part?: string | null;
   saved_at: string;
@@ -128,6 +130,24 @@ export function unansweredNotice(r: CharacterRow, stepId: string): string | null
 
 /** 올리기 버튼을 켤 수 있나: 이미지를 골랐고 권리 확인을 체크했다 (서버도 rights_confirmed 없으면 422) */
 export const canUpload = (hasFile: boolean, rightsChecked: boolean, busy = false) => hasFile && rightsChecked && !busy;
+
+// 11/24 올린 이미지 종류 (시안 ①). 서버 CharacterUploadKind와 같은 값
+export type UploadKind = "real_photo" | "virtual_human" | "illustration";
+export const KIND_OPTIONS: { kind: UploadKind; label: string; hint: string; isNew?: boolean }[] = [
+  { kind: "real_photo", label: "실제 사람 사진", hint: "그림체 캐릭터로 바꿔서 써요(지금 방식). 실존 인물 얼굴을 광고에 쓰지 않기 위해서예요." },
+  { kind: "virtual_human", label: "AI로 만든 가상 인물", hint: "올린 이미지를 그대로 참조로 써요. 다시 그리지 않아요(그림 크레딧 0).", isNew: true },
+  { kind: "illustration", label: "그림·일러스트 캐릭터", hint: "그대로 써요." },
+];
+export const VIRTUAL_CONFIRM_LABEL = "실존 인물이 아닌 AI 가상 인물이고, 우리 회사가 쓸 권리가 있어요";
+export const VIRTUAL_NOTE = "영상·게시물에 \"AI 가상 인물\" 표시가 붙어요.";
+export const VIRTUAL_HUMAN_LABEL = "AI 가상 인물";
+/** 원본을 그대로 참조로 쓰는 종류 (서버 REFERENCE_KINDS) */
+export const isReferenceKind = (kind: UploadKind) => kind === "virtual_human" || kind === "illustration";
+
+/** 올리기 버튼: 파일 + (가상 인물이면 가상 인물 확인, 아니면 권리 확인) */
+export function canUploadKind(hasFile: boolean, kind: UploadKind, rightsChecked: boolean, virtualChecked: boolean, busy = false): boolean {
+  return canUpload(hasFile, kind === "virtual_human" ? virtualChecked : rightsChecked, busy);
+}
 
 /** 대표 캐릭터 한 줄 아래 설명: "이미지 시트 CR-… · 11/20 저장" */
 export function savedLine(c: Pick<SavedCharacter, "record_id" | "saved_at">): string {

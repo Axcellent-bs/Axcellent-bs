@@ -46,7 +46,20 @@ const PATH = "/api/dashboard/marketing/character-sheet";
 /** 제작 기록에 남길 작은 미리보기(긴 변) */
 export const THUMB_SIDE = 256;
 
-export async function shrinkImage(file: File): Promise<{ media_type: "image/jpeg"; data_base64: string; preview: string; thumb_base64: string }> {
+/** base64 길이로 원래 바이트 수 (패딩 무시한 근사) */
+export const base64Bytes = (b64: string) => Math.floor((b64.length * 3) / 4);
+
+/** 가상 인물·일러스트: 긴 변 2048 → 1536 → 1024 순으로 줄여 2MB 이하인 첫 결과 */
+export async function shrinkReference(file: File): Promise<Awaited<ReturnType<typeof shrinkImage>>> {
+  let last: Awaited<ReturnType<typeof shrinkImage>> | null = null;
+  for (const side of REFERENCE_SIDES) {
+    last = await shrinkImage(file, side);
+    if (base64Bytes(last.data_base64) <= MAX_IMAGE_BYTES) return last;
+  }
+  return last as Awaited<ReturnType<typeof shrinkImage>>;
+}
+
+export async function shrinkImage(file: File, maxSide: number = MAX_SIDE): Promise<{ media_type: "image/jpeg"; data_base64: string; preview: string; thumb_base64: string }> {
   if (!ACCEPT.split(",").includes(file.type)) throw new Error("PNG·JPEG·WebP 이미지만 올릴 수 있어요");
   const url = URL.createObjectURL(file);
   try {
@@ -56,7 +69,7 @@ export async function shrinkImage(file: File): Promise<{ media_type: "image/jpeg
       el.onerror = () => reject(new Error("이미지를 읽을 수 없어요"));
       el.src = url;
     });
-    const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
     canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
@@ -78,11 +91,21 @@ export async function shrinkImage(file: File): Promise<{ media_type: "image/jpeg
   }
 }
 
-export async function makeCharacterSheet(image: { media_type: string; data_base64: string }, note: string, thumb?: string): Promise<CharacterSheetResult> {
+/** 11/24 올린 이미지 종류: 실제 사람 사진(그림체로 바꿈) · AI 가상 인물(그대로 참조) · 그림·일러스트(그대로) */
+export type UploadKind = "real_photo" | "virtual_human" | "illustration";
+/** 가상 인물·일러스트는 원본을 참조로 쓰므로 긴 변 2048px까지 보낸다(2MB를 넘으면 더 줄인다) */
+export const REFERENCE_SIDES = [2048, 1536, MAX_SIDE];
+export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+
+export async function makeCharacterSheet(image: { media_type: string; data_base64: string }, note: string, thumb?: string,
+  opts: { kind?: UploadKind; virtualConfirmed?: boolean } = {}): Promise<CharacterSheetResult> {
   const res = await fetch(`${DASHBOARD_API_URL}${PATH}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...dashboardAuth() },
-    body: JSON.stringify({ image, note: note.trim() || undefined, thumbnail_base64: thumb || undefined }),
+    body: JSON.stringify({
+      image, note: note.trim() || undefined, thumbnail_base64: thumb || undefined,
+      ...(opts.kind && opts.kind !== "real_photo" ? { kind: opts.kind, virtual_confirmed: !!opts.virtualConfirmed } : {}),
+    }),
     cache: "no-store",
   });
   const parsed: unknown = await res.json().catch(() => undefined);

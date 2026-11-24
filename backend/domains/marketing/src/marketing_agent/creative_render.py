@@ -54,6 +54,7 @@ import httpx
 from ax_agent_template import company_scope as _request_company
 from ax_agent_template.execute import execute
 from ax_contracts.schemas import Evidence, ExecuteDecision, RequestMeta
+from ax_contracts.schemas.marketing_character import REFERENCE_KINDS
 from marketing_agent import company_scope as _company_scope
 from marketing_agent import creative_mcp as _mcp
 from marketing_agent import creative_records as _creative
@@ -562,7 +563,7 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
         _set(record_id, "board_image", status="unavailable", error=why, route=via, company_id=cid)
         return
     try:
-        ref = asset_path(record_id, "sheet_image", cid).read_bytes()
+        ref = _ref_bytes(record_id, "sheet_image", cid, rec)  # 올린 원본이면 sheet.png일 수 있다
     except OSError:
         _set(record_id, "board_image", status="failed", error="sheet_file_missing")
         return
@@ -714,14 +715,20 @@ async def _mcp_render(
     kind: str,
     params: dict[str, Any],
     ref: bytes | None,
+    role: str | None = None,
 ) -> str:
-    """회사 계정으로: 참조 올리기 → 만들기 → 기다리기 → 내려받기. 돌려주는 값은 sha256."""
+    """회사 계정으로: 참조 올리기 → 만들기 → 기다리기 → 내려받기. 돌려주는 값은 sha256.
+
+    `role`을 주면 그 역할로(11/24 영상 image_references), 아니면 그림은 image_references·영상은
+    start_image."""
     if not cid:
         raise McpAuthError("not_connected")
     hf = _mcp.Higgsfield(client, cid)
     if ref:
-        media = await _mcp.upload(hf, ref, f"{record_id}-{part}-ref.jpg", "image/jpeg")
-        role = _mcp.IMAGE_REF_ROLE if kind == "image" else _mcp.VIDEO_START_ROLE
+        png = ref.startswith(b"\x89PNG")
+        name = f"{record_id}-{part}-ref.{'png' if png else 'jpg'}"
+        media = await _mcp.upload(hf, ref, name, "image/png" if png else "image/jpeg")
+        role = role or (_mcp.IMAGE_REF_ROLE if kind == "image" else _mcp.VIDEO_START_ROLE)
         params = _mcp.with_media(params, media, role)
     try:
         job = await _mcp.submit(hf, kind, params)
@@ -761,7 +768,10 @@ async def request_video(
     if why:
         raise RenderError(why)
     settings = MediaSettings.from_env()
-    seconds = video_seconds()
+    # 11/24 기획 제작안 길이 → 서버 설정·모델 상한 안으로 (기획 길이가 없으면 지금 규칙)
+    seconds, clamped = plan_seconds(
+        (rec.get("storyboard") or {}).get(PLAN_DURATION_KEY), _model("video", via)
+    )
     expected = usage_mod.UsageAmount("seconds", seconds)
     applies = _quota_applies(settings, via)
     cap = settings.quota("video") if applies else None
@@ -824,6 +834,8 @@ async def request_video(
         "route": via,
         "company_id": cid,
     }
+    if clamped is not None:
+        base["seconds_clamped_from"] = clamped
     if decision.status == "held":
         return _set(
             record_id,
@@ -949,15 +961,19 @@ async def _render_video(
     via = MCP if video.get("route") == MCP else API  # 승인받은 길 그대로
     cid = video.get("company_id")  # 승인에 올릴 때 정한 회사 그대로
     try:
-        ref = asset_path(record_id, "board_image", cid).read_bytes()
         if via == MCP:
             if not cid or not _mcp_auth.connected(cid):
                 raise McpAuthError("not_connected")  # 키 길로 바꾸지 않는다
+            # 11/24 가상 인물 원본(image_references를 받는 모델) 또는 스토리보드 그림(start_image)
+            part, role = video_reference(rec, mcp_video_model())
+            ref = _ref_bytes(record_id, part, cid, rec)
             params = _video_mcp_params(rec, seconds)
             await _mcp_preflight(cid, "video", params)  # 승인 사이에 크레딧이 줄었을 수 있다
             async with CLIENT() as client:
-                sha = await _mcp_render(client, cid, record_id, "video", "video", params, ref)
+                sha = await _mcp_render(client, cid, record_id, "video", "video", params, ref,
+                                        role=role)  # fmt: skip
         else:
+            ref = asset_path(record_id, "board_image", cid).read_bytes()
             async with CLIENT() as client:
                 sha = await _api_video(client, record_id, _video_prompt(rec), ref, seconds, cid)
     except _ERRORS as error:
@@ -1031,6 +1047,73 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+ORIGINAL_SOURCE = "upload_original"  # 11/24 가상 인물·일러스트: 올린 원본을 시트 그림 자리에
+_MAGIC = {"image/jpeg": (b"\xff\xd8", "sheet.jpg"), "image/png": (b"\x89PNG", "sheet.png")}
+
+
+def save_original(record_id: str, data: bytes, mime_type: str, cid: str | None = None) -> None:
+    """올린 원본(화면이 긴 변을 줄인 JPEG·PNG, 업로드 검사를 지난 것)을 그 회사 기록 폴더에
+    시트 그림(`sheet_image`)으로 저장한다. Higgsfield를 부르지 않는다(크레딧 0).
+
+    실제 사람 사진(real_photo)은 부르지 않는다(원본을 저장하지 않는 지금 규칙)."""
+    magic, name = _MAGIC.get(mime_type, (b"", ""))
+    if not name or not data.startswith(magic):
+        raise RenderError("bad_asset")
+    path = _dir(record_id, cid) / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    _set(record_id, "sheet_image", status="done", error=None, asset=name, sha256=_sha256(path),
+         source=ORIGINAL_SOURCE, company_id=cid or _request_company.active())  # fmt: skip
+
+
+PLAN_DURATION_KEY = "plan_duration_s"  # 의뢰 스토리보드에 남긴 기획 제작안 길이 (request_creative)
+
+
+def _ref_bytes(record_id: str, part: str, cid: str | None, rec: dict[str, Any]) -> bytes:
+    """그 칸 파일 (시트 그림은 저장 이름이 jpg·png 둘 중 하나)."""
+    name = ((rec.get("render") or {}).get(part) or {}).get("asset")
+    if part == "sheet_image" and name in UPLOAD_FILES["sheet_image"]:
+        return (_dir(record_id, cid) / str(name)).read_bytes()
+    return asset_path(record_id, part, cid).read_bytes()
+
+
+def is_reference_kind(rec: dict[str, Any] | None) -> bool:
+    """기록이 올린 원본을 그대로 참조로 쓰는 종류(가상 인물·일러스트)인가."""
+    return _creative.upload_kind((rec or {}).get("sheet")) in REFERENCE_KINDS
+
+
+def video_reference(rec: dict[str, Any], model: str) -> tuple[str, str]:
+    """(참조로 올릴 칸, MCP medias role).
+
+    11/24: 가상 인물·일러스트 기록이고 영상 모델이 `image_references`를 받으면 올린 원본(시트 그림
+    자리)을 `image_references`로. 아니면(모르는 모델 포함) 지금처럼 스토리보드 그림을
+    `start_image`로."""
+    sheet = (rec.get("render") or {}).get("sheet_image") or {}
+    original = sheet.get("source") == ORIGINAL_SOURCE and sheet.get("status") == "done"
+    if is_reference_kind(rec) and original and _mcp.takes_image_references(model):
+        return "sheet_image", _mcp.IMAGE_REF_ROLE
+    return "board_image", _mcp.VIDEO_START_ROLE
+
+
+def plan_seconds(plan_s: Any, model: str) -> tuple[int, int | None]:
+    """(만들 초, 줄였으면 원래 초). 11/24: 기획 제작안 길이(`video_plan.duration_s`)를 쓰고,
+    서버 설정 `MARKETING_HIGGSFIELD_VIDEO_DURATION_S`는 상한으로만, 모델 상한도 같이 본다.
+    기획 길이가 없으면 지금 규칙(`video_seconds`)."""
+    try:
+        want = int(plan_s)
+    except (TypeError, ValueError):
+        return video_seconds(), None
+    if want < 1:
+        return video_seconds(), None
+    cap = _mcp.video_max_seconds(model) or MAX_VIDEO_S
+    try:
+        if (raw := os.getenv(VIDEO_DURATION_ENV, "").strip()):
+            cap = min(cap, max(1, int(raw)))
+    except ValueError:
+        pass
+    return (want, None) if want <= cap else (cap, want)
 
 
 async def attach_upload(

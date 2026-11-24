@@ -36,6 +36,14 @@ ESTIMATE_TOOLS = {"image": "estimate_image_cost", "video": "estimate_video_cost"
 GENERATE_TOOLS = {"image": "generate_image_batch", "video": "generate_video_batch"}
 IMAGE_REF_ROLE = "image_references"
 VIDEO_START_ROLE = "start_image"
+# 11/24 영상 모델 능력 (models_explore로 확인한 것만).
+# 모르는 모델은 지금 동작 = start_image·기존 상한
+# - kling_4_0_flash: medias role start_image·image_references(최대 10)·video_references, 3~20초
+# - kling3_0_turbo: start_image만
+VIDEO_MODELS: dict[str, dict[str, Any]] = {
+    "kling_4_0_flash": {"image_references": True, "max_s": 20},
+    "kling3_0_turbo": {"image_references": False},
+}
 WAIT_TIMEOUT_S = 15  # jobs_wait 상한
 MAX_WAITS = 40  # 15초 × 40 = 10분
 FAILED = {"failed", "nsfw", "canceled", "ip_detected", "submission_failed"}
@@ -296,6 +304,17 @@ def video_params(model: str, prompt: str, aspect: str, seconds: int) -> dict[str
         "duration": seconds,
         "use_unlim": False,
     }
+
+
+def takes_image_references(model: str) -> bool:
+    """영상 모델이 참조 이미지(`image_references`)를 받는지. 모르는 모델이면 False(지금 동작)."""
+    return bool(VIDEO_MODELS.get(model.strip(), {}).get("image_references"))
+
+
+def video_max_seconds(model: str) -> int | None:
+    """영상 모델 길이 상한(아는 모델만)."""
+    value = VIDEO_MODELS.get(model.strip(), {}).get("max_s")
+    return int(value) if value else None
 
 
 def with_media(params: dict[str, Any], media_id: str, role: str) -> dict[str, Any]:
