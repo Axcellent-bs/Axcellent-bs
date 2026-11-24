@@ -111,7 +111,8 @@ def test_favorites_match_skill(agg, sales, cfg) -> None:  # noqa: ANN001
         f = {a.key: v}
         out = seg.favorites(sales, TENANT, f, "90d", 20, cfg, "catbooks", SKILL_NOW)
         rows = [r for r in agg.more_rows("agg_segment_profile", TENANT, AS_OF)
-                if r["period"] == "90d" and r["attr_cell"] == f"{a.key}={v}"]  # fmt: skip
+                if r["period"] == "90d" and r["attr_cell"] == f"{a.key}={v}"
+                and (r["item_code"] != "" or r["buyers_hidden"])]  # 묶음 크기 줄 빼고  # fmt: skip
         if out.status != "ok" or out.segment_suppressed:
             assert all(r["buyers_hidden"] for r in rows)
             continue

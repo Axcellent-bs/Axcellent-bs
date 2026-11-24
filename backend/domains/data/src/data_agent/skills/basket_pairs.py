@@ -210,7 +210,8 @@ def from_snapshot(  # noqa: PLR0913 - 입력 칸 그대로
         rows,
         key=lambda r: (-_lift(r), -r["together_buyers"], r["code_a"], r["code_b"]),
     )[:max_pairs]
-    titles = {r["dim_code"]: r["title"] for r in buyers if r["dim_kind"] == "product"}
+    titles = {r["dim_code"]: r["title"] for r in buyers
+              if r["dim_kind"] == "product" and not r["attr_cell"]}  # fmt: skip
     name: Callable[[str], str | None] = (
         cfg.genres.get if level == "genre" else (lambda c: titles.get(c) or NO_PRODUCT)
     )
