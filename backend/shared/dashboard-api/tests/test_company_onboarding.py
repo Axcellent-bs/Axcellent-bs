@@ -1,0 +1,438 @@
+"""운영자 화면에서 고객사 등록 + 그 회사 첫 관리자 만들기, 고객사 관리자는 자기 회사 계정만.
+
+7단계(누비투어·스터디온 연결)를 실제 고객 첫 연결처럼 화면에서만 하려고 만든 경로.
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from ax_agent_template import companies as company_list
+from ax_agent_template import company_connection as cc
+from ax_agent_template import human_auth
+from ax_dashboard_api import accounts, connection_keys
+from ax_dashboard_api.main import app
+
+BASE = "/api/dashboard/auth"
+BOOT_EMAIL = "ops@example.com"
+BOOT_PW = "boot-pass-for-tests"  # 테스트용 자리값
+PW = "member-pass-1234"  # 테스트용 자리값
+
+
+@pytest.fixture
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setenv("DASHBOARD_MOCK", "1")
+    monkeypatch.setenv(cc.CONNECTION_FILE_ENV, str(tmp_path / "company_connection.json"))
+    monkeypatch.delenv(accounts.ACCOUNTS_FILE_ENV, raising=False)
+    monkeypatch.delenv(company_list.COMPANIES_FILE_ENV, raising=False)
+    monkeypatch.delenv(company_list.COMPANIES_DIR_ENV, raising=False)
+    monkeypatch.delenv(human_auth.REVOKED_FILE_ENV, raising=False)
+    monkeypatch.delenv(human_auth.GENERATIONS_FILE_ENV, raising=False)
+    monkeypatch.delenv(human_auth.ALLOW_SHARED_ENV, raising=False)
+    monkeypatch.setenv(human_auth.SESSION_SECRET_ENV, "s" * 40)  # 테스트용 자리값
+    monkeypatch.setenv(accounts.BOOTSTRAP_ENV, f"{BOOT_EMAIL}:{BOOT_PW}")
+    accounts.reset_failures_for_tests()
+    human_auth.reset_revoked_for_tests()
+    connection_keys.reset_public_limits_for_tests()
+    c = TestClient(app)
+    c.headers.pop("authorization")  # conftest의 공용 토큰을 빼고 시작
+    return c
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _login(client: TestClient, email: str, password: str) -> str:
+    res = client.post(BASE + "/login", json={"email": email, "password": password})
+    assert res.status_code == 200, res.text
+    return res.json()["data"]["token"]
+
+
+def _op(client: TestClient) -> str:
+    return _login(client, BOOT_EMAIL, BOOT_PW)
+
+
+def _issue(client, token, **company):
+    res = client.post(
+        "/api/dashboard/connection-keys/issue", json={"memo": "", **company}, headers=_bearer(token)
+    )
+    assert res.status_code == 200, res.text
+    return res.json()["data"]["key"]
+
+
+def _signup(client, key, name="누비관리", email="n@example.com"):
+    body = {"key": key, "name": name, "email": email, "password": PW}
+    return client.post("/api/dashboard/connection-keys/signup", json=body)
+
+
+def _companies(tmp_path: Path) -> list[str]:
+    path = tmp_path / "companies.json"
+    if not path.exists():
+        return ["catbooks"]
+    return [c["company_id"] for c in json.loads(path.read_text(encoding="utf-8"))["companies"]]
+
+
+def _account(client, token, name, email, role="admin"):
+    body = {"name": name, "email": email, "role": role, "password": PW}
+    return client.post(BASE + "/accounts", json=body, headers=_bearer(token))
+
+
+def _rows(tmp_path: Path) -> list[dict]:
+    return json.loads((tmp_path / accounts.ACCOUNTS_FILE).read_text(encoding="utf-8"))["accounts"]
+
+
+def _id_of(tmp_path: Path, email: str) -> str:
+    return next(r["id"] for r in _rows(tmp_path) if r["email"] == email)
+
+
+def _check(client, key, token=None):
+    path = "/check" if token else "/check-public"
+    headers = _bearer(token) if token else {}
+    res = client.post("/api/dashboard/connection-keys" + path, json={"key": key}, headers=headers)
+    assert res.status_code == 200, res.text
+    return res.json()["data"]
+
+
+def _connect(client, token, key, name="누비투어"):
+    body = {"key": key, "name": name, "industry": "여행사", "network": ""}
+    return client.post("/api/dashboard/connection-keys/connect", json=body, headers=_bearer(token))
+
+
+def _nubi_admin(client, op) -> tuple[str, str]:
+    """누비투어 전용 키를 발급하고 그 키로 첫 관리자 가입. (키, 관리자 세션 토큰)"""
+    key = _issue(client, op, company_name="누비투어", industry="여행사", company_id="nubi")
+    res = _signup(client, key)
+    assert res.status_code == 200, res.text
+    return key, res.json()["data"]["token"]
+
+
+def test_issuing_a_company_key_registers_the_company_and_keeps_catbooks(client, tmp_path) -> None:
+    op = _op(client)
+    _issue(client, op, company_name="누비투어", industry="여행사", company_id="nubi")
+    assert _companies(tmp_path) == ["catbooks", "nubi"]
+    auto = _issue(client, op, company_name="스터디온에듀")  # 회사 ID를 비우면 자동
+    assert len(_companies(tmp_path)) == 3
+    assert _check(client, auto)["company_id"].startswith("c-")
+    # 같은 회사 ID로 새 회사는 못 만들고, ID만 주면 있는 회사 전용 키
+    res = client.post(
+        "/api/dashboard/connection-keys/issue",
+        json={"company_name": "다른", "company_id": "nubi"},
+        headers=_bearer(op),
+    )
+    assert res.status_code == 409 and res.json()["error"]["code"] == "COMPANY_EXISTS"
+    again = _issue(client, op, company_id="nubi")
+    assert _check(client, again)["company_id"] == "nubi"
+    res = client.post(
+        "/api/dashboard/connection-keys/issue", json={"company_id": "nope"}, headers=_bearer(op)
+    )
+    assert res.json()["error"]["code"] == "UNKNOWN_COMPANY"
+    # 예전처럼 회사 없이 발급한 키도 된다(캣북스 키 그대로)
+    plain = _issue(client, op)
+    assert "company_id" not in _check(client, plain, op)
+
+
+def test_broken_company_file_is_not_overwritten(client, tmp_path) -> None:
+    op = _op(client)
+    broken = tmp_path / "companies.json"
+    broken.write_text("{not json", encoding="utf-8")
+    res = client.post(
+        "/api/dashboard/connection-keys/issue",
+        json={"company_name": "누비투어", "company_id": "nubi"},
+        headers=_bearer(op),
+    )
+    assert res.status_code == 409 and res.json()["error"]["code"] == "COMPANIES_FILE_BROKEN"
+    assert broken.read_text(encoding="utf-8") == "{not json"
+
+
+def test_first_admin_signs_up_with_the_company_key_then_connects(client, tmp_path) -> None:
+    op = _op(client)
+    key = _issue(client, op, company_name="누비투어", industry="여행사", company_id="nubi")
+    seen = _check(client, key)  # 로그인 전
+    assert seen["ok"] and seen["signup"] and seen["company_id"] == "nubi"
+    assert seen["company"]["name"] == "누비투어"
+    res = _signup(client, key)
+    assert res.status_code == 200, res.text
+    token = res.json()["data"]["token"]
+    row = next(r for r in _rows(tmp_path) if r["email"] == "n@example.com")
+    assert row["role"] == "admin" and row["memberships"] == [
+        {"company_id": "nubi", "role": "admin"}
+    ]
+    me = client.get(BASE + "/me", headers=_bearer(token)).json()["data"]
+    assert me["company_id"] == "nubi"  # 계정 기준으로 누비투어에 들어간다
+    # 키는 가입에 한 번만
+    assert _check(client, key)["signup"] is False
+    again = _signup(client, key, name="또", email="x@example.com")
+    assert again.status_code == 409 and again.json()["error"]["code"] == "KEY_SIGNUP_USED"
+    # 그 세션으로 연결하면 누비투어 줄에만 저장된다
+    assert _connect(client, token, key).status_code == 200
+    keys = json.loads((tmp_path / "connection_keys.json").read_text(encoding="utf-8"))
+    assert keys["companies"]["nubi"]["name"] == "누비투어"
+    assert keys.get("company") is None  # 캣북스 줄은 그대로(없던 그대로)
+
+
+def test_signup_needs_a_company_key_and_no_admin_yet(client) -> None:
+    op = _op(client)
+    plain = _issue(client, op)
+    res = _signup(client, plain)
+    assert res.status_code == 422 and res.json()["error"]["code"] == "KEY_NOT_FOR_SIGNUP"
+    res = _signup(client, "AXC-AAAA-BBBB-CCCC")
+    assert res.status_code == 422
+    _nubi_admin(client, op)
+    second = _issue(client, op, company_id="nubi")
+    res = _signup(client, second, name="둘째", email="two@example.com")
+    assert res.status_code == 409 and res.json()["error"]["code"] == "COMPANY_HAS_ADMIN"
+
+
+def test_catbooks_admin_cannot_connect_with_another_company_key(client, tmp_path) -> None:
+    op = _op(client)
+    plain = _issue(client, op)
+    assert _account(client, op, "캣관리", "a@example.com").status_code == 200
+    cat_admin = _login(client, "a@example.com", PW)
+    assert _connect(client, cat_admin, plain, name="캣북스").status_code == 200
+    before = json.loads((tmp_path / "connection_keys.json").read_text(encoding="utf-8"))["company"]
+    nubi_key = _issue(client, op, company_name="누비투어", company_id="nubi")
+    seen = _check(client, nubi_key, cat_admin)
+    assert seen["ok"] is False and "다른 회사용" in seen["reason"]
+    res = _connect(client, cat_admin, nubi_key)
+    assert res.status_code == 422 and res.json()["error"]["code"] == "KEY_OTHER_COMPANY"
+    after = json.loads((tmp_path / "connection_keys.json").read_text(encoding="utf-8"))["company"]
+    assert after == before  # 캣북스 연결은 그대로
+
+
+def test_admin_sees_and_touches_only_own_company_accounts(client, tmp_path) -> None:
+    op = _op(client)
+    assert _account(client, op, "캣관리", "a@example.com").status_code == 200
+    assert _account(client, op, "캣회원", "m@example.com", role="member").status_code == 200
+    _, nubi_admin = _nubi_admin(client, op)
+    # 누비투어 관리자가 일반회원을 만들면 누비투어 소속
+    res = _account(client, nubi_admin, "누비회원", "nm@example.com", role="member")
+    assert res.status_code == 200
+    row = next(r for r in _rows(tmp_path) if r["email"] == "nm@example.com")
+    assert row["memberships"] == [{"company_id": "nubi", "role": "member"}]
+
+    seen = client.get(BASE + "/accounts", headers=_bearer(nubi_admin)).json()["data"]
+    assert {r["email"] for r in seen} == {"n@example.com", "nm@example.com"}
+    cat_admin = _login(client, "a@example.com", PW)
+    seen = client.get(BASE + "/accounts", headers=_bearer(cat_admin)).json()["data"]
+    assert {r["email"] for r in seen} == {"a@example.com", "m@example.com"}
+
+    cat_member = _id_of(tmp_path, "m@example.com")
+    res = client.post(
+        f"{BASE}/accounts/{cat_member}/reset-password",
+        json={"new_password": "new-pass-12345"},
+        headers=_bearer(nubi_admin),
+    )
+    assert res.status_code == 404
+    res = client.post(
+        f"{BASE}/accounts/{cat_member}/update", json={"dept": "영업"}, headers=_bearer(nubi_admin)
+    )
+    assert res.status_code == 404
+
+
+def test_last_admin_is_counted_per_company(client, tmp_path) -> None:
+    op = _op(client)
+    assert _account(client, op, "캣관리1", "a1@example.com").status_code == 200
+    assert _account(client, op, "캣관리2", "a2@example.com").status_code == 200
+    _nubi_admin(client, op)
+    nubi_admin = _id_of(tmp_path, "n@example.com")
+    res = client.post(
+        f"{BASE}/accounts/{nubi_admin}/update", json={"role": "member"}, headers=_bearer(op)
+    )
+    assert res.status_code == 409 and res.json()["error"]["code"] == "LAST_ADMIN"
+    # 캣북스는 관리자가 둘이라 하나는 내릴 수 있다
+    cat_admin = _id_of(tmp_path, "a2@example.com")
+    res = client.post(
+        f"{BASE}/accounts/{cat_admin}/update", json={"role": "member"}, headers=_bearer(op)
+    )
+    assert res.status_code == 200, res.text
+
+
+def _move(client, token, key):
+    return client.post(
+        "/api/dashboard/connection-keys/move", json={"key": key}, headers=_bearer(token)
+    )
+
+
+def _disconnect(client, token):
+    res = client.post("/api/dashboard/connection-keys/disconnect", headers=_bearer(token))
+    assert res.status_code == 200, res.text
+
+
+def test_admin_moves_to_a_new_company_with_members_after_disconnecting(client, tmp_path) -> None:
+    """7단계 B안: 캣북스를 끊은 관리자가 누비 키를 넣으면 관리자와 연결된 회원이 누비투어로."""
+    op = _op(client)
+    plain = _issue(client, op)
+    assert _account(client, op, "캣관리", "a@example.com").status_code == 200
+    assert _account(client, op, "캣관리2", "a2@example.com").status_code == 200
+    cat_admin = _login(client, "a@example.com", PW)
+    assert _account(client, cat_admin, "캣회원", "m@example.com", role="member").status_code == 200
+    other_admin = _login(client, "a2@example.com", PW)
+    assert (
+        _account(client, other_admin, "남는회원", "s@example.com", role="member").status_code == 200
+    )
+    member_old = _login(client, "m@example.com", PW)
+    assert _connect(client, cat_admin, plain, name="캣북스").status_code == 200
+    nubi_key = _issue(client, op, company_name="누비투어", industry="여행사", company_id="nubi")
+
+    # 연결 중이면 먼저 끊어야 한다(캣북스 줄은 그대로)
+    res = _move(client, cat_admin, nubi_key)
+    assert res.status_code == 409 and res.json()["error"]["code"] == "DISCONNECT_FIRST"
+    _disconnect(client, cat_admin)
+
+    res = _move(client, cat_admin, nubi_key)
+    assert res.status_code == 200, res.text
+    data = res.json()["data"]
+    assert data["moved_accounts"] == 2 and data["from_company"] == "catbooks"
+    token = data["token"]
+    me = client.get(BASE + "/me", headers=_bearer(token)).json()["data"]
+    assert me["company_id"] == "nubi"
+    rows = {r["email"]: r for r in _rows(tmp_path)}
+    assert rows["a@example.com"]["memberships"] == [{"company_id": "nubi", "role": "admin"}]
+    assert rows["m@example.com"]["memberships"] == [{"company_id": "nubi", "role": "member"}]
+    # 다른 캣북스 관리자와 그 관리자가 데려온 회원은 그대로 캣북스
+    assert accounts.memberships_of(rows["s@example.com"])[0].company_id == "catbooks"
+    # 소속 칸이 없는 예전 캣북스 계정은 읽을 때 캣북스 소속이다(파일을 고쳐 쓰지 않는다)
+    kept = accounts.memberships_of(rows["a2@example.com"])
+    assert [(m.company_id, m.role) for m in kept] == [("catbooks", "admin")]
+    # 옮긴 일반회원의 옛 세션은 끊기고, 다시 로그인하면 누비투어
+    assert client.get(BASE + "/me", headers=_bearer(member_old)).status_code == 401
+    member_new = _login(client, "m@example.com", PW)
+    assert (
+        client.get(BASE + "/me", headers=_bearer(member_new)).json()["data"]["company_id"] == "nubi"
+    )
+    # 새 세션으로 연결하면 누비투어 줄에 저장된다
+    assert _connect(client, token, nubi_key).status_code == 200
+    keys = json.loads((tmp_path / "connection_keys.json").read_text(encoding="utf-8"))
+    assert keys["companies"]["nubi"]["name"] == "누비투어"
+    assert keys.get("company") is None  # 캣북스는 끊은 그대로(다시 연결하면 돌아온다)
+    # 키는 한 번만: 가입·옮기기 다시 안 됨
+    assert _check(client, nubi_key)["signup"] is False
+
+
+def test_move_needs_a_company_key_and_an_empty_target(client, tmp_path) -> None:
+    op = _op(client)
+    plain = _issue(client, op)
+    assert _account(client, op, "캣관리", "a@example.com").status_code == 200
+    cat_admin = _login(client, "a@example.com", PW)
+    res = _move(client, cat_admin, plain)
+    assert res.status_code == 422 and res.json()["error"]["code"] == "KEY_NOT_FOR_MOVE"
+    nubi_key, _ = _nubi_admin(client, op)  # 누비투어에 이미 관리자가 있다
+    res = _move(client, cat_admin, nubi_key)
+    assert res.status_code == 409
+    assert res.json()["error"]["code"] in {"KEY_SIGNUP_USED", "COMPANY_HAS_ADMIN"}
+    rows = {r["email"]: r for r in _rows(tmp_path)}
+    assert accounts.memberships_of(rows["a@example.com"])[0].company_id == "catbooks"
+
+
+def _unlink(client, token, account_id):
+    return client.post(BASE + f"/accounts/{account_id}/unlink", headers=_bearer(token))
+
+
+def test_admin_unlinks_only_own_members_and_they_lose_the_company(client, tmp_path) -> None:
+    op = _op(client)
+    assert _account(client, op, "캣관리", "a@example.com").status_code == 200
+    assert _account(client, op, "캣관리2", "a2@example.com").status_code == 200
+    mine = _login(client, "a@example.com", PW)
+    other = _login(client, "a2@example.com", PW)
+    assert _account(client, mine, "내회원", "m@example.com", role="member").status_code == 200
+    assert _account(client, other, "남회원", "s@example.com", role="member").status_code == 200
+    member_session = _login(client, "m@example.com", PW)
+    rows = {r["email"]: r for r in _rows(tmp_path)}
+    assert rows["m@example.com"]["linked_admin"] == rows["a@example.com"]["id"]
+
+    # 다른 관리자가 연결한 회원은 못 끊는다
+    res = _unlink(client, mine, rows["s@example.com"]["id"])
+    assert res.status_code == 403 and res.json()["error"]["code"] == "NOT_MY_MEMBER"
+    # 관리자는 못 끊는다(일반회원만)
+    res = _unlink(client, mine, rows["a2@example.com"]["id"])
+    assert res.status_code == 409 and res.json()["error"]["code"] == "MEMBER_ONLY"
+
+    res = _unlink(client, mine, rows["m@example.com"]["id"])
+    assert res.status_code == 200, res.text
+    assert res.json()["data"]["linked_admin"] is None
+    rows = {r["email"]: r for r in _rows(tmp_path)}
+    assert rows["m@example.com"]["memberships"] == []  # 연결 대기(계정은 남는다)
+    assert accounts.memberships_of(rows["s@example.com"])[0].company_id == "catbooks"
+    # 끊긴 회원의 세션은 끊기고, 다시 로그인해도 회사가 없다
+    assert client.get(BASE + "/me", headers=_bearer(member_session)).status_code == 401
+    again = _login(client, "m@example.com", PW)
+    assert client.get(BASE + "/me", headers=_bearer(again)).json()["data"]["company_id"] is None
+    # 소속이 없는 세션은 어느 회사 자료도 못 본다(캣북스로 읽히지 않는다)
+    res = client.get("/api/dashboard/connection-keys", headers=_bearer(again))
+    assert res.status_code == 403 and res.json()["error"]["code"] == "NO_COMPANY"
+    # 일반회원은 끊을 수 없다
+    res = _unlink(client, again, rows["s@example.com"]["id"])
+    assert res.status_code == 403
+
+
+def test_check_public_answers_old_keys_like_unknown_keys(client) -> None:
+    """로그인 없이 예전 키(회사 정보 없음)의 회사 정보를 내주지 않는다."""
+    op = _op(client)
+    plain = _issue(client, op)
+    old = _check(client, plain)
+    unknown = _check(client, "AXC-0000-0000-0000")
+    assert old == unknown and old["ok"] is False
+    assert "company" not in old or old.get("company") is None
+
+
+def test_signup_refuses_bad_input_and_never_returns_the_hash(client, tmp_path) -> None:
+    op = _op(client)
+    key = _issue(client, op, company_name="누비투어", company_id="nubi")
+    short = client.post(
+        "/api/dashboard/connection-keys/signup",
+        json={"key": key, "name": "누비관리", "email": "n@example.com", "password": "short"},
+    )
+    assert short.status_code == 422
+    assert _check(client, key)["signup"] is True  # 짧은 비밀번호는 키를 쓰지 않는다
+    assert _account(client, op, "다른사람", "taken@example.com", role="operator").status_code == 200
+    taken = _signup(client, key, email="taken@example.com")
+    assert taken.status_code == 409 and taken.json()["error"]["code"] == "EMAIL_TAKEN"
+    assert _check(client, key)["signup"] is True  # 계정을 못 만들면 키 표시를 되돌린다
+    res = _signup(client, key)
+    assert res.status_code == 200, res.text
+    assert "password_hash" not in json.dumps(res.json())
+    assert "authorization" not in {k.lower() for k in client.headers}  # 토큰 없이 돈다
+
+
+def test_signup_with_revoked_or_other_company_key_fails(client) -> None:
+    op = _op(client)
+    key = _issue(client, op, company_name="누비투어", company_id="nubi")
+    rows = client.get("/api/dashboard/connection-keys", headers=_bearer(op)).json()["data"]["keys"]
+    key_id = next(k["id"] for k in rows if k.get("for_company") == "nubi")
+    res = client.post(
+        "/api/dashboard/connection-keys/revoke", json={"id": key_id}, headers=_bearer(op)
+    )
+    assert res.status_code == 200, res.text
+    revoked = _signup(client, key)
+    assert revoked.status_code == 422 and revoked.json()["error"]["code"] == "KEY_REVOKED"
+
+
+def test_only_one_signup_wins_when_two_arrive_together(client) -> None:
+    import threading
+
+    op = _op(client)
+    key = _issue(client, op, company_name="누비투어", company_id="nubi")
+    codes: list[int] = []
+
+    def go(i: int) -> None:
+        codes.append(_signup(client, key, name=f"관리{i}", email=f"n{i}@example.com").status_code)
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(3)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert sorted(codes).count(200) == 1 and all(c in (200, 409) for c in codes)
+
+
+def test_public_key_paths_are_rate_limited(client, monkeypatch) -> None:
+    monkeypatch.setattr(connection_keys, "PUBLIC_MAX_PER_KEY", 2)
+    for _ in range(2):
+        _check(client, "AXC-1111-1111-1111")
+    res = client.post(
+        "/api/dashboard/connection-keys/check-public", json={"key": "AXC-1111-1111-1111"}
+    )
+    assert res.status_code == 429 and res.json()["error"]["code"] == "TOO_MANY_TRIES"

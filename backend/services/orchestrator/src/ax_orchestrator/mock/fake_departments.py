@@ -296,8 +296,8 @@ ALT_OUTPUTS: dict[tuple[str, str], Callable[[AgentRequest], dict[str, Any]]] = {
 
 
 _PAST_ACTIONS = {
-    "release_fault": ("card_past_release", "사람(쇼핑몰 운영자)이 결제 장애 상태를 해제해 정상화"),
-    "rollback_deployment": ("card_past_rollback", "쇼핑몰 서버 이전 버전으로 되돌림 (v2 → v1)"),
+    "release_fault": ("card_past_release", "사람(사이트 운영자)이 결제 장애 상태를 해제해 정상화"),
+    "rollback_deployment": ("card_past_rollback", "사이트 서버 이전 버전으로 되돌림 (v2 → v1)"),
 }
 
 

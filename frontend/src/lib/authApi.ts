@@ -134,3 +134,10 @@ export async function resetPassword(accountId: string, newPassword: string): Pro
   if (status < 200 || status >= 300) throw new Error(errorMessage(status, body, "비밀번호를 초기화하지 못했어요"));
   return (body as { data: ServerAccount }).data;
 }
+
+/** 관리자가 연결한 일반회원을 회사에서 끊는다(계정은 남고 연결 대기가 된다, 그 회원의 로그인은 끊긴다) */
+export async function unlinkMember(accountId: string): Promise<ServerAccount> {
+  const { status, body } = await send(`/accounts/${encodeURIComponent(accountId)}/unlink`, { method: "POST", session: true });
+  if (status < 200 || status >= 300) throw new Error(errorMessage(status, body, "회원 연결을 끊지 못했어요"));
+  return (body as { data: ServerAccount }).data;
+}

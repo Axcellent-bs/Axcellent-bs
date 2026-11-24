@@ -83,10 +83,10 @@ export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) 
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">공지·쿠폰</h1>
-          <p className="mt-1 text-sm text-ink-500">마케팅 AI가 회사 쇼핑몰에 실제로 올린 공지와 고객에게 준 쿠폰입니다. 공지 게시와 쿠폰 발급은 안전 장치를 거쳐 실행됩니다. 이 화면에서 캠페인을 시작하고 보류된 마케팅 작업을 결정합니다. 나머지는 읽기만 합니다.</p>
+          <p className="mt-1 text-sm text-ink-500">마케팅 AI가 회사 사이트에 실제로 올린 공지와 고객에게 준 쿠폰입니다. 공지 게시와 쿠폰 발급은 안전 장치를 거쳐 실행됩니다. 이 화면에서 캠페인을 시작하고 보류된 마케팅 작업을 결정합니다. 나머지는 읽기만 합니다.</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
-          <Chip label="실제 데이터" tone="bg-emerald-50 text-emerald-700" title="회사 쇼핑몰 배너와 안전 장치 실행 기록을 읽습니다" />
+          <Chip label="실제 데이터" tone="bg-emerald-50 text-emerald-700" title="회사 사이트 배너와 안전 장치 실행 기록을 읽습니다" />
           {live && <span className="text-ink-500">{ago(live.loaded_at)} 갱신 · 15초마다 자동</span>}
           <button className="btn-ghost" onClick={() => void load()} disabled={loading}>{loading ? "불러오는 중" : "새로고침"}</button>
         </div>
@@ -104,22 +104,22 @@ export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) 
         <>
           <Section title="지표" desc="안전 장치 실행 기록으로 센 값입니다. 총액은 건수 x 단가를 안전 장치가 계산한 값입니다.">
             <div className="grid gap-3 sm:grid-cols-4">
-              <Tile label="지금 걸린 공지" value={live.banners ? `${live.banners.length}건` : "확인할 수 없음"} note="회사 쇼핑몰 배너" tone="bg-brand-50 text-brand-700" />
+              <Tile label="지금 걸린 공지" value={live.banners ? `${live.banners.length}건` : "확인할 수 없음"} note="회사 사이트 배너" tone="bg-brand-50 text-brand-700" />
               <Tile label="게시한 공지" value={`${publishedCount}건`} note="지금까지 게시 요청이 실행된 건수" tone="bg-ink-50 text-ink-700" />
               <Tile label="발급한 쿠폰" value={`${issued.reduce((s, c) => s + c.count, 0)}장`} note={`총 ${won(issuedTotal)}`} tone="bg-emerald-50 text-emerald-800" />
               <Tile label="사람 결정 대기" value={`${heldCount}건`} note="안전 장치 보류 큐" tone="bg-amber-50 text-amber-800" />
             </div>
           </Section>
 
-          <Section title="지금 회사 쇼핑몰에 걸린 공지" desc="고객이 쇼핑몰에서 보고 있는 배너입니다. 게시 기간 안이고 끝나지 않은 공지만 나옵니다.">
-            {live.banners === null ? <Empty>쇼핑몰 서버에서 공지를 읽지 못했습니다.</Empty>
+          <Section title="지금 회사 사이트에 걸린 공지" desc="고객이 회사 사이트에서 보고 있는 배너입니다. 게시 기간 안이고 끝나지 않은 공지만 나옵니다.">
+            {live.banners === null ? <Empty>사이트 서버에서 공지를 읽지 못했습니다.</Empty>
               : live.banners.length === 0 ? <Empty>지금 게시 중인 공지가 없습니다.</Empty> : (
                 <div className="space-y-3">
                   {live.banners.map((b) => (
                     <article key={b.notice_id} className="space-y-2 rounded-2xl border border-ink-100 p-4" title={`공지 번호 ${b.notice_id}`}>
                       <div className="flex flex-wrap items-center gap-2">
                         <b className="text-sm" title={b.context_id ?? undefined}>{incidentName(b.context_id, incidents)}</b>
-                        <Chip label="쇼핑몰 배너" tone="bg-brand-50 text-brand-700" />
+                        <Chip label="사이트 배너" tone="bg-brand-50 text-brand-700" />
                         <Chip label="게시 중" tone="bg-emerald-50 text-emerald-700" />
                         <span className="ml-auto text-xs text-ink-500">{ago(b.created_at)} 게시</span>
                       </div>
@@ -134,7 +134,7 @@ export default function LiveMarketing({ view = "notice" }: { view?: LiveView }) 
               )}
           </Section>
 
-          <Section title="공지 게시 기록" desc="마케팅 AI가 사건마다 올린 공지입니다. 지금 걸려 있지 않은 공지의 본문은 쇼핑몰에서 내려가 여기서 볼 수 없습니다.">
+          <Section title="공지 게시 기록" desc="마케팅 AI가 사건마다 올린 공지입니다. 지금 걸려 있지 않은 공지의 본문은 회사 사이트에서 내려가 여기서 볼 수 없습니다.">
             {live.notices === null ? <Empty>공지 게시 기록을 읽지 못했습니다.</Empty>
               : live.notices.length === 0 ? <Empty>아직 게시한 공지가 없습니다.</Empty> : (
                 <ol className="divide-y divide-ink-100 rounded-2xl border border-ink-100">

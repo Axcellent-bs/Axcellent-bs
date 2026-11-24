@@ -89,7 +89,7 @@ export const SOURCE_LABEL: Record<string, string> = {
   trend_history: '검색 기록',
   trend_popular: '인기 트렌드',
   shorts_stats: '숏츠 통계',
-  'shop-api': '쇼핑몰 상품',
+  'shop-api': '회사 사이트 상품',
   campaign_effect: '캠페인 성과',
   youtube_velocity: '유튜브 조회',
   trend_scan: '검색 급상승',

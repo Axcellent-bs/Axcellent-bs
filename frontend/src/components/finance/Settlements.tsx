@@ -113,7 +113,7 @@ export function SettlementsSection({ tick, source, request, canRequest = true, o
         ? `${SAFETY_SERVER}가 응답하지 않아 요청하지 않았습니다. 지급 기록도 남지 않았습니다. 안전 장치를 켠 뒤 다시 누르세요.`
         : code === "nothing_to_settle" ? "보류 없이 지급할 판매자가 없어 요청하지 않았습니다."
         : code === "period_not_closed" ? "이 주는 아직 끝나지 않아 지급을 요청하지 않았습니다. 그 주 일요일이 지나면 요청할 수 있습니다."
-        : code === "orders_partial" ? "판매 서버 주문 일부를 읽지 못해 정산금이 모자랄 수 있어 요청하지 않았습니다. 잠시 뒤 다시 누르세요."
+        : code === "orders_partial" ? "사이트 서버 주문 일부를 읽지 못해 정산금이 모자랄 수 있어 요청하지 않았습니다. 잠시 뒤 다시 누르세요."
           : err.message);
     } finally {
       setSending(false);

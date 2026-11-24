@@ -234,7 +234,7 @@ def income_statement(
         ],
         "basis": (
             "국제회계기준(K-IFRS) 손익계산서 형식. "
-            "장부(판매 사이트·안전 장치 기록)에 있는 항목만 계산"
+            "장부(회사 사이트·안전 장치 기록)에 있는 항목만 계산"
         ),
         "confirmed": {
             "current": now_fixed == now_total,

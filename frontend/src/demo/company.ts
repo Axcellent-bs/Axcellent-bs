@@ -24,6 +24,10 @@ export type ConnectedCompany = {
   key?: string
   connectedAt?: string
 }
+/** 회사 업종 선택지 (키 발급·관리자 가입·회사 연결 화면이 같이 쓴다). 업종별 낱말 표와 같은 이름(lib/industryTerms.ts) */
+export { INDUSTRIES } from '@/lib/industryTerms'
+/** 고르지 않았을 때의 업종 */
+export const DEFAULT_INDUSTRY = '기타'
 export type CompanyInfo = Pick<ConnectedCompany, 'name' | 'industry' | 'network' | 'siteUrl'>
 export type KeyStatus = 'issued' | 'connected' | 'revoked'
 export type IssuedKey = {
@@ -36,10 +40,16 @@ export type IssuedKey = {
   status: KeyStatus
   /** 고객사가 연결하면서 입력한 회사 정보 (연결 전에는 없음) */
   company?: ConnectedCompany
+  /** 회사 전용 키면 그 회사 ID(발급 때 회사를 등록한 키). 예전 키는 없음 */
+  forCompany?: string
+  /** 회사 전용 키로 첫 관리자 가입·회사 옮기기를 할 수 있나 (키 확인 응답에서만) */
+  signup?: boolean
 }
+/** 키 발급 때 함께 등록하는 회사. 이름을 넣으면 회사 목록에 새 회사가 생긴다(ID 비우면 자동) */
+export type NewCompany = { companyName: string; industry: string; siteUrl?: string; companyId?: string }
 
 type ServerInfo = { name: string; industry: string; network: string; site_url?: string }
-type ServerRow = { id: string; key: string; memo: string | null; issued_at: string; status: KeyStatus; company: ServerInfo | null }
+type ServerRow = { id: string; key: string; memo: string | null; issued_at: string; status: KeyStatus; company: ServerInfo | null; for_company?: string | null }
 type ServerCompany = ServerInfo & { id: string; key: string | null; connected_at: string }
 type ServerState = { keys: ServerRow[]; company: ServerCompany | null; editable: boolean }
 
@@ -74,6 +84,7 @@ function apply(s: ServerState) {
     issuedAt: r.issued_at,
     status: r.status,
     company: r.company ? { id: company && r.status === 'connected' ? company.id : `k-${r.id}`, ...fromServer(r.company) } : undefined,
+    forCompany: r.for_company || undefined,
   }))
   notify()
 }
@@ -150,8 +161,15 @@ export const useKeys = () => useSyncExternalStore(subscribe, () => keys)
 
 // ---------------------------------------------------------------- AXcellent 운영팀: 키 발급·폐기
 /** 새 키 발급. 돌려받은 `key`가 전체 키(지금만 보인다) */
-export async function issueKey(memo: string): Promise<IssuedKey> {
-  const s = await call<ServerState & { id: string; key: string }>('POST', `${PATH}/issue`, { memo })
+export async function issueKey(memo: string, newCompany?: NewCompany): Promise<IssuedKey> {
+  const body: Record<string, string> = { memo }
+  if (newCompany?.companyName.trim()) {
+    body.company_name = newCompany.companyName.trim()
+    body.industry = newCompany.industry
+    if (newCompany.siteUrl?.trim()) body.site_url = newCompany.siteUrl.trim()
+    if (newCompany.companyId?.trim()) body.company_id = newCompany.companyId.trim()
+  }
+  const s = await call<ServerState & { id: string; key: string }>('POST', `${PATH}/issue`, body)
   apply(s)
   const row = keys.find((k) => k.id === s.id)
   return { ...(row ?? { id: s.id, issuedAt: new Date().toISOString(), status: 'issued' as const }), key: s.key }
@@ -163,11 +181,29 @@ export async function revokeKey(id: string) {
 
 // ---------------------------------------------------------------- 고객사 시스템 관리자: 키 확인 → 회사 정보 입력 → 연결
 export type KeyCheck = { ok: true; issued: IssuedKey } | { ok: false; reason: string }
-export async function checkKey(input: string): Promise<KeyCheck> {
+type ServerCheck = { ok: boolean; reason: string | null; company: (Partial<ServerInfo> & { name: string }) | null; company_id?: string; signup?: boolean }
+const issuedFrom = (key: string, r: ServerCheck): IssuedKey => ({
+  id: '', key, issuedAt: '', status: 'issued',
+  company: r.company ? { id: r.company_id ?? '', name: r.company.name, industry: r.company.industry ?? '', network: r.company.network ?? '', siteUrl: r.company.site_url || undefined } : undefined,
+  forCompany: r.company_id || undefined,
+  signup: r.signup,
+})
+/** 키 확인. 로그인했으면 그 회사 기준, 로그인 전(`publicCheck`)이면 회사 전용 키의 가입 가능 여부만 */
+export async function checkKey(input: string, publicCheck = false): Promise<KeyCheck> {
   const key = input.trim().toUpperCase()
-  const r = await call<{ ok: boolean; reason: string | null; company: ServerInfo | null }>('POST', `${PATH}/check`, { key })
+  const r = await call<ServerCheck>('POST', `${PATH}/${publicCheck ? 'check-public' : 'check'}`, { key })
   if (!r.ok) return { ok: false, reason: r.reason ?? '쓸 수 없는 키예요.' }
-  return { ok: true, issued: { id: '', key, issuedAt: '', status: 'issued', company: r.company ? { id: '', ...fromServer(r.company) } : undefined } }
+  return { ok: true, issued: issuedFrom(key, r) }
+}
+/** 회사 전용 키로 그 회사의 첫 관리자 가입(로그인 전). 성공하면 로그인 응답(세션)을 돌려준다 */
+export async function signupWithKey(key: string, admin: { name: string; email: string; password: string }): Promise<unknown> {
+  return call<unknown>('POST', `${PATH}/signup`, { key: key.trim().toUpperCase(), ...admin })
+}
+/** 지금 회사 연결을 끊은 관리자가 다른 회사 전용 키로 회사를 옮긴다(나와 내가 연결한 일반회원이 같이 간다).
+ *  돌려받은 로그인 응답으로 세션을 새 회사로 바꾼다 */
+export async function moveCompany(key: string): Promise<{ login: unknown; moved: number; from: string }> {
+  const r = await call<{ moved_accounts: number; from_company: string } & Record<string, unknown>>('POST', `${PATH}/move`, { key: key.trim().toUpperCase() })
+  return { login: r, moved: r.moved_accounts, from: r.from_company }
 }
 export async function connectWithKey(k: IssuedKey, info: CompanyInfo) {
   apply(await call<ServerState>('POST', `${PATH}/connect`, { key: k.key, ...toServer(info) }))

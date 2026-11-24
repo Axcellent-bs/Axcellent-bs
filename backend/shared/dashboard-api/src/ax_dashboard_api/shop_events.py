@@ -91,7 +91,7 @@ def _check(tenant: str, body: dict[str, Any]) -> EventEnvelope:
         raise ApiError(403, "TENANT_MISMATCH", "회사 키와 이벤트의 회사가 다르다")
     if envelope.type not in ALLOWED_TYPES:
         raise ApiError(
-            422, "EVENT_TYPE_NOT_ALLOWED", f"판매 서버 이벤트가 아니다: {envelope.type.value}"
+            422, "EVENT_TYPE_NOT_ALLOWED", f"사이트 서버 이벤트가 아니다: {envelope.type.value}"
         )
     if envelope.source != SHOP_SOURCE:
         raise ApiError(422, "EVENT_SOURCE_NOT_ALLOWED", f"source는 {SHOP_SOURCE}만 받는다")

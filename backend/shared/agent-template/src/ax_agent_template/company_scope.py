@@ -20,11 +20,14 @@ from __future__ import annotations
 import contextvars
 import functools
 import logging
+import re
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from ax_agent_template.companies import canonical_company_id, is_company
+from ax_agent_template.companies import canonical_company_id, get_company, is_company
+from ax_agent_template.industry_terms import DEFAULT as DEFAULT_TERMS
+from ax_agent_template.industry_terms import Terms, terms_for
 from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 
 CATBOOKS = TENANT_ID_CATBOOKS
@@ -94,6 +97,42 @@ def checked(tenant_id: str | None) -> str:
     if cid != CATBOOKS and not is_company(cid):
         _warn_once(f"unknown:{cid}", "회사 목록에 없는 요청 회사다(거절하지 않음): %s", cid)
     return cid
+
+
+_PROMPT_TEXT_MAX = 40  # 지시문에 싣는 회사 이름·업종 한 칸 길이 상한
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def _prompt_text(value: str) -> str:
+    return _CONTROL.sub(" ", value).strip()[:_PROMPT_TEXT_MAX].strip()
+
+
+def prompt_line() -> str:
+    """LLM 지시문 앞에 붙일 지금 요청 회사 한 줄. 회사 설정(회사 목록)의 이름·업종을 읽는다.
+
+    요청 밖이거나 회사 목록에 없으면 빈 문자열이다(지시문은 "회사"라는 말만 쓴다).
+    업종을 지어내지 않는다: 설정에 없으면 이름만 싣는다.
+    """
+    cid = _ACTIVE.get()
+    company = get_company(cid) if cid else None
+    if company is None:
+        return ""
+    name = _prompt_text(company.name)
+    if not name:
+        return ""
+    industry = _prompt_text(company.industry)
+    line = f"이 회사: {name}" + (f" (업종: {industry})" if industry else "")
+    words = terms_for(company.industry)
+    if words != DEFAULT_TERMS:  # 업종에 맞는 말이 따로 있으면 그 말로 답하게 알려 준다
+        line += f". 파는 것은 '{words.item}', 고객이 사는 일은 '{words.order}'(이)라고 부른다"
+    return line + "\n"
+
+
+def terms() -> Terms:
+    """지금 요청 회사의 업종 낱말(상품·주문을 부르는 말). 회사를 모르면 기본 낱말."""
+    cid = _ACTIVE.get()
+    company = get_company(cid) if cid else None
+    return terms_for(company.industry) if company else DEFAULT_TERMS
 
 
 def _warn_once(key: str, message: str, *args: object) -> None:

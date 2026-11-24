@@ -539,7 +539,7 @@ def decide(
                 names = "; ".join(flag_text(f) for f in reaction.flagged)
                 detail = (
                     f"{names} → 요청 금액의 {crx.limit_factor:.0%}인 {fc.won(cap)}까지 "
-                    "(걸린 책이 여럿이어도 요청당 한 번)"
+                    "(걸린 상품이 여럿이어도 요청당 한 번)"
                 )
                 # 다른 규칙이 이미 한도를 더 낮췄으면(cap >= limit) 한도와 이유(limits)는
                 # 바꾸지 않는다. 걸린 책은 아래 `CRX-001` 적용 규칙 기록(detail)에만 남는다
@@ -548,10 +548,10 @@ def decide(
                     limit = cap
                     limits.append(detail)
             else:
-                detail = f"걸린 책 없음 (읽은 책 {reaction.checked}권)"
+                detail = f"걸린 상품 없음 (읽은 상품 {reaction.checked}개)"
             if reaction.low_sales:
                 low = ", ".join(reaction.low_sales)
-                notes.append(f"판매 적어 비율 참고만 (판매 {crx.min_sold_qty}권 미만): {low}")
+                notes.append(f"판매 적어 비율 참고만 (판매 {crx.min_sold_qty}개 미만): {low}")
                 detail += f". 판매 적어 비율 참고만: {low}"
             if reaction.sales_unread:
                 unread = ", ".join(reaction.sales_unread)

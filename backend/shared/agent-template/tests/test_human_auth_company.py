@@ -162,3 +162,35 @@ def test_changing_the_default_company_does_not_move_a_cid_less_token(
     assert ha.verify_session(token, now=200).company_id == "catbooks"
     monkeypatch.setenv(ha.LEGACY_COMPANY_ENV, "nubi")  # 명시한 옛 회사만 바꾼다
     assert ha.verify_session(token, now=200).company_id == "nubi"
+
+
+def test_a_no_company_token_is_refused_unless_the_route_allows_it() -> None:
+    """회사에서 끊긴 계정의 토큰(`nocid`)은 캣북스로 읽히지 않고, 허용한 경로만 받는다."""
+    token, _ = ha.issue_session(
+        account_id="acc-9", name="끊긴회원", role="member", no_company=True, now=100
+    )
+    payload = _payload(token)
+    assert payload["nocid"] is True and "cid" not in payload
+    with pytest.raises(ha.HumanAuthError) as err:
+        ha.verify_session(token, now=200)
+    assert (err.value.status_code, err.value.code) == (403, "NO_COMPANY")
+    with pytest.raises(ha.HumanAuthError) as err:  # 다른 서비스가 쓰는 공용 검사도 거절한다
+        ha.verify_human(f"Bearer {token}", now=200)
+    assert err.value.code == "NO_COMPANY"
+    human = ha.verify_session(token, now=200, allow_no_company=True)
+    assert (human.company_id, human.company_role, human.account_id) == (None, None, "acc-9")
+
+
+def test_no_company_cannot_be_combined_with_a_company() -> None:
+    with pytest.raises(ValueError):
+        ha.issue_session(
+            account_id="acc-9", name="x", role="member", company_id="catbooks", no_company=True
+        )
+    for extra in ({"cid": "catbooks"}, {"crole": "member"}):
+        token = _signed(
+            {"sub": "a", "name": "x", "role": "member", "iat": 100, "exp": 10_000, "jti": "j1",
+             "nocid": True, **extra}
+        )  # fmt: skip
+        with pytest.raises(ha.HumanAuthError) as err:
+            ha.verify_session(token, now=200, allow_no_company=True)
+        assert err.value.code == "HUMAN_TOKEN_INVALID"

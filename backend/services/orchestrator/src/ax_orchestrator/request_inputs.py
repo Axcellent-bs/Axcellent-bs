@@ -294,7 +294,7 @@ def claim_input(
 
 
 TOPIC_MAX = 100  # 마케팅 `draft_sns_post.topic` 길이 상한
-TOPIC_ASK = "어떤 주제로 쓸까요? 숫자·링크·#·@ 없이 주제를 짧게 알려 주세요. 예: '신간 그림책 소개'"
+TOPIC_ASK = "어떤 주제로 쓸까요? 숫자·링크·#·@ 없이 주제를 짧게 알려 주세요. 예: '신상품 소개'"
 _TOPIC_BAD = re.compile(r"https?:|www\.|[#@]|\d", re.IGNORECASE)
 _TOPIC_TRIM = (
     r"(인스타그램|인스타|SNS|sns|에스엔에스)",

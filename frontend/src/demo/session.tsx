@@ -147,6 +147,8 @@ export function canOpen(account: Account, path: string, connected = !!getCompany
     if (matchPath('/control', path)) return true
     return isSupporting(account) && canOpen(supportViewer(account), path, connected)
   }
+  // 소속 회사가 없는 일반회원(연결 대기)은 아무 화면도 못 연다
+  if (waiting(account)) return false
   // 회사 연결 전: 관리자는 AXcellent 연결만, 일반회원은 아무 화면도 못 연다
   if (!connected) return !!account.admin && matchPath('/system/connect', path)
   // 일반회원은 관리자가 계정·PC IP를 회사에 연결해야 연다
@@ -161,9 +163,15 @@ export function canOpen(account: Account, path: string, connected = !!getCompany
 
 /** 로그인 뒤 처음 여는 화면: 운영자는 관제 센터, 관리자는 AI 대화방(연결 전이면 AXcellent 연결), 일반회원은 첫 서비스(없으면 AI 대화방) */
 export const ADMIN_HOME = '/agents/chat'
+/** 회사에 연결되지 않은 일반회원(관리자가 아직 연결 안 했거나 끊음)이 보는 화면. 할 수 있는 일이 없다 */
+export const WAITING_PATH = '/waiting'
+/** 서버 로그인 일반회원인데 소속 회사가 없다(관리자가 연결하지 않았거나 끊음) */
+export const waiting = (account: Account) =>
+  !account.operator && !account.admin && !!account.server && !!getSession()?.noCompany
 export const homeOf = (account: Account) =>
   account.operator ? '/control'
     : account.admin ? (getCompany() ? ADMIN_HOME : '/system/connect')
+    : waiting(account) ? WAITING_PATH
     : !isLinked(account) ? '/login'
     : assignedOf(account)[0]?.entry ?? '/agents/chat'
 

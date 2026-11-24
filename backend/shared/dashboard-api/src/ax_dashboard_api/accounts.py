@@ -49,6 +49,10 @@
   기존 세션을 모두 끊고 새 세션 토큰을 돌려준다
 - `POST /api/dashboard/auth/accounts/{id}/reset-password` {new_password}
   (운영자: 모든 계정 / 고객사 관리자: 일반회원만) → 임시 비밀번호로 초기화, 그 계정의 세션을 끊는다
+
+고객사 관리자는 자기 세션 회사 계정만 보고·바꾸고·초기화한다(다른 회사 계정은 404).
+마지막 관리자 검사도 회사마다 센다. 고객사 첫 관리자는 그 회사 전용 연결 키로 가입한다
+(`create_first_admin`, 경로는 `connection_keys.py`의 `POST /connection-keys/signup`).
 """
 
 from __future__ import annotations
@@ -172,14 +176,20 @@ def _write(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def _new_row(
-    name: str, email: str, role: str, password: str, company_id: str | None = None
+    name: str,
+    email: str,
+    role: str,
+    password: str,
+    company_id: str | None = None,
+    *,
+    password_hash: str | None = None,
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "id": "acc-" + secrets.token_hex(6),
         "name": name,
         "email": _norm_email(email),
         "role": role,
-        "password_hash": hash_password(password),
+        "password_hash": password_hash or hash_password(password),
         "created_at": _now(),
     }
     if role in CUSTOMER_ROLES:
@@ -327,6 +337,8 @@ def _issue_for(row: dict[str, Any]) -> tuple[str, int, list[Membership]]:
         role=str(row["role"]),
         company_id=first.company_id if first else None,
         company_role=first.role if first else None,
+        # 고객사 계정인데 소속이 없으면(회사에서 끊김) 캣북스로 읽히지 않게 표시한다
+        no_company=first is None and row.get("role") in CUSTOMER_ROLES,
     )
     return token, exp, memberships
 
@@ -387,7 +399,18 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     out["policy_editor"] = can_edit and row.get("policy_editor") is True
     out["secret_editor"] = can_edit and row.get("secret_editor") is True
     out["secret_tenants"] = secret_tenants_of(row) if can_edit else []
+    linked = row.get("linked_admin")
+    out["linked_admin"] = linked if isinstance(linked, str) and linked else None
     return out
+
+
+def _in_my_company(human: human_auth.Human, row: dict[str, Any]) -> bool:
+    """고객사 관리자가 다룰 수 있는 계정인가: 내 세션 회사에 소속된 고객사 계정."""
+    return (
+        row.get("role") in CUSTOMER_ROLES
+        and human.company_id is not None
+        and human.company_id in _company_ids(row)
+    )
 
 
 # ---- 실패 횟수 제한 ----
@@ -425,15 +448,19 @@ def _api_error(err: human_auth.HumanAuthError) -> ApiError:
     return ApiError(err.status_code, err.code, err.message)
 
 
-def session_human(authorization: str | None) -> human_auth.Human:
-    """로그인 세션 토큰만 받는다(공용 토큰은 계정이 아니라 여기서 거절)."""
+def session_human(authorization: str | None, *, allow_no_company: bool = False) -> human_auth.Human:
+    """로그인 세션 토큰만 받는다(공용 토큰은 계정이 아니라 여기서 거절).
+
+    소속 회사가 없는 계정의 세션은 403 `NO_COMPANY`로 거절한다. 내 정보·로그아웃·비밀번호
+    바꾸기만 allow_no_company=True로 받는다.
+    """
     token = human_auth.bearer(authorization)
     if not token:
         raise ApiError(401, "AUTH_REQUIRED", "로그인이 필요하다 (Authorization: Bearer 토큰)")
     if not human_auth.is_session_token(token):
         raise ApiError(403, "SESSION_REQUIRED", "로그인한 계정의 토큰이 필요하다")
     try:
-        return human_auth.verify_session(token)
+        return human_auth.verify_session(token, allow_no_company=allow_no_company)
     except human_auth.HumanAuthError as err:
         raise _api_error(err) from None
 
@@ -512,6 +539,11 @@ def _raise_if_locked(email: str, now: float) -> None:
         )
 
 
+def check_new_password(password: str) -> None:
+    """새 비밀번호 길이 검사(키 가입이 잠금 전에 부른다)."""
+    _check_new_password(password)
+
+
 def _check_new_password(password: str) -> None:
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ApiError(
@@ -561,14 +593,14 @@ def login(body: LoginIn) -> dict:
 
 @router.post("/logout")
 def logout(authorization: str | None = Header(None)) -> dict:
-    human = session_human(authorization)
+    human = session_human(authorization, allow_no_company=True)
     human_auth.revoke_session(human)
     return ok({"logged_out": True})
 
 
 @router.get("/me")
 def me(authorization: str | None = Header(None)) -> dict:
-    human = session_human(authorization)
+    human = session_human(authorization, allow_no_company=True)
     row = next((r for r in load_accounts() if r.get("id") == human.account_id), None)
     if row is None:
         raise ApiError(401, "ACCOUNT_GONE", "계정이 없어졌어요. 다시 로그인해 주세요")
@@ -590,7 +622,7 @@ def list_accounts(authorization: str | None = Header(None)) -> dict:
     if human.role == "operator":
         visible = load_accounts()
     elif human.role == "admin":
-        visible = [r for r in load_accounts() if r.get("role") in CUSTOMER_ROLES]
+        visible = [r for r in load_accounts() if _in_my_company(human, r)]
     else:
         raise ApiError(403, "ROLE_REQUIRED", "운영자와 고객사 관리자만 볼 수 있어요")
     rows = [_public(r) for r in visible]
@@ -613,6 +645,10 @@ def create_account(body: AccountIn, authorization: str | None = Header(None)) ->
         if any(r.get("email") == email for r in rows):
             raise ApiError(409, "EMAIL_TAKEN", "이미 있는 이메일이에요")
         row = _new_row(body.name.strip(), email, body.role, body.password, human.company_id)
+        if body.role == "member" and human.role == "admin" and human.account_id:
+            row["linked_admin"] = (
+                human.account_id
+            )  # 이 회원을 데려온 관리자(회사 옮기기 때 같이 간다)
         if _name_taken(rows, row["name"], _company_ids(row)):
             raise ApiError(409, "NAME_TAKEN", "같은 회사에 이름이 같은 계정이 있어요")
         rows.append(row)
@@ -621,10 +657,114 @@ def create_account(body: AccountIn, authorization: str | None = Header(None)) ->
     return ok(_public(row))
 
 
+def company_has_admin(company_id: str) -> bool:
+    """그 회사에 고객사 관리자가 있나 (키 가입은 첫 관리자만)."""
+    return any(r.get("role") == "admin" and company_id in _company_ids(r) for r in load_accounts())
+
+
+def create_first_admin(
+    name: str, email: str, password: str, company_id: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """회사 전용 연결 키로 그 회사의 첫 관리자를 만든다(`connection_keys.signup`이 부른다).
+
+    키 검사·키 쓰임 표시는 부르는 쪽(키 파일 잠금 안)에서 한다. 여기서는 계정 파일 잠금 안에서
+    이메일·이름 중복과 "그 회사에 관리자가 이미 있는가"를 다시 보고 만든 뒤, 로그인 응답을 돌려준다.
+    돌려주는 값: (공개 계정, 로그인 데이터 {token, expires_at, account, companies})
+    """
+    email = _norm_email(email)
+    if not EMAIL_RE.match(email):
+        raise ApiError(422, "EMAIL_INVALID", "이메일 형식이 아니에요")
+    _check_new_password(password)
+    hashed = hash_password(
+        password
+    )  # 잠금 밖에서 계산한다(요청이 몰려도 계정 파일 잠금을 오래 쥐지 않게)
+    path = _editable_path()
+    with _file_lock:
+        rows = _bootstrap(path, _read(path))
+        if any(r.get("email") == email for r in rows):
+            raise ApiError(409, "EMAIL_TAKEN", "이미 있는 이메일이에요")
+        if any(r.get("role") == "admin" and company_id in _company_ids(r) for r in rows):
+            raise ApiError(
+                409,
+                "COMPANY_HAS_ADMIN",
+                "이 회사에는 관리자가 있어요. 그 관리자에게 계정을 받아요",
+            )
+        row = _new_row(name.strip(), email, "admin", password, company_id, password_hash=hashed)
+        if company_id not in _company_ids(row):  # 회사 목록에 없는 회사(읽을 때 버려진다)
+            raise ApiError(409, "UNKNOWN_COMPANY", "등록되지 않은 회사예요")
+        if _name_taken(rows, row["name"], _company_ids(row)):
+            raise ApiError(409, "NAME_TAKEN", "같은 회사에 이름이 같은 계정이 있어요")
+        rows.append(row)
+        _write(path, rows)
+    logger.info("키로 첫 관리자를 만들었다: %s(%s)", email, company_id)
+    token, exp, memberships = _issue_for(row)
+    login = {
+        "token": token,
+        "expires_at": exp,
+        "account": _public(row),
+        "companies": _companies_out(memberships),
+    }
+    return _public(row), login
+
+
+def _swap_company(row: dict[str, Any], old: str, new: str) -> None:
+    """계정 소속의 old 회사를 new 회사로 바꾼다(역할 그대로). 칸 없는 옛 계정은 칸을 적는다."""
+    stored = [m.model_dump(mode="json") for m in memberships_of(row)]
+    row["memberships"] = [{**m, "company_id": new} if m["company_id"] == old else m for m in stored]
+
+
+def move_company(admin_id: str, old: str, new: str) -> tuple[list[str], dict[str, Any]]:
+    """관리자가 회사를 옮긴다(로드맵 7단계 B안): 그 관리자와 연결된 일반회원이 new 회사로.
+
+    연결된 일반회원 = 그 관리자가 만든(데려온) 회원(`linked_admin`). old 회사의 다른 관리자와
+    그들의 회원, 연결 표시가 없는 옛 회원은 그대로 둔다. 옮긴 계정의 지금 세션은 끊는다
+    (세션에 옛 회사가 적혀 있어서). 키 검사·"old 연결을 먼저 끊었는가"는 부르는 쪽
+    (키 파일 잠금 안)에서 한다.
+    돌려주는 값: (옮긴 계정 id들, 관리자 로그인 데이터 {token, expires_at, account, companies})
+    """
+    path = _editable_path()
+    with _file_lock:
+        rows = _bootstrap(path, _read(path))
+        if new not in company_list.company_ids():
+            raise ApiError(409, "UNKNOWN_COMPANY", "등록되지 않은 회사예요")
+        if any(r.get("role") == "admin" and new in _company_ids(r) for r in rows):
+            raise ApiError(
+                409,
+                "COMPANY_HAS_ADMIN",
+                "옮길 회사에 이미 관리자가 있어요. 그 관리자에게 계정을 받아요",
+            )
+        admin = next((r for r in rows if str(r.get("id")) == admin_id), None)
+        if admin is None or admin.get("role") != "admin" or old not in _company_ids(admin):
+            raise ApiError(403, "ROLE_REQUIRED", "이 회사 관리자만 회사를 옮길 수 있어요")
+        members = [
+            r
+            for r in rows
+            if r.get("role") == "member"
+            and r.get("linked_admin") == admin_id
+            and old in _company_ids(r)
+        ]
+        moved = [admin, *members]
+        for row in moved:
+            _swap_company(row, old, new)
+        _write(path, rows)
+    ids = [str(r["id"]) for r in moved]
+    for account_id in ids:
+        human_auth.end_account_sessions(account_id)
+    logger.info("회사를 옮겼다: %s → %s, 계정 %s개(관리자 %s)", old, new, len(ids), admin_id)
+    token, exp, memberships = _issue_for(admin)
+    login = {
+        "token": token,
+        "expires_at": exp,
+        "account": _public(admin),
+        "companies": _companies_out(memberships),
+    }
+    return ids, login
+
+
 @router.post("/password")
 def change_password(body: PasswordChangeIn, authorization: str | None = Header(None)) -> dict:
     """내 비밀번호 바꾸기. 성공하면 이 계정의 기존 세션을 모두 끊고 새 세션을 준다."""
-    human = session_human(authorization)
+    human = session_human(authorization, allow_no_company=True)
     _check_new_password(body.new_password)
     path = _editable_path()
     now = time.time()
@@ -676,12 +816,63 @@ def reset_password(
             raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
         if human.role == "admin" and row.get("role") != "member":
             raise ApiError(403, "ROLE_REQUIRED", "고객사 관리자는 일반회원만 초기화할 수 있어요")
+        if human.role == "admin" and not _in_my_company(human, row):
+            raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
         _set_password(row, body.new_password)
         _write(path, rows)
     _clear_failures(str(row.get("email", "")))
     human_auth.end_account_sessions(account_id)
     logger.info("비밀번호를 초기화했다: %s by %s", account_id, human.name)
     return ok(_public(row))
+
+
+@router.post("/accounts/{account_id}/unlink")
+def unlink_member(account_id: str, authorization: str | None = Header(None)) -> dict:
+    """관리자가 연결한 일반회원을 회사에서 끊는다(그 회원은 연결 대기: 할 수 있는 일이 없다).
+
+    고객사 관리자는 내 세션 회사의 일반회원 중 내가 연결한 회원(또는 연결 표시가 없는 옛 회원)만,
+    운영자는 어느 일반회원이든(그 회원의 모든 회사에서). 계정은 지우지 않고 그 회사 소속만 뺀다.
+    끊은 회원의 지금 세션은 끊는다. 다시 연결하려면 관리자가 회원 연결로 다시 데려온다.
+    """
+    human = session_human(authorization)
+    if human.role not in ("operator", "admin"):
+        raise ApiError(403, "ROLE_REQUIRED", "회원 연결을 끊을 권한이 없어요")
+    path = _editable_path()
+    with _file_lock:
+        rows = _bootstrap(path, _read(path))
+        row = next((r for r in rows if r.get("id") == account_id), None)
+        if row is None:
+            raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
+        if row.get("role") != "member":
+            raise ApiError(409, "MEMBER_ONLY", "일반회원만 연결을 끊을 수 있어요")
+        if human.role == "admin":
+            if not _in_my_company(human, row):
+                raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
+            linked = row.get("linked_admin")
+            if linked and linked != human.account_id:
+                raise ApiError(
+                    403, "NOT_MY_MEMBER", "다른 관리자가 연결한 회원이에요. 그 관리자가 끊어요"
+                )
+            drop = {human.company_id}
+        else:
+            drop = _company_ids(row)
+        row["memberships"] = [
+            m.model_dump(mode="json") for m in memberships_of(row) if m.company_id not in drop
+        ]
+        row.pop("linked_admin", None)
+        _write(path, rows)
+    human_auth.end_account_sessions(account_id)
+    logger.info("회원 연결을 끊었다: %s (%s) by %s", account_id, ",".join(sorted(drop)), human.name)
+    return ok(_public(row))
+
+
+def _last_admin(row: dict[str, Any], rows: list[dict[str, Any]]) -> bool:
+    """이 관리자를 내리면 관리자가 0명이 되는 회사가 있나. 소속이 없으면 예전처럼 전체로 센다."""
+    admins = [r for r in rows if r.get("role") == "admin"]
+    companies = _company_ids(row)
+    if not companies:
+        return len(admins) <= 1
+    return any(sum(1 for r in admins if cid in _company_ids(r)) <= 1 for cid in companies)
 
 
 def _check_role_change(
@@ -695,7 +886,8 @@ def _check_role_change(
         raise ApiError(409, "SELF_ROLE_CHANGE", "자기 역할은 스스로 바꿀 수 없어요")
     if human.role == "admin" and new_role not in CUSTOMER_ROLES:
         raise ApiError(403, "ROLE_REQUIRED", "고객사 관리자는 운영자 역할을 줄 수 없어요")
-    if old_role == "admin" and sum(1 for r in rows if r.get("role") == "admin") <= 1:
+    # 마지막 관리자는 회사마다 센다(그 계정이 속한 회사 중 하나라도 관리자가 그 사람뿐이면 막는다)
+    if old_role == "admin" and _last_admin(row, rows):
         raise ApiError(409, "LAST_ADMIN", "마지막 남은 고객사 관리자는 내릴 수 없어요")
 
 
@@ -767,6 +959,8 @@ def update_account(
             raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
         if human.role == "admin" and row.get("role") not in CUSTOMER_ROLES:
             raise ApiError(403, "ROLE_REQUIRED", "고객사 관리자는 고객사 계정만 바꿀 수 있어요")
+        if human.role == "admin" and not _in_my_company(human, row):
+            raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
         if "policy_editor" in patch and human.role != "operator":
             mine = next((r for r in rows if r.get("id") == human.account_id), {})
             if mine.get("policy_editor") is not True:
@@ -780,7 +974,12 @@ def update_account(
             _check_role_change(human, row, patch["role"], rows)
             row["role"] = patch["role"]
             if role_changed:
-                _sync_company_membership(row, patch["role"], human.company_id)
+                # 운영자는 세션 회사가 없다: 그 계정이 속한 회사들의 역할을 맞춘다
+                targets = (
+                    [human.company_id] if human.role != "operator" else sorted(_company_ids(row))
+                )
+                for cid in targets or [None]:
+                    _sync_company_membership(row, patch["role"], cid)
         if "name" in patch:
             name = patch["name"].strip()
             if not name:

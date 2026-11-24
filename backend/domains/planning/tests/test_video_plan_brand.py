@@ -68,7 +68,9 @@ def test_idol_request_prompt_has_fan_culture_brand_and_topic(
     sent, plan = _sent(monkeypatch, "catbooks")
     assert "온라인 서점" not in sent  # 고정 글자 없음 (회사는 데이터 블록으로만)
     assert "응원봉" in sent and "포토카드" in sent and "팬 굿즈" in sent  # 팬 문화 지시
-    assert "등장인물은 자체 제작 고양이 마스코트, 배경은 아늑한 동네 책방" in sent  # 캣북스 [brand]
+    assert "등장인물은 자체 제작 고양이 마스코트" in sent  # 캣북스 [brand]
+    # 재미 먼저(기본)는 회사 배경에 묶지 않는다 (11/24 PROP-23). 배경 값은 "묶지 않는다" 줄에 남는다
+    assert "회사 배경 '아늑한 동네 책방'에 묶지 않는다" in sent
     assert sent.index("캣북스") > sent.index("방향:")  # 회사 이름은 데이터 블록 안
     # 의뢰 주제·후보 이름은 제안 근거에 있던 값만
     assert '"topic": "아이돌"' in sent or "'topic': '아이돌'" in sent

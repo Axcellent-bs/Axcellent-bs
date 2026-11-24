@@ -105,7 +105,7 @@ async def claim_pull_status(request: AgentRequest) -> AgentResult:
 
 def _unavailable(request: AgentRequest, exc: shop_client.ShopError) -> AgentResult:
     return h._done(
-        request, {"message": "판매 서버에 닿지 못했다", "code": exc.code}, outcome="unavailable"
+        request, {"message": "사이트 서버에 닿지 못했다", "code": exc.code}, outcome="unavailable"
     )
 
 

@@ -271,7 +271,7 @@ async def _inquiry_evidence(request: AgentRequest, period: str) -> InquiryEviden
     unread = sum(1 for status, _, _ in loaded if status == "unread")
     if unread:
         notes.append(
-            f"판매 서버에서 주문 {unread}개를 읽지 못했거나 마감 때문에 건너뛰어 "
+            f"사이트 서버에서 주문 {unread}개를 읽지 못했거나 마감 때문에 건너뛰어 "
             "그 문의는 상품에 붙이지 못했다"
         )
     if counts.truncated:

@@ -156,7 +156,7 @@ export function IncidentResponse({ tick }: { tick: number }) {
             <p className="text-sm"><b>{incidentTitle(current)}</b> <span className="text-ink-500">· {shortDateTime(current.opened_at)} 시작 · {current.status === "open" ? "대응 중" : current.status === "resolved" ? "해결됨" : "사람 확인 필요"}</span></p>
             <Detail incident={current} tick={tick} />
           </div>
-        ) : <Empty>아직 열린 사건이 없습니다. 쇼핑몰에서 문제가 감지되면 총괄 AI가 사건을 열고 여기에 대응 기록이 쌓입니다.</Empty>}
+        ) : <Empty>아직 열린 사건이 없습니다. 회사 사이트에서 문제가 감지되면 총괄 AI가 사건을 열고 여기에 대응 기록이 쌓입니다.</Empty>}
       </ResourceBody>
     </Panel>
   );
