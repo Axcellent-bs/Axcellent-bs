@@ -511,7 +511,7 @@ def setting_rule(style_: str, b: dict[str, str]) -> str:
     if style_ == FUN_FIRST:
         return (
             f"배경은 장면 이야기에 맞게 고른다(회사 배경 '{b['setting_ko']}'에 묶지 않는다. "
-            "책장·책 더미처럼 업종을 보여 주는 소품을 본론에 일부러 넣지 않는다)"
+            "회사 업종을 드러내는 진열대·상품 더미 같은 소품을 본론에 일부러 넣지 않는다)"
         )
     return f"배경은 {b['setting_ko']}"
 
