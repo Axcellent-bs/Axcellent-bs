@@ -1014,14 +1014,24 @@ def check_conclusion(text: str, brief: TrendReportBrief) -> tuple[str | None, st
 
 
 async def recommendation_section(report: TrendReport, llm: Any, *,
-                                 context_id: str | None = None) -> Recommended:  # fmt: skip
-    """(섹션, LLM 호출 수, 한계 문장). 근거가 하나도 없으면 LLM을 부르지 않는다."""
+                                 context_id: str | None = None,
+                                 promo: tuple[str, str] | None = None,
+                                 company_name: str | None = None) -> Recommended:  # fmt: skip
+    """(섹션, LLM 호출 수, 한계 문장). 근거가 하나도 없으면 LLM을 부르지 않는다.
+
+    promo = (promo_style, brand_exposure) (11/24, trend_report_promo.direction).
+    fun_first면 결론·재료를 "재미 먼저, 브랜드는 끝에"로 고른다.
+    product·None이면 지금 규칙 그대로다(None은 방향을 적지 않는다)."""
     from pydantic import ValidationError
 
     from ax_agent_template.llm import LLMFormatError, LLMNotConfiguredError
     from data_agent.llm_budget import no_llm
+    from data_agent.skills import trend_report_promo as tp
 
     out = TrendRecommendationSection(status="running", music_note=MUSIC_NOTE)
+    if promo is not None:
+        out.promo_style, out.brand_exposure = promo  # type: ignore[assignment]
+    fun = promo is not None and promo[0] == tp.FUN_FIRST
     catalog = evidence_catalog(report)
     if not catalog:
         out.status, out.reason = "unknown", "섹션 1~4에 근거가 없어 추천을 만들지 않음"
@@ -1033,6 +1043,17 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
     data.update({f"근거_{k}": word for k, (_, word, _) in catalog.items()})
     memes = meme_ids(report) if wants_memes(brief) else set()
     prompt = _PROMPT + (_MEME_TEXT if memes else "")
+    off = tp.off_industry_ids(report) & set(catalog) if fun else set()
+    heads = tp.industry_heads(brief, company_name) if fun else []
+    if fun:  # 11/24: 재미 먼저, 브랜드는 끝에
+        prompt += tp.fun_prompt(off, promo[1] if promo else tp.END_CARD)
+
+    def conclude(text: str) -> tuple[str | None, str | None]:
+        line, why_ = check_conclusion(text, brief)
+        if line is not None and fun and tp.starts_with_industry(line, heads):
+            return None, tp.STARTS_WITH_PRODUCT
+        return line, why_
+
     try:
         answer = await llm.structured(prompt, _Recommendation, untrusted=data,
                                       context_id=context_id)  # fmt: skip
@@ -1047,26 +1068,34 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
         return out, 1, []
     limits: list[str] = []
     calls = 1
-    out.conclusion, why = check_conclusion(answer.conclusion, brief)
-    out.materials, dropped, partial = pick_materials(answer.materials, catalog)
+    out.conclusion, why = conclude(answer.conclusion)
+    items, kind_dropped = tp.fun_kinds(answer.materials) if fun else (answer.materials, [])
+    out.materials, dropped, partial = pick_materials(items, catalog)
+    dropped = kind_dropped + dropped
     if memes:  # 11/24: 밈 소스 근거를 쓴 재료를 먼저 (나머지 순서는 그대로)
         out.materials = meme_materials_first(out.materials, memes)
+    if fun:  # 업종 밖 재료 먼저, 업종 연결은 하나까지, 업종 밖이 둘보다 적으면 한계
+        out.materials, fun_dropped, fun_limits = tp.fun_materials(out.materials, off)
+        dropped += fun_dropped
+        partial += fun_limits
     limits += partial
     if dropped:
         limits.append("버린 재료: " + "; ".join(dropped))
     if out.conclusion is None:  # 11/23: 결론만 한 번 다시 묻는다 (하루 상한을 거치는 호출 1번)
         calls += 1
         first = why
+        retry = prompt if fun else _PROMPT  # 재미 먼저 지시는 다시 물을 때도 그대로
         try:
-            again = await llm.structured(_PROMPT + _RETRY_TEXT.format(why=why), _Conclusion,
+            again = await llm.structured(retry + _RETRY_TEXT.format(why=why), _Conclusion,
                                          untrusted=data, context_id=context_id)  # fmt: skip
-            out.conclusion, why = check_conclusion(again.conclusion, brief)
+            out.conclusion, why = conclude(again.conclusion)
         except LLMNotConfiguredError as error:
             why = f"{first}; 다시 묻지 못함 ({no_llm(error)})"
         except Exception as error:  # noqa: BLE001 - 형식 오류·호출 실패: 첫 이유 그대로
             why = f"{first}; 다시 묻기 실패 ({type(error).__name__})"
         if out.conclusion is not None:
-            limits.append(f"결론을 숫자 없이 다시 받음 (처음 답: {first})")
+            how = "다시" if first == tp.STARTS_WITH_PRODUCT else "숫자 없이 다시"
+            limits.append(f"결론을 {how} 받음 (처음 답: {first})")
     if out.conclusion is None:
         limits.append(f"결론 한 줄을 버림 ({why})")
     # 11/23: 추천은 결론 한 줄과 재료 하나 이상이 있어야 known (예전에는 결론 또는 콘티)
@@ -1346,8 +1375,16 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
         await save()
 
     async def run_recommendation() -> None:
+        # 11/24 홍보 방향: 회사 설정(화면 저장 → tenant.toml) + 의뢰 문장이 제품을 직접 말하는지
+        from ax_agent_template import tenant
+        from data_agent.skills import trend_report_promo as tp
+
+        promo = tp.direction(report.brief, getattr(request, "request_text", None), tenant.promo())
+        now_id = tenant.current()
+        company_name = next((t["name"] for t in tenant.list_tenants() if t["id"] == now_id), None)
         section, calls, more = await recommendation_section(report, deps.llm,
-                                                            context_id=context_id)  # fmt: skip
+                                                            context_id=context_id, promo=promo,
+                                                            company_name=company_name)  # fmt: skip
         report.sections.recommendation = section
         report.calls.llm += calls
         limits.extend(more)

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DangerRow, Facts, PageHead, SectionHead, StatusChip, Tabs, TONE_DOT, type Tone } from '@/components/connect/parts'
 import CompanyAiTools from '@/components/connect/CompanyAiTools'
+import BrandPromoSettings from '@/components/connect/BrandPromoSettings'
 import type { ConnectionState } from '@/lib/companyConnection'
 import { privateIp, useHosts } from './store'
 import { SERVICES } from './services'
@@ -20,9 +21,13 @@ const DETECTED_NETWORK = '192.168.30.0/24'
 const DEMO_INFO: CompanyInfo = { name: '새벽커피', industry: '카페 체인', network: DETECTED_NETWORK }
 
 // 탭: 사이트·API 연결(예전 이 화면 전체) / 공통 AI 도구 연결(회사 AI 모델·키·예산, 회사 AI 연결 설계)
-const TABS = [{ id: 'site', label: '사이트·API 연결' }, { id: 'ai', label: '공통 AI 도구 연결' }] as const
+// 11/24 브랜드: 홍보 영상 방향(재미 먼저·제품 소개)·브랜드 노출 (BrandPromoSettings)
+const TABS = [{ id: 'site', label: '사이트·API 연결' }, { id: 'ai', label: '공통 AI 도구 연결' }, { id: 'brand', label: '브랜드' }] as const
 type TabId = (typeof TABS)[number]['id']
-const readTab = (): TabId => (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab') === 'ai' ? 'ai' : 'site')
+const readTab = (): TabId => {
+  const t = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') : null
+  return t === 'ai' || t === 'brand' ? t : 'site'
+}
 
 type Phase = { at: 'key' } | { at: 'info'; key: IssuedKey } | { at: 'run'; key: IssuedKey; info: CompanyInfo }
 
@@ -124,7 +129,7 @@ export default function CompanyConnect() {
 
       <Tabs label="회사 연결" items={TABS} value={tab} onPick={setTab} />
 
-      {tab === 'ai' ? <CompanyAiTools me={account?.name ?? ''} /> : <>
+      {tab === 'brand' ? <BrandPromoSettings /> : tab === 'ai' ? <CompanyAiTools me={account?.name ?? ''} /> : <>
       <ConnectionMap company={company?.name ?? null} shop={company ? shop : null} pcs={{ online, total: hosts.length }} />
 
       <section className="space-y-4">

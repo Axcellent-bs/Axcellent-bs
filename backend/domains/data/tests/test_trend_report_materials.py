@@ -27,6 +27,16 @@ from data_agent.skills import trend_report_insight as ti
 from data_agent.trend_report_hooks import top_evidence
 
 
+@pytest.fixture(autouse=True)
+def _product_promo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """11/24: 이 파일은 지금 규칙(제품·업종 소개)의 재료·기획 넘김을 본다.
+    회사 기본값은 재미 먼저라 여기서만 product로 둔다 (재미 먼저: test_trend_report_promo.py)."""
+    from ax_agent_template import tenant
+
+    monkeypatch.setattr(tenant, "promo", lambda name=None: {"promo_style": "product",
+                                                            "brand_exposure": "end_card"})
+
+
 def _load(name: str, file: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(file))
     assert spec and spec.loader

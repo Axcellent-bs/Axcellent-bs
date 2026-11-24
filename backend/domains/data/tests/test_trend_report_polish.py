@@ -38,6 +38,16 @@ from data_agent.skills.domain_profile import INDUSTRIES
 from data_agent.trend_report_store import TrendReportStore
 
 
+@pytest.fixture(autouse=True)
+def _product_promo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """11/24: 이 파일은 지금 규칙(제품·업종 소개)의 보고서·기획 넘김 숫자를 본다.
+    회사 기본값은 재미 먼저라 여기서만 product로 둔다 (재미 먼저: test_trend_report_promo.py)."""
+    from ax_agent_template import tenant
+
+    monkeypatch.setattr(tenant, "promo", lambda name=None: {"promo_style": "product",
+                                                            "brand_exposure": "end_card"})
+
+
 def _load(name: str, file: str) -> Any:
     """tests 폴더는 패키지가 아니라 파일로 읽는다 (dataclass가 모듈을 찾게 sys.modules에 먼저)."""
     spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(file))

@@ -170,7 +170,9 @@
         }
       ],
       "music_note": "저작권 문제없는 라이브러리 음원 중 선택",
-      "materials": []
+      "materials": [],
+      "promo_style": null,
+      "brand_exposure": null
     },
     "theme": {
       "status": "skipped",

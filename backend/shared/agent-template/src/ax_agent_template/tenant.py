@@ -259,6 +259,72 @@ def brand() -> dict[str, str]:
     return out
 
 
+# ---------------------------------------------------------------- 홍보 영상 방향 (11/24)
+# "재미 먼저, 브랜드는 끝에": 대상층이 좋아하는 형식·소재로 웃기고 브랜드는 끝에 붙인다.
+# 같은 `[brand]` 섹션의 두 칸(promo_style·brand_exposure). brand() 5칸과 따로 읽는다
+# (5칸은 영상 프롬프트에 그대로 들어가는 글이라 금칙·길이 규칙이 다르다).
+# 고르는 순서: 화면 저장(시스템 관리 › 회사 연결 › 브랜드, 회사별) → tenant.toml [brand] → 기본값.
+# 화면 저장 파일: `AX_PROMO_FILE` → 회사 연결 파일 옆 `promo_style.json`
+# ({"companies": {"<회사>": {"promo_style": …, "brand_exposure": …}}}).
+# dashboard-api가 쓰고 data가 읽는다
+PROMO_STYLES = ("fun_first", "product")
+BRAND_EXPOSURES = ("end_card", "prop", "caption")
+PROMO_DEFAULTS: dict[str, str] = {"promo_style": "fun_first", "brand_exposure": "end_card"}
+_PROMO_CHOICES = {"promo_style": PROMO_STYLES, "brand_exposure": BRAND_EXPOSURES}
+PROMO_FILE_ENV = "AX_PROMO_FILE"
+PROMO_FILE = "promo_style.json"
+
+
+def promo_file() -> Path | None:
+    raw = os.getenv(PROMO_FILE_ENV, "").strip()
+    if raw:
+        return Path(raw)
+    conn = os.getenv("AX_COMPANY_CONNECTION_FILE", "").strip()
+    return Path(conn).with_name(PROMO_FILE) if conn else None
+
+
+def promo_saved_all() -> dict[str, dict[str, str]]:
+    """화면 저장 파일 전체 (회사 → 칸). 없거나 깨졌으면 빈 dict. 모르는 값은 뺀다."""
+    import json
+
+    path = promo_file()
+    if path is None:
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    companies = data.get("companies") if isinstance(data, dict) else None
+    if not isinstance(companies, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for name, row in companies.items():
+        if isinstance(name, str) and isinstance(row, dict):
+            good = {k: v for k, v in row.items() if k in _PROMO_CHOICES and v in _PROMO_CHOICES[k]}
+            if good:
+                out[name] = good
+    return out
+
+
+def promo_tenant(name: str | None = None) -> dict[str, str]:
+    """회사 설정 파일 tenant.toml [brand]의 두 칸 (모르는 값·없는 칸은 뺀다)."""
+    name = name if name is not None else current()
+    raw = (_read(tenants_dir() / name) or {}) if name else {}
+    given = raw.get("brand")
+    given = given if isinstance(given, dict) else {}
+    return {k: v for k, v in given.items() if k in _PROMO_CHOICES and v in _PROMO_CHOICES[k]}
+
+
+def promo(name: str | None = None) -> dict[str, str]:
+    """회사의 홍보 영상 방향 두 칸 {promo_style, brand_exposure}. 칸마다 화면 저장 → 파일 → 기본값.
+
+    다른 회사의 화면 저장 값은 쓰지 않는다(회사 이름으로 나눠 저장)."""
+    name = name if name is not None else current()
+    saved = promo_saved_all().get(name, {}) if name else {}
+    from_file = promo_tenant(name)
+    return {k: saved.get(k) or from_file.get(k) or d for k, d in PROMO_DEFAULTS.items()}
+
+
 # ---------------------------------------------------------------- 인스타 레이더 계정
 # 회사 연결 › 인스타 레이더 계정에서 저장한 목록.
 # 있으면 회사 설정 trends.toml [instagram] radar_accounts보다 먼저다.

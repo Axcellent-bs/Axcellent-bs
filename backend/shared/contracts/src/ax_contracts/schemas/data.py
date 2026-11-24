@@ -15,7 +15,7 @@ from typing import Any, Literal, Self
 from pydantic import Field, model_validator
 
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel, UtcDatetime
-from ax_contracts.schemas.planning import ReceiveInsightInput
+from ax_contracts.schemas.planning import BrandExposure, PromoStyle, ReceiveInsightInput
 
 # ---------- impact_analysis ----------
 
@@ -4670,6 +4670,10 @@ class TrendRecommendationSection(AxModel):
     music_note: str = ""
     # 아래는 예전 응답은 없다 (11/23). 기획에 넘길 재료 (종류마다 하나, 최대 4)
     materials: list[TrendMaterial] = Field(default_factory=list, max_length=4)
+    # 아래는 예전 응답은 없다 (11/24). 이 보고서 추천이 따른 홍보 방향(회사 설정 + 의뢰 문장).
+    # 기획 넘김(trend_report_insight)이 같은 값을 ReceiveInsightInput에 싣는다. 예전 보고서는 None
+    promo_style: PromoStyle | None = None
+    brand_exposure: BrandExposure | None = None
 
 
 ThemeSeenIn = Literal["radar", "youtube", "llm"]
