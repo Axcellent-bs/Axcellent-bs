@@ -960,7 +960,7 @@ async def read_customer_reaction(data: CampaignBudgetReviewInput, context_id: st
     )
     report = await state().sources.book_issue_report(meta, list(data.product_ids))
     if report is None:
-        return cr.unavailable("고객지원 책별 집계를 받지 못함")
+        return cr.unavailable("고객지원 상품별 집계를 받지 못함")
     return cr.evaluate(report, list(data.product_ids), rules)
 
 

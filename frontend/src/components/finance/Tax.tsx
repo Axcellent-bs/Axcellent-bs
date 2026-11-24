@@ -43,7 +43,7 @@ export function TaxSection({ tick }: { tick: number }) {
   return (
     <div className="space-y-4">
       <Panel id="tax-vat" title="부가세 신고 보조 집계" meta={vat.env?.meta}
-        hint="회사의 과세 매출은 판매 수수료(중개 용역)입니다. 판매자가 파는 도서(면세)·문구(과세)는 판매자 매출이라 회사 신고에 들어가지 않습니다. 신고서가 아니라 신고할 때 쓸 숫자입니다. 책이 면세여도 회사 수수료에는 부가세가 붙는다고 보고 계산합니다(세무사 확인 필요).">
+        hint="회사의 과세 매출은 판매 수수료(중개 용역)입니다. 판매자가 파는 면세·과세 상품은 판매자 매출이라 회사 신고에 들어가지 않습니다. 신고서가 아니라 신고할 때 쓸 숫자입니다. 상품이 면세여도 회사 수수료에는 부가세가 붙는다고 보고 계산합니다(세무사 확인 필요).">
         <ResourceBody res={vat}>
           {(p) => (
             <div className="space-y-4">
@@ -97,7 +97,7 @@ export function TaxSection({ tick }: { tick: number }) {
                 </p>
               </div>
               {p.seller_sales && (
-                <p className="text-sm text-ink-500">참고 · 판매자 상품 매출(회사 매출 아님): 면세(도서) {krw(p.seller_sales.exempt)}, 과세 {krw(p.seller_sales.taxable)}</p>
+                <p className="text-sm text-ink-500">참고 · 판매자 상품 매출(회사 매출 아님): 면세 {krw(p.seller_sales.exempt)}, 과세 {krw(p.seller_sales.taxable)}</p>
               )}
               <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <b>세무사에게 확인할 것</b>

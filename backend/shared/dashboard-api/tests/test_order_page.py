@@ -216,15 +216,15 @@ def test_shop_down_is_502_not_empty(
     assert res.status_code == 502
     error = res.json()["error"]
     assert error["code"] == "UPSTREAM_UNAVAILABLE"
-    assert error["message"].startswith("판매 서버에 연결하지 못했습니다")
+    assert error["message"].startswith("사이트 서버에 연결하지 못했습니다")
 
 
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
-        (httpx.ReadTimeout(""), "판매 서버가 10초 안에 응답하지 않았습니다"),  # 문구가 빈 예외
-        (httpx.ConnectTimeout(""), "판매 서버가 10초 안에 응답하지 않았습니다"),
-        (httpx.RemoteProtocolError(""), "판매 서버와 통신하지 못했습니다(RemoteProtocolError)"),
+        (httpx.ReadTimeout(""), "사이트 서버가 10초 안에 응답하지 않았습니다"),  # 문구가 빈 예외
+        (httpx.ConnectTimeout(""), "사이트 서버가 10초 안에 응답하지 않았습니다"),
+        (httpx.RemoteProtocolError(""), "사이트 서버와 통신하지 못했습니다(RemoteProtocolError)"),
     ],
 )
 def test_unreachable_message_is_plain_words_and_never_empty(

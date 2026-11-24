@@ -367,7 +367,7 @@ export const handoffReasonKo = (code: string | null) => (code ? HANDOFF_REASON_K
 
 export const MEDIA_KIND_KO: Record<string, string> = { image: "이미지", video: "영상", carousel: "캐러셀" };
 export const mediaKindKo = (kind: string | null | undefined) => (kind ? MEDIA_KIND_KO[kind] ?? kind : "확인할 수 없음");
-export const MEDIA_FIELD_KO: Record<string, string> = { season: "계절", color_theme: "색감", category: "책 분류" };
+export const MEDIA_FIELD_KO: Record<string, string> = { season: "계절", color_theme: "색감", category: "상품 분류" };
 export const mediaFieldKo = (name: string) => MEDIA_FIELD_KO[name] ?? name;
 export const FIELD_SOURCE_KO: Record<string, string> = { brief: "자동 · 기획안 근거", default: "자동 · 기본값", admin: "관리자 선택", undecided: "미정" };
 export const KIND_SOURCE_KO: Record<string, string> = { auto: "자동 선택", auto_fallback: "자동 선택 · 이미지로 대체", admin: "관리자 선택" };

@@ -78,7 +78,7 @@ export interface MarketingLive {
 
 // ---------------------------------------------------------------- 쉬운 말
 export const PURPOSE_LIVE_KO: Record<string, string> = { compensation: "보상", campaign: "캠페인" };
-export const CHANNEL_LIVE_KO: Record<string, string> = { banner: "쇼핑몰 배너", email: "메일", sns: "SNS" };
+export const CHANNEL_LIVE_KO: Record<string, string> = { banner: "사이트 배너", email: "메일", sns: "SNS" };
 const COMPONENT_KO: Record<string, string> = { payment: "결제", api: "판매 사이트", db: "주문 DB", search: "검색", shipping: "배송" };
 const HOLD_KO: Record<string, string> = {
   over_threshold: "기준에 걸림", amount_mismatch: "적어 낸 금액과 계산이 다름", unregistered_action: "등록되지 않은 일",
@@ -166,7 +166,7 @@ function groupCoupons(coupons: CouponRun[]): CouponGroup[] {
 export async function loadMarketingLive(): Promise<MarketingLive> {
   const [banners, executions, reviews, incidents] = await Promise.allSettled([
     // 판매 서버는 dashboard-api가 회사 연결 주소로 대신 읽는다
-    getJson<ShopBanner[]>(`${DASHBOARD_API_URL}/api/dashboard/shop/banners`, "회사 쇼핑몰 공지 중계"),
+    getJson<ShopBanner[]>(`${DASHBOARD_API_URL}/api/dashboard/shop/banners`, "회사 사이트 공지 중계"),
     finance.executions(),
     finance.reviews(),
     getJson<IncidentLite[]>(`${DASHBOARD_API_URL}/api/dashboard/incidents`, "화면 중계 서버"),

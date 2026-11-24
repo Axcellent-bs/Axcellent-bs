@@ -89,8 +89,8 @@ function Result<T>({ id, title, hint, res, children }: {
   );
 }
 
-// 문의는 있는데 그 주문이 판매 서버에 없는 경우(판매 서버 자료가 바뀌기 전 옛 문의 등). 서버가 "…주문 …이 판매 서버에 없다"로 답한다
-const orderMissing = (error: string | null | undefined): boolean => !!error && error.includes("판매 서버에 없다");
+// 문의는 있는데 그 주문이 사이트 서버에 없는 경우(사이트 서버 자료가 바뀌기 전 옛 문의 등). 서버가 "…주문 …이 사이트 서버에 없다"로 답한다
+const orderMissing = (error: string | null | undefined): boolean => !!error && error.includes("사이트 서버에 없다");
 
 export function InquiryCheck({ tick, selected, onSelect }: { tick: number; selected: number | null; onSelect: (id: number) => void }) {
   // 문의 목록은 상담 콘솔과 같은 API. 못 받아도 번호를 직접 넣어 볼 수 있다

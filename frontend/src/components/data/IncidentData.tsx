@@ -160,7 +160,7 @@ function RecoveryCard({ inc }: { inc: OrchIncident }) {
       {!step ? <Empty>이번 사건에는 복구 확인 단계가 없습니다.</Empty> : step.status === "skipped" && signal ? (
         <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-surface-2 px-4 py-3 text-sm">
           <Chip label="복구됨" tone={TONE.ok} />
-          <span className="tabular-nums text-ink-700">쇼핑몰 정상 복귀 신호 {signal}</span>
+          <span className="tabular-nums text-ink-700">회사 사이트 정상 복귀 신호 {signal}</span>
         </div>
       ) : allEmpty ? (
         <p className="rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-500">인프라 AI의 복구 확인 기록이 아직 없어요</p>
@@ -330,7 +330,7 @@ export function IncidentData({ list, detail, selected, onSelect }: {
   if (incidents.length === 0) {
     return (
       <Empty>
-        아직 장애 사건이 없어요. 쇼핑몰에서 결제 장애가 감지되면 총괄 AI가 사건을 열고, 데이터 AI가 센 실패 주문·영향 고객·미결제 금액이 여기에 나타납니다.
+        아직 장애 사건이 없어요. 회사 사이트에서 결제 장애가 감지되면 총괄 AI가 사건을 열고, 데이터 AI가 센 실패 주문·영향 고객·미결제 금액이 여기에 나타납니다.
       </Empty>
     );
   }
@@ -352,7 +352,7 @@ export function IncidentData({ list, detail, selected, onSelect }: {
             <Stat label="확인·환불 필요 (시간 초과 결제)" value={timeouts ?? UNKNOWN} tone={timeouts == null ? "text-ink-500" : ""} />
             <Stat label="복구까지 걸린 시간" value={duration(inc.metrics?.mttr_seconds)} sub="감지 → 정상 복귀" tone={num(inc.metrics?.mttr_seconds) == null ? "text-ink-500" : ""} />
           </div>
-          <Panel id="data-flow" title="데이터 AI 처리 흐름" hint={`${incidentTitle(inc)} · ${shortDateTime(inc.opened_at)} 시작. 감지는 쇼핑몰 모니터·Zabbix가 하고, 데이터 AI는 총괄 AI 요청을 받아 일합니다.`}>
+          <Panel id="data-flow" title="데이터 AI 처리 흐름" hint={`${incidentTitle(inc)} · ${shortDateTime(inc.opened_at)} 시작. 감지는 회사 사이트 모니터·Zabbix가 하고, 데이터 AI는 총괄 AI 요청을 받아 일합니다.`}>
             <Flow inc={inc} />
           </Panel>
           <RootCauseCard inc={inc} />

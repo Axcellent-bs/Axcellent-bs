@@ -911,7 +911,7 @@ export function todoTab(t: Pick<FinanceTodo, "kind" | "link">): FinanceTab {
 }
 
 // ---------------------------------------------------------------- 장애 이벤트 표시 도우미
-export const COMPONENT_KO: Record<string, string> = { payment: "결제", order: "주문", shop: "쇼핑몰", search: "검색", delivery: "배송" };
+export const COMPONENT_KO: Record<string, string> = { payment: "결제", order: "주문", shop: "회사 사이트", search: "검색", delivery: "배송" };
 export const componentKo = (c: string | null | undefined) => (c ? COMPONENT_KO[c] ?? "서비스" : null);
 
 /**

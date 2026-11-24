@@ -163,7 +163,7 @@ export default function VoicePage() {
         </div>
         {!humanTokenSet && <p className="mt-2 text-xs text-amber-800">이 계정에는 결정 권한이 없어 넘기기 버튼이 꺼져 있습니다. 결정 권한이 있는 담당자 계정으로 들어오면 켜집니다.</p>}
         {data.groups.length === 0 ? (
-          <p className="mt-3 text-xs text-ink-500">아직 쌓인 아이디어가 없습니다. 쇼핑몰에서 고객이 보낸 아이디어가 여기에 모입니다.</p>
+          <p className="mt-3 text-xs text-ink-500">아직 쌓인 아이디어가 없습니다. 회사 사이트에서 고객이 보낸 아이디어가 여기에 모입니다.</p>
         ) : (
           <ul className="mt-3 grid gap-3 md:grid-cols-2">
             {data.groups.map((g) => (

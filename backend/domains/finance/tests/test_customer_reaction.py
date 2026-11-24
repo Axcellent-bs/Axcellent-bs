@@ -154,7 +154,7 @@ def crx(result: dict) -> list[dict]:
 def test_a_flagged_book_halves_the_limit_and_the_opinion_becomes_reduce() -> None:
     got = decide(look([row("prd_1", sold=120, claims=18, defect=6, title="고양이 그림책")]))
     assert got["decision"] == "conditional" and got["approved_limit_krw"] == 500_000
-    assert any("고양이 그림책" in r and "판매 120권" in r for r in got["reasons"])
+    assert any("고양이 그림책" in r and "판매 120개" in r for r in got["reasons"])
     assert crx(got) and "요청 금액의 50%" in crx(got)[0]["detail"]
     assert cp.DECISION_KO[got["decision"]] == "줄여서 권장"
 
@@ -192,7 +192,7 @@ def test_a_cut_below_the_minimum_viable_amount_becomes_not_recommended_by_brk_00
 def test_a_book_that_is_fine_does_not_change_the_opinion() -> None:
     got = decide(look([row("prd_1", sold=100, claims=1)]))
     assert got["decision"] == "approved" and got["approved_limit_krw"] == 1_000_000
-    assert crx(got) and "걸린 책 없음" in crx(got)[0]["detail"]
+    assert crx(got) and "걸린 상품 없음" in crx(got)[0]["detail"]
 
 
 def test_few_sales_keep_the_opinion_and_say_so_in_the_reasons_and_the_rule_record() -> None:

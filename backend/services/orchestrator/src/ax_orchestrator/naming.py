@@ -18,7 +18,7 @@ COMPONENT_KO = {
 }
 SUBJECT_KO = {
     "payment": "결제가",
-    "api": "쇼핑몰이",
+    "api": "회사 사이트가",
     "db": "주문 DB가",
     "search": "검색이",
     "shipping": "배송이",
@@ -66,7 +66,7 @@ TERM_KO = {
     "error_rate_5xx": "서버 오류율",
     "p95_latency_ms": "응답 시간",
     "order_fail_rate": "주문 실패율",
-    "shop-api": "쇼핑몰 서버",
+    "shop-api": "사이트 서버",
     "payment": "결제",
     "shipping": "배송",
     "search": "검색",

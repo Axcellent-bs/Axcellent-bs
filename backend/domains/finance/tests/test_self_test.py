@@ -71,7 +71,7 @@ async def test_missing_data_sources_only_warn() -> None:
     result = await _run(_network({"safety"}))
     assert result["result"] == "warn"
     bad = {c["name"]: c["level"] for c in result["checks"] if not c["ok"]}
-    assert bad == {"쇼핑몰 연결": "warn", "데이터 AI 연결": "warn"}
+    assert bad == {"회사 사이트 연결": "warn", "데이터 AI 연결": "warn"}
 
 
 @pytest.mark.asyncio

@@ -65,7 +65,7 @@ def _unavailable(request: AgentRequest, books: sb.SettlementBooks) -> AgentResul
         request.meta,
         TaskStatus.FAILED,
         "shop_unavailable",
-        f"판매 서버에서 정산 자료를 받지 못했다({missing}). 정산금을 0으로 채우지 않는다",
+        f"사이트 서버에서 정산 자료를 받지 못했다({missing}). 정산금을 0으로 채우지 않는다",
     )
 
 
@@ -210,14 +210,14 @@ async def request_week(period: str | None, requested_by: str, meta: RequestMeta)
         return RequestOutcome(
             error=(
                 "shop_unavailable",
-                f"판매 서버에서 정산 자료를 받지 못했다({missing}). 정산금을 0으로 채우지 않는다",
+                f"사이트 서버에서 정산 자료를 받지 못했다({missing}). 정산금을 0으로 채우지 않는다",
             )
         )
     if ORDERS_PARTIAL in books.unavailable:
         return RequestOutcome(
             error=(
                 ORDERS_PARTIAL,
-                "판매 서버 주문 일부를 읽지 못해 정산금이 모자랄 수 있다. "
+                "사이트 서버 주문 일부를 읽지 못해 정산금이 모자랄 수 있다. "
                 "다 읽은 뒤 지급을 요청한다",
             )
         )

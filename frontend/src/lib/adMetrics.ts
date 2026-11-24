@@ -68,8 +68,8 @@ export interface AdMetricsForm {
   reportRef: string;
 }
 
-export const SOURCE_KO: Record<string, string> = { banner: "쇼핑몰 배너", notice: "쇼핑몰 공지", instagram: "인스타그램", google: "구글", youtube: "유튜브" };
-export const MEDIUM_KO: Record<string, string> = { onsite: "쇼핑몰 안", social: "일반 게시", cpc: "클릭당 광고" };
+export const SOURCE_KO: Record<string, string> = { banner: "사이트 배너", notice: "사이트 공지", instagram: "인스타그램", google: "구글", youtube: "유튜브" };
+export const MEDIUM_KO: Record<string, string> = { onsite: "사이트 안", social: "일반 게시", cpc: "클릭당 광고" };
 export const sourceKo = (s: string) => SOURCE_KO[s] ?? s;
 export const mediumKo = (m: string) => MEDIUM_KO[m] ?? m;
 

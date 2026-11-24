@@ -131,7 +131,7 @@
     },
     {
       "id": "submit_idea",
-      "description": "고객이 쇼핑몰에서 '이런 걸 해 주면 좋겠다'는 아이디어(이벤트·혜택 요청, 새 기능, 개선, 상품 제안)를 문의·불만과 따로 남긴다. 글은 untrusted.text로만 받고 개인정보는 가려 저장하며, 영역(배송·결제·상품·쿠폰/적립/이벤트·사이트 사용성)은 단어 규칙으로 코드가 붙인다. 환불·취소·불량 같은 문제는 받지 않고 문의로 안내하며(use_inquiry), 광고·링크(spam)·너무 짧은 글(too_short)·하루 5건 초과(rate_limited)도 받지 않는다. 같은 고객의 같은 글은 한 번만 쌓는다. 상태 변경이라 execute()를 거친다.",
+      "description": "고객이 회사 사이트에서 '이런 걸 해 주면 좋겠다'는 아이디어(이벤트·혜택 요청, 새 기능, 개선, 상품 제안)를 문의·불만과 따로 남긴다. 글은 untrusted.text로만 받고 개인정보는 가려 저장하며, 영역(배송·결제·상품·쿠폰/적립/이벤트·사이트 사용성)은 단어 규칙으로 코드가 붙인다. 환불·취소·불량 같은 문제는 받지 않고 문의로 안내하며(use_inquiry), 광고·링크(spam)·너무 짧은 글(too_short)·하루 5건 초과(rate_limited)도 받지 않는다. 같은 고객의 같은 글은 한 번만 쌓는다. 상태 변경이라 execute()를 거친다.",
       "input_schema": "agents/support/src/support_agent/idea_handlers.py#SubmitIdeaInput",
       "output_schema": "agents/support/src/support_agent/idea_handlers.py#SubmitIdeaOutput",
       "grade": "A",
@@ -181,7 +181,7 @@
     },
     {
       "id": "inquiry_pull_status",
-      "description": "판매 서버 문의함을 AXcellent 고객지원이 마지막으로 읽은 결과를 알려 준다: 연결됨·끊김(connected, last_error), 마지막 시도·성공 시각, 문의함에 남은 문의 수(pending), 읽어 처리한 수·실패 수(ingested_total·failed_total), 읽기 켜짐 여부와 간격. 숫자는 읽기 루프가 센 값이고 재시작하면 비워진다. 읽기만 한다.",
+      "description": "사이트 서버 문의함을 AXcellent 고객지원이 마지막으로 읽은 결과를 알려 준다: 연결됨·끊김(connected, last_error), 마지막 시도·성공 시각, 문의함에 남은 문의 수(pending), 읽어 처리한 수·실패 수(ingested_total·failed_total), 읽기 켜짐 여부와 간격. 숫자는 읽기 루프가 센 값이고 재시작하면 비워진다. 읽기만 한다.",
       "input_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#InquiryPullStatusInput",
       "output_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#InquiryPullStatus",
       "grade": "read",
@@ -191,7 +191,7 @@
     },
     {
       "id": "list_stuck_intake",
-      "description": "판매 서버가 여러 번 읽지 못해 실패로 빼 둔 문의·클레임 접수 목록을 알려 준다(번호 seq, 종류 kind, 사유 코드 reason, 시도 횟수, 실패 시각). 고객이 쓴 글은 싣지 않는다. 사람이 확인하고 다시 시도하는 데 쓴다. 읽기만 한다.",
+      "description": "사이트 서버가 여러 번 읽지 못해 실패로 빼 둔 문의·클레임 접수 목록을 알려 준다(번호 seq, 종류 kind, 사유 코드 reason, 시도 횟수, 실패 시각). 고객이 쓴 글은 싣지 않는다. 사람이 확인하고 다시 시도하는 데 쓴다. 읽기만 한다.",
       "input_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#StuckIntakeInput",
       "output_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#StuckIntake",
       "grade": "read",
@@ -201,7 +201,7 @@
     },
     {
       "id": "retry_stuck_intake",
-      "description": "실패로 빼 둔 접수(kind=inquiry|claim, seq)를 판매 서버에서 다시 읽는 차례로 돌린다. 클레임은 고객 화면에도 다시 접수됨으로 보인다. 판매 서버의 접수 상태를 바꾸므로 execute()를 거친다.",
+      "description": "실패로 빼 둔 접수(kind=inquiry|claim, seq)를 사이트 서버에서 다시 읽는 차례로 돌린다. 클레임은 고객 화면에도 다시 접수됨으로 보인다. 사이트 서버의 접수 상태를 바꾸므로 execute()를 거친다.",
       "input_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#RetryStuckIntakeInput",
       "output_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#RetryStuckIntake",
       "grade": "A",
@@ -403,7 +403,7 @@
     },
     {
       "id": "book_issue_stats",
-      "description": "기간(day·week·month) 안의 클레임을 상품(책)별로 코드가 센다: 클레임 수(종류별)·불량 등 사유 건수·반품 입고 수량·지급한 환불액. 이벤트 후보에서 불만 많은 책을 거를 근거다. 묶는 열쇠는 상품 ID이고 상품 ID가 없는 클레임은 claims_without_product로 알린다. 행마다 사유 코드별 클레임 수(claims_by_reason)를 담고, product_ids를 주면 그 상품은 클레임·문의가 0건이어도 모두 한 행씩 돌려준다(min_claims·min_inquiries·limit을 무시). 문의는 문의 서비스에서 주문별로 읽어 상품에 붙인다(주문 단위, include_inquiries=false면 읽지 않음). 판매 수량은 판매 서버의 판매 집계(sales-summary, 7일씩 읽고 5분 캐시, 그 경로가 없는 옛 판매 서버는 주문 목록)에서 결제 끝난 주문 기준으로 읽어 클레임 수량 대비 비율(claim_rate)을 낸다. 끝까지 읽지 못하면(페이지 상한·연결 실패·마감) 비율을 내지 않고 이유를 missing에 적는다(include_sales=false면 읽지 않음). 요청한 고객사(meta.tenant_id)의 클레임만 센다. 문의를 일부 주문만 읽었으면(읽지 못한 주문·상품 ID 없는 주문·주문 200개 상한·마감) 문의 없는 상품도 0이 아니라 비우고 inquiries_complete=false로 알린다. 고객 이름·구매자 ID·글은 담지 않는다. LLM을 쓰지 않는다.",
+      "description": "기간(day·week·month) 안의 클레임을 상품별로 코드가 센다: 클레임 수(종류별)·불량 등 사유 건수·반품 입고 수량·지급한 환불액. 이벤트 후보에서 불만 많은 상품을 거를 근거다. 묶는 열쇠는 상품 ID이고 상품 ID가 없는 클레임은 claims_without_product로 알린다. 행마다 사유 코드별 클레임 수(claims_by_reason)를 담고, product_ids를 주면 그 상품은 클레임·문의가 0건이어도 모두 한 행씩 돌려준다(min_claims·min_inquiries·limit을 무시). 문의는 문의 서비스에서 주문별로 읽어 상품에 붙인다(주문 단위, include_inquiries=false면 읽지 않음). 판매 수량은 사이트 서버의 판매 집계(sales-summary, 7일씩 읽고 5분 캐시, 그 경로가 없는 옛 사이트 서버는 주문 목록)에서 결제 끝난 주문 기준으로 읽어 클레임 수량 대비 비율(claim_rate)을 낸다. 끝까지 읽지 못하면(페이지 상한·연결 실패·마감) 비율을 내지 않고 이유를 missing에 적는다(include_sales=false면 읽지 않음). 요청한 고객사(meta.tenant_id)의 클레임만 센다. 문의를 일부 주문만 읽었으면(읽지 못한 주문·상품 ID 없는 주문·주문 200개 상한·마감) 문의 없는 상품도 0이 아니라 비우고 inquiries_complete=false로 알린다. 고객 이름·구매자 ID·글은 담지 않는다. LLM을 쓰지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/book_issue.py#BookIssueInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/book_issue.py#BookIssueReport",
       "grade": "read",
@@ -453,7 +453,7 @@
     },
     {
       "id": "claim_pull_status",
-      "description": "판매 서버 클레임함·반품 입고를 읽는 서버(claims)의 읽기 상태를 알려 준다: 연결됨·끊김(connected, last_error), 클레임함에 남은 수(claims_pending)·실패로 뺀 수(claims_inbox_failed), 읽어 처리한 수·실패 수, 반품 입고 처리 수. 문의를 읽는 서버와 저장소가 따로라 따로 센다. 읽기만 한다.",
+      "description": "사이트 서버 클레임함·반품 입고를 읽는 서버(claims)의 읽기 상태를 알려 준다: 연결됨·끊김(connected, last_error), 클레임함에 남은 수(claims_pending)·실패로 뺀 수(claims_inbox_failed), 읽어 처리한 수·실패 수, 반품 입고 처리 수. 문의를 읽는 서버와 저장소가 따로라 따로 센다. 읽기만 한다.",
       "input_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#ClaimPullStatusInput",
       "output_schema": "agents/support/src/support_agent/inquiry_pull_handlers.py#ClaimPullStatus",
       "grade": "read",
@@ -505,7 +505,7 @@
     },
     {
       "id": "inquiry_order_counts",
-      "description": "기간(day·week·month) 안의 문의를 주문별로 센다(문의 건수·분류 코드별). 책별 집계(book_issue_stats)가 문의를 상품에 붙일 때 클레임 서비스가 부른다. 주문 ID·건수·분류 코드뿐이고 고객 이름·구매자 ID·글은 담지 않는다. 요청한 고객사(meta.tenant_id)의 문의만 센다. 주문이 200개를 넘으면 문의 많은 순으로 자르고 truncated로 알린다. LLM을 쓰지 않는다.",
+      "description": "기간(day·week·month) 안의 문의를 주문별로 센다(문의 건수·분류 코드별). 상품별 집계(book_issue_stats)가 문의를 상품에 붙일 때 클레임 서비스가 부른다. 주문 ID·건수·분류 코드뿐이고 고객 이름·구매자 ID·글은 담지 않는다. 요청한 고객사(meta.tenant_id)의 문의만 센다. 주문이 200개를 넘으면 문의 많은 순으로 자르고 truncated로 알린다. LLM을 쓰지 않는다.",
       "input_schema": "agents/support/src/support_agent/book_issue_schemas.py#InquiryOrderCountsInput",
       "output_schema": "agents/support/src/support_agent/book_issue_schemas.py#InquiryOrderCounts",
       "grade": "read",

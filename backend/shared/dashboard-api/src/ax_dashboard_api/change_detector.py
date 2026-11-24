@@ -86,7 +86,7 @@ TOKEN_NAME = "dashboard-api"
 CANCELLED_STATUSES = frozenset({"cancelled"})
 
 NO_TENANT = "회사가 정해지지 않아 읽지 않아요 (회사 연결 확인)"
-TOKEN_NOT_SET = "dashboard-api 토큰이 없어 판매 서버를 부를 수 없어요"
+TOKEN_NOT_SET = "dashboard-api 토큰이 없어 사이트 서버를 부를 수 없어요"
 
 # 테스트에서 httpx.MockTransport로 바꿔 끼운다
 TRANSPORT: httpx.AsyncBaseTransport | None = None
@@ -284,7 +284,7 @@ class _Shop:
         try:
             return await self.client.get(f"{self.base}{path}", params=params, headers=self.headers)
         except httpx.HTTPError as error:
-            raise DetectorError(f"판매 서버에 닿지 못했어요 ({type(error).__name__})") from None
+            raise DetectorError(f"사이트 서버에 닿지 못했어요 ({type(error).__name__})") from None
 
     @staticmethod
     def _failure(res: httpx.Response) -> DetectorError:
@@ -295,7 +295,7 @@ class _Shop:
         except (ValueError, AttributeError):
             pass
         tail = f" {code}" if code else ""
-        return DetectorError(f"판매 서버 응답 HTTP {res.status_code}{tail}")
+        return DetectorError(f"사이트 서버 응답 HTTP {res.status_code}{tail}")
 
     async def sales_export(self, cursor: str | None) -> ShopSalesExportResult:
         params: dict[str, Any] = {"limit": PAGE_LIMIT}
@@ -477,7 +477,7 @@ async def _pages(
             _save(state)
             return
         if not page.next_cursor or page.next_cursor == cursor:
-            raise DetectorError("판매 서버가 더 있다면서 다음 커서를 주지 않았어요")
+            raise DetectorError("사이트 서버가 더 있다면서 다음 커서를 주지 않았어요")
         _save(state)
 
 

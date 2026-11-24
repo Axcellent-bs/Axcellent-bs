@@ -286,7 +286,7 @@ def test_empty_shop_is_missing_orders_not_zero_sales(monkeypatch: pytest.MonkeyP
     books = asyncio.run(bk.live_books(_transport([], orders=[])))
     assert "orders" in books.unavailable and books.unavailable_core()
     assert books.notes["orders_empty"] == bk.EMPTY_SHOP_NOTE
-    assert books.meta()["notes"]["orders_empty"].startswith("판매 서버에 주문 기록이 하나도")
+    assert books.meta()["notes"]["orders_empty"].startswith("사이트 서버에 주문 기록이 하나도")
     # 주문이 한 건이라도 있으면 평소대로 읽는다
     books = asyncio.run(bk.live_books(_transport([], orders=[SHOP_ORDER])))
     assert "orders" not in books.unavailable and "orders_empty" not in books.notes

@@ -141,7 +141,7 @@ export function ReconciliationSection({ tick }: { tick: number }) {
 
               <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {([
-                  ["주문 금액 합계", r.totals.order_amount, "우리 쇼핑몰 기록"],
+                  ["주문 금액 합계", r.totals.order_amount, "회사 사이트 기록"],
                   ["PG 금액 합계", r.totals.pg_amount, "결제대행사가 알려 준 금액"],
                   ["PG 수수료", r.totals.pg_fee, "결제대행사가 떼는 돈"],
                   ["입금 예정액", r.totals.pay_out, "수수료를 빼고 받을 돈"],

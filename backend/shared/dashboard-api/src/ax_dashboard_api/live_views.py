@@ -57,10 +57,10 @@ def unreachable_reason(error: httpx.HTTPError) -> str:
     시간 초과 예외는 문구가 비어 있어서 예외 종류로 고른다.
     """
     if isinstance(error, httpx.TimeoutException):
-        return f"판매 서버가 {TIMEOUT_SECONDS:g}초 안에 응답하지 않았습니다"
+        return f"사이트 서버가 {TIMEOUT_SECONDS:g}초 안에 응답하지 않았습니다"
     if isinstance(error, httpx.ConnectError):
-        return "판매 서버에 연결하지 못했습니다(꺼져 있거나 회사 연결의 주소가 다를 수 있습니다)"
-    return f"판매 서버와 통신하지 못했습니다({type(error).__name__})"
+        return "사이트 서버에 연결하지 못했습니다(꺼져 있거나 회사 연결의 주소가 다를 수 있습니다)"
+    return f"사이트 서버와 통신하지 못했습니다({type(error).__name__})"
 
 
 async def _shop_get(
@@ -76,7 +76,7 @@ def shop_failure(res: httpx.Response) -> ApiError:
     from ax_dashboard_api.shop_relay import not_connected_error
 
     return not_connected_error(res) or ApiError(
-        502, "UPSTREAM_ERROR", f"판매 서버에서 오류가 났습니다 (HTTP {res.status_code})"
+        502, "UPSTREAM_ERROR", f"사이트 서버에서 오류가 났습니다 (HTTP {res.status_code})"
     )
 
 
@@ -114,7 +114,9 @@ async def _shop_orders(params: dict[str, Any], max_rows: int) -> list[dict[str, 
         if items is None:
             items = []
         if not isinstance(items, list):
-            raise ApiError(502, "UPSTREAM_ERROR", "판매 서버가 주문 목록이 아닌 응답을 보냈습니다")
+            raise ApiError(
+                502, "UPSTREAM_ERROR", "사이트 서버가 주문 목록이 아닌 응답을 보냈습니다"
+            )
         found.extend(items)
         cursor = meta.get("next_cursor")
         if not cursor or len(found) > max_rows:
@@ -329,7 +331,7 @@ async def order_detail(order_no: str) -> OrderDetail:
     """판매 서버의 주문 한 건을 화면 모델로 맞춘다. 없는 값은 None이다."""
     o = await _shop_get(f"/api/shop/orders/{order_no}", not_found="주문을 찾을 수 없다")
     if not isinstance(o, dict) or "order_id" not in o:
-        raise ApiError(502, "UPSTREAM_ERROR", "판매 서버가 주문이 아닌 응답을 보냈습니다")
+        raise ApiError(502, "UPSTREAM_ERROR", "사이트 서버가 주문이 아닌 응답을 보냈습니다")
     status = str(o.get("status") or "")
     return OrderDetail(
         order_no=o["order_id"],

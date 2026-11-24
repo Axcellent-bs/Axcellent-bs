@@ -472,7 +472,7 @@ def _similar(inc: Incident) -> dict[str, Any]:
 
 # 쇼핑몰 복구 신호(`shop.recovered`)가 알려 준 "어떻게 풀렸는지" → 조치 문장. 사실만 옮긴다
 RECOVERY_ACTION = {
-    ("fault_released", "admin"): "사람(쇼핑몰 운영자)이 결제 장애 상태를 해제해 정상화",
+    ("fault_released", "admin"): "사람(사이트 운영자)이 결제 장애 상태를 해제해 정상화",
     ("fault_released", "infra"): "인프라 AI가 결제 장애 상태를 해제해 정상화",
     ("metrics_normal", None): "따로 조치한 기록 없이 결제 지표가 정상으로 돌아옴",
 }

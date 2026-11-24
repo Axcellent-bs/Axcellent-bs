@@ -67,7 +67,7 @@ export default function Integrations({ onState, embedded = false, tenant }: { on
 
   return (
     <section className="space-y-4">
-      <SectionHead as={embedded ? 'h3' : 'h2'} title={embedded ? 'AXcellent 규격 API 연결' : '회사 판매 서버'}
+      <SectionHead as={embedded ? 'h3' : 'h2'} title={embedded ? 'AXcellent 규격 API 연결' : '회사 사이트 서버'}
         desc="부서 AI가 주문·상품·구매자를 읽는 곳이에요. 바꾸면 다시 켜지 않아도 모든 부서 AI가 바로 따라가요."
         right={status} />
 
@@ -88,14 +88,14 @@ export default function Integrations({ onState, embedded = false, tenant }: { on
           )}
 
           <form onSubmit={test} className="space-y-3 border-t border-ink-100 pt-5">
-            <SectionHead as="h3" title="회사 판매 서버 주소" desc="연결 확인을 먼저 하고, 세 항목을 모두 통과하면 저장할 수 있어요. 저장하면 회사 판매 서버로 바뀌어요." />
+            <SectionHead as="h3" title="회사 사이트 서버 주소" desc="연결 확인을 먼저 하고, 세 항목을 모두 통과하면 저장할 수 있어요. 저장하면 회사 사이트 서버로 바뀌어요." />
             <div className="flex flex-wrap gap-2">
-              <input id="shop-api-url" aria-label="판매 서버 주소" className="field min-w-[260px] flex-1 font-mono" placeholder="http://10.20.30.40:8080/shop-api"
+              <input id="shop-api-url" aria-label="사이트 서버 주소" className="field min-w-[260px] flex-1 font-mono" placeholder="http://10.20.30.40:8080/shop-api"
                 value={url} onChange={(e) => { setUrl(e.target.value); setResult(null) }} />
               <button className="btn-ghost" disabled={busy !== null || !url.trim() || !canWrite}>{busy === 'test' ? '확인 중…' : '1. 연결 확인'}</button>
               <button type="button" className="btn-primary" onClick={save} disabled={busy !== null || !(tested || pendingSwitch) || !canWrite}>{busy === 'save' ? '저장 중…' : '2. 저장'}</button>
             </div>
-            {pendingSwitch && <p role="status" className="text-sm text-amber-800">아직 내부 데이터로 읽고 있어요. 저장하면 회사 판매 서버로 바꿔요</p>}
+            {pendingSwitch && <p role="status" className="text-sm text-amber-800">아직 내부 데이터로 읽고 있어요. 저장하면 회사 사이트 서버로 바꿔요</p>}
             {result && (
               <ul className="grid gap-2 sm:grid-cols-3" aria-label="연결 확인 결과">
                 {result.checks.map((c) => (
@@ -106,7 +106,7 @@ export default function Integrations({ onState, embedded = false, tenant }: { on
                 ))}
               </ul>
             )}
-            <p className="text-xs leading-5 text-amber-800">판매 서버를 바꾸면 확정하지 않은 결산 숫자가 바뀔 수 있어요. 확정한 결산은 그대로이고, 차이는 재무 화면에 결산 차이로 보여요.</p>
+            <p className="text-xs leading-5 text-amber-800">사이트 서버를 바꾸면 확정하지 않은 결산 숫자가 바뀔 수 있어요. 확정한 결산은 그대로이고, 차이는 재무 화면에 결산 차이로 보여요.</p>
             {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           </form>
 
@@ -125,13 +125,13 @@ export default function Integrations({ onState, embedded = false, tenant }: { on
             )}
             <More summary="어떤 주소를 쓸 수 있나요">
               <p>사내 주소(192.168.x.x 등)는 바로 돼요. 사내 밖 주소는 설치 운영자가 허용 목록(AX_COMPANY_SHOP_ALLOWED_HOSTS)에 넣은 https 주소만 돼요.</p>
-              <p>연결 해제는 저장한 주소를 지우고 기본 판매 서버로 돌아가요.</p>
+              <p>연결 해제는 저장한 주소를 지우고 기본 사이트 서버로 돌아가요.</p>
             </More>
           </div>
         </div>
 
         {state?.connection && (
-          <DangerRow note={confirmClear ? '저장한 회사 판매 서버 주소를 지우고 기본 판매 서버로 돌아가요.' : '저장한 주소를 지울 때만 써요.'}>
+          <DangerRow note={confirmClear ? '저장한 회사 사이트 서버 주소를 지우고 기본 사이트 서버로 돌아가요.' : '저장한 주소를 지울 때만 써요.'}>
             {confirmClear ? (
               <>
                 <button type="button" className="btn-quiet" onClick={() => setConfirmClear(false)}>취소</button>

@@ -119,6 +119,6 @@ def evaluate(
 def flag_text(flag: Flag) -> str:
     rate = "비율 모름" if flag.claim_rate is None else f"클레임 {flag.claim_rate:.0%}"
     return (
-        f"책 '{flag.title}': 판매 {flag.sold_qty}권 중 {rate}"
+        f"상품 '{flag.title}': 판매 {flag.sold_qty}개 중 {rate}"
         f"(클레임 {flag.claim_count}건·불량 {flag.defect_claim_count}건)"
     )

@@ -27,7 +27,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from ax_agent_template import company_ai
+from ax_agent_template import company_ai, company_scope
 from ax_agent_template import config as template_config
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas.orchestrator_chat import (
@@ -44,7 +44,7 @@ TITLE_CHARS = 30
 ANSWER_TIMEOUT_SEC = 120
 
 SYSTEM_PROMPT = (
-    "너는 회사(온라인 쇼핑몰 중개 플랫폼)의 총괄 AI다. 사람이 지금 장애(이슈)가 어디까지 왔는지, "
+    "너는 회사의 총괄 AI다. 사람이 지금 장애(이슈)가 어디까지 왔는지, "
     "어느 부서에서 오래 걸렸는지, 승인 대기가 있는지 물으면 아래 데이터의 facts로만 답한다.\n"
     "- facts에 없는 숫자·시각·상태는 말하지 않는다. 모르면(unavailable 포함) 모른다고 하고 "
     "총괄 화면의 이슈 목록에서 확인하라고 안내한다.\n"
@@ -214,7 +214,10 @@ class ChatService:
         }
         try:
             out = await asyncio.wait_for(
-                llm.structured(SYSTEM_PROMPT, ChatOut, untrusted=data), ANSWER_TIMEOUT_SEC
+                llm.structured(
+                    company_scope.prompt_line() + SYSTEM_PROMPT, ChatOut, untrusted=data
+                ),
+                ANSWER_TIMEOUT_SEC,
             )
             reply = out.reply.strip()
             if reply:

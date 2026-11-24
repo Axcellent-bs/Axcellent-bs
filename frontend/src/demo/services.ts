@@ -26,7 +26,7 @@ export const FAMILIES: { id: Family; name: string; desc: string }[] = [
  */
 export type AgentId = 'orchestrator' | 'safety' | 'support' | 'finance' | 'data' | 'archive' | 'hr' | 'marketing' | 'planning' | 'dev'
 export const AGENTS: { id: AgentId; name: string; Icon: ComponentType<{ size?: number }>; backend: string }[] = [
-  { id: 'orchestrator', Icon: IconBolt, name: '총괄 AI', backend: 'orchestrator (8000) · 판매 서버 관리 읽기 중계 (dashboard-api 8020)' },
+  { id: 'orchestrator', Icon: IconBolt, name: '총괄 AI', backend: 'orchestrator (8000) · 사이트 서버 관리 읽기 중계 (dashboard-api 8020)' },
   { id: 'safety', Icon: IconLock, name: '안전 처리 로그', backend: 'safety (8001)' },
   { id: 'archive', Icon: IconBook, name: '아카이브 AI', backend: 'decisions (8114) · dashboard-api (8020)' },
   { id: 'support', Icon: IconUser, name: '고객지원 AI', backend: 'dashboard-api (8020)' },
@@ -80,7 +80,7 @@ export const SERVICES: Service[] = [
   },
   {
     id: 'orders', agent: 'support', family: 'customer', name: '주문 관리', by: 'AXcellent', Icon: IconCart, entry: '/orders', paths: ['/orders'],
-    desc: '판매 서버의 주문을 최신순으로 보고, 취소·부분 환불·전체 환불을 따로 걸러 봅니다. 쇼핑몰이 아닌 회사는 꺼 두면 됩니다.',
+    desc: '사이트 서버의 주문을 최신순으로 보고, 취소·부분 환불·전체 환불을 따로 걸러 봅니다. 주문을 받지 않는 회사는 꺼 두면 됩니다.',
   },
   {
     id: 'claims', agent: 'support', family: 'customer', name: '클레임·보상', by: 'AXcellent', Icon: IconReceipt, entry: '/claims', paths: ['/claims', '/queue', '/settlements'],

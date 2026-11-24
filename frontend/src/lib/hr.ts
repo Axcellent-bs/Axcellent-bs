@@ -96,7 +96,7 @@ const DEPT_NAME: Record<string, string> = {
 // 글 속 영어 지표·구성요소 이름과 문의 처리 결과 코드를 한국어로 (긴 이름부터 바꾼다)
 const TERM_KO: Record<string, string> = {
   payment_fail_rate: "결제 실패율", error_rate_5xx: "서버 오류율", p95_latency_ms: "응답 시간", order_fail_rate: "주문 실패율",
-  "shop-api": "쇼핑몰 서버", payment: "결제", shipping: "배송", search: "검색", api: "판매 사이트", db: "주문 DB",
+  "shop-api": "사이트 서버", payment: "결제", shipping: "배송", search: "검색", api: "회사 사이트", db: "주문 DB",
   confirm_spec: "기획서 확정", answered: "답변 완료", claim_decided: "클레임 결정", compensated: "보상 완료", escalated: "상담원에게 넘김",
 };
 const TERM_RE = new RegExp(`(?<![A-Za-z0-9_-])(${Object.keys(TERM_KO).sort((a, b) => b.length - a.length).join("|")})(?![A-Za-z0-9_-])`, "g");
