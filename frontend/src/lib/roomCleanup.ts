@@ -11,6 +11,10 @@ export const CLEAR_COMMAND = "/clear";
 export const CLEAR_HINT = "이 방의 지금까지 대화를 내 화면에서 지워요";
 export const DIRECT_CLEAR_HINT = "새 대화를 시작해요 (AI가 앞 대화를 잊어요)";
 export const NEW_THREAD_NOTE = "새 대화를 시작했어요";
+// 11/24 1:1 [새 대화] 확인은 브라우저 confirm() 대신 버튼 아래 화면 안 상자로 받는다 (/clear와 같은 새 대화 시작 함수)
+export const NEW_THREAD_CONFIRM = { head: "새 대화를 시작할까요?", body: "지금 대화는 '내 지난 대화'에 남아요." };
+/** [새 대화]를 누르면 먼저 물어보나: 남의 대화를 보는 중(readOnly)이면 묻지 않고 바로 내 대화로 돌아간다 */
+export const newThreadNeedsConfirm = (readOnly: boolean) => !readOnly;
 
 /** 입력이 /clear 명령인가 (앞뒤 빈칸만 허용). 명령이면 메시지로 보내지 않는다 */
 export const isClearCommand = (text: string) => text.trim().toLowerCase() === CLEAR_COMMAND;
