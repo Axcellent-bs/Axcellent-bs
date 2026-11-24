@@ -469,3 +469,56 @@ def test_promo_fields_are_optional_and_checked() -> None:
     assert _insight().promo_style is None and _insight().brand_exposure is None
     with pytest.raises(ValidationError):
         _insight().model_validate({**_insight().model_dump(), "promo_style": "ad"})
+
+
+# ---------------------------------------------------------------- PROP-23 피드백 (11/24 재현 님)
+
+
+def test_fun_first_does_not_pin_company_setting() -> None:
+    b = vp.tenant.brand()
+    fun = vp.rule_plan(_prop())  # 기본 재미 먼저
+    assert b["setting_en"] not in fun.style and vp.FREE_SETTING_EN in fun.style
+    assert all(b["setting_en"] not in s.prompt for s in fun.scenes)
+    old = vp.rule_plan(_prop(), PRODUCT)  # 상품 홍보는 회사 배경 그대로
+    assert b["setting_en"] in old.style
+
+
+def test_fun_first_llm_prompt_frees_setting() -> None:
+    llm = _mock(_llm_out())
+    plan = asyncio.run(vp.write(llm, _prop(), "ctx"))
+    sent = str(llm.calls[-1])
+    assert "묶지 않는다" in sent and vp.tenant.brand()["setting_en"] not in plan.style
+    llm2 = _mock(_llm_out())
+    asyncio.run(vp.write(llm2, _prop(), "ctx", PRODUCT))
+    assert f"배경은 {vp.tenant.brand()['setting_ko']}" in str(llm2.calls[-1])
+
+
+def test_shorts_format_keeps_only_video_formats() -> None:
+    assert vp.shorts_only("캐러셀") is None and vp.shorts_only("사진") is None
+    assert vp.shorts_only("릴스") == "릴스" and vp.shorts_only(None) is None
+
+
+def test_request_length_and_chosen_format_are_not_number_warnings() -> None:
+    from planning_agent import proposals as ext
+    from planning_agent.proposals import ProposalDraft
+
+    class Says15:
+        async def draft(self, inp, ctx):
+            return ProposalDraft("15초 숏폼으로 밤 독서를 보여 준다", "검색이 오른다", None,
+                                 "숏폼 15초", "llm")  # fmt: skip
+
+    inp = _insight().model_copy(update={"request_text": "15초 쇼츠 만들어 주세요"})
+    d = asyncio.run(ext.write(Says15(), inp, "ctx"))
+    assert d.warnings == []
+    d2 = asyncio.run(ext.write(Says15(), _insight(), "ctx"))  # 의뢰 없이도 고른 형식 숫자는 통과
+    assert d2.warnings == []
+
+
+def test_carousel_from_data_is_not_saved_as_shorts_format() -> None:
+    svc = PlanningService(gate=_gate, relater=None, marketing=Brief(), proposal_writer=Writer(None))
+    inp = _insight().model_copy(update={"shorts_format": "캐러셀"})
+    out = ReceiveInsightOutput.model_validate(
+        asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp)).output
+    )
+    p = next(x for x in svc.state.proposals if x.id == out.proposal_id)
+    assert p.shorts_format is None
