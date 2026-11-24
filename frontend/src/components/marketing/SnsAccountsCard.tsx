@@ -8,6 +8,7 @@ import { fetchHiggsfieldStatus, type HiggsfieldStatus } from "@/lib/higgsfield";
 import { checkedAt, reasonLine, reasonView } from "@/lib/higgsfieldReason";
 import { fetchInstagramStatus, fetchYoutubeStatus, type InstagramStatus, type YoutubeStatus } from "@/lib/youtube";
 import { useVisibleInterval } from "@/lib/visibleInterval";
+import { RenderSettings } from "./RenderSettings";
 
 // 마케팅 › SNS·미디어의 "SNS 계정 연결". 회사마다 자기 Higgsfield·유튜브·인스타 계정을 쓴다(로그인한 회사 기준, 11/23).
 // - 연결 상태는 서버가 실제로 확인한 값(Higgsfield: 키를 한 번 보여 봄, 유튜브: 채널 이름을 읽어 봄). 1분마다 다시 본다
@@ -292,6 +293,7 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
           )}
         </div>
       </div>
+      <RenderSettings />
       {blocked && admin && <p className="text-xs text-accent">{admin.secret_store.reason}</p>}
       {msg && <p className="text-xs text-ink-700" role="status">{msg}</p>}
     </section>
