@@ -247,3 +247,78 @@ def test_last_admin_is_counted_per_company(client, tmp_path) -> None:
         f"{BASE}/accounts/{cat_admin}/update", json={"role": "member"}, headers=_bearer(op)
     )
     assert res.status_code == 200, res.text
+
+
+def _move(client, token, key):
+    return client.post(
+        "/api/dashboard/connection-keys/move", json={"key": key}, headers=_bearer(token)
+    )
+
+
+def _disconnect(client, token):
+    res = client.post("/api/dashboard/connection-keys/disconnect", headers=_bearer(token))
+    assert res.status_code == 200, res.text
+
+
+def test_admin_moves_to_a_new_company_with_members_after_disconnecting(client, tmp_path) -> None:
+    """7단계 B안: 캣북스를 끊은 관리자가 누비 키를 넣으면 관리자와 연결된 회원이 누비투어로."""
+    op = _op(client)
+    plain = _issue(client, op)
+    assert _account(client, op, "캣관리", "a@example.com").status_code == 200
+    assert _account(client, op, "캣관리2", "a2@example.com").status_code == 200
+    cat_admin = _login(client, "a@example.com", PW)
+    assert _account(client, cat_admin, "캣회원", "m@example.com", role="member").status_code == 200
+    other_admin = _login(client, "a2@example.com", PW)
+    assert (
+        _account(client, other_admin, "남는회원", "s@example.com", role="member").status_code == 200
+    )
+    member_old = _login(client, "m@example.com", PW)
+    assert _connect(client, cat_admin, plain, name="캣북스").status_code == 200
+    nubi_key = _issue(client, op, company_name="누비투어", industry="여행사", company_id="nubi")
+
+    # 연결 중이면 먼저 끊어야 한다(캣북스 줄은 그대로)
+    res = _move(client, cat_admin, nubi_key)
+    assert res.status_code == 409 and res.json()["error"]["code"] == "DISCONNECT_FIRST"
+    _disconnect(client, cat_admin)
+
+    res = _move(client, cat_admin, nubi_key)
+    assert res.status_code == 200, res.text
+    data = res.json()["data"]
+    assert data["moved_accounts"] == 2 and data["from_company"] == "catbooks"
+    token = data["token"]
+    me = client.get(BASE + "/me", headers=_bearer(token)).json()["data"]
+    assert me["company_id"] == "nubi"
+    rows = {r["email"]: r for r in _rows(tmp_path)}
+    assert rows["a@example.com"]["memberships"] == [{"company_id": "nubi", "role": "admin"}]
+    assert rows["m@example.com"]["memberships"] == [{"company_id": "nubi", "role": "member"}]
+    # 다른 캣북스 관리자와 그 관리자가 데려온 회원은 그대로 캣북스
+    assert accounts.memberships_of(rows["s@example.com"])[0].company_id == "catbooks"
+    assert {"company_id": "catbooks", "role": "admin"} in rows["a2@example.com"]["memberships"]
+    # 옮긴 일반회원의 옛 세션은 끊기고, 다시 로그인하면 누비투어
+    assert client.get(BASE + "/me", headers=_bearer(member_old)).status_code == 401
+    member_new = _login(client, "m@example.com", PW)
+    assert (
+        client.get(BASE + "/me", headers=_bearer(member_new)).json()["data"]["company_id"] == "nubi"
+    )
+    # 새 세션으로 연결하면 누비투어 줄에 저장된다
+    assert _connect(client, token, nubi_key).status_code == 200
+    keys = json.loads((tmp_path / "connection_keys.json").read_text(encoding="utf-8"))
+    assert keys["companies"]["nubi"]["name"] == "누비투어"
+    assert keys.get("company") is None  # 캣북스는 끊은 그대로(다시 연결하면 돌아온다)
+    # 키는 한 번만: 가입·옮기기 다시 안 됨
+    assert _check(client, nubi_key)["signup"] is False
+
+
+def test_move_needs_a_company_key_and_an_empty_target(client, tmp_path) -> None:
+    op = _op(client)
+    plain = _issue(client, op)
+    assert _account(client, op, "캣관리", "a@example.com").status_code == 200
+    cat_admin = _login(client, "a@example.com", PW)
+    res = _move(client, cat_admin, plain)
+    assert res.status_code == 422 and res.json()["error"]["code"] == "KEY_NOT_FOR_MOVE"
+    nubi_key, _ = _nubi_admin(client, op)  # 누비투어에 이미 관리자가 있다
+    res = _move(client, cat_admin, nubi_key)
+    assert res.status_code == 409
+    assert res.json()["error"]["code"] in {"KEY_SIGNUP_USED", "COMPANY_HAS_ADMIN"}
+    rows = {r["email"]: r for r in _rows(tmp_path)}
+    assert accounts.memberships_of(rows["a@example.com"])[0].company_id == "catbooks"

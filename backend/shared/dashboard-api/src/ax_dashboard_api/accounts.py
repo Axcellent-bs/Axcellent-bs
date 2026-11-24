@@ -626,6 +626,10 @@ def create_account(body: AccountIn, authorization: str | None = Header(None)) ->
         if any(r.get("email") == email for r in rows):
             raise ApiError(409, "EMAIL_TAKEN", "이미 있는 이메일이에요")
         row = _new_row(body.name.strip(), email, body.role, body.password, human.company_id)
+        if body.role == "member" and human.role == "admin" and human.account_id:
+            row["linked_admin"] = (
+                human.account_id
+            )  # 이 회원을 데려온 관리자(회사 옮기기 때 같이 간다)
         if _name_taken(rows, row["name"], _company_ids(row)):
             raise ApiError(409, "NAME_TAKEN", "같은 회사에 이름이 같은 계정이 있어요")
         rows.append(row)
@@ -679,6 +683,60 @@ def create_first_admin(
         "companies": _companies_out(memberships),
     }
     return _public(row), login
+
+
+def _swap_company(row: dict[str, Any], old: str, new: str) -> None:
+    """계정 소속의 old 회사를 new 회사로 바꾼다(역할 그대로). 칸 없는 옛 계정은 칸을 적는다."""
+    stored = [m.model_dump(mode="json") for m in memberships_of(row)]
+    row["memberships"] = [{**m, "company_id": new} if m["company_id"] == old else m for m in stored]
+
+
+def move_company(admin_id: str, old: str, new: str) -> tuple[list[str], dict[str, Any]]:
+    """관리자가 회사를 옮긴다(로드맵 7단계 B안): 그 관리자와 연결된 일반회원이 new 회사로.
+
+    연결된 일반회원 = 그 관리자가 만든(데려온) 회원(`linked_admin`). old 회사의 다른 관리자와
+    그들의 회원, 연결 표시가 없는 옛 회원은 그대로 둔다. 옮긴 계정의 지금 세션은 끊는다
+    (세션에 옛 회사가 적혀 있어서). 키 검사·"old 연결을 먼저 끊었는가"는 부르는 쪽
+    (키 파일 잠금 안)에서 한다.
+    돌려주는 값: (옮긴 계정 id들, 관리자 로그인 데이터 {token, expires_at, account, companies})
+    """
+    path = _editable_path()
+    with _file_lock:
+        rows = _bootstrap(path, _read(path))
+        if new not in company_list.company_ids():
+            raise ApiError(409, "UNKNOWN_COMPANY", "등록되지 않은 회사예요")
+        if any(r.get("role") == "admin" and new in _company_ids(r) for r in rows):
+            raise ApiError(
+                409,
+                "COMPANY_HAS_ADMIN",
+                "옮길 회사에 이미 관리자가 있어요. 그 관리자에게 계정을 받아요",
+            )
+        admin = next((r for r in rows if str(r.get("id")) == admin_id), None)
+        if admin is None or admin.get("role") != "admin" or old not in _company_ids(admin):
+            raise ApiError(403, "ROLE_REQUIRED", "이 회사 관리자만 회사를 옮길 수 있어요")
+        members = [
+            r
+            for r in rows
+            if r.get("role") == "member"
+            and r.get("linked_admin") == admin_id
+            and old in _company_ids(r)
+        ]
+        moved = [admin, *members]
+        for row in moved:
+            _swap_company(row, old, new)
+        _write(path, rows)
+    ids = [str(r["id"]) for r in moved]
+    for account_id in ids:
+        human_auth.end_account_sessions(account_id)
+    logger.info("회사를 옮겼다: %s → %s, 계정 %s개(관리자 %s)", old, new, len(ids), admin_id)
+    token, exp, memberships = _issue_for(admin)
+    login = {
+        "token": token,
+        "expires_at": exp,
+        "account": _public(admin),
+        "companies": _companies_out(memberships),
+    }
+    return ids, login
 
 
 @router.post("/password")

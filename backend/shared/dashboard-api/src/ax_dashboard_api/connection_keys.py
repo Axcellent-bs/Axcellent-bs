@@ -20,6 +20,8 @@
 - 발급 때 회사 이름(·업종·사이트 주소, 회사 ID는 비우면 자동)을 넣으면 회사 목록에 그 회사를
   더하고(있는 회사는 그대로) 키 줄에 `for_company`를 남긴다. 회사 ID만 넣으면 이미 있는 회사 전용
 - 회사 전용 키는 그 회사 세션에서만 확인·연결된다(다른 회사 세션이면 `KEY_OTHER_COMPANY`).
+- 회사 옮기기(`/move`): 지금 회사 연결을 끊은 관리자가 다른 회사 전용 키를 넣으면 그 관리자와
+  연결된 일반회원이 그 회사로 옮긴다. 기록은 회사 ID별이라 섞이지 않는다(7단계 B안).
   그래서 캣북스 관리자가 누비투어 키로 캣북스 연결을 덮는 일이 없다
 - 로그인 전 `/signup` {key, name, email, password}: 회사 전용 키로 그 회사의 첫 관리자를 만들고
   로그인 세션을 준다. 키 하나에 한 번(`signup_at`), 그 회사에 관리자가 이미 있으면 거절.
@@ -495,6 +497,47 @@ def connect(body: ConnectIn, authorization: str | None = Header(None)) -> dict:
         _set_record(data, cid, company)
         _save(data)
     return ok(_state(data, everyone=_sees_all(authorization)))
+
+
+@router.post("/move", dependencies=ADMIN_ONLY)
+def move(body: KeyIn, authorization: str | None = Header(None)) -> dict:
+    """지금 회사 연결을 끊은 관리자가 다른 회사 전용 키로 회사를 옮긴다(로드맵 7단계 B안).
+
+    그 관리자와 연결된 일반회원(그 관리자가 만든 회원)이 키의 회사로 옮겨 가고, 지금 회사의
+    기록·연결 줄은 그대로 남는다(다시 연결하면 그대로 돌아온다). 옮긴 뒤 세션은 새 회사로
+    다시 주고, 연결은 그 세션으로 `/connect`에서 한다.
+    지금 회사가 연결 중이면 먼저 끊어야 한다(`DISCONNECT_FIRST`).
+    """
+    human = session_human(authorization)
+    if not human.account_id:
+        raise ApiError(403, "ROLE_REQUIRED", "관리자 로그인으로만 회사를 옮길 수 있어요")
+    old = _cid()
+    with _file_lock:
+        data = _load()
+        found = _find(data, body.key)
+        bound = found.get("for_company") if found else None
+        if found is None or not bound:
+            raise ApiError(
+                422, "KEY_NOT_FOR_MOVE", "회사 전용으로 발급한 키로만 회사를 옮길 수 있어요"
+            )
+        new = company_scope.scope_id(bound)
+        if new == old:
+            raise ApiError(
+                409, "SAME_COMPANY", "지금 회사의 키예요. 회사 연결에서 바로 연결해 주세요"
+            )
+        if _record(data, old):
+            raise ApiError(
+                409, "DISCONNECT_FIRST", "지금 회사 연결을 먼저 끊어 주세요. 기록은 그대로 남아요"
+            )
+        problem = _why_not(data, found, new) or _signup_problem(found, new)
+        if problem:
+            raise ApiError(409 if problem[0] != "KEY_REVOKED" else 422, problem[0], problem[1])
+        ids, login = accounts.move_company(human.account_id, old, new)
+        found["signup_at"] = _now()
+        found["signup_account"] = human.account_id
+        found["moved_from"] = old
+        _save(data)
+    return ok({**login, "moved_accounts": len(ids), "from_company": old})
 
 
 @router.post("/company", dependencies=ADMIN_ONLY)
