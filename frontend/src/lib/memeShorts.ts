@@ -19,7 +19,7 @@ export function perSubscriberLabel(v: Pick<MemeShortsVideo, "views_per_subscribe
 
 /** 안내 한 줄: 키워드가 없으면 설정 안내, 모르면 서버 이유, 영상이 있으면 null */
 export function shortsNote(s: MemeShortsSearch): string | null {
-  if (s.status === "not_set") return "회사 밈 키워드가 없어요. 아래에서 키워드를 넣으면 다음 날부터 찾아요.";
+  if (s.status === "not_set") return "회사 밈 키워드가 없어요. 유튜브 칩의 \"유튜브 밈 키워드\"에 넣으면 다음 날부터 찾아요.";
   if (s.status === "unknown") return s.reason ?? "쇼츠 검색 결과를 모르는 상태예요.";
   return s.items.length === 0 ? (s.reason ?? "찾은 쇼츠가 없어요.") : null;
 }
