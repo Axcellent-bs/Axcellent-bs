@@ -22,6 +22,8 @@ export const SPACE_NOTE = "올린 이미지는 이 회사 공간에만 저장하
 export const VIDEO_WAIT_LABEL = "영상 승인 대기";
 
 export type CharacterRow = Pick<WorkRequestRow, "plan" | "steps" | "status"> & {
+  /** 의뢰 종류. 없으면(옛 기록) 영상 준비 단계로만 본다 */
+  task?: string | null;
   /** 사람이 고른 대표 캐릭터(CR-…). null = 캐릭터 없이, 칸이 없으면 아직 답하지 않음 */
   brand_character_record_id?: string | null;
   stopped_at?: string | null;
@@ -62,6 +64,36 @@ export function askMode(r: CharacterRow, saved: readonly SavedCharacter[] | null
   if (!characterOpen(r)) return "closed";
   if (answered) return r.brand_character_record_id ? "chosen" : "none";
   return saved && saved.length > 0 ? "saved" : "ask";
+}
+
+// 11/24 대화방 의뢰 진행 카드에도 같은 질문을 둔다 (#1636은 고객 의뢰 넘김 카드에만 있어 wr_6eace07d39가 질문 없이 진행됐다).
+// 두 카드는 같은 의뢰 기록(brand_character_record_id)을 본다
+export const PROMO_VIDEO_TASK = "promo_video";
+export const CHAT_NONE_LINE = "캐릭터 없이 진행";
+export const UNANSWERED_NOTICE = "회사 캐릭터를 정하지 않았어요. 이대로 진행하면 캐릭터 없이 만들어요.";
+
+/** 홍보 영상 의뢰(promo_video)인가. 종류가 비어 있으면 영상 준비 단계가 있는지로 본다 */
+export const isPromoVideo = (r: Pick<CharacterRow, "plan" | "task">) =>
+  isVideoRequest(r) && (!r.task || r.task === PROMO_VIDEO_TASK);
+
+/** 대화방 카드 맨 위에 질문을 띄우나: 홍보 영상 의뢰 · 영상 준비가 아직 pending · 캐릭터를 아직 정하지 않음 */
+export const chatAskShown = (r: CharacterRow) =>
+  isPromoVideo(r) && characterOpen(r) && r.brand_character_record_id === undefined;
+
+/** 정한 뒤 접힌 한 줄: "회사 캐릭터: 이름(CR-…)" 또는 "캐릭터 없이 진행". [바꾸기]는 영상 준비 전까지만 (뒤면 서버도 409) */
+export function chatCharacterLine(r: CharacterRow, name?: string | null): { text: string; canChange: boolean } | null {
+  if (!isPromoVideo(r) || r.brand_character_record_id === undefined) return null;
+  const id = r.brand_character_record_id;
+  const text = id ? `회사 캐릭터: ${name ? `${name}(${id})` : id}` : CHAT_NONE_LINE;
+  return { text, canChange: characterOpen(r) };
+}
+
+/** 사람 확인 단계 [영상 초안 준비 진행] 위 안내: 이 단계 다음이 영상 준비이고 캐릭터를 정하지 않았다. 막지는 않는다 */
+export function unansweredNotice(r: CharacterRow, stepId: string): string | null {
+  if (!chatAskShown(r)) return null;
+  const i = r.plan.findIndex((p) => p.step_id === stepId);
+  const next = r.plan.find((p) => p.after.includes(stepId)) ?? (i >= 0 ? r.plan[i + 1] : undefined);
+  return next?.skill === PREPARE_SKILL ? UNANSWERED_NOTICE : null;
 }
 
 /** 올리기 버튼을 켤 수 있나: 이미지를 골랐고 권리 확인을 체크했다 (서버도 rights_confirmed 없으면 422) */
