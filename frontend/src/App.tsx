@@ -8,6 +8,7 @@ import PlanPurchase from '@/demo/PlanPurchase'
 import { ADMIN_HOME, canOpen, homeOf, useSession } from '@/demo/session'
 import { useCompany, useCompanyLoaded } from '@/demo/company'
 import Setup from '@/demo/Setup'
+import WaitingPage from '@/demo/WaitingPage'
 import CatalogHome from '@/demo/CatalogHome'
 import { PrivacyPage, TermsPage } from '@/demo/PolicyPages'
 import OperatorLogin from '@/control/OperatorLogin'
@@ -60,6 +61,8 @@ export function App() {
       <Route path="/plans" element={<PlanPurchase />} />
       {/* 관리자(회사 계정) 가입: 운영자에게 받은 키 → 관리자 계정 → 회사 정보 */}
       <Route path="/setup" element={<Setup />} />
+      {/* 회사에 연결되지 않은 일반회원: 할 수 있는 일이 없다는 안내만 */}
+      <Route path="/waiting" element={<WaitingPage />} />
       {/* AXcellent 운영팀 전용 입구 */}
       <Route path="/control/login" element={<OperatorLogin />} />
       <Route path="*" element={<Guarded><Pages /></Guarded>} />

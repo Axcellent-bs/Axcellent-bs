@@ -67,6 +67,8 @@ export interface HumanSession {
   /** 만료 시각 (유닉스 초, 서버 `expires_at`) */
   expiresAt: number;
   account: ServerAccount;
+  /** 고객사 계정인데 소속 회사가 없다(관리자가 아직 연결하지 않았거나 끊음). 서버는 이 세션의 업무 경로를 403으로 막는다 */
+  noCompany?: boolean;
 }
 
 /** 브라우저 저장소 중 이 모듈이 쓰는 부분 (테스트에서 바꿔 끼운다) */
@@ -93,20 +95,24 @@ export function parseSession(raw: string | null, now = nowSeconds()): HumanSessi
     return null;
   }
   if (!v || typeof v !== "object") return null;
-  const o = v as { token?: unknown; expiresAt?: unknown; account?: unknown };
+  const o = v as { token?: unknown; expiresAt?: unknown; account?: unknown; noCompany?: unknown };
   const account = readServerAccount(o.account);
   const ok =
     typeof o.token === "string" && o.token.startsWith("axs1.") &&
     typeof o.expiresAt === "number" && Number.isFinite(o.expiresAt) && !!account;
   if (!ok || !account) return null;
   const s: HumanSession = { token: o.token as string, expiresAt: o.expiresAt as number, account };
+  if (o.noCompany === true) s.noCompany = true;
   return isExpired(s, now) ? null : s;
 }
 
 /** 로그인 응답(`{token, expires_at, account}`)을 세션으로. 모양이 다르면 null */
 export function sessionFromLogin(data: unknown, now = nowSeconds()): HumanSession | null {
-  const d = (data ?? {}) as { token?: unknown; expires_at?: unknown; account?: unknown };
-  return parseSession(JSON.stringify({ token: d.token, expiresAt: d.expires_at, account: d.account }), now);
+  const d = (data ?? {}) as { token?: unknown; expires_at?: unknown; account?: unknown; companies?: unknown };
+  const role = (d.account as { role?: unknown } | undefined)?.role;
+  // 고객사 계정인데 소속 회사가 비어 있으면 연결 대기(운영자는 원래 소속이 없다)
+  const noCompany = role !== "operator" && Array.isArray(d.companies) && d.companies.length === 0;
+  return parseSession(JSON.stringify({ token: d.token, expiresAt: d.expires_at, account: d.account, noCompany }), now);
 }
 
 /** 사람 토큰 고르기: 만료 전 세션이 있으면 세션 토큰, 없으면 공용 토큰(옮기는 동안, 설계 3절) */
