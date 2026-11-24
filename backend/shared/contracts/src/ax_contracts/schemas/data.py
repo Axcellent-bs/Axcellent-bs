@@ -4062,6 +4062,8 @@ class MemeShortsVideo(AxModel):
     big_channel: bool = False  # 구독자 10만 이상 (따로 표시)
     video_url: str | None = None
     thumbnail_url: str | None = None
+    # 11/24 채널 이름·제목에 욕설·성인 표현 → "광고 근거 제외: 표현" (InstagramRadarPost와 같음)
+    ad_excluded: str | None = None
 
 
 class MemeShortsSearch(AxModel):
@@ -4380,6 +4382,9 @@ class InstagramRadarPost(AxModel):
     audience_ages: list[AgeBand] = Field(default_factory=list)
     audience_genders: list[AudienceGender] = Field(default_factory=list)
     topic: str | None = None
+    # 11/24 계정 이름·캡션 앞부분에 욕설·성인 표현 → "광고 근거 제외: 표현" (보고서 근거에서 뺌,
+    # 원자료 표에는 이 표시로 남김). 걸리지 않으면 None
+    ad_excluded: str | None = None
 
 
 # ---------- 11/24 레이더 계정 메타 (대상층) ----------
@@ -4464,6 +4469,9 @@ class MegaViewItem(AxModel):
     audience_ages: list[AgeBand] = Field(default_factory=list)
     audience_genders: list[AudienceGender] = Field(default_factory=list)
     topic: str | None = None
+    # 11/24 계정·채널 이름·제목에 욕설·성인 표현 → "광고 근거 제외: 표현"
+    # (InstagramRadarPost와 같음)
+    ad_excluded: str | None = None
 
 
 class MegaViews(AxModel):

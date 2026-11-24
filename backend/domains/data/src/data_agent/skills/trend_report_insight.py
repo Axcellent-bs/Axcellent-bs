@@ -3,9 +3,12 @@
 총괄 plan ②(trend_report_insight)와 사람이 누르는 기획에 보내기(trend_report_handoff)가 같이 쓴다.
 같은 보고서면 늘 같은 결과다(insight_id = "trend_report:" + report_id, 시각은 보고서 끝난 시각).
 
-- facts(최대 12): 추천 근거(재료, 옛 보고서는 콘티)가 가리키는 행 먼저, 그다음 섹션 1 상위 3
-  (basis filtered만, small_base 제외), 섹션 2 상위 3, 섹션 3 상위 2(link = permalink),
-  섹션 4 상위 2. 근거가 0개면 insight 없음
+- facts(최대 12): 추천 근거(재료, 옛 보고서는 콘티)가 가리키는 행 먼저(그 순서, 중복 없이),
+  그다음 섹션 1 상위 3 (basis filtered만, small_base 제외), 섹션 2 상위 3, 섹션 3 상위 2
+  (link = permalink), 섹션 4 상위 2. 근거가 0개면 insight 없음.
+  11/24: 보고서가 근거 id로 쓰는 천만 조회(`mega:`)·쇼츠 검색(`shorts:`)도 행을 만든다
+  (TR-0E4C: 결론이 기댄 천만 조회 근거가 facts에서 빠져 기획이 책·경쟁사로 장면을 짬).
+  욕설·성인 표현 계정(`ad_excluded`)은 행을 만들지 않는다
 - 캡션 등 외부 글은 body_md·facts에 넣지 않는다(태그·계정 이름·숫자만)
 - body_md의 숫자는 facts(label·value)·제목에 같은 값이 있을 때만 (기획 숫자 검사와 같은 규칙).
   11/23: "## 기획에 넘길 재료"에 "재료(해시태그): …" 줄 (시간별 장면은 기획이 짠다).
@@ -18,6 +21,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from typing import Any
 
 from ax_contracts.schemas.data import TrendReport
@@ -71,6 +75,31 @@ def _fmt(media_product_type: str | None, media_type: str | None) -> str:
 Row = tuple[str, str, str | None]  # (label, value, link)
 
 
+def _man(n: int) -> str:
+    """조회수 → "2,465만"(만 아래 버림) · 만 미만은 "9,800"."""
+    return f"{n // 10_000:,}만" if n >= 10_000 else f"{n:,}"
+
+
+def _ago(at: datetime | None, ref: datetime | None) -> str | None:
+    """보고서 끝난 시각 기준 "3일 전"·"오늘" (같은 보고서면 늘 같은 값). 모르면 None."""
+    if at is None or ref is None:
+        return None
+    days = (ref - at).days
+    return "오늘" if days <= 0 else f"{days}일 전"
+
+
+def _kind_word(report: TrendReport, accounts: Sequence[str]) -> str:
+    """해시태그를 쓴 계정 종류: 보고서가 아는 종류(#1681 계정 메타)가 하나뿐이면 "밈·코미디 계정",
+    모르거나 섞였으면 "계정". 업종 단어는 박지 않는다."""
+    from data_agent.radar_meta import KIND_WORD
+
+    known = {p.account: p.account_kind for p in report.sections.content.posts if p.account_kind}
+    kinds = {known.get(a) for a in accounts}
+    if len(kinds) == 1 and (kind := kinds.pop()) is not None and kind in KIND_WORD:
+        return f"{KIND_WORD[kind]} 계정"
+    return "계정"
+
+
 def row_facts(report: TrendReport) -> dict[str, Row]:
     """근거 id(섹션:행 번호, 콘티 evidence_items.id와 같은 규칙) → (label, value, link)."""
     s, b = report.sections, report.brief
@@ -91,8 +120,32 @@ def row_facts(report: TrendReport) -> dict[str, Row]:
                                     _signed(r.shopping_change_pct), None)  # fmt: skip
     for n, h in enumerate(s.hashtags.rows, start=1):
         used = f"{h.accounts}곳 (직전 7일 {h.previous_accounts}곳)"
-        out[f"hashtag:{n}"] = (f"인스타 {h.tag}를 쓴 뷰티 계정 (이번 7일)", used, None)
+        # 11/24: 업종 단어를 박지 않는다 (예전 "뷰티 계정"). 쓴 계정 종류가 하나로 알면 그 종류
+        out[f"hashtag:{n}"] = (f"인스타 {h.tag}를 쓴 {_kind_word(report, h.used_by)} (이번 7일)",
+                               used, None)  # fmt: skip
+    ref = report.finished_at or report.created_at
+    for n, v in enumerate(s.content.mega, start=1):  # 11/24 조회 천만 이상 (#1681)
+        if v.ad_excluded:
+            continue
+        when = _ago(v.posted_at, ref)
+        if v.platform == "instagram":
+            label = f"릴스 조회 (@{v.account}{', ' + when if when else ''})"
+        else:
+            label = f"유튜브 쇼츠 조회 ({v.account}{', ' + when if when else ''})"
+        out[f"mega:{n}"] = (label, _man(v.views), v.link)
+    for n, sv in enumerate(s.content.shorts, start=1):  # 11/24 쇼츠 검색 근거 (#1681, 제목 안 넘김)
+        if sv.ad_excluded:
+            continue
+        ratio = (f"구독자 대비 {sv.views_per_subscriber:g}배"
+                 if sv.views_per_subscriber else None)  # fmt: skip
+        views = _man(sv.views) if sv.views is not None else None
+        value = " · ".join(x for x in (views, ratio) if x)
+        if value:
+            out[f"shorts:{n}"] = (f"쇼츠 '{sv.keyword}' 조회 ({sv.channel_title or '채널 모름'})",
+                                  value, sv.video_url)  # fmt: skip
     for n, p in enumerate(s.content.posts, start=1):
+        if p.ad_excluded:  # 11/24 욕설·성인 표현 계정은 근거로 넘기지 않는다
+            continue
         who_p = names.get(p.account) or p.account
         out[f"content:{n}"] = (f"{who_p} {_fmt(p.media_product_type, p.media_type)} 터짐",
                                f"평소의 {p.ratio:g}배", p.permalink)  # fmt: skip

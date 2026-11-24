@@ -34,6 +34,10 @@ MEDIA_TIMEOUT_S = (
 )
 HUMAN_GRADE = "C"  # 총괄이 사람 승인을 먼저 받는 등급(`human_gate`가 있는 단계도 같다)
 BRAND_CHARACTER_KEY = "brand_character_record_id"  # 홍보 영상에 쓸 회사 대표 캐릭터 (11/23)
+# 11/24: 홍보 영상은 회사 캐릭터 답을 먼저 받는다. 이 사람 단계는 사람 확인(승인·거절)이 아니라
+# 캐릭터 답(POST /api/requests/{id}/brand-character)으로만 닫힌다
+CHARACTER_SKILL = "brand_character"
+CHARACTER_STEP_ID = "character"
 
 
 @dataclass(frozen=True)
@@ -86,8 +90,14 @@ class TaskDef:
 
     @property
     def first_dept(self) -> str | None:
-        first = next((s for s in self.steps if not s.after), self.steps[0])
+        """처음 일을 받는 부서 (사람 단계는 건너뛴다: 홍보 영상은 캐릭터 답 뒤 데이터분석)."""
+        first = next((s for s in self.steps if s.kind != "human"), self.steps[0])
         return first.dept
+
+    @property
+    def asks_character_first(self) -> bool:
+        """회사 캐릭터 답을 먼저 받고 시작하는 일 (11/24 홍보 영상)."""
+        return self.steps[0].skill == CHARACTER_SKILL
 
     @property
     def needs_human_approval(self) -> bool:
@@ -139,7 +149,12 @@ PROMO_VIDEO = TaskDef(
         "우리 브랜드 광고 영상이 필요해요",
     ),
     (
-        TREND_STEP,
+        # 11/24: 캐릭터를 고르기 전에 기획서가 회사 기본 마스코트로 짜이지 않게 답을 먼저 받는다
+        # (답이 없으면 기다린다. 자동으로 "캐릭터 없이" 가지 않는다)
+        TaskStep(
+            CHARACTER_STEP_ID, None, CHARACTER_SKILL, "회사 캐릭터 고르기", None, kind="human"
+        ),
+        replace(TREND_STEP, after=(CHARACTER_STEP_ID,)),
         TaskStep(
             "insight",
             "data",

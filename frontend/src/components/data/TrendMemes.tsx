@@ -216,6 +216,7 @@ export function MegaRow({ x }: { x: MegaViewItem }) {
         <span className="truncate text-[13px] font-semibold text-ink-900">{x.account}{x.title ? ` · ${x.title}` : ""}</span>
         <span className="text-xs text-ink-700">{[platformLabel(x.platform), viewsLabel(x.views), when].filter(Boolean).join(" · ")}</span>
         {chips.length > 0 && <span className="flex flex-wrap gap-1">{chips.map((c) => <span key={c} className="chip text-[11px]">{c}</span>)}</span>}
+        {x.ad_excluded && <span className="text-[11px] font-medium text-ink-500">{x.ad_excluded}</span>}
       </span>
     </>
   );

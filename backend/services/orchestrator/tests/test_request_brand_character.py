@@ -134,10 +134,16 @@ def make(reqs: WorkRequests | None = None, task: str = "promo_video") -> tuple[W
     return reqs, row["request_id"]
 
 
-async def until_confirm(fake: Fake) -> tuple[WorkRequests, str, RequestRunner]:
+async def until_confirm(
+    fake: Fake, first: str | None = None
+) -> tuple[WorkRequests, str, RequestRunner]:
+    """캐릭터 답(기본: 없어요)을 하고 사람 확인 단계까지 돌린다 (11/24: 답 전에는 시작 안 함)."""
     reqs, rid = make()
     r = RequestRunner(reqs, lambda: fake, retry_delay=0)
     await r.run(rid)
+    assert fake.calls == []
+    assert r.set_brand_character(rid, first) == "ok"
+    await r.wait_idle()
     assert reqs.get(rid)["steps"]["confirm"]["status"] == "waiting_human"
     return reqs, rid, r
 
@@ -190,7 +196,9 @@ async def test_brand_character_goes_only_to_the_prepare_step_and_its_record_is_t
 
 
 @pytest.mark.asyncio
-async def test_without_an_answer_the_flow_is_unchanged() -> None:
+async def test_answering_no_character_keeps_the_flow_unchanged() -> None:
+    """11/24 전 이름: test_without_an_answer_the_flow_is_unchanged. 이제 답이 없으면 기다리고,
+    "없어요"로 답하면 지금 흐름 그대로다."""
     fake = Fake()
     reqs, rid, r = await until_confirm(fake)
     r.decide(rid, "confirm", True)
@@ -280,6 +288,7 @@ async def test_safety_decision_event_resumes_the_held_video() -> None:
     await r.run(rid)
     fake.answers["prepare_video_draft_from_plan"] = [Fake.prepared(MADE)]
     r.set_brand_character(rid, BRAND)
+    await r.wait_idle()  # 11/24: 답을 받아야 데이터분석부터 사람 확인까지 간다
     r.decide(rid, "confirm", True)
     await r.wait_idle()
     held = done_event("t1", False, outcome="video_held", review_id="rev_1", creative_record_id=MADE)
@@ -323,11 +332,17 @@ async def test_deleted_or_other_requests_are_not_resumed() -> None:
 async def test_other_company_is_passed_to_departments() -> None:
     fake = Fake()
     reqs, rid = make(WorkRequests(IncidentStore(company_id="nubitour")))
-    await RequestRunner(reqs, lambda: fake, retry_delay=0).run(rid)
+    r = RequestRunner(reqs, lambda: fake, retry_delay=0)
+    await r.run(rid)
+    r.set_brand_character(rid, None)  # 11/24: 캐릭터 답 뒤에 부서를 부른다
+    await r.wait_idle()
     assert {c[1].meta.tenant_id for c in fake.calls} == {"nubitour"}
     fake2 = Fake()
     reqs2, rid2 = make(WorkRequests(IncidentStore(company_id="catbooks")))
-    await RequestRunner(reqs2, lambda: fake2, retry_delay=0).run(rid2)
+    r2 = RequestRunner(reqs2, lambda: fake2, retry_delay=0)
+    await r2.run(rid2)
+    r2.set_brand_character(rid2, None)
+    await r2.wait_idle()
     assert {c[1].meta.tenant_id for c in fake2.calls} == {"shop-demo"}  # 캣북스는 기본값 그대로
 
 
@@ -362,10 +377,13 @@ def test_api_needs_a_human_token(client: Any) -> None:
     assert client.post(_path(rid), json={"record_id": BRAND}, headers=AGENT).status_code == 403
 
 
-def test_api_sets_and_clears_until_prepare_starts(client: Any) -> None:
+def test_api_sets_and_clears_until_prepare_starts(client: Any, monkeypatch: Any) -> None:
+    # 답하면 다음 단계를 시작한다(11/24). 이 시험은 답·바꾸기 규칙만 본다
+    monkeypatch.setattr(state.manager.request_runner, "start", lambda *_a, **_k: None)
     _, rid = make(client.reqs)
     res = client.post(_path(rid), json={"record_id": BRAND}, headers=HUMAN)
     assert res.status_code == 200 and res.json()["data"]["record_id"] == BRAND
+    assert res.json()["data"]["plan_outdated"] is False
     assert client.reqs.get(rid)["brand_character_record_id"] == BRAND
     assert client.post(_path(rid), json={"record_id": None}, headers=HUMAN).status_code == 200
     assert client.reqs.get(rid)["brand_character_record_id"] is None

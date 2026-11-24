@@ -140,6 +140,7 @@ export default function InstagramRadarSetup() {
                     <td className="min-w-[8rem] px-1 py-2">
                       <b className={r.excluded ? 'font-medium' : 'text-ink-900'}>@{r.account}</b>
                       {r.excluded && <small className="block text-[11px] text-ink-500">{r.excluded}</small>}
+                      {state?.ad_excluded?.[r.account] && <small className="block text-[11px] text-ink-500">{state.ad_excluded[r.account]}</small>}
                       {editing === r.account && (
                         <div className="mt-2">
                           <Editor row={r} busy={busy} canWrite={canEditMeta} onSave={(d) => void saveMeta(r, d)} onCancel={() => setEditing(null)} />

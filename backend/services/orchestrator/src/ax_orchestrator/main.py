@@ -481,11 +481,16 @@ async def set_request_brand_character(
 ) -> dict:
     """의뢰에 회사 캐릭터를 정한다(11/23). 사람 토큰, 같은 회사, 영상 준비 시작 전까지만.
 
+    11/24: 홍보 영상은 이 답을 받아야 캐릭터 단계가 닫히고 데이터분석이 시작된다. 기획이 시작된
+    뒤 바꾸면 `plan_outdated: true`(기획서는 예전 캐릭터 기준, 화면 안내용).
+
     캐릭터를 쓰면 영상은 만들기 전에 사람 승인(C)을 한 번 받는다. 값이 없으면 지금 흐름 그대로다.
     """
     runner = state.manager.request_runner if state.manager else None
-    outcome = (
-        runner.set_brand_character(request_id, body.record_id, by=who) if runner else "missing"
+    outcome, outdated = (
+        runner.answer_brand_character(request_id, body.record_id, by=who)
+        if runner
+        else ("missing", False)
     )
     if outcome == "missing":
         raise HTTPException(404, "없는 의뢰")
@@ -495,7 +500,8 @@ async def set_request_brand_character(
         raise HTTPException(422, "홍보 영상 의뢰가 아니에요")
     if outcome == "started":
         raise HTTPException(409, "영상 준비가 시작돼서 바꿀 수 없어요")
-    return {"data": {"ok": True, "record_id": body.record_id}, "meta": {}}
+    data = {"ok": True, "record_id": body.record_id, "plan_outdated": outdated}
+    return {"data": data, "meta": {}}
 
 
 @app.post("/api/requests/{request_id}/steps/{step_id}/decision")

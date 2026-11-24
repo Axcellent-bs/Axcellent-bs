@@ -50,8 +50,9 @@ def test_steps_follow_only_earlier_steps_and_human_step_has_no_department() -> N
 
 def test_promo_video_runs_trend_then_insight_then_plan_then_a_person_then_marketing() -> None:
     promo = BY_NAME["promo_video"]
-    assert promo.first_dept == "data"
+    assert promo.first_dept == "data"  # 사람 단계(캐릭터)는 건너뛰고 처음 일을 받는 부서
     assert [s.skill for s in promo.steps] == [
+        "brand_character",  # 11/24: 회사 캐릭터 답을 먼저 받는다
         "trend_report_create",
         "trend_report_insight",
         "receive_insight",
@@ -60,6 +61,7 @@ def test_promo_video_runs_trend_then_insight_then_plan_then_a_person_then_market
         "generate_media",
     ]
     assert [s.dept for s in promo.steps] == [
+        None,
         "data",
         "data",
         "planning",
@@ -69,10 +71,23 @@ def test_promo_video_runs_trend_then_insight_then_plan_then_a_person_then_market
     ]
     assert promo.blocked_by is None  # 데이터분석·기획 연결이 끝나 실행할 수 있다
     assert promo.changes_state
+    steps = {s.step_id: s for s in promo.steps}
+    assert steps["character"].kind == "human" and steps["character"].after == ()
+    assert steps["character"].label == "회사 캐릭터 고르기"
+    assert steps["trend"].after == ("character",)
+    assert promo.asks_character_first
+
+
+def test_only_promo_video_asks_for_a_character_and_other_tasks_keep_their_first_step() -> None:
+    others = [t for t in TASKS if t.name != "promo_video"]
+    assert not any(t.asks_character_first for t in others)
+    assert not any(s.skill == "brand_character" for t in others for s in t.steps)
+    assert BY_NAME["trend_report"].steps[0].after == ()  # 트렌드 분석만은 바로 시작
+    assert request_tasks.TREND_STEP.after == ()  # 같이 쓰는 원본은 그대로
 
 
 def test_trend_report_is_called_as_a_long_task_with_the_customer_sentence_in_input() -> None:
-    for task in (BY_NAME["promo_video"].steps[0], BY_NAME["trend_report"].steps[0]):
+    for task in (BY_NAME["promo_video"].steps[1], BY_NAME["trend_report"].steps[0]):
         assert task.skill == "trend_report_create"
         assert dict(task.fixed_input) == {"caller": "orchestrator"}  # 아니면 부서가 동기로 끝낸다
         assert task.text_key == "request_text"
@@ -95,7 +110,7 @@ def test_read_tasks_do_not_change_state_and_change_tasks_say_so() -> None:
 
 def test_plan_of_has_what_work_requests_needs() -> None:
     plan = request_tasks.plan_of(BY_NAME["promo_video"])
-    assert plan[2] == {
+    assert plan[3] == {
         "step_id": "plan",
         "dept": "planning",
         "skill": "receive_insight",
@@ -116,7 +131,8 @@ def test_plan_of_has_what_work_requests_needs() -> None:
         "on_missing": "skip",
         "timeout_s": None,
     }
-    assert plan[0]["ref_key"] == "report_id"  # 트렌드 보고서는 번호(report_id)만 다음 부서에 넘긴다
+    assert plan[0]["kind"] == "human" and plan[0]["skill"] == "brand_character"
+    assert plan[1]["ref_key"] == "report_id"  # 트렌드 보고서는 번호(report_id)만 다음 부서에 넘긴다
 
 
 def test_prompt_lists_every_task_name_and_says_to_not_follow_customer_text() -> None:
