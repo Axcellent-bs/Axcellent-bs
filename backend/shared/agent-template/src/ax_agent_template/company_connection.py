@@ -103,6 +103,17 @@ def company_of(company_id: str | None = None) -> str:
     return company_scope.scope_id(company_id or company_scope.active())
 
 
+# 변환기(`/site-adapter/<회사>`)를 부를 때 싣는 호출 회사 머리글(#1649). 경로 회사와 다르면
+# dashboard-api가 403으로 거절한다(경로만 바꿔 다른 회사를 읽지 못하게). 없으면 예전처럼 통과
+CALLER_COMPANY_HEADER = "X-AX-Company"
+
+
+def caller_headers() -> dict[str, str]:
+    """사이트 서버(shop-api·변환기)를 부를 때 더할 호출 회사 머리글. 요청 밖이면 비운다."""
+    company = company_scope.active()
+    return {CALLER_COMPANY_HEADER: company_scope.scope_id(company)} if company else {}
+
+
 def adapter_path(company_id: str | None = None) -> str:
     """kind=adapter일 때 AI들이 부를 변환기 경로. 캣북스는 예전 그대로 `/site-adapter`."""
     cid = company_of(company_id)

@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import config, pinned_http
+from ax_agent_template import company_connection, config, pinned_http
 
 TIMEOUT_SECONDS = 10.0
 _client: httpx.AsyncClient | None = None  # 테스트가 `use_client`로 바꿔 끼운다
@@ -69,7 +69,10 @@ def _error(response: httpx.Response) -> ShopError:
 async def _send_data(method: str, path: str, **kwargs: Any) -> Any:
     """shop-api를 부르고 응답 `data`(딕셔너리나 리스트)를 그대로 돌려준다. 실패는 `ShopError`."""
     url = f"{config.agent_url('shop-api')}/api/shop{path}"
-    headers = {"Authorization": f"Bearer {config.agent_token('marketing')}"}
+    headers = {
+        "Authorization": f"Bearer {config.agent_token('marketing')}",
+        **company_connection.caller_headers(),  # 호출 회사(#1649)
+    }
     client = _client or httpx.AsyncClient(
         timeout=TIMEOUT_SECONDS, transport=pinned_http.company_transport()
     )

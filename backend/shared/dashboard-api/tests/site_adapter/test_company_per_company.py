@@ -658,3 +658,28 @@ def test_other_screen_paths_read_the_session_company(
     assert whose(people["nubi"]) == "nubi"
     assert whose(people["cat"]) is None
     assert whose() is None
+
+
+def test_caller_company_must_match_the_path_company(client: TestClient, sites: Sites) -> None:
+    """변환기 경로 회사와 호출 회사(X-AX-Company)가 다르면 403(#1649). 머리글 없으면 통과."""
+    _connect("catbooks", CAT_SITE, CAT_KEY)
+    _connect("nubi", NUBI_SITE, NUBI_KEY)
+
+    def get(path: str, caller: str | None = None) -> int:
+        headers = {"X-AX-Company": caller} if caller else {}
+        return client.get(path, headers=headers).status_code
+
+    assert get("/site-adapter/nubi/api/shop/products", "nubi") == 200
+    assert get("/site-adapter/nubi/api/shop/products", "catbooks") == 403
+    assert get("/site-adapter/api/shop/products", "nubi") == 403  # 예전 캣북스 주소
+    assert get("/site-adapter/api/shop/products", "shop-demo") == 200  # 별칭은 캣북스
+    assert get("/site-adapter/nubi/api/shop/products") == 200  # 머리글 없음: 예전 그대로
+    assert get("/site-adapter/nubi/api/shop/products", "Bad Id") == 403
+
+
+def test_caller_headers_follow_the_request_company() -> None:
+    from ax_agent_template import company_scope
+
+    assert cc.caller_headers() == {}
+    with company_scope.using("nubi"):
+        assert cc.caller_headers() == {"X-AX-Company": "nubi"}
