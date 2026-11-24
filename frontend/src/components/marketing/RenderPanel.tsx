@@ -8,6 +8,7 @@ import { ThumbnailPicker } from "./ThumbnailPicker";
 import { chosenThumb, thumbUrl } from "@/lib/creativeThumbnails";
 import { YoutubePanel } from "./YoutubePanel";
 import type { StoryboardResult } from "@/lib/storyboard";
+import { videoSummaryLine } from "@/lib/creativeVideo";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
@@ -174,6 +175,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   }, [pending, load]);
 
   const video = render.video;
+  const summaryLine = videoSummaryLine(video?.status, video?.summary);
   const thumb = chosenThumb(render.thumbnails); // 인스타 릴스 표지 = 고른 썸네일(안 고르면 첫 장)
   const reelCover = thumb ? { url: thumbUrl(recordId, thumb.media_id), picked: thumb.picked } : null;
   const canAsk = render.board_image?.status === "done" && !["awaiting_approval", "running", "done"].includes(video?.status ?? "");
@@ -199,6 +201,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
         <Picture recordId={recordId} part="board_image" info={render.board_image} label="스토리보드 그림" onChanged={() => void load()} onError={setError} />
       </div>
       <div className="space-y-2 border-t border-ink-100 pt-3">
+        {summaryLine && <p className="text-xs text-ink-700" aria-label="영상 만들기 요약">{summaryLine}</p>}
         <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" onChanged={() => void load()} onError={setError} />
         {video?.status === "awaiting_approval" && (
           <p className="text-xs text-ink-700">사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>
