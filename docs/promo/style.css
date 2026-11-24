@@ -340,6 +340,15 @@ body { overflow-x: clip; }
 .vgroup-h { margin-top: var(--gap-block); }
 .vgroup-h h3 { font-size: 24px; font-weight: 800; }
 .vgroup-h + .vposts { margin-top: 16px; align-items: start; }
+/* 고객사 홍보 영상 칸: 고객사 이름(.cv-h) 아래에 영상이 칸 폭을 채워 2열로 나란히 보인다 */
+.cv-group { margin-top: 16px; display: grid; gap: 14px; }
+.cv-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.cv-h h4 { font-size: 20px; font-weight: 800; }
+.cv-h .badges { margin: 0; }
+.cv-group .vposts { margin-top: 0; }
+.vposts-two { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+.vposts-two .vpost-wide { grid-column: auto; }
+@media (max-width: 780px) { .vposts-two { grid-template-columns: minmax(0, 1fr); } }
 @media (min-width: 780px) { .vpost-wide { grid-column: span 2; } }
 
 .top-cta .btn { white-space: nowrap; }

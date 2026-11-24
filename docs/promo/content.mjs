@@ -234,6 +234,17 @@ export default {
       { title: "AXcellent × DejaFix (1분, 음악 포함)", customer: "AXcellent 홍보 영상", caption: "장애 하나에, AI 아홉이 일을 나눠 맡아요. 소리(배경음악)가 나옵니다. 시연 환경(가상 데이터) 기준. 영상 속 안전 관문의 “10분”은 쿠폰·환불 같은 일반 보류 기준이며, 판매자 정산 지급 보류는 24시간입니다.", src: "assets/demo/axcellent-promo-66s.mp4", ratio: "16 / 9", wide: true, aiMade: true },
       { title: "AXcellent 홍보 영상 (13초, 소리 포함)", customer: "AXcellent 홍보 영상", caption: "AI 직원들이 서로 일을 이어받고, 돈과 외부 게시는 대표님이 승인합니다. 남성 나레이션과 BGM이 나옵니다(소리가 나옵니다). 장면과 인물은 AI가 만든 것이며 시연 환경(가상 데이터) 기준.", src: "assets/demo/axcellent-promo-ai-13s.mp4", ratio: "16 / 9", wide: true, aiMade: true },
     ],
+    // 고객사 홍보 영상 칸(AXcellent 홍보 영상과 캣북스 인스타그램 사이에 보인다). 칸 이름 아래에 고객사 이름, 그 아래에 영상이 가로로 나란히 보인다.
+    // 영상 추가: mp4를 assets/demo/에 넣고(영문 소문자·숫자·-, 15MB 이하) 해당 고객사 items에 한 줄을 더한다. groups에 고객사를 더하면 칸 아래에 이어서 보인다.
+    customerVideos: {
+      title: "고객사 홍보 영상",
+      groups: [
+        { name: "누비투어", badges: ["시연 가상 고객사"], items: [
+          { title: "누비투어 소개 영상 (15초, 소리 포함)", customer: "누비투어", caption: "시연용 가상 서비스 누비투어를 소개하는 영상입니다. 지도 캐릭터 누비가 여행지를 다니며 어디든 떠날 수 있다는 것을 보여 줍니다. 소리가 나옵니다. 캐릭터와 장면은 AI가 만든 것이며, 서비스는 모두 가상(시연 환경)입니다.", src: "assets/demo/nubitour-intro-15s.mp4", ratio: "16 / 9", aiMade: true },
+          { title: "누비투어 소개 영상 (10초, 소리 포함)", customer: "누비투어", caption: "시연용 가상 서비스 누비투어를 소개하는 짧은 영상입니다. 지도 캐릭터 누비가 여행지에 나타납니다. 소리가 나옵니다. 캐릭터와 장면은 AI가 만든 것이며, 서비스는 모두 가상(시연 환경)입니다.", src: "assets/demo/nubitour-intro-10s.mp4", ratio: "16 / 9", aiMade: true },
+        ] },
+      ],
+    },
     // 고객사별 영상 묶음(맨 아래에 보인다). items는 위 영상 카드와 같은 모양이다.
     // items가 비어 있으면 묶음 이름과 "영상 준비 중" 칸 하나를 보여 주고, 영상을 넣으면 그 칸이 영상으로 바뀐다.
     // 영상 추가: mp4를 assets/demo/에 넣고(영문 소문자·숫자·-, 15MB 이하) items에 한 줄을 더한다.
