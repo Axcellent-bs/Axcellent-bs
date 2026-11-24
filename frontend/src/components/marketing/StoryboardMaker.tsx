@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { StoryboardResult, StoryboardShot } from "@/lib/storyboard";
+import { isSvgBoard, redrawNext, svgCell, type RedrawStep } from "@/lib/storyboardSvg";
 import { spanLabel } from "@/lib/creativeScript";
 import { CopyButton, PromptBox } from "./PromptParts";
 
@@ -102,7 +104,56 @@ function ShotCard({ shot }: { shot: StoryboardShot }) {
   );
 }
 
-export function StoryboardView({ r }: { r: StoryboardResult }) {
+/** SVG 콘티 칸: AI가 그린 SVG는 <img> data URI로만 보인다(스크립트가 돌지 않는다). 그림이 없는 칸은 구도 그림 */
+function SvgCellItem({ shot }: { shot: StoryboardShot }) {
+  const c = svgCell(shot);
+  return (
+    <li className="min-w-0 space-y-1">
+      <div className="relative overflow-hidden rounded-lg border border-ink-100 bg-white">
+        {c.src
+          ? <img src={c.src} alt={`${c.no}번 칸 콘티: ${c.caption}`} className="block h-auto w-full" />
+          : <Frame shot={shot} />}
+        <span className="absolute left-1.5 top-1.5 rounded-md bg-white/90 px-1.5 text-xs font-semibold tabular-nums text-ink-900 ring-1 ring-ink-100">{c.no}</span>
+      </div>
+      {c.time && <p className="text-xs font-medium tabular-nums text-ink-700">{c.time}</p>}
+      <p className="break-words text-xs text-ink-500">{c.caption}</p>
+    </li>
+  );
+}
+
+/** [Higgsfield 그림으로 다시 그리기] → 같은 화면에서 한 번 더 묻고 [만들기]를 눌러야 그림 크레딧을 쓴다 */
+function RedrawControl({ onRedraw }: { onRedraw: () => Promise<void> }) {
+  const [step, setStep] = useState<RedrawStep>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const go = async () => {
+    setStep((s) => redrawNext(s, "ok"));
+    setError(null);
+    try {
+      await onRedraw();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "그림을 요청하지 못했어요");
+    } finally {
+      setStep((s) => redrawNext(s, "done"));
+    }
+  };
+  return (
+    <div className="space-y-1.5">
+      {step === "idle" && <button type="button" className="btn-ghost text-xs" onClick={() => setStep((s) => redrawNext(s, "click"))}>Higgsfield 그림으로 다시 그리기</button>}
+      {step === "confirm" && (
+        <div role="group" aria-label="그림 크레딧 확인" className="flex flex-wrap items-center gap-2 rounded-xl bg-ink-50 p-2 text-xs text-ink-700">
+          <span>그림 크레딧을 써요. 만들까요?</span>
+          <button type="button" className="btn-primary text-xs" onClick={() => void go()}>만들기</button>
+          <button type="button" className="btn-ghost text-xs" onClick={() => setStep((s) => redrawNext(s, "cancel"))}>취소</button>
+        </div>
+      )}
+      {step === "running" && <p role="status" className="text-xs text-ink-500">요청하는 중…</p>}
+      {error && <p role="alert" className="text-xs text-accent">{error}</p>}
+    </div>
+  );
+}
+
+export function StoryboardView({ r, onRedraw }: { r: StoryboardResult; onRedraw?: () => Promise<void> }) {
+  const svgBoard = isSvgBoard(r);
   return (
     <div className="space-y-5">
       <div>
@@ -110,8 +161,15 @@ export function StoryboardView({ r }: { r: StoryboardResult }) {
         <p className="text-sm text-ink-500">{r.logline_ko}{r.character_used ? " · 이미지 시트 캐릭터 사용" : ""}{r.script_used ? " · 대본 장면을 따름" : ""}</p>
         {r.cta_ko && <p className="text-xs text-ink-500">끝 문장(CTA): {r.cta_ko}</p>}
       </div>
-      <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="스토리보드 칸">
-        {r.shots.map((s) => <ShotCard key={s.no} shot={s} />)}
+      {svgBoard && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold text-ink-900">스토리보드 (AI 콘티)</span>
+          <span className="chip bg-ink-50 text-ink-500">그림 크레딧 0</span>
+          {onRedraw && <span className="ml-auto"><RedrawControl onRedraw={onRedraw} /></span>}
+        </div>
+      )}
+      <ol className={svgBoard ? "grid grid-cols-2 gap-2 sm:grid-cols-4" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"} aria-label="스토리보드 칸">
+        {r.shots.map((s) => svgBoard ? <SvgCellItem key={s.no} shot={s} /> : <ShotCard key={s.no} shot={s} />)}
       </ol>
       <PromptBox title={`스토리보드 시트 한 장 프롬프트 (${r.shots.length}칸 · ${r.columns}열)`} text={r.sheet_prompt_en} />
       <PromptBox title="네거티브 프롬프트" text={r.negative_prompt_en} />

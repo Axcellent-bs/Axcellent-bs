@@ -6,6 +6,7 @@ import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import type { CharacterSheetResult } from "./characterSheet";
 import type { StoryboardResult } from "./storyboard";
 import type { CreativeScript } from "./creativeScript";
+import type { CreativeVideoSummary } from "./creativeVideo";
 
 // 마케팅 › 제작 기록. 이미지 시트를 만들 때마다 남은 기록과 이어 만든 스토리보드를 읽는다.
 // dashboard-api GET /marketing/creative-records(목록) · /marketing/creative-records/{id}(상세)
@@ -43,6 +44,8 @@ export interface RenderPart {
   label?: string | null;
   /** 올린 사람 */
   by?: string | null;
+  /** 영상 칸의 요약(모델·길이·비율·참조·예상 크레딧). 아직 없을 수 있다 */
+  summary?: CreativeVideoSummary;
 }
 
 export interface CreativeRecord {
