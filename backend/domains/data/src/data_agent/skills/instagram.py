@@ -115,6 +115,10 @@ class IgConfig:
     # 레이더 계정 출처 (screen · tenant · auto · none)와 비었을 때 무엇이 없는지
     radar_source: str = "none"
     radar_missing: str = NO_RADAR
+    # 11/24 대상층: creator·meme 계정 팔로워 하한 ([instagram] radar_min_followers),
+    # 조회 천만 이상 모음 기준 ([instagram] radar_mega_views)
+    min_followers: int = 50_000
+    mega_views: int = 10_000_000
 
     def kind_of(self, account: str) -> str:
         """레이더 계정 종류: meme(밈·크리에이터) · benchmark(그 밖)."""
@@ -186,6 +190,8 @@ def load_config(env: Mapping[str, str]) -> IgConfig:
             hashtag_reserve=max(0, int(raw.get("hashtag_reserve", base.hashtag_reserve))),
             hashtag_pages=max(1, min(10, int(raw.get("hashtag_pages", base.hashtag_pages)))),
             memo_add_enabled=bool(raw.get("memo_add_enabled", False)),
+            min_followers=max(0, int(raw.get("radar_min_followers", base.min_followers))),
+            mega_views=max(1, int(raw.get("radar_mega_views", base.mega_views))),
             radar_batch_size=max(1, int(raw.get("radar_batch_size", base.radar_batch_size))),
             radar_batch_interval_min=max(
                 0, int(raw.get("radar_batch_interval_min", base.radar_batch_interval_min))
@@ -596,7 +602,8 @@ def judge(m: Mapping[str, Any], base: Mapping[str, float]) -> tuple[str, int, fl
 
 
 def bursts(media: Mapping[str, Sequence[Mapping[str, Any]]], now: datetime,
-           config: IgConfig) -> list[InstagramRadarPost]:  # fmt: skip
+           config: IgConfig, meta: Mapping[str, Any] | None = None,
+           ) -> list[InstagramRadarPost]:  # fmt: skip
     """계정마다 같은 지표 중앙값의 burst_ratio배 이상이고 게시 burst_days일 안인 게시물 (순수 계산).
 
     릴스 조회수와 사진 좋아요를 섞어 중앙값을 내지 않는다(`judge`). account_median·metric은
@@ -618,6 +625,7 @@ def bursts(media: Mapping[str, Sequence[Mapping[str, Any]]], now: datetime,
                 continue
             cap = str(m.get("caption") or "")
             followers = _int(m, OWNER_FOLLOWERS)
+            tag = (meta or {}).get(account)
             out.append(InstagramRadarPost(
                 account=account, media_id=str(m["id"]),
                 media_product_type=m.get("media_product_type"),
@@ -629,8 +637,47 @@ def bursts(media: Mapping[str, Sequence[Mapping[str, Any]]], now: datetime,
                 source_kind=config.kind_of(account),  # type: ignore[arg-type]
                 followers=followers, comments=_int(m, "comments_count"),
                 follower_engagement=follower_engagement(m),
+                account_kind=tag.kind if tag else None,
+                audience_ages=list(tag.ages) if tag else [],
+                audience_genders=list(tag.genders) if tag else [],
+                topic=tag.topic if tag else None,
             ))  # fmt: skip
     return out
+
+
+AUDIENCE_POSTS_MAX = 40
+
+
+def audience_posts(posts: Sequence[InstagramRadarPost]) -> list[InstagramRadarPost]:
+    """industry가 아닌 계정의 뜬 게시물 (묶음과 상관없이 배수 순, 최대 40개).
+
+    보고서가 의뢰 대상층으로 고른다."""
+    mine = [p for p in posts if p.account_kind not in (None, "industry")]
+    return sorted(mine, key=lambda p: (-p.ratio, p.media_id))[:AUDIENCE_POSTS_MAX]
+
+
+def apply_floor(media: Mapping[str, Sequence[Mapping[str, Any]]], meta: Mapping[str, Any],
+                minimum: int) -> tuple[dict[str, Any], list[str]]:  # fmt: skip
+    """creator·meme 계정 중 팔로워가 하한보다 작은 계정을 판정에서 뺀다 (industry·brand는 그대로).
+
+    (남은 계정 → 미디어, 뺀 계정 한계 문장). 메타의 followers·excluded_reason도 채운다."""
+    from data_agent.radar_meta import excluded_reason
+
+    kept: dict[str, Any] = {}
+    limits: list[str] = []
+    for account, items in media.items():
+        tag = meta.get(account)
+        followers = next((f for m in items if (f := _int(m, OWNER_FOLLOWERS)) is not None), None)
+        if tag is not None:
+            if followers is not None:
+                tag.followers = followers
+            why = excluded_reason(tag, followers, minimum)
+            tag.excluded_reason = why
+            if why:
+                limits.append(f"{account}: {why}")
+                continue
+        kept[account] = items
+    return kept, limits
 
 
 def follower_engagement(m: Mapping[str, Any]) -> float | None:
@@ -838,7 +885,17 @@ async def instagram_radar(
     if out.reason:
         return Result(out, Evidence(queries=["ig_radar.db"], data_summary=out.reason,
                                     collected_at=now))  # fmt: skip
-    posts = bursts(media, now, config)
+    # 11/24 대상층: 계정 메타(지금 요청 회사의 파일) + creator·meme 팔로워 하한
+    from data_agent import company_scope
+    from data_agent.radar_meta import load_meta
+
+    meta = load_meta(config.radar_accounts, config.meme_accounts, company_scope.active())
+    media, floor = apply_floor(media, meta, config.min_followers)
+    out.limits.extend(floor)
+    out.min_followers = config.min_followers
+    out.accounts_meta = list(meta.values())
+    posts = bursts(media, now, config, meta)
+    out.audience_posts = audience_posts(posts)
     out.bursts, out.status = len(posts), "known"
     if config.meme_accounts:  # 밈·크리에이터 계정은 같은 해시태그로 잘 안 묶여 따로 둔다
         out.meme_posts = meme_posts(posts)

@@ -4,6 +4,7 @@ import { when } from "@/components/data/Sources";
 import { useSkill } from "@/components/data/useSkill";
 import { AD, times } from "@/components/data/TrendMemes";
 import { safeLink } from "@/lib/safeLink";
+import { ageLabels, genderLabels } from "@/lib/radarMeta";
 import { Thumb } from "@/components/data/VideoExplorer";
 import { IgWhyFacts } from "@/components/data/IgWhyFacts";
 import { dataAi, type InstagramRadarGroup, type InstagramRadarOutput, type InstagramRadarPost } from "@/lib/data";
@@ -39,6 +40,7 @@ export function PostCard({ post: p, rank, adMaterial, domId }: { post: Instagram
   const kind = kindLabel(p);
   const ad = adMaterial ? AD[adMaterial] : null;
   const engagement = engagementLabel(p);
+  const layers = [...ageLabels(p.audience_ages), ...genderLabels(p.audience_genders)];
   const body = (
     <>
       <Thumb src={thumbSrc(p.thumbnail_url)} alt={p.caption_excerpt ?? `${p.account} 게시물`} wide={false} rank={rank} tall>
@@ -51,7 +53,8 @@ export function PostCard({ post: p, rank, adMaterial, domId }: { post: Instagram
       </span>
       {engagement && <span className="text-xs text-ink-700"><span className="chip mr-1 text-[11px]">밈</span>{engagement}</span>}
       {p.standout && <span className="text-xs font-medium text-emerald-700">{p.standout}</span>}
-      {ad && <span><span className={`chip text-[11px] ${ad.tone}`}>광고 재료 {ad.label}</span></span>}
+      {layers.length > 0 && <span className="flex flex-wrap gap-1">{layers.map((c) => <span key={c} className="chip text-[11px]">{c}</span>)}</span>}
+      {ad &&<span><span className={`chip text-[11px] ${ad.tone}`}>광고 재료 {ad.label}</span></span>}
     </>
   );
   const cls = "flex flex-col gap-1 rounded-lg";

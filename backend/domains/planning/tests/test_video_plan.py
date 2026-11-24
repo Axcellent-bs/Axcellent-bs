@@ -449,3 +449,23 @@ def test_llm_fun_first_prompt_and_timing() -> None:
     sent = str(llm.calls[-1])
     assert "재미 먼저, 브랜드는 끝에" in sent and "엔드 카드" in sent
     assert "상품 홍보" not in sent
+
+
+def test_promo_fields_from_data_are_saved_and_drive_the_plan() -> None:
+    """데이터가 보낸 최종값(회사 브랜드 설정 + 의뢰 문장)을 제안에 저장하고 제작안이 읽는다."""
+    svc = PlanningService(gate=_gate, relater=None, marketing=Brief(), proposal_writer=Writer(None))
+    inp = _insight().model_copy(update={"promo_style": "product", "brand_exposure": "prop"})
+    out = ReceiveInsightOutput.model_validate(
+        asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp)).output
+    )
+    p = next(x for x in svc.state.proposals if x.id == out.proposal_id)
+    assert (p.promo_style, p.brand_exposure) == ("product", "prop")
+    assert vp.promo_of(p) == (vp.PRODUCT, vp.PROP)
+    assert out.video_plan is not None and out.video_plan.scenes[0].start_s == 0
+    assert out.video_plan.scenes[0].end_s != 2  # product는 예전 장면 시간 (2초 훅이 아님)
+
+
+def test_promo_fields_are_optional_and_checked() -> None:
+    assert _insight().promo_style is None and _insight().brand_exposure is None
+    with pytest.raises(ValidationError):
+        _insight().model_validate({**_insight().model_dump(), "promo_style": "ad"})

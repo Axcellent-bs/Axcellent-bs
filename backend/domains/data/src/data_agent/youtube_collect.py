@@ -374,6 +374,11 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
             from data_agent.skills import instagram
 
             await instagram.run(env)
+            # 11/24 레이더 계정 대상층 AI 태그 (하루 1번, 태그 없는 새 계정만, 팔로워 수 갱신.
+            # 사람이 고친 태그는 덮지 않는다. 실패해도 계속)
+            from data_agent import radar_tags
+
+            await radar_tags.run(env)
             if result.saved and precompute_after:
                 # 새 스냅샷 직후 감지 탭 결과를 미리 계산해 저장 (화면은 읽기만).
                 # 실패해도 수집은 계속

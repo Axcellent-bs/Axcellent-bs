@@ -94,6 +94,10 @@ case "$1" in
     fi
     grep -qx "$3" "$FAKE_STATE/git_on_${4#origin/}"; exit $? ;;
   status) cat "$FAKE_STATE/git_dirty" 2>/dev/null; exit 0 ;;
+  # checkout --quiet --detach <sha>: state/checkout_rc 가 있으면 그 끝 코드로 실패, 아니면 서버 HEAD 를 그 커밋으로 옮긴다
+  checkout)
+    [[ -f "$FAKE_STATE/checkout_rc" ]] && exit "$(cat "$FAKE_STATE/checkout_rc")"
+    echo "$4" > "$FAKE_STATE/git_head"; exit 0 ;;
 esac
 exit 1
 """,
@@ -119,6 +123,13 @@ exit 1
            '    exit 0\n'
            '  fi\n'
            'done < <(type -aP mv)\nexit 127\n'),
+    # 가짜 uv: 부른 인자를 남기고 state/uv_rc 의 끝 코드로 끝난다. state/uv_sleep 이 있으면 그만큼 자고(시간 초과 시험용)
+    # state/uv_moves_head 가 있으면 서버 HEAD 를 바꾼다
+    "uv": ('echo "uv $*" >> "$FAKE_LOG"\n'
+           '[[ -f "$FAKE_STATE/uv_sleep" ]] && sleep "$(cat "$FAKE_STATE/uv_sleep")"\n'
+           '[[ -f "$FAKE_STATE/uv_moves_head" ]] && echo "f" > "$FAKE_STATE/git_head"\n'
+           'echo "uv-output-line"\n'
+           'exit "$(cat "$FAKE_STATE/uv_rc" 2>/dev/null || echo 0)"\n'),
     "nginx": 'echo "nginx $*" >> "$FAKE_LOG"\nexit "$(cat "$FAKE_STATE/nginx_rc" 2>/dev/null || echo 0)"\n',
     # 주소별 응답 코드: state/curl_code_<포트> 가 있으면 그 값, 없으면 state/curl_code, 그것도 없으면 200
     "curl": ('url="${@: -1}"\nport="${url##*:}"\nport="${port%%/*}"\necho "curl $url" >> "$FAKE_LOG"\n'
@@ -198,6 +209,11 @@ backup_sqlite = ["{root}/data/app.db"]
 backup_files = ["{root}/data/secrets.env", "{root}/data/state.json", "{root}/opt/app/repo/backend/.env"]
 backup_dirs = ["{root}/data/data-dir"]
 
+[uv_sync]
+uv_bin = "{root}/fakebin/uv"
+project_dir = "{root}/opt/app/repo/backend"
+timeout_seconds = 30
+
 [health]
 urls = ["http://127.0.0.1:8201/health", "http://127.0.0.1:8202/health", "http://127.0.0.1:8203/health"]
 
@@ -268,6 +284,7 @@ class GateCase(unittest.TestCase):
         ddb.commit()
         ddb.close()
         write(r / "data/data-dir/keep.txt", "keep")
+        write(r / "opt/app/repo/backend/uv.lock", "# fake lock\n")
         write(r / "opt/app/repo/backend/.env",
               f"APP_PUBLIC_MARK=placeholder-a\nAPP_VIEWER_TOKEN={VIEWER}\n")
         write(self.state / "git_known", f"{SHA}\n{SHA_LOCAL}\n{SHA_FEATURE}\n{SHA_OLD}\n")
@@ -1456,7 +1473,7 @@ class NginxRestoreAndStatusTests(GateCase):
 
 PAUSED_SH = HERE.parent / "autodeploy-paused.sh"
 OWNER_PLUS = (ALL + ', "gateway-allow-propose", "gateway-allow-approve", "gateway-allow-restore", '
-              '"autodeploy-pause", "autodeploy-resume"')
+              '"autodeploy-pause", "autodeploy-resume", "rollback-code", "uv-sync"')
 
 
 class AutodeployPauseTests(GateCase):
@@ -2190,7 +2207,7 @@ class UsabilityTests(GateCase):
                       "nginx-approve-location gateway-allow-propose gateway-allow-approve gateway-allow-restore "
                       "restart-backend rollback-bundle", p.stdout)
         self.assertIn("--dry-run", p.stdout)
-        self.assertIn("ax-gate 0.4.0", p.stdout)
+        self.assertIn("ax-gate 0.5.0", p.stdout)
         self.assertEqual(self.calls(), "")                       # sudo 를 부르지 않는다(앞단에서 끝난다)
         self.assertIn("user=member-x\taction=help\targs=-\tmode=real\tannounced=no\tpr=-\tnote=-\t"
                       "layer=front\tresult=help", self.audit_text())
@@ -2202,7 +2219,7 @@ class UsabilityTests(GateCase):
         self.assertIn("  restart-backend <SHA> --ack-data-loss\n", p.stdout)
         # 이 테스트 정책의 권한자에게 없는 것은 게이트웨이 허용 3개와 자동 배포 정지·재개뿐이다(따로 적어야 열린다)
         self.assertIn("이 계정에 없는 동작(권한자에게 요청한다): gateway-allow-propose gateway-allow-approve "
-                      "gateway-allow-restore autodeploy-pause autodeploy-resume\n", p.stdout)
+                      "gateway-allow-restore autodeploy-pause autodeploy-resume rollback-code uv-sync\n", p.stdout)
         p = self.gate("member-x", "help restart-backend")
         self.assertRc(p, 0)
         self.assertIn("형식: restart-backend <SHA> --ack-data-loss", p.stdout)
@@ -2339,7 +2356,7 @@ class UsabilityTests(GateCase):
 
     def test_version_has_no_draft_suffix(self):
         p = self.gate("member-x", "status")
-        self.assertIn("ax-gate 0.4.0 — status", p.stdout)
+        self.assertIn("ax-gate 0.5.0 — status", p.stdout)
         self.assertNotIn("draft", p.stdout)
 
 
@@ -2891,6 +2908,261 @@ class GatewayAllowTests(GateCase):
         self.assertNotIn("location 제안(승인 대기): 이름 list_items", out)
 
 
+CODE_ACTIONS = ', "rollback-code", "uv-sync"'
+PREV = "d" * 40                                         # SHA 를 배포하기 직전 HEAD(기록 파일에 들어 있는 값)
+
+
+class CodeRollbackAndUvSyncBase(GateCase):
+    def setUp(self):
+        super().setUp()
+        text = policy_text(self.root)
+        for owner in ("owner-a", "owner-b"):
+            text = text.replace(f"{owner} = [{ALL}]", f"{owner} = [{ALL}{CODE_ACTIONS}]")
+        write(self.policy, text)
+        self.write_policy_text = text
+        write(self.state / "git_known", f"{SHA}\n{SHA_LOCAL}\n{SHA_FEATURE}\n{SHA_OLD}\n{PREV}\n")
+        write(self.state / "git_on_dev", f"{SHA}\n{SHA_OLD}\n{PREV}\n")
+        write(self.state / "git_on_origin", f"{SHA}\n{SHA_FEATURE}\n{SHA_OLD}\n{PREV}\n")
+
+    def head(self):
+        return (self.state / "git_head").read_text(encoding="utf-8").strip()
+
+    def prevfile(self, sha=SHA):
+        return self.rootp / "backups" / f"deploy-prev-head.bak-before-{sha[:8]}"
+
+
+class RollbackCodeTests(CodeRollbackAndUvSyncBase):
+    CMD = f"rollback-code {SHA} --announced"
+
+    def test_moves_tree_only_to_recorded_prev_head_without_restart(self):
+        write(self.prevfile(), PREV + "\n")
+        p = self.gate("owner-a", self.CMD + " pr=77")
+        self.assertRc(p, 0)
+        self.assertEqual(self.head(), PREV)
+        calls = self.calls()
+        self.assertIn(f"git -C {self.root}/opt/app/repo checkout --quiet --detach {PREV}", calls)
+        self.assertNotIn("systemctl", calls)
+        self.assertNotIn("deploy.sh", calls)
+        self.assertNotIn("uv ", calls)
+        self.assertIn(f"restart-backend {PREV[:8]} --ack-data-loss --announced", p.stdout)
+        audit = self.audit_text()
+        self.assertIn("action=rollback-code", audit)
+        self.assertIn(f"result=rollback-code:{SHA[:8]}->{PREV[:8]}", audit)
+        self.assertIn(f"note=to:{PREV[:8]}", audit)
+        self.assertIn("result=end:rc=0", audit)
+        # git 은 배포 계정으로만 돈다
+        lines = calls.splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith("git "):
+                self.assertEqual(lines[i - 1], "runuser as=deploy", line)
+
+    def test_works_with_record_left_by_deploy_bundle(self):
+        # deploy-bundle 이 직전 HEAD(여기서는 SHA_OLD)를 기록한다. 배포가 끝나 HEAD 가 SHA 가 됐다고 하고 되돌린다.
+        write(self.state / "git_head", SHA_OLD + "\n")
+        write(self.state / "git_behind_head", "")
+        write(self.state / "deploy_moves_head", "")
+        self.assertRc(self.gate("owner-a", f"deploy-bundle {SHA} --announced"), 0)
+        self.assertEqual(self.prevfile().read_text(encoding="utf-8").strip(), SHA_OLD)
+        self.assertEqual(self.head(), SHA)
+        self.assertRc(self.gate("owner-a", self.CMD), 0)
+        self.assertEqual(self.head(), SHA_OLD)
+
+    def test_no_record_is_refused(self):
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn("result=fail:prev-head-not-found", self.audit_text())
+        self.assertNotIn("checkout", self.calls())
+        self.assertEqual(self.head(), SHA)
+
+    def test_arbitrary_sha_is_never_accepted(self):
+        write(self.prevfile(), PREV + "\n")            # SHA 에 대한 기록만 있다
+        for target in (PREV, SHA_OLD, SHA_FEATURE):
+            with self.subTest(target=target):
+                self.assertNotEqual(self.gate("owner-a", f"rollback-code {target} --announced").returncode, 0)
+        self.assertNotIn("checkout", self.calls())
+        self.assertRc(self.gate("owner-a", f"rollback-code {SHA} {PREV} --announced"), 2)    # 두 번째 SHA 는 못 준다
+        self.assertRc(self.gate("owner-a", "rollback-code --announced"), 2)
+        self.assertRc(self.gate("owner-a", "rollback-code HEAD~1 --announced"), 2)
+
+    def test_bad_record_content_is_refused(self):
+        for body in ("not-a-sha\n", "\n", PREV[:20] + "\n", PREV.upper() + "\n"):
+            with self.subTest(body=body):
+                write(self.prevfile(), body)
+                self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertIn("result=fail:prev-head-bad", self.audit_text())
+        self.assertNotIn("checkout", self.calls())
+
+    def test_record_commit_unknown_or_not_ancestor_is_refused(self):
+        write(self.prevfile(), "9" * 40 + "\n")
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertIn("result=fail:prev-head-unknown", self.audit_text())
+        write(self.prevfile(), PREV + "\n")
+        write(self.state / "git_pairs", "\n")           # 어느 쌍도 조상 관계가 아니다
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertIn("result=fail:prev-head-not-ancestor", self.audit_text())
+        self.assertNotIn("checkout", self.calls())
+
+    def test_only_from_the_deployed_sha(self):
+        write(self.prevfile(), PREV + "\n")
+        write(self.state / "git_head", SHA_OLD + "\n")
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertIn("result=fail:head-not-deployed", self.audit_text())
+        self.assertNotIn("checkout", self.calls())
+        self.assertEqual(self.head(), SHA_OLD)
+
+    def test_already_at_prev_head_is_a_noop(self):
+        write(self.prevfile(), PREV + "\n")
+        write(self.state / "git_head", PREV + "\n")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertIn("할 일 없음", p.stdout)
+        self.assertNotIn("checkout", self.calls())
+
+    def test_dirty_repo_and_checkout_failure(self):
+        write(self.prevfile(), PREV + "\n")
+        write(self.state / "git_dirty", " M backend/x.py\n")
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertIn("result=fail:repo-dirty", self.audit_text())
+        self.assertNotIn("checkout", self.calls())
+        (self.state / "git_dirty").unlink()
+        write(self.state / "checkout_rc", "1\n")
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertIn("result=fail:checkout-failed", self.audit_text())
+        self.assertEqual(self.head(), SHA)
+
+    def test_permission_announce_lock_and_dry_run(self):
+        write(self.prevfile(), PREV + "\n")
+        self.assertRc(self.gate("member-x", self.CMD), 3)
+        self.assertRc(self.gate("owner-c", self.CMD), 3)                    # 이 계정에는 안 열었다
+        p = self.gate("owner-a", f"rollback-code {SHA}")
+        self.assertRc(p, 2)
+        self.assertIn("되돌리는 방법: deploy-bundle " + SHA, p.stderr)
+        self.assertIn("result=denied:not-announced", self.audit_text())
+        write(self.lock, "garbage\n")
+        self.assertRc(self.gate("owner-a", self.CMD), 4)
+        self.assertIn("result=denied:locked", self.audit_text())
+        self.lock.unlink()
+        p = self.gate("owner-a", f"rollback-code {SHA} --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN:", p.stdout)
+        self.assertIn("checkout", p.stdout)
+        self.assertEqual(self.head(), SHA)
+        self.assertNotIn("checkout --quiet", self.calls())
+
+    def test_default_account_cannot_be_given_it(self):
+        text = self.write_policy_text.replace('_default = ["status", "deploy-bundle", "record-pr"]',
+                                              '_default = ["status", "rollback-code"]')
+        write(self.policy, text)
+        self.assertRc(self.gate("member-x", "status"), 5)
+        self.assertIn("result=denied:policy-value", self.audit_text())
+
+
+class UvSyncTests(CodeRollbackAndUvSyncBase):
+    CMD = f"uv-sync {SHA} --announced"
+
+    def test_runs_uv_sync_frozen_as_deploy_user_when_head_matches(self):
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        calls = self.calls()
+        self.assertIn(f"uv --directory {self.root}/opt/app/repo/backend sync --frozen\n", calls)
+        lines = calls.splitlines()
+        i = [n for n, ln in enumerate(lines) if ln.startswith("uv ")][0]
+        self.assertEqual(lines[i - 1], "runuser as=deploy")
+        self.assertNotIn("systemctl", calls)
+        self.assertNotIn("uv-output-line", p.stdout + p.stderr)         # 출력은 기록 파일로만 간다
+        logs = [n for n in os.listdir(self.rootp / "backups") if n.startswith(f"deploy-uv-sync-{SHA[:8]}-")]
+        self.assertEqual(len(logs), 1)
+        self.assertIn("uv-output-line", (self.rootp / "backups" / logs[0]).read_text(encoding="utf-8"))
+        self.assertIn("action=uv-sync", self.audit_text())
+        self.assertIn("result=end:rc=0", self.audit_text())
+
+    def test_head_must_be_that_sha(self):
+        write(self.state / "git_head", SHA_OLD + "\n")
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertIn("result=fail:head-mismatch", self.audit_text())
+        self.assertNotIn("uv --directory", self.calls())
+
+    def test_failure_is_nonzero_and_audited(self):
+        write(self.state / "uv_rc", "3\n")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn("끝 코드 3", p.stderr)
+        audit = self.audit_text()
+        self.assertIn("result=fail:uv-sync-failed", audit)
+        self.assertIn("result=end:rc=1", audit)
+        self.assertNotIn("systemctl", self.calls())
+
+    def test_timeout_stops_uv_and_fails(self):
+        write(self.policy, self.write_policy_text.replace("timeout_seconds = 30", "timeout_seconds = 1"))
+        write(self.state / "uv_sleep", "5\n")
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertIn("result=fail:uv-sync-failed", self.audit_text())
+
+    def test_head_changed_by_uv_is_a_failure(self):
+        write(self.state / "uv_moves_head", "")
+        self.assertRc(self.gate("owner-a", self.CMD), 1)
+        self.assertIn("result=fail:head-after-uv-sync", self.audit_text())
+
+    def test_permission_announce_lock_and_dry_run(self):
+        self.assertRc(self.gate("member-x", self.CMD), 3)
+        self.assertRc(self.gate("owner-c", self.CMD), 3)
+        self.assertRc(self.gate("owner-a", f"uv-sync {SHA}"), 2)
+        write(self.lock, "garbage\n")
+        self.assertRc(self.gate("owner-a", self.CMD), 4)
+        self.lock.unlink()
+        p = self.gate("owner-a", f"uv-sync {SHA} --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn("DRY_RUN: timeout", p.stdout)
+        self.assertIn("sync --frozen", p.stdout)
+        self.assertNotIn("uv --directory", self.calls())
+        self.assertEqual(os.listdir(self.rootp / "backups"), [])
+        for bad in (f"uv-sync {SHA} {SHA}", "uv-sync", "uv-sync HEAD"):
+            self.assertRc(self.gate("owner-a", bad + " --announced"), 2)
+
+    def test_missing_or_bad_policy_section(self):
+        text = self.write_policy_text
+        start = text.index("[uv_sync]")
+        end = text.index("[health]")
+        write(self.policy, text[:start] + text[end:])
+        self.assertRc(self.gate("owner-a", self.CMD), 5)
+        self.assertIn("result=fail:config-path", self.audit_text())
+        self.assertRc(self.gate("owner-a", "status"), 0)                 # 다른 동작은 영향 없다
+        # 레포 밖 폴더는 거부
+        write(self.policy, text.replace(f'project_dir = "{self.root}/opt/app/repo/backend"',
+                                        f'project_dir = "{self.root}/opt/other"'))
+        self.assertRc(self.gate("owner-a", self.CMD), 5)
+        # 모르는 키·잘못된 숫자는 정책 전체 거부
+        for body in (text.replace("timeout_seconds = 30", 'timeout_seconds = 30\nextra_flag = "x"'),
+                     text.replace("timeout_seconds = 30", "timeout_seconds = 0")):
+            write(self.policy, body)
+            self.assertRc(self.gate("owner-a", "status"), 5)
+        self.assertNotIn("uv --directory", self.calls())
+
+    def test_missing_lockfile_fails_before_running_uv(self):
+        (self.rootp / "opt/app/repo/backend/uv.lock").unlink()
+        self.assertRc(self.gate("owner-a", self.CMD), 5)
+        self.assertNotIn("uv --directory", self.calls())
+
+    def test_announce_notice_text_for_new_actions(self):
+        for cmd, undo in ((f"rollback-code {SHA}", "deploy-bundle " + SHA),
+                          (f"uv-sync {SHA}", "되돌릴 수 없음(.venv")):
+            with self.subTest(cmd=cmd):
+                p = self.gate("owner-a", cmd)
+                self.assertRc(p, 2)
+                self.assertIn("[test-server] owner-a: " + cmd.split()[0], p.stderr)
+                self.assertIn("되돌리는 방법: " + undo, p.stderr)
+
+    def test_help_lists_new_actions_for_owner_only(self):
+        p = self.gate("owner-a", "help")
+        self.assertRc(p, 0)
+        self.assertIn("  rollback-code <SHA>\n", p.stdout)
+        self.assertIn("  uv-sync <SHA>\n", p.stdout)
+        p = self.gate("owner-c", "help")
+        self.assertRc(p, 0)
+        self.assertIn("rollback-code uv-sync", p.stdout)     # owner-c 에는 열지 않았다 → "없는 동작"에 나온다
+        self.assertNotIn("  rollback-code <SHA>\n", p.stdout.split("이 계정에 없는 동작")[0])
+
+
 class ExamplePolicyTests(GateCase):
     def test_gate_can_load_the_example_policy(self):
         shutil.copyfile(EXAMPLE_POLICY, self.policy)
@@ -2957,6 +3229,9 @@ class ExamplePolicyTests(GateCase):
                          {"list_file", "card_path", "reload_cmd", "backup_dir", "card_repo", "expected_card_sha"})
         for actions in perms.values():
             self.assertFalse({"gateway-allow-propose", "gateway-allow-approve", "gateway-allow-restore"} & set(actions))
+            self.assertFalse({"rollback-code", "uv-sync"} & set(actions))
+        # [uv_sync] 는 예시에서 주석으로만 있다(쓰려면 풀고 채운다)
+        self.assertNotIn("uv_sync", data)
 
 
 if __name__ == "__main__":

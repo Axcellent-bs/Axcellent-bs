@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from data_agent.connectors.instagram_graph import OWNER_FOLLOWERS, OWNER_NAME
+from data_agent.connectors.instagram_graph import OWNER_BIO, OWNER_FOLLOWERS, OWNER_NAME
 
 DATA = Path(__file__).resolve().parents[4] / ".data"  # backend/.data
 AUDIO_ENV, RADAR_ENV = "DATA_IG_AUDIO_DB", "DATA_IG_RADAR_DB"
@@ -215,6 +215,8 @@ class RadarStore(_Store):
             # 11/24: 팔로워 수 (business_discovery followers_count, 같은 호출). 예전 파일은 열만
             if "followers" not in acc:
                 self._conn.execute("ALTER TABLE accounts ADD COLUMN followers INTEGER")
+            if "bio" not in acc:  # 11/24 계정 소개 (대상층 AI 태그, untrusted)
+                self._conn.execute("ALTER TABLE accounts ADD COLUMN bio TEXT")
 
     def cursor(self) -> tuple[date, int, datetime | None, str] | None:
         """(바퀴 날짜, 다음 위치, 마지막 묶음 시각, 계정 목록 해시). 없으면 None."""
@@ -265,9 +267,11 @@ class RadarStore(_Store):
                          if isinstance(m.get(OWNER_NAME), str)), None)  # fmt: skip
             followers = next((m.get(OWNER_FOLLOWERS) for m in media
                               if isinstance(m.get(OWNER_FOLLOWERS), int)), None)  # fmt: skip
+            bio = next((m.get(OWNER_BIO) for m in media
+                        if isinstance(m.get(OWNER_BIO), str)), None)  # fmt: skip
             self._conn.execute(
-                "INSERT OR REPLACE INTO accounts (day, account, status, reason, name, followers)"
-                " VALUES (?,?,?,?,?,?)", (d, account, status, reason, name, followers),
+                "INSERT OR REPLACE INTO accounts (day, account, status, reason, name, followers,"
+                " bio) VALUES (?,?,?,?,?,?,?)", (d, account, status, reason, name, followers, bio),
             )  # fmt: skip
 
     def done(self, day: date, account: str) -> bool:
@@ -374,6 +378,12 @@ def radar_latest(path: str | Path) -> tuple[date | None, dict[str, list[dict[str
             ):
                 for m in media.get(acc, []):
                     m[OWNER_FOLLOWERS] = int(followers)
+        if "bio" in acc_cols:  # 11/24 계정 소개 (예전 파일·예전 줄은 없음)
+            for acc, bio in conn.execute(
+                "SELECT account, bio FROM accounts WHERE day = ? AND bio IS NOT NULL", (day,)
+            ):
+                for m in media.get(acc, []):
+                    m[OWNER_BIO] = str(bio)
         return date.fromisoformat(day), media, failed
     except sqlite3.DatabaseError:
         return None, {}, {}

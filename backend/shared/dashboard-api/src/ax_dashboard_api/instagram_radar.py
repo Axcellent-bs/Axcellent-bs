@@ -20,7 +20,7 @@ import os
 import re
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -36,23 +36,48 @@ HANDLE = re.compile(r"^[A-Za-z0-9._]{1,30}$")
 router = APIRouter(prefix="/api/dashboard/instagram-radar", dependencies=[Depends(require_human)])
 
 
+MIN_FOLLOWERS = 50_000  # [instagram] radar_min_followers 기본값 (creator·meme 계정만)
+
+
+class MetaIn(BaseModel):
+    """한 줄 고치기 (11/24): 사람이 고친 태그는 tag_source=human이고 AI가 다시 덮지 않는다."""
+
+    account: str = Field(min_length=1, max_length=40)
+    kind: Literal["industry", "creator", "meme", "brand"]
+    ages: list[Literal["10s", "20s", "30s", "40s", "50s", "60plus"]] = Field(max_length=6)
+    genders: list[Literal["male", "female", "all"]] = Field(max_length=3)
+    topic: str | None = Field(default=None, max_length=20)
+
+
 class SaveIn(BaseModel):
     accounts: list[str] = Field(max_length=1000)
     # 11/24 밈·크리에이터 계정. 안 보내면(None) 저장해 둔 밈 목록을 그대로 둔다
     meme_accounts: list[str] | None = Field(default=None, max_length=1000)
 
 
-def _tenant_list(key: str) -> list[str]:
+def _tenant_raw() -> dict[str, Any]:
     path = tenant.setting("DATA_TREND_CONFIG")
     if not path or not Path(path).is_file():
-        return []
+        return {}
     try:
         with Path(path).open("rb") as f:
             raw = tomllib.load(f).get("instagram") or {}
     except (OSError, tomllib.TOMLDecodeError):
-        return []
-    listed = raw.get(key, []) if isinstance(raw, dict) else []
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _tenant_list(key: str) -> list[str]:
+    listed = _tenant_raw().get(key, [])
+    listed = listed if isinstance(listed, list) else []
     return [str(a).strip().lstrip("@") for a in listed if str(a).strip()]
+
+
+def _min_followers() -> int:
+    try:
+        return max(0, int(_tenant_raw().get("radar_min_followers", MIN_FOLLOWERS)))
+    except (TypeError, ValueError):
+        return MIN_FOLLOWERS
 
 
 def _tenant_accounts() -> list[str]:
@@ -83,6 +108,9 @@ def _state() -> dict[str, Any]:
     accounts = accounts[:MAX_ACCOUNTS]
     lower = {a.lower() for a in accounts}
     meme = [a for a in meme if a.lower() not in lower][: max(0, MAX_ACCOUNTS - len(accounts))]
+    # 11/24 계정 메타 (지금 회사 것만). 목록에 있는 계정만 보여 준다
+    listed = {a.lower() for a in [*accounts, *meme]}
+    meta = {a: row for a, row in tenant.ig_radar_meta().items() if a.lower() in listed}
     return {
         "accounts": accounts,
         "source": source,
@@ -92,6 +120,9 @@ def _state() -> dict[str, Any]:
         "meme_tenant_count": len(meme_tenant),
         "max": MAX_ACCOUNTS,
         "editable": tenant.ig_radar_file() is not None,
+        "meta": meta,
+        "min_followers": _min_followers(),
+        "meta_editable": tenant.ig_radar_meta_file() is not None,
     }
 
 
@@ -158,6 +189,35 @@ def save_radar(body: SaveIn) -> dict:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
     os.replace(tmp, path)
+    return ok(_state())
+
+
+@router.post("/meta")
+def save_meta(body: MetaIn) -> dict:
+    """계정 한 줄의 종류·층·주제를 사람이 정한다 (tag_source=human, 팔로워 값은 그대로)."""
+    from datetime import UTC, datetime
+
+    handle = body.account.strip().lstrip("@")
+    if not HANDLE.match(handle):
+        raise ApiError(422, "INVALID_HANDLE", f"인스타 계정 이름이 아니에요: {body.account}")
+    state = _state()
+    listed = {a.lower(): a for a in [*state["accounts"], *state["meme_accounts"]]}
+    if handle.lower() not in listed:
+        raise ApiError(404, "NOT_IN_RADAR", f"레이더 목록에 없는 계정이에요: {handle}")
+    name = listed[handle.lower()]
+    topic = " ".join((body.topic or "").split()) or None
+
+    def change(data: dict[str, Any]) -> dict[str, Any]:
+        old = data["accounts"].get(name) or {}
+        data["accounts"][name] = {
+            **old, "kind": body.kind, "ages": list(dict.fromkeys(body.ages)),
+            "genders": list(dict.fromkeys(body.genders)), "topic": topic,
+            "tag_source": "human", "tagged_at": datetime.now(UTC).isoformat(),
+        }  # fmt: skip
+        return data
+
+    if tenant.update_ig_radar_meta(change) is None:
+        raise ApiError(409, "META_NOT_EDITABLE", "회사 연결 파일 설정이 없어 저장할 수 없다")
     return ok(_state())
 
 

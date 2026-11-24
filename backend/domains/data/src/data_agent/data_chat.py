@@ -85,7 +85,7 @@ _WORDS: dict[str, tuple[str, ...]] = {
                 "네이버", "데이터랩", "검색광고", "한도"),
     # 맨 "토큰"은 LLM 토큰(수집 상태)과 겹쳐 인스타는 만료·액세스 토큰만 ("인스타 토큰"은 "인스타")
     "instagram": ("인스타", "인스타그램", "레이더", "릴스", "해시태그", "오디오", "경쟁사 계정",
-                  "토큰 만료", "액세스 토큰"),
+                  "토큰 만료", "액세스 토큰", "천만", "1000만", "1,000만"),
     # 질문형만 온다: 의뢰 문장은 is_trend_request(의뢰 카드)가 먼저 가져간다
     "report": ("분석 의뢰", "보고서", "tr-", "의뢰"),
 }  # fmt: skip
@@ -133,6 +133,8 @@ SYSTEM_PROMPT = (
     "- facts에 없는 지표(시간당 조회 등)가 없다는 말은 사람이 그 지표를 물었을 때만 한다.\n"
     "- 인스타 게시물에 종류(밈·크리에이터 계정/벤치마크 계정)가 있으면 "
     '"밈 계정에서는 … / 벤치마크 계정에서는 …"으로 나눠 말한다.\n'
+    "- 질문에 대상층(나이·성별)이 있으면 facts의 \"대상층(…)에 맞는 계정의 뜬 게시물\"로 답하고, "
+    "조회 천만을 물으면 \"조회 천만 이상\"으로 답한다.\n"
     "- 근거 줄은 서버가 붙이니 쓰지 않는다.\n"
     "- reply는 짧은 한국어 해요체. summary는 이 대화 전체를 한두 줄로 요약한다.\n"
     '- JSON {"reply": "...", "summary": "..."} 로만 답한다.'
@@ -733,7 +735,63 @@ def post_row(p: Mapping[str, Any], now: datetime, *, kinds: bool = False) -> dic
         row["종류"] = IG_KIND.get(str(p.get("source_kind") or "benchmark"), "벤치마크 계정")
         if p.get("source_kind") == "meme" and (e := engagement_words(p.get("follower_engagement"))):
             row["팔로워 대비 반응"] = e
+    if p.get("account_kind"):  # 11/24 대상층: 계정 메타가 있는 판정이면 계정 종류·층 태그
+        from data_agent import radar_meta as rm
+
+        row["계정 종류"] = rm.KIND_WORD.get(str(p["account_kind"]), str(p["account_kind"]))
+        layer = rm.layer_words(p.get("audience_ages") or [], p.get("audience_genders") or [])
+        row["층"] = layer or "태그 없음"
+        if p.get("topic"):
+            row["주제"] = p["topic"]
     return row
+
+
+AUDIENCE_ROWS = 5
+
+
+def audience_rows(judged: Mapping[str, Any], question: str | None,
+                  now: datetime) -> tuple[str, list[dict[str, Any]]] | None:  # fmt: skip
+    """질문에 대상층이 있으면("20대 여성이 좋아하는 릴스") 보고서와 같은 규칙으로 고른 게시물.
+
+    (대상층 말, 게시물 줄). 대상층 말이 없거나 판정에 계정 메타가 없으면 None."""
+    from data_agent import radar_meta as rm
+
+    audience = rm.audience_from_text(question)
+    posts = [p for p in judged.get("audience_posts") or [] if isinstance(p, Mapping)]
+    if audience is None or audience.is_all or not judged.get("accounts_meta"):
+        return None
+    def fits(p: Mapping[str, Any]) -> bool:
+        ages, genders = p.get("audience_ages") or [], p.get("audience_genders") or []
+        return rm.tags_match(ages, genders, audience)
+
+    picked = [p for p in posts if fits(p)]
+    return audience.label, [post_row(p, now) for p in picked[:AUDIENCE_ROWS]]
+
+
+MEGA_ROWS = 5
+_MEGA_WORDS = ("천만", "1000만", "1,000만")
+
+
+def mega_rows(env: Mapping[str, str], now: datetime) -> list[dict[str, Any]] | str:
+    """조회 천만 이상 (trend_memes 저장분 mega_views, 회사 범위). 없으면 이유 문장."""
+    stored = _cached(env, "trend_memes", lambda o: isinstance(o.get("mega_views"), dict))
+    mega = (stored or {}).get("mega_views") or {}
+    items = [i for i in mega.get("items") or [] if isinstance(i, Mapping)]
+    if not stored:
+        return "조회 천만 이상 목록이 아직 계산되지 않았어요"
+    if not items:
+        return mega.get("reason") or "최근 30일 안에 조회 천만 이상인 릴스·쇼츠가 없어요"
+    from data_agent import radar_meta as rm
+
+    out = []
+    for i in items[:MEGA_ROWS]:
+        row = {"플랫폼": "인스타" if i.get("platform") == "instagram" else "유튜브",
+               "계정": i.get("account"), "조회수": i.get("views"),
+               "며칠 전": _days_ago(i.get("posted_at"), now), "링크": i.get("link")}  # fmt: skip
+        if layer := rm.layer_words(i.get("audience_ages") or [], i.get("audience_genders") or []):
+            row["층"] = layer
+        out.append(row)
+    return out
 
 
 def meme_rows(judged: Mapping[str, Any], now: datetime) -> list[dict[str, Any]]:
@@ -799,9 +857,14 @@ def read_instagram(env: Mapping[str, str], now: datetime,
                 facts["뜬 묶음 없음 이유"] = judged.get("reason") or "판정에 뜬 묶음이 없음"
             if has_meme_accounts(judged):  # 11/24 밈 소스: 밈 계정 게시물은 따로 나눠 답하게
                 facts["밈·크리에이터 계정 뜬 게시물"] = meme_rows(judged, now) or "없음"
+            if (got := audience_rows(judged, question, now)) is not None:  # 11/24 대상층 질문
+                label, rows = got
+                facts[f"대상층({label})에 맞는 계정의 뜬 게시물"] = rows or "없음"
     elif with_posts:
         pos = cursor[0][1] if cursor else 0
         facts["레이더 판정"] = f"아직 한 바퀴를 못 돌았어요(진행 {pos}/{total}곳)"
+    if question and any(w in question for w in _MEGA_WORDS):  # 11/24 "조회 천만 넘은 영상"
+        facts["조회 천만 이상"] = mega_rows(env, now)
     if with_status:
         facts["토큰 만료"] = token_line(env, now)
     times = [last for *_, last in cursor if last] + [judged.get("generated_at") if judged else None]

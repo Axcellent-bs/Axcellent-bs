@@ -116,6 +116,20 @@ def test_direction_line_has_no_digits() -> None:
     assert not any(c.isdigit() for c in tp.fun_prompt(set(), "end_card"))
 
 
+def test_off_industry_sources_include_radar_audience_evidence() -> None:
+    # #1681 대상층: 크리에이터 계정 게시물·조회 천만 이상·쇼츠 검색도 업종 밖 근거다
+    posts = [SimpleNamespace(source_kind="benchmark", account_kind="industry"),
+             SimpleNamespace(source_kind="benchmark", account_kind="creator"),
+             SimpleNamespace(source_kind="meme", account_kind=None),
+             SimpleNamespace(source_kind="benchmark", account_kind="brand")]  # fmt: skip
+    content = SimpleNamespace(posts=posts, memes=[1], mega=[1, 2], shorts=[1])
+    report = SimpleNamespace(sections=SimpleNamespace(content=content))
+    assert tp.off_industry_ids(report) == {"content:2", "content:3", "meme:1", "mega:1",
+                                           "mega:2", "shorts:1"}  # fmt: skip
+    assert [name for name, _ in tp.OFF_INDUSTRY_SOURCES][:2] == ["밈·크리에이터 계정 게시물",
+                                                                  "요즘 유행·밈"]  # fmt: skip
+
+
 # ---------------------------------------------------------------- fun_first 추천
 
 

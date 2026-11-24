@@ -109,21 +109,30 @@ def starts_with_industry(conclusion: str, words: Sequence[str]) -> bool:
 
 
 # ---- 업종 밖 근거 (근거 id 규칙: 섹션:행 번호, trend_report.evidence_catalog와 같다)
-# (이름, 이 보고서에서 그 근거 id들을 고르는 함수).
-# radar-audience가 쇼츠 검색·천만 조회 근거를 더하면 같은 모양으로 한 줄 더한다
+# (이름, 이 보고서에서 그 근거 id들을 고르는 함수). 새 근거 종류가 생기면 같은 모양으로 한 줄 더한다
+_OFF_KINDS = ("meme", "creator")  # 계정 종류(#1671 source_kind, #1681 account_kind)
+
+
 def _meme_posts(report: Any) -> set[str]:
     posts = report.sections.content.posts
     return {f"content:{n}" for n, p in enumerate(posts, start=1)
-            if getattr(p, "source_kind", None) == "meme"}  # fmt: skip
+            if getattr(p, "source_kind", None) in _OFF_KINDS
+            or getattr(p, "account_kind", None) in _OFF_KINDS}  # fmt: skip
 
 
-def _trending_memes(report: Any) -> set[str]:
-    return {f"meme:{n}" for n in range(1, len(report.sections.content.memes) + 1)}
+def _numbered(prefix: str, field: str) -> Callable[[Any], set[str]]:
+    def pick(report: Any) -> set[str]:
+        rows = getattr(report.sections.content, field, None) or []
+        return {f"{prefix}:{n}" for n in range(1, len(rows) + 1)}
+
+    return pick
 
 
 OFF_INDUSTRY_SOURCES: tuple[tuple[str, Callable[[Any], set[str]]], ...] = (
     ("밈·크리에이터 계정 게시물", _meme_posts),
-    ("요즘 유행·밈", _trending_memes),
+    ("요즘 유행·밈", _numbered("meme", "memes")),
+    ("조회 천만 이상 (#1681)", _numbered("mega", "mega")),
+    ("유튜브 쇼츠 검색 (#1681)", _numbered("shorts", "shorts")),
 )
 
 

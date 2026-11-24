@@ -193,6 +193,11 @@ const postCard = (it) => `<article class="vpost${it.wide ? " vpost-wide" : ""} r
 const brochureCard = has(C.links.brochureUrl) && PS.brochure ? `<div class="dl-card reveal"><div class="dl-body"><h3>${esc(PS.brochure.title)}</h3><p>${esc(PS.brochure.body)}</p><span class="dl-size">${esc(PS.brochure.size)}</span></div>${brochureBtn()}</div>` : "";
 const postEmpty = () => `<article class="vpost vpost-empty reveal"><div class="vpost-media"><span>${esc(PS.emptyTitle)}</span></div><h3>홍보 영상 칸</h3><p>영상이 올라오면 이 자리에 나옵니다.</p></article>`;
 const postList = PS.items.length ? PS.items.map(postCard).join("") : Array.from({ length: PS.emptySlots }, postEmpty).join("");
+// 홍보 영상이 itemsFirst개를 넘으면 처음에는 앞의 itemsFirst개만 보이고, 오른쪽 화살표 버튼(app.js가 켠다)을 눌러야 나머지가 보인다.
+// 스크립트가 꺼져 있으면 버튼은 숨겨진 채로 전부 보인다.
+const itemsFirst = PS.itemsFirst > 0 ? PS.itemsFirst : 0;
+const itemsMore = itemsFirst && PS.items.length > itemsFirst ? `<button type="button" class="posts-more" hidden aria-expanded="false" aria-label="영상 더 보기" data-more="영상 더 보기" data-less="영상 접기" data-first="${itemsFirst}"><span aria-hidden="true">›</span></button>` : "";
+const itemsBlock = `<div class="posts-wrap vposts-wrap"><div class="vposts">${postList}</div>${itemsMore}</div>`;
 
 // 고객사별 인스타 게시물. 게시물이 있는 고객사만 보인다
 const igGroups = (PS.instagram || []).filter((it) => it.posts && it.posts.length);
@@ -214,7 +219,7 @@ const posts = !showPosts ? "" : `
     <h2 class="h2 ink reveal">${esc(PS.title[0])}<br><span class="brand">${esc(PS.title[1])}</span></h2>
     <p class="posts-lead reveal">${esc(PS.lead)}</p>
     ${brochureCard}
-    ${PS.items.length || !igGroups.length ? `${has(PS.itemsTitle) && PS.items.length ? `<header class="vgroup-h reveal"><h3>${esc(PS.itemsTitle)}</h3></header>` : ""}<div class="vposts">${postList}</div>` : ""}
+    ${PS.items.length || !igGroups.length ? `${has(PS.itemsTitle) && PS.items.length ? `<header class="vgroup-h reveal"><h3>${esc(PS.itemsTitle)}</h3></header>` : ""}${itemsBlock}` : ""}
     ${igHtml}
     ${vgroupHtml}
     <p class="callout reveal">${esc(PS.note)}</p>

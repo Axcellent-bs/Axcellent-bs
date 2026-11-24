@@ -681,6 +681,10 @@ class Proposal(DomainModel):
     # 콘텐츠 카테고리(예: 아재개그)·형식(shorts·reels). 인사이트에서 받아 brief로 넘긴다 (11/17)
     content_category: str | None = None
     content_format: Literal["shorts", "reels"] | None = None
+    # 홍보 영상 방향 (11/24 재현 님 "재미 먼저, 브랜드는 끝에"). 데이터가 회사 브랜드 설정과
+    # 의뢰 문장으로 정한 최종값. None이면 기획이 fun_first·end_card로 본다 (video_plan.promo_of)
+    promo_style: Literal["fun_first", "product"] | None = None
+    brand_exposure: Literal["end_card", "prop", "caption"] | None = None
     audience: str | None = None  # 타깃 연령대 (데이터분석)
     shorts_format: str | None = None  # 잘 맞는 숏츠 형식 (데이터분석)
     body_md: str | None = None  # 보낸 쪽 설명 (외부 문구라 지시로 쓰지 않는다)

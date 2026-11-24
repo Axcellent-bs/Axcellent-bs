@@ -16,6 +16,7 @@ import os
 import re
 import tomllib
 import unicodedata
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -472,5 +473,92 @@ def write_ig_radar_auto(payload: dict[str, Any]) -> Path | None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+# ---------------------------------------------------------------- 인스타 레이더 계정 메타 (11/24)
+# 계정마다 kind(industry·creator·meme·brand)·ages·genders·topic·tag_source(ai·human)·followers.
+# 파일: `AX_IG_RADAR_META_FILE` → 회사 폴더를 켰으면 `<회사 폴더>/<회사>/instagram_radar_meta.json`
+# → 아니면 회사 연결 파일 옆. 파일 안에 회사 id를 두고 다른 회사 것이면 읽지 않는다.
+# data(AI 태그·팔로워)와 dashboard-api(사람 수정)가 같이 쓴다: 읽고 바로 고쳐 쓴다
+# (`update_ig_radar_meta`).
+# 사람이 고친 줄(tag_source=human)은 AI가 덮지 않는다(data 쪽 규칙)
+IG_RADAR_META_FILE_ENV = "AX_IG_RADAR_META_FILE"
+IG_RADAR_META_FILE = "instagram_radar_meta.json"
+
+
+def _meta_company(company_id: str | None) -> str:
+    from ax_agent_template.companies import canonical_company_id
+    from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
+
+    return canonical_company_id(company_id or current()) or TENANT_ID_CATBOOKS
+
+
+def ig_radar_meta_file(company_id: str | None = None) -> Path | None:
+    from ax_agent_template import company_files
+
+    raw = os.getenv(IG_RADAR_META_FILE_ENV, "").strip()
+    if raw:
+        return Path(raw)
+    conn = os.getenv("AX_COMPANY_CONNECTION_FILE", "").strip()
+    legacy = Path(conn).with_name(IG_RADAR_META_FILE) if conn else None
+    if company_files.folders_on():
+        return company_files.company_file(IG_RADAR_META_FILE, source=legacy,
+                                          company_id=_meta_company(company_id))  # fmt: skip
+    return legacy
+
+
+def ig_radar_meta(company_id: str | None = None) -> dict[str, dict[str, Any]]:
+    """계정 → 메타 줄. 파일이 없거나 깨졌거나 다른 회사 것이면 빈 표."""
+    import json
+
+    path = ig_radar_meta_file(company_id)
+    if path is None:
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict) or data.get("company_id") != _meta_company(company_id):
+        return {}
+    rows = data.get("accounts")
+    if not isinstance(rows, dict):
+        return {}
+    return {str(k): v for k, v in rows.items() if isinstance(v, dict)}
+
+
+def ig_radar_meta_state(company_id: str | None = None) -> dict[str, Any]:
+    """파일 전체 (accounts 말고 `ai_day` 같은 칸도). 없거나 다른 회사 것이면 빈 표."""
+    import json
+
+    path = ig_radar_meta_file(company_id)
+    if path is None:
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    ok = isinstance(data, dict) and data.get("company_id") == _meta_company(company_id)
+    return data if ok else {}
+
+
+def update_ig_radar_meta(change: Callable[[dict[str, Any]], dict[str, Any]],
+                         company_id: str | None = None) -> Path | None:  # fmt: skip
+    """파일을 읽어 `change`(전체 dict → 새 dict)로 고쳐 바로 바꿔 쓴다. 자리가 없으면 None."""
+    import json
+
+    path = ig_radar_meta_file(company_id)
+    if path is None:
+        return None
+    cid = _meta_company(company_id)
+    data = ig_radar_meta_state(company_id) or {"company_id": cid, "accounts": {}}
+    if not isinstance(data.get("accounts"), dict):
+        data["accounts"] = {}
+    data = change(data)
+    data["company_id"] = cid
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, path)
     return path

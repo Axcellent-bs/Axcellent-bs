@@ -122,12 +122,22 @@
           "source_kind": "benchmark",
           "followers": null,
           "comments": null,
-          "follower_engagement": null
+          "follower_engagement": null,
+          "account_kind": null,
+          "audience_ages": [],
+          "audience_genders": [],
+          "topic": null
         }
       ],
       "memes": [
         {"name": "#오늘의루틴", "description": "아침 루틴을 빠르게 보여 주는 영상이 몰림", "ad_material": "ok"}
-      ]
+      ],
+      "audience_line": null,
+      "audience_label": null,
+      "audience_widened": false,
+      "audience_thin": false,
+      "shorts": [],
+      "mega": []
     },
     "competitors": {
       "status": "known",

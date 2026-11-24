@@ -311,6 +311,11 @@ body { overflow-x: clip; }
 .ig-group .post-thumb { border-radius: 16px; overflow: hidden; }
 .ig-group .post-thumb img { aspect-ratio: 4 / 5; border-radius: 0; }
 .ig-group .posts.is-collapsed .post:nth-child(n+4) { display: none; }
+/* 홍보 영상 칸: 앞의 2개만 보이고 오른쪽 화살표를 눌러야 나머지(가로 영상)가 보인다. 화살표 버튼은 인스타 게시물과 같은 것을 쓴다 */
+.vposts-wrap { margin-top: var(--gap-block); }
+.vgroup-h + .vposts-wrap { margin-top: 16px; }
+.vposts-wrap .vposts { flex: 1; min-width: 0; margin-top: 0; align-items: start; }
+.vposts.is-collapsed .vpost:nth-child(n+3) { display: none; }
 .posts-more { flex: none; align-self: center; width: 48px; height: 48px; border-radius: 50%; border: 1px solid #d9d9ee; background: #fff; color: var(--brand-d); font-size: 30px; line-height: 1; cursor: pointer; display: grid; place-items: center; box-shadow: 0 2px 10px rgba(20, 20, 46, .12); }
 .posts-more[hidden] { display: none; }
 .posts-more:hover { background: var(--paper); }
