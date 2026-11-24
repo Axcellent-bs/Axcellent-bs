@@ -2,9 +2,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  CLEAR_HINT, DIRECT_CLEAR_HINT, HIDE_LABEL, HIDE_WAIT, afterClear, clearDividerText, clearMap, commandHint,
-  hiddenRows, hideConfirm, incidentHideItem, isClearCommand, withoutServerHidden,
+  CLEAR_HINT, DIRECT_CLEAR_HINT, HIDE_LABEL, HIDE_WAIT, NEW_THREAD_CONFIRM, afterClear, clearDividerText, clearMap, commandHint,
+  hiddenRows, hideConfirm, incidentHideItem, isClearCommand, newThreadNeedsConfirm, withoutServerHidden,
 } from "./roomCleanup.ts";
+
+test("1:1 [새 대화]: 내 대화면 화면 안 상자로 묻고, 남의 대화를 보는 중이면 묻지 않는다 (11/24)", () => {
+  assert.equal(newThreadNeedsConfirm(false), true);
+  assert.equal(newThreadNeedsConfirm(true), false);
+  assert.deepEqual(NEW_THREAD_CONFIRM, { head: "새 대화를 시작할까요?", body: "지금 대화는 '내 지난 대화'에 남아요." });
+});
 
 const msg = (id: string, at: string, lane?: "log") => ({ id, at, kind: "msg" as const, ...(lane ? { lane } : {}) });
 
