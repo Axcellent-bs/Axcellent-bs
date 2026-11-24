@@ -47,8 +47,14 @@ def current_id() -> str:
 
 
 def active() -> str:
-    """지금 쓰는 회사: skill 요청 안이면 그 요청의 회사, 아니면 지금 회사."""
-    return _ACTIVE.get() or current_id()
+    """지금 쓰는 회사: data가 건 회사 → 서버가 건 요청 회사 → 지금 회사.
+
+    서버(agent-template)는 skill 요청의 `meta.tenant_id`와 화면 경로의 로그인 세션 회사를 공용
+    `company_scope`에 건다. data가 따로 걸지 않은 경로(화면용 HTTP 목록 등)도 그 회사로 읽게
+    공용 값을 본다(11/24 누비투어 연결: 누비투어 화면에 캣북스 목록이 섞임)."""
+    from ax_agent_template import company_scope as request_scope
+
+    return _ACTIVE.get() or request_scope.active() or current_id()
 
 
 def meta_tenant() -> str:

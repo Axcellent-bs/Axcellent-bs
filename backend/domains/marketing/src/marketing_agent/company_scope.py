@@ -35,6 +35,28 @@ def scope_id(company_id: str | None) -> str:
     return canonical_company_id(company_id) or TENANT_ID_CATBOOKS
 
 
+class RequestCompany:
+    """저장소의 `company_id` 칸: 요청 회사(`ax_agent_template.company_scope.active()`)가 먼저.
+
+    저장소는 서버가 켤 때 한 번 만들어져 회사가 캣북스로 고정됐다.
+    그래서 누비투어 요청도 캣북스 줄을 읽고 썼다(11/24 누비투어 연결).
+    이 칸을 읽을 때마다 지금 요청의 회사를 보고, 요청 밖(스스로 도는 루틴·시험에서 직접 만든
+    저장소)이면 만들 때 받은 회사를 쓴다. `self.company_id = …`는 그대로 쓴다.
+    """
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        self._slot = f"_pinned_{name}"
+
+    def __get__(self, obj: object, owner: type | None = None) -> str:
+        if obj is None:
+            return TENANT_ID_CATBOOKS
+        active = request_scope.active()
+        return scope_id(active) if active else getattr(obj, self._slot, TENANT_ID_CATBOOKS)
+
+    def __set__(self, obj: object, value: str | None) -> None:
+        setattr(obj, self._slot, scope_id(value))
+
+
 def company_name() -> str:
     """그 요청 회사의 이름(회사 목록). 요청 밖이면 기본 회사, 이름을 모르면 "우리 회사"."""
     company = get_company(request_scope.active() or default_company_id())
