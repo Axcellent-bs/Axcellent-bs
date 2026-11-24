@@ -24,6 +24,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from ax_agent_template import company_scope
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel
 from support_agent.store import now_iso
 
@@ -143,12 +144,19 @@ class ChatStore:
         return thread
 
     def _visible(self) -> list[ChatThread]:
-        return [t for t in self._threads.values() if t.removed_at is None]
+        # 요청 회사의 대화만(11/24 회사 격리: 다른 회사에 같은 이름이 있어도 안 섞이게)
+        return [
+            t
+            for t in self._threads.values()
+            if t.removed_at is None and company_scope.visible(t.tenant_id)
+        ]
 
     def get(self, thread_id: str) -> ChatThread | None:
-        """숨긴 대화는 없는 것과 같다."""
+        """숨긴 대화·다른 회사 대화는 없는 것과 같다."""
         thread = self._threads.get(thread_id)
-        return None if thread is None or thread.removed_at is not None else thread
+        if thread is None or thread.removed_at is not None:
+            return None
+        return thread if company_scope.visible(thread.tenant_id) else None
 
     def all(self) -> list[ChatThread]:
         return sorted(self._visible(), key=lambda t: (t.updated_at, t.seq), reverse=True)
@@ -161,7 +169,12 @@ class ChatStore:
     ) -> ChatThread:
         seq = max((t.seq for t in self._threads.values()), default=0) + 1
         now = now_iso()
+        company = company_scope.active()
         thread = ChatThread(
+            # 캣북스(회사를 모름 포함)는 예전 값 그대로
+            tenant_id=(
+                company if company and company != company_scope.CATBOOKS else TENANT_ID_DEFAULT
+            ),
             context_id=context_id,
             id=f"chat-{seq}",
             title=title_of(first_text),
