@@ -374,6 +374,8 @@ class PlanningCore(StateService):
     # ---- 상태·구독
 
     def _seed(self) -> State:
+        if self.company:  # 다른 회사는 빈 상태로 시작한다 (캣북스 예시를 섞지 않는다)
+            return State(auto_policy=initial_state().auto_policy, tenant_id=self.company)
         return real_state() if self.real_example else initial_state()
 
     # ---- 적용 틀

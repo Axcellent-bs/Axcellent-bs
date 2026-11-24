@@ -313,7 +313,10 @@ class PlanningService(ReturnedMixin, ProposalMixin, PlanningCore):
         finance: proposals.FinanceBudget | None | Literal["default"] = "default",
         proposal_writer: proposals.ProposalWriter | None | Literal["default"] = "default",
         spec_filler: spec_fill.SpecFiller | None | Literal["default"] = "default",
+        company: str | None = None,
     ):
+        # 캣북스가 아닌 회사 서비스면 그 회사 (상태 파일 따로·빈 상태로 시작, runtime.get_service)
+        self.company = company
         super().__init__(clock, gate, tenant_id, result_sender, dev_sender, real_example, relater)
         # 기획 제안: 데이터분석 인사이트를 받아오는 곳·마케팅에 넘기는 곳
         # (None이면 부르지 않음, 목 모드 기본값)

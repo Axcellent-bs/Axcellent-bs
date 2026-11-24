@@ -29,11 +29,15 @@ ENV_DIR = "PLANNING_STATE_DIR"
 RUNNING = ("queued", "reading", "writing", "reviewing")
 
 
-def path_for(role: str) -> str | None:
+def path_for(role: str, company: str | None = None) -> str | None:
+    """상태 파일. `company`가 있으면(캣북스가 아닌 회사, 11/24)
+    `planning_state_<역할>.<회사>.json`로 따로 둔다. 회사끼리 제안·기획서·브리프가 섞이지 않게
+    하려는 것이다. 없으면 예전 파일 그대로."""
     folder = (os.getenv(ENV_DIR) or "").strip()
     if not folder:
         return None
-    return os.path.join(folder, f"planning_state_{role or 'all'}.json")
+    suffix = f".{company}" if company else ""
+    return os.path.join(folder, f"planning_state_{role or 'all'}{suffix}.json")
 
 
 def save(

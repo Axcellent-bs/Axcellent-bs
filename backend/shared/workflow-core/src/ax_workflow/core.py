@@ -78,6 +78,10 @@ class StateService:
 
     하위 클래스는 필요한 필드를 다 둔 뒤 마지막에 `_init_state()`를 부른다 (시드는 `_seed`)."""
 
+    # 캣북스가 아닌 회사의 서비스면 그 회사 id (11/24): 상태 파일을 따로 두고 빈 상태로 시작한다.
+    # None이면 예전 그대로(설치 회사 = 캣북스)
+    company: str | None = None
+
     agent_name = "planning"  # 관문에 보내는 에이전트 토큰 이름
     soft_actions: frozenset[str] = frozenset()  # 보류돼도 본 작업을 되돌리지 않는 부수 기록
 
@@ -118,7 +122,7 @@ class StateService:
         # 못 보낸 넘기기 (멱등 키 → [skill, context_id, 입력]). 주기적으로 다시 보낸다
         self._unsent: dict[str, list] = {}
         # 상태 파일(PLANNING_STATE_DIR)이 있으면 이어서 시작한다. 초기화(fresh)면 시드로 덮어쓴다
-        self._state_path = store.path_for(self.role)
+        self._state_path = store.path_for(self.role, self.company)
         if self._state_path and not fresh:
             saved = store.load(self._state_path)
             if saved is not None:
