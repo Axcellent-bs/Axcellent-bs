@@ -534,6 +534,53 @@ def has_forbidden_claim(text: str) -> bool:
     return any(re.search(pattern, squeezed) for pattern in FORBIDDEN_CLAIM_PATTERNS)
 
 
+# 참여 조건부 게시(좋아요·공유·댓글·팔로우를 하면 혜택)를 막는다. 참여 단어가 들어 있기만 하면
+# 막던 규칙은 "공유할 책 일상 밈" 같은 설명 문장도 막아서,
+# 단어 뒤 12자 안에 요구·조건 표현이 있을 때만 본다.
+# 혜택 없는 요청("댓글로 알려 주세요")도 지금처럼 막는다("주세요").
+ENGAGEMENT_WORDS = (*FORBIDDEN_PHRASES, "리그램", "태그")
+ENGAGEMENT_DEMANDS = (
+    "누르",
+    "눌러",
+    "하면",
+    "해주",
+    "해 주",
+    "달아",
+    "남겨",
+    "부탁",
+    "하고",
+    "해야",
+    "이벤트",
+    "추첨",
+    "증정",
+    "선물",
+    "당첨",
+    "주세요",
+)
+ENGAGEMENT_WINDOW = 12
+_ENGAGEMENT_WORD = re.compile("|".join(map(re.escape, ENGAGEMENT_WORDS)))
+_ENGAGEMENT_DEMAND = re.compile("|".join(re.escape(d.replace(" ", "")) for d in ENGAGEMENT_DEMANDS))
+
+
+def engagement_bait_count(text: str) -> int:
+    """참여 단어 뒤 12자 안에 요구·조건 표현이 붙은 곳의 수.
+
+    공백을 뺀 글에서 센다(띄어쓰기로 피하지 못하게)."""
+    squeezed = re.sub(r"\s+", "", text)
+    return sum(
+        1
+        for word in _ENGAGEMENT_WORD.finditer(squeezed)
+        if _ENGAGEMENT_DEMAND.search(squeezed[word.end() : word.end() + ENGAGEMENT_WINDOW])
+    )
+
+
+def has_engagement_bait(text: str) -> bool:
+    """참여 조건부 게시 표현이 있으면 True.
+
+    해시태그 검사(tag_check)는 단어 포함 규칙을 그대로 쓴다."""
+    return engagement_bait_count(text) > 0
+
+
 BRIEF_HOOK_MAX = 50
 BRIEF_LINE_MAX = 120
 BRIEF_FACTS_MAX = 2
@@ -616,7 +663,7 @@ def _topic_parts(request: AgentRequest, data: DraftSnsPostInput) -> SourceParts 
         return _result(request, TaskStatus.FAILED, outcome="topic_link_or_tag")
     if re.search(r"\d", topic):
         return _result(request, TaskStatus.FAILED, outcome="topic_unverified_number")
-    if any(phrase in topic for phrase in FORBIDDEN_PHRASES):
+    if has_engagement_bait(topic):
         return _result(request, TaskStatus.FAILED, outcome="forbidden_phrase")
     if has_forbidden_claim(topic):
         return _result(request, TaskStatus.FAILED, outcome="forbidden_claim")
@@ -669,7 +716,7 @@ def source_parts(
             return _result(request, TaskStatus.FAILED, outcome="brief_not_found")
         # 쓰지 않는 문장까지 포함한 기획안 전체를 검사한다(막는 쪽으로 기운다)
         full = _brief_all_text(stored)
-        if any(phrase in full for phrase in FORBIDDEN_PHRASES):  # 참여 조건부 게시 금지
+        if has_engagement_bait(full):  # 참여 조건부 게시 금지
             return _result(request, TaskStatus.FAILED, outcome="forbidden_phrase")
         if has_forbidden_claim(full):  # 인건비 절감·직원 대체·과장 표현
             return _result(request, TaskStatus.FAILED, outcome="forbidden_claim")
@@ -983,7 +1030,7 @@ async def check_sns_post(request: AgentRequest, store: SnsStore) -> AgentResult:
     if constraint_missing:
         problems.append("constraint_missing")
 
-    forbidden = sum(1 for phrase in FORBIDDEN_PHRASES if phrase in caption)
+    forbidden = engagement_bait_count(caption)  # 참여 조건부 게시 표현이 붙은 곳의 수
     if forbidden:
         problems.append("forbidden_phrase")
     if has_forbidden_claim(caption):
