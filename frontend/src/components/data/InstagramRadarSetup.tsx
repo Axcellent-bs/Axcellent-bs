@@ -178,7 +178,7 @@ export default function InstagramRadarSetup() {
         <label className="mt-3 block space-y-1 text-sm">
           <span className="text-ink-700">벤치마크 계정 (@는 빼도 돼요)</span>
           <textarea className="field h-48 w-full font-mono text-xs" value={text} onChange={(e) => { setText(e.target.value); setDone(null) }}
-            placeholder={'catbooks_official\nbook_reviewer'} />
+            placeholder={'our_brand_official\nproduct_reviewer'} />
         </label>
         <label className="block space-y-1 text-sm">
           <span className="text-ink-700">밈·크리에이터 계정 (한 줄에 하나)</span>

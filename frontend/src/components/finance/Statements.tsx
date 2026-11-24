@@ -165,7 +165,7 @@ function OtherPnlForm({ month, onSaved }: { month: string; onSaved: () => void }
   return (
     <details className="rounded-2xl border border-ink-100 px-4 py-3 text-sm">
       <summary className="cursor-pointer font-semibold text-ink-900">{month} 장부 밖 손익 입력{info ? ` · ${info}` : ""}</summary>
-      <p className="mt-1 text-ink-500">급여·임차료·영업외손익은 쇼핑몰 장부에 없습니다. 월 합계를 원 단위로 넣으면 아래 칸이 계산됩니다. 입력하지 않으면 "자료 없음"입니다.</p>
+      <p className="mt-1 text-ink-500">급여·임차료·영업외손익은 회사 사이트 장부에 없습니다. 월 합계를 원 단위로 넣으면 아래 칸이 계산됩니다. 입력하지 않으면 "자료 없음"입니다.</p>
       {locked && <p className="mt-1 text-amber-800">확정한 달이라 고칠 수 없습니다. 차이는 결산 조정으로 처리합니다.</p>}
       <div className="mt-2 grid gap-2 sm:grid-cols-3">
         {OTHER_FIELDS.map((f) => (

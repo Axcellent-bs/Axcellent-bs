@@ -634,8 +634,8 @@ export default function AgentChat() {
         </details>
         {/* 쇼핑몰 결제 상태는 장애일 때만 머리에 바로 보인다 (평소에는 ⓘ 안에서) */}
         {orchOn && !orchMock && (
-          <span className={`chip ${fault?.active ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"} ${fault?.active ? "" : "hidden lg:inline-flex"}`} title="회사 쇼핑몰 결제 서버 상태 (장애는 운영자가 넣고 뺀다)">
-            쇼핑몰 결제 {fault == null ? "확인 중" : fault.active ? (fault.failing ? "장애 중" : `느림(${fault.delay_ms}ms)`) : "정상"}{fault?.degraded ? " · 감지됨" : ""}
+          <span className={`chip ${fault?.active ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"} ${fault?.active ? "" : "hidden lg:inline-flex"}`} title="회사 사이트 결제 서버 상태 (장애는 운영자가 넣고 뺀다)">
+            사이트 결제 {fault == null ? "확인 중" : fault.active ? (fault.failing ? "장애 중" : `느림(${fault.delay_ms}ms)`) : "정상"}{fault?.degraded ? " · 감지됨" : ""}
           </span>
         )}
       {/* 나눠 보기: 한 번에 볼 칸 수 */}
@@ -701,7 +701,7 @@ function EmptyState({ orchConn, known }: { orchConn: Conn; known: boolean }) {
     return (
       <div className="mx-auto max-w-xl py-14 text-sm text-ink-700">
         <p className="font-semibold text-ink-900">총괄 AI가 꺼져 있습니다.</p>
-        <p className="mt-1 text-ink-500">backend/에서 실제 모드로 켜면 회사 쇼핑몰 장애로 AI들이 함께 일하는 과정을 볼 수 있습니다.</p>
+        <p className="mt-1 text-ink-500">backend/에서 실제 모드로 켜면 회사 사이트 장애로 AI들이 함께 일하는 과정을 볼 수 있습니다.</p>
         <pre className="mt-3 overflow-x-auto rounded-xl bg-surface p-3 font-mono text-xs text-ink-700"><code>{ORCH_CMD}</code></pre>
       </div>
     );

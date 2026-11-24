@@ -198,7 +198,7 @@ function InsightCard({ i, facts }: { i: TrendInsight; facts: DataFact[] | undefi
       highlights={i.evidence_highlights}
       extraTiles={formatTile}
       products={(borrow ? (i.borrow_products ?? []) : i.products).map((p) => ({ id: p.product_id, name: p.name }))}
-      productsLabel={borrow ? "이어 붙일 책" : "연결 상품"}
+      productsLabel={borrow ? "이어 붙일 상품" : "연결 상품"}
       thumbs={shortsThumbs([...(i.evidence_shorts ?? []), ...(i.evidence.video_links ?? [])], [...i.evidence.links, ...factLinks(facts, i.insight_id, i.fact_ids)])}
       thumbsLabel={borrow ? "지금 뜨는 영상" : "이런 숏츠가 잘 돼요"}
       highlight={i.company_related === true}
@@ -546,7 +546,7 @@ export function InsightBrief({ state, examples, examplesCount }: {
           <p className="text-sm text-ink-500">
             {v6
               ? "요즘 숏츠 전체보다 1시간 조회가 많은 형식만 빌려 우리 회사 홍보 영상을 만들어요. 다른 회사·연예인 이름과 로고는 쓰지 않아요. 아래 기준을 넘은 것만 기획에 넘겨요."
-              : `두 가지예요. ${name} 책에서 뜨는 주제, 그리고 책 숏츠에 빌려 쓸 수 있는 요즘 유행. 숫자는 모두 데이터 근거예요.`}
+              : `두 가지예요. ${name} 상품에서 뜨는 주제, 그리고 홍보 숏츠에 빌려 쓸 수 있는 요즘 유행. 숫자는 모두 데이터 근거예요.`}
           </p>
         </div>
         {out && <BriefWhen out={out} />}
@@ -578,7 +578,7 @@ export function InsightBrief({ state, examples, examplesCount }: {
             {/* v6: 기준을 넘은 것만, 없으면 칸을 숨긴다 (기회 가설 카드는 아래 참고용 접힘으로) */}
             {(!v6 || bookOnes.length > 0) && (
               <section aria-labelledby="data-trend-insight-books" className="space-y-3">
-                <h3 id="data-trend-insight-books" className="text-lg font-bold text-ink-900">{name} 책에서 뜨는 주제</h3>
+                <h3 id="data-trend-insight-books" className="text-lg font-bold text-ink-900">{name} 상품에서 뜨는 주제</h3>
                 <ul className="space-y-4">
                   {!v6 && <OpportunityCards list={out.opportunities} reason={out.opportunities_reason} facts={out.facts} />}
                   {bookOnes.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}
@@ -587,7 +587,7 @@ export function InsightBrief({ state, examples, examplesCount }: {
             )}
             {(!v6 || borrowed.length > 0) && <section aria-labelledby="data-trend-insight-borrow" className="space-y-3">
               <h3 id="data-trend-insight-borrow" className="text-lg font-bold text-ink-900">
-                책 숏츠에 빌려 쓸 요즘 유행 <span className="text-sm font-normal text-ink-500">이름·로고는 안 쓰고 형식만 빌려요</span>
+                홍보 숏츠에 빌려 쓸 요즘 유행 <span className="text-sm font-normal text-ink-500">이름·로고는 안 쓰고 형식만 빌려요</span>
               </h3>
               {borrowed.length > 0
                 ? <ul className="space-y-4">{borrowed.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}</ul>
@@ -596,7 +596,7 @@ export function InsightBrief({ state, examples, examplesCount }: {
             {unlinked.length > 0 && (
               <details className="card p-4">
                 <summary className="cursor-pointer text-sm font-semibold text-ink-900">
-                  연결할 책이 없는 화제 (참고용) {unlinked.length}개
+                  연결할 상품이 없는 화제 (참고용) {unlinked.length}개
                 </summary>
                 <ul className="mt-4 space-y-4">{unlinked.map((i) => <InsightCard key={i.insight_id} i={i} facts={out.facts} />)}</ul>
               </details>

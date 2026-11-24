@@ -43,7 +43,7 @@ export default function YoutubeMemeKeywordsSetup() {
       <label className="block space-y-1 text-sm">
         <span className="text-ink-700">키워드 (최대 {max}개, 하나에 30자까지)</span>
         <textarea className="field h-32 w-full text-xs" value={text} onChange={(e) => { setText(e.target.value); setDone(null) }}
-          placeholder={'고양이 밈\n책 읽는 고양이'} />
+          placeholder={'고양이 밈\n출근길 브이로그'} />
       </label>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn-primary" disabled={busy || !canWrite}

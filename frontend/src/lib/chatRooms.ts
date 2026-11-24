@@ -61,11 +61,11 @@ export const SHORT_KIND_BY_EVENT: Record<string, string> = {
   "payment:payment_fail_rate": "결제 실패",
   "payment:p95_latency_ms": "결제 지연",
   "payment:order_fail_rate": "주문 실패",
-  "api:error_rate_5xx": "쇼핑몰 오류",
-  "api:p95_latency_ms": "쇼핑몰 지연",
+  "api:error_rate_5xx": "사이트 오류",
+  "api:p95_latency_ms": "사이트 지연",
 };
 export const SHORT_KIND_BY_COMPONENT: Record<string, string> = {
-  payment: "결제 장애", api: "쇼핑몰 장애", db: "주문 DB 장애", search: "검색 장애", shipping: "배송 장애",
+  payment: "결제 장애", api: "사이트 장애", db: "주문 DB 장애", search: "검색 장애", shipping: "배송 장애",
 };
 /** 총괄 제목 끝 "(지표)"에서 지표 코드 (예전 제목 형식). event_type이 없을 때만 쓴다 */
 const metricInTitle = (title: string) => /\(([a-z0-9_]+)\)\s*$/.exec(title)?.[1] ?? null;

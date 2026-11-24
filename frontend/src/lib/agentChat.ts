@@ -98,7 +98,7 @@ export interface DemoRequest {
 // ---------------------------------------------------------------- 이름표
 export const DEPT_KO: Record<string, string> = {
   orchestrator: "총괄 AI", planning: "기획", dev: "개발", support: "고객지원", marketing: "마케팅", hr: "인사", archive: "아카이브",
-  finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전 처리 로그", memory: "회사 기억", "shop-api": "회사 쇼핑몰",
+  finance: "재무", data: "데이터분석", infra: "인프라", safety: "안전 처리 로그", memory: "회사 기억", "shop-api": "회사 사이트",
   "dashboard-api": "AXcellent 화면", operator: "운영자(사람)",
 };
 // 백엔드는 서비스 단위로 나뉘어 있다(backend/README.md). 서비스 이름 → 부서.
@@ -136,7 +136,7 @@ const COMPONENT_KO: Record<string, string> = { payment: "결제", api: "판매 �
 const METRIC_KO: Record<string, string> = {
   error_rate_5xx: "서버 오류로 자꾸 실패해요", p95_latency_ms: "응답이 느려졌어요", order_fail_rate: "주문 실패가 늘었어요", payment_fail_rate: "실패가 늘었어요",
 };
-const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "쇼핑몰이", db: "주문 DB가", search: "검색이", shipping: "배송이" };
+const SUBJECT_KO: Record<string, string> = { payment: "결제가", api: "회사 사이트가", db: "주문 DB가", search: "검색이", shipping: "배송이" };
 /** 보류 건을 결정하는 화면. 환불·판매자 정산 지급은 고객지원, 쿠폰은 마케팅, 나머지는 재무 화면의 보류 큐다 */
 /** 보류(C 등급)를 사람이 결정하는 화면. 화면의 보류 칸이 받는 일과 같아야 한다
  *  (환불·고객지원 삭제 /queue, 판매자 정산 /settlements, 마케팅 5종 /marketing, 개발 4종 /dev/work/holds, 나머지는 재무 보류 큐).
@@ -256,7 +256,7 @@ const FIELD_KO: Record<string, string> = {
 };
 /** 코드 값 → 사람이 읽는 말 */
 const VALUE_KO: Record<string, string> = {
-  published: "게시됨", draft: "초안", banner: "쇼핑몰 배너", popup: "팝업", email: "메일", resolved: "해결됨", open: "진행 중",
+  published: "게시됨", draft: "초안", banner: "사이트 배너", popup: "팝업", email: "메일", resolved: "해결됨", open: "진행 중",
   pass: "통과", fail: "실패", approved: "승인", rejected: "거절", held: "보류", high: "높음", mid: "보통", low: "낮음",
   suspected: "의심됨", confirmed: "확정", unknown: "확인할 수 없음", rolled_back: "되돌림", recovered: "복구됨", degraded: "일부 미완료",
   completed: "완료", failed: "실패", skipped: "건너뜀", critical: "매우 높음",
@@ -377,7 +377,7 @@ export function incidentItems(inc: OrchIncident): ChatItem[] {
   out.push({ kind: "separator", id: `${room}:sep`, at: opened, room, text: `${incidentTitle(inc)}${opened ? ` · ${clockKo(opened)} 시작` : ""}`, raw: `이슈 번호 ${inc.context_id}`, variant: "topic" });
   out.push({ kind: "system", id: `${room}:open`, at: opened, room, text: inc.component.startsWith("support-inquiry-")
       ? `고객지원 AI가 문의를 해결 종료해서 총괄 AI가 "${incidentTitle(inc)}" 이슈를 열고 재무·아카이브에 넘겼어요.`
-      : `회사 쇼핑몰이 "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 이슈를 열었어요.` });
+      : `회사 사이트가 "${incidentTitle(inc)}" 신호를 보내서 총괄 AI가 이슈를 열었어요.` });
 
   for (const step of inc.steps) {
     const sid = `${room}:${step.step_id}`;

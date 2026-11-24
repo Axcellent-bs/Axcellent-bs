@@ -40,7 +40,7 @@ export function OrderDetail({ orderNo, tick, onClose }: { orderNo: string; tick:
   ];
   return (
     <Panel id="order-detail" title={`${humanId(o.order_no)} 상세`} meta={res.env.meta}
-      hint="판매 서버에 기록된 값 그대로입니다. 판매 서버에 없는 값은 —로 보입니다."
+      hint="사이트 서버에 기록된 값 그대로입니다. 사이트 서버에 없는 값은 —로 보입니다."
       tools={
         <div className="flex items-center gap-2">
           <Chip label={o.status_ko} tone={STATUS_TONE[o.status] ?? TONE.muted} />
@@ -73,7 +73,7 @@ export function OrderDetail({ orderNo, tick, onClose }: { orderNo: string; tick:
         </div>
         <div>
           <p className="mb-2 text-xs font-medium text-ink-700">환불 내역</p>
-          {o.refunds == null ? <Empty>이 판매 서버는 환불 기록을 따로 주지 않습니다. 환불 금액 합계는 위에 있습니다.</Empty>
+          {o.refunds == null ? <Empty>이 사이트 서버는 환불 기록을 따로 주지 않습니다. 환불 금액 합계는 위에 있습니다.</Empty>
             : o.refunds.length === 0 ? <Empty>환불 기록이 없습니다.</Empty> : (
               <TableView columns={["차례", "시각", "금액"]}
                 rows={o.refunds.map((r, i) => [`${i + 1}번째`, time(r.created_at), money(r.amount)])} />

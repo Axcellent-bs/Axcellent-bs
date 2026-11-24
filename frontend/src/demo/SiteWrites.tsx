@@ -284,7 +284,7 @@ function WriteEditor({ action, saved, candidates, onSave, busy }: {
 
       <More summary="짝 식 쓰는 법">
         <p><span className="font-mono">view.answer</span> 점 경로: AI 요청 본문의 그 칸 · <span className="font-mono">const:approve</span> 그 글자 그대로 · <span className="font-mono">json:true</span> 참거짓·숫자·목록</p>
-        <p><span className="font-mono">link:payments.payment_id</span> AXcellent 번호에 맞는 사이트 id(사이트에서 읽을 때 적어 둔 것) · <span className="font-mono">path:seq</span> 판매 서버 경로 값</p>
+        <p><span className="font-mono">link:payments.payment_id</span> AXcellent 번호에 맞는 사이트 id(사이트에서 읽을 때 적어 둔 것) · <span className="font-mono">path:seq</span> 사이트 서버 경로 값</p>
         <p><span className="font-mono">key_code:AX</span> 같은 쓰기면 같은 코드 · <span className="font-mono">now_plus:7</span> 지금부터 7일 뒤 · <span className="font-mono">first:a,b</span> 값이 있는 첫 칸</p>
       </More>
 

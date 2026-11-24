@@ -124,7 +124,7 @@ export default function CompanyConnect() {
   return (
     <div className="space-y-10 px-4 py-8 sm:px-8">
       <PageHead where="시스템 관리" title="회사 연결">
-        이 워크스페이스를 회사와 잇고, 부서 AI가 읽을 회사 판매 서버를 정해요. 업무 데이터는 회사 밖으로 나가지 않아요.
+        이 워크스페이스를 회사와 잇고, 부서 AI가 읽을 회사 사이트 서버를 정해요. 업무 데이터는 회사 밖으로 나가지 않아요.
       </PageHead>
 
       <Tabs label="회사 연결" items={TABS} value={tab} onPick={setTab} />
@@ -317,12 +317,12 @@ const hostOf = (url: string) => {
 /** 연결 지도: 이 서버에서 회사·판매 서버·사내 PC까지 어디까지 이어졌는지 한 줄로. 끊긴 곳이 바로 보이게 한다 */
 function ConnectionMap({ company, shop, pcs }: { company: string | null; shop: ConnectionState | 'error' | null; pcs: { online: number; total: number } }) {
   const shopNode: MapNode = !company
-    ? { name: '판매 서버', value: '회사 연결 뒤', tone: 'off', note: '회사를 먼저 연결해요' }
-    : shop === 'error' ? { name: '판매 서버', value: '읽지 못함', tone: 'bad', note: '연결 상태를 받지 못했어요' }
-    : !shop ? { name: '판매 서버', value: '확인 중…', tone: 'off', note: '' }
+    ? { name: '사이트 서버', value: '회사 연결 뒤', tone: 'off', note: '회사를 먼저 연결해요' }
+    : shop === 'error' ? { name: '사이트 서버', value: '읽지 못함', tone: 'bad', note: '연결 상태를 받지 못했어요' }
+    : !shop ? { name: '사이트 서버', value: '확인 중…', tone: 'off', note: '' }
     : shop.mode === 'connected'
-      ? { name: '판매 서버', value: '회사 서버', tone: 'ok', note: hostOf(shop.shop_api_url) }
-      : { name: '판매 서버', value: '내부 데이터', tone: 'wait', note: '회사 서버 대신 기본 판매 서버를 읽어요' }
+      ? { name: '사이트 서버', value: '회사 서버', tone: 'ok', note: hostOf(shop.shop_api_url) }
+      : { name: '사이트 서버', value: '내부 데이터', tone: 'wait', note: '회사 서버 대신 기본 사이트 서버를 읽어요' }
   const nodes: MapNode[] = [
     { name: 'AXcellent', value: '상태 신호만', tone: company ? 'ok' : 'off', note: '업무 데이터는 보내지 않아요' },
     { name: '우리 회사', value: company ?? '연결 전', tone: company ? 'ok' : 'off', note: company ? '연결 키로 연결됨' : '아래에서 키를 넣어요' },

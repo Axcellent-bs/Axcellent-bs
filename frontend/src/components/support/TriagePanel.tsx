@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { CATEGORY_KO, TRIAGE_REASON_KO, tenantName } from "@/lib/labels";
 import type { ConversationListItem } from "@/lib/types";
+import { useCompany } from "@/demo/company";
 
 const LABEL_MAX = 40;
 
@@ -20,6 +21,7 @@ export function TriagePanel({ onCount }: { onCount?: (needed: number) => void })
   const [labels, setLabels] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const connected = useCompany();
 
   const load = useCallback(async () => {
     try {
@@ -79,7 +81,7 @@ export function TriagePanel({ onCount }: { onCount?: (needed: number) => void })
         <span className="mx-1 h-4 w-px bg-ink-300" aria-hidden />
         <button className={`chip ${company === "all" ? "bg-ink-900 text-white" : "bg-ink-100 text-ink-700"}`} onClick={() => setCompany("all")}>모든 회사</button>
         {companies.map(([id, n]) => (
-          <button key={id} className={`chip ${company === id ? "bg-ink-900 text-white" : "bg-ink-100 text-ink-700"}`} onClick={() => setCompany(id)}>{tenantName(id)} {n}</button>
+          <button key={id} className={`chip ${company === id ? "bg-ink-900 text-white" : "bg-ink-100 text-ink-700"}`} onClick={() => setCompany(id)}>{tenantName(id, connected)} {n}</button>
         ))}
       </div>
       {view === "done" && labelCounts.length > 0 && (
@@ -100,7 +102,7 @@ export function TriagePanel({ onCount }: { onCount?: (needed: number) => void })
                 return (
                   <li key={c.id} className="flex flex-col gap-2 p-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="chip bg-indigo-50 text-indigo-800">{tenantName(c.tenant_id)}</span>
+                      <span className="chip bg-indigo-50 text-indigo-800">{tenantName(c.tenant_id, connected)}</span>
                       <span className="chip bg-amber-50 text-amber-800">{TRIAGE_REASON_KO[t.reason] ?? t.reason}</span>
                       {c.category && <span className="chip bg-ink-100 text-ink-700">{CATEGORY_KO[c.category] ?? c.category}</span>}
                       {t.label && <span className="chip bg-emerald-50 text-emerald-800">{t.label}</span>}
