@@ -180,6 +180,46 @@ def _bad_request(code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=400, content={"error": {"code": code, "message": message}})
 
 
+def _session_company(headers: list[tuple[bytes, bytes]]) -> str | None:
+    """화면 요청의 로그인 세션 회사. 세션 토큰이 아니거나 검증이 안 되면 None(거절은 각 경로 몫)."""
+    from ax_agent_template import human_auth
+
+    authorization = next(
+        (v.decode("latin-1") for k, v in headers if k.lower() == b"authorization"), None
+    )
+    token = human_auth.bearer(authorization)
+    if not token or not human_auth.is_session_token(token):
+        return None
+    try:
+        return human_auth.verify_session(token).company_id
+    except Exception:  # noqa: BLE001 - 회사만 읽는다. 오류 응답은 각 경로의 인증 검사가 낸다
+        return None
+
+
+class SessionCompanyScope:
+    """화면용 HTTP 경로에 로그인 세션의 회사를 건다(11/24, 누비투어 연결).
+
+    skill 요청(`/a2a`)은 `meta.tenant_id`로 회사를 걸지만, 화면이 부르는 HTTP 경로(GET 목록 등)는
+    회사를 몰라 저장소가 설치 회사(캣북스)로 읽었다. 사람 세션 토큰의 회사(`cid`)가 캣북스가 아니면
+    요청 동안 `company_scope.using`을 걸어 그 회사 건만 보게 한다. 캣북스 세션·공용 토큰·토큰 없음은
+    예전 그대로(회사를 걸지 않음)다.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http" or scope.get("path") == "/a2a":
+            await self.app(scope, receive, send)
+            return
+        company = _session_company(scope.get("headers", []))
+        if not company or company_scope.scope_id(company) == company_scope.CATBOOKS:
+            await self.app(scope, receive, send)
+            return
+        with company_scope.using(company):
+            await self.app(scope, receive, send)
+
+
 def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAPI:
     """Agent Card와 skill 핸들러로 에이전트 앱을 만든다.
 
@@ -216,6 +256,7 @@ def create_agent_app(card: AgentCard, handlers: Mapping[str, Handler]) -> FastAP
             await events.stop_consumer()
 
     app = FastAPI(title=f"ax-agent-{card.name}", lifespan=lifespan)
+    app.add_middleware(SessionCompanyScope)
 
     @app.get("/health")
     def health() -> dict:
