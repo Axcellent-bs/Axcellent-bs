@@ -39,6 +39,11 @@ character_ko = "자체 제작 고양이 마스코트"
 setting_en = "a cozy independent bookstore"
 setting_ko = "아늑한 동네 책방"
 style_en = "flat illustration style, soft natural light"
+# 홍보 영상 방향 (11/24, 선택). promo_style: fun_first(재미 먼저, 브랜드는 끝에) · product(제품·업종 소개)
+# brand_exposure(재미 먼저일 때): end_card(마지막 2~3초 채널 이름·로고) · prop(화면 속 소품) · caption(캡션·프로필에만)
+# 시스템 관리 › 회사 연결 › 브랜드에서 저장한 값이 있으면 그것이 먼저다. 없으면 fun_first · end_card
+promo_style = "fun_first"
+brand_exposure = "end_card"
 
 [finance]
 # 팀 예산 = 그달 1일 팀 인원 × 인당 월 단가(원). 재무 AI가 계산하고 재무 담당이 승인한다

@@ -670,6 +670,14 @@ class InsightPast(AxModel):
     views_at: UtcDatetime | None = None
 
 
+# 홍보 영상 방향 (11/24). fun_first = 대상층이 좋아하는 형식·소재로 웃기고 브랜드는 끝에
+# ("이 재밌는 영상 만든 채널 어디지?"), product = 제품·업종 소개(의뢰가 제품을 직접 말할 때 등).
+# 브랜드 노출: end_card(마지막 2~3초 채널 이름·로고) · prop(화면 속 소품으로 살짝)
+# · caption(캡션·프로필에만)
+PromoStyle = Literal["fun_first", "product"]
+BrandExposure = Literal["end_card", "prop", "caption"]
+
+
 class ReceiveInsightInput(AxModel):
     schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
     insight_id: str = Field(min_length=1, max_length=80)  # 보낸 쪽 인사이트 id (재전송은 중복)

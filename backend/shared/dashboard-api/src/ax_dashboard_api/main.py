@@ -35,6 +35,7 @@ from ax_dashboard_api.instagram_oauth import refresh_interval as ig_refresh_inte
 from ax_dashboard_api.instagram_oauth import refresh_loop as ig_refresh_loop
 from ax_dashboard_api.instagram_oauth import router as instagram_oauth_router
 from ax_dashboard_api.instagram_radar import router as instagram_radar_router
+from ax_dashboard_api.promo_style import router as promo_style_router
 from ax_dashboard_api.routes import router
 from ax_dashboard_api.secret_routes import router as secret_router
 from ax_dashboard_api.site_adapter.company_route import CompanyRouteMiddleware
@@ -164,6 +165,7 @@ app.include_router(accounts_router)
 app.include_router(public_info.router)
 app.include_router(instagram_radar_router)
 app.include_router(youtube_meme_keywords_router)  # 11/24 밈 소스: 쇼츠 검색 키워드
+app.include_router(promo_style_router)  # 11/24 홍보 영상 방향 (재미 먼저, 브랜드는 끝에)
 app.include_router(youtube_oauth_router)
 # 회사 Higgsfield 계정 연결(원격 MCP + OAuth, 구독 크레딧). 콜백만 토큰 없이(auth.PUBLIC_ROUTES)
 app.include_router(higgsfield_mcp_router)

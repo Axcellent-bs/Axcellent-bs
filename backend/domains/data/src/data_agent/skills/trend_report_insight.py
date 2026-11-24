@@ -23,6 +23,7 @@ from typing import Any
 from ax_contracts.schemas.data import TrendReport
 from ax_contracts.schemas.planning import InsightFact, ReceiveInsightInput
 from data_agent.skills import trend_report_brief as tb
+from data_agent.skills import trend_report_promo as tp
 
 SKILL = "trend_report_create"
 SOURCE = "trend_report_create"
@@ -138,10 +139,17 @@ def pick_facts(report: TrendReport) -> list[InsightFact]:
     theme_ids = [k for k in rows if k.startswith("theme:")]
     order = list(dict.fromkeys([*(i for i in beat_ids if i in rows), *theme_ids,
                                 *_top(report, rows)]))  # fmt: skip
-    return [InsightFact(label=clip(rows[i][0], LABEL_MAX), value=clip(rows[i][1], VALUE_MAX),
-                        source=clip(SOURCE, SOURCE_MAX),
-                        link=rows[i][2][:500] if rows[i][2] else None)
-            for i in order[:FACTS_MAX]]  # fmt: skip
+    facts = [InsightFact(label=clip(rows[i][0], LABEL_MAX), value=clip(rows[i][1], VALUE_MAX),
+                         source=clip(SOURCE, SOURCE_MAX),
+                         link=rows[i][2][:500] if rows[i][2] else None)
+             for i in order]  # fmt: skip
+    if not facts:  # 근거가 없으면 방향 줄만으로 넘기지 않는다
+        return []
+    # 11/24 재미 먼저: 맨 앞에 "방향: 재미 먼저 · 브랜드는 …" 한 줄 (상한 12 안)
+    line = tp.direction_line(rec.promo_style or "", rec.brand_exposure or tp.END_CARD)
+    head = [InsightFact(label="방향", value=clip(line, VALUE_MAX), source=clip(SOURCE, SOURCE_MAX))
+            ] if line else []  # fmt: skip
+    return [*head, *facts][:FACTS_MAX]
 
 
 def shorts_format(report: TrendReport) -> str | None:
@@ -289,4 +297,8 @@ def build_insight(report: TrendReport | None) -> tuple[ReceiveInsightInput | Non
         shorts_format=shorts_format(report),
         generated_at=report.finished_at or report.created_at,
         body_md=body_md(report, facts),
+        # 11/24 홍보 방향 (보고서 추천이 정한 값).
+        # 예전 보고서는 None → 기획이 fun_first·end_card로 본다
+        promo_style=report.sections.recommendation.promo_style,
+        brand_exposure=report.sections.recommendation.brand_exposure,
     ), None

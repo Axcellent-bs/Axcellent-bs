@@ -31,6 +31,17 @@ from data_agent.skills import trend_report_insight as ti
 from data_agent.trend_report_runner import TrendReportService
 from data_agent.trend_report_store import INTERRUPTED_REASON, TrendReportStore
 
+
+@pytest.fixture(autouse=True)
+def _product_promo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """11/24: 이 파일은 지금 규칙(제품·업종 소개)의 추천·기획 넘김을 본다.
+    회사 기본값은 재미 먼저라 여기서만 product로 둔다 (재미 먼저: test_trend_report_promo.py)."""
+    from ax_agent_template import tenant
+
+    monkeypatch.setattr(tenant, "promo", lambda name=None: {"promo_style": "product",
+                                                            "brand_exposure": "end_card"})
+
+
 # 보고서 테스트의 가짜(LLM·인스타·네이버)를 그대로 쓴다 (tests는 패키지가 아니라 파일로 읽는다)
 _SPEC = importlib.util.spec_from_file_location(
     "trend_report_fakes", Path(__file__).with_name("test_trend_report.py"))
