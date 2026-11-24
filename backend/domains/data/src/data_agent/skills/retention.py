@@ -35,9 +35,10 @@ min_group_size)은 카탈로그 `[sales]`에서 온다.
 from __future__ import annotations
 
 import itertools
+import json
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from ax_contracts.schemas import Evidence
@@ -47,6 +48,9 @@ from ax_contracts.schemas.data import (
     RetentionCohort,
     RetentionOutput,
 )
+from data_agent.aggregate import read_buyers as rb
+from data_agent.aggregate.build_day import day_window
+from data_agent.aggregate.store import AggregateStore
 from data_agent.sales_quality import KST
 from data_agent.sales_store import REPEAT_DAYS, SalesStore
 from data_agent.skills import segment_analysis as seg
@@ -166,6 +170,54 @@ def at_risk_rows(  # noqa: PLR0913 - 집계 재료를 그대로 받는다
     return shown[:AT_RISK_TOP]
 
 
+def _cell(text: str) -> dict[str, str]:
+    return dict(part.split("=", 1) for part in text.split(";")) if text else {}
+
+
+def from_snapshot(
+    agg: AggregateStore, tenant_id: str, cohorts: int, cfg: CatalogSales, as_of: date
+) -> tuple[list[RetentionCohort], list[RetentionAtRisk], date] | None:
+    """어제 기준 코호트·떠날 위험 스냅샷을 화면 행으로 (3-2 ④, 조건 없음만).
+
+    숨김은 저장할 때 화면 규칙 그대로 끝났다. 계산 때 단골·떠남 기준이 지금 카탈로그와 다르면
+    None(원본 경로)."""
+    end = day_window(as_of)[1]
+    months = cohort_months(cohorts, end)
+    stored = {r["cohort_month"]: r for r in agg.cohort_rows(tenant_id, as_of) if not r["attr_cell"]}
+    if any(m.label not in stored for m in months):
+        return None
+    out_c = []
+    for m in months:
+        r = stored[m.label]
+        n = r["first_buyers"]
+        if r["first_hidden"] or n is None:
+            out_c.append(RetentionCohort(cohort_month=m.label, suppressed=True))
+            continue
+        repeat = json.loads(r["repeat"])
+        rates: dict[str, float | None] = {}
+        for days in REPEAT_DAYS:
+            h = repeat.get(str(days))
+            ok = h is not None and not h["hidden"] and h["value"] is not None
+            rates[f"r{days}"] = seg.ratio(h["value"], n) if ok else None
+        out_c.append(RetentionCohort(cohort_month=m.label, customers=n, **rates))
+    risk_rows = agg.at_risk_rows(tenant_id, as_of)
+    if any(r["churn_days"] != cfg.churn_days or r["repeat_min_orders"] != cfg.repeat_min_orders
+           for r in risk_rows):  # fmt: skip
+        return None
+    shown = []
+    for r in risk_rows:
+        if r["regulars_hidden"] or r["at_risk_hidden"]:
+            continue
+        values = _cell(r["attr_cell"])
+        shown.append(RetentionAtRisk(
+            filters=values, label=seg.filter_label(values, cfg), regulars=r["regulars"],
+            at_risk=r["at_risk"], share=seg.ratio(r["at_risk"], r["regulars"]),
+            top_item_label=r["top_genre"],
+        ))  # fmt: skip
+    shown.sort(key=lambda x: (-(x.at_risk or 0), -(x.share or 0), x.label))
+    return out_c, shown[:AT_RISK_TOP], as_of
+
+
 def summary_of(out: RetentionOutput, cfg: CatalogSales | None) -> str:
     if out.status != "ok":
         text = "재구매·이탈 숫자를 내지 않음 — " + "; ".join(out.insufficient_reasons)
@@ -223,6 +275,23 @@ def retention(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
     if reasons or cfg is None:
         out = RetentionOutput(**common, status="insufficient", insufficient_reasons=reasons)
         return out.model_copy(update={"summary": summary_of(out, cfg)})
+    sales_cfg = cfg
+    got = (
+        None
+        if filters
+        else rb.from_snapshot(
+            tenant_id, now, lambda agg, day: from_snapshot(agg, tenant_id, cohorts, sales_cfg, day)
+        )
+    )
+    if got is not None:
+        cohort_out, at_risk_out, as_of = got
+        start = cohort_months(cohorts, day_window(as_of)[1])[0].start
+        common["basis"] = basis.model_copy(update={
+            "period_from": start, "period_to": day_window(as_of)[1], "previous_from": start,
+            "previous_to": start,
+        })  # fmt: skip
+        out = RetentionOutput(**common, cohorts=cohort_out, at_risk=at_risk_out)
+        return out.model_copy(update={"summary": rb.with_note(summary_of(out, cfg), as_of)})
     keys = [a.key for a in cfg.attributes]
     with store.segment_session(tenant_id, HISTORY_FROM, now, keys) as s:
         counts = s.cohort_counts(months[0].start, months[-1].end)

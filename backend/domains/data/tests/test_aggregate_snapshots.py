@@ -136,7 +136,8 @@ def test_attribute_cells_follow_profile_hiding(agg: AggregateStore, cfg) -> None
 
 def test_items_keep_small_products_as_one_hidden_row(agg: AggregateStore, cfg) -> None:  # noqa: ANN001
     k = cfg.min_group_size
-    rows = [r for r in agg.buyer_rows(TENANT, AS_OF) if r["period"] == "365d"]
+    rows = [r for r in agg.buyer_rows(TENANT, AS_OF)
+            if r["period"] == "365d" and not r["attr_cell"]]  # 대상×속성 줄 빼고  # fmt: skip
     products = [r for r in rows if r["dim_kind"] == "product"]
     shown = [r for r in products if r["dim_code"] != OTHER_PRODUCTS]
     assert shown and all(r["buyers"] >= k and r["title"] for r in shown)

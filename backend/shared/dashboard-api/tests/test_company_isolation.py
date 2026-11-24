@@ -271,13 +271,13 @@ def test_1_a_cannot_read_or_answer_b_inquiry(
 
 @pytest.mark.skip(
     reason=(
-        "dashboard-api에 보고서 경로가 없다. 화면이 data A2A(/a2a)를 공용 에이전트 토큰으로 바로 "
-        "부르고 사람 세션이 없다. data의 trend_report_get·list도 회사 칸 없이 report_id로만 찾는다 "
-        f"— 보고서를 세션 경로로 옮길 때(데이터 담당, {STAGE4}) 여기 시험을 채운다"
+        "dashboard-api에는 보고서 경로가 없다(화면이 data A2A를 바로 부르고 meta.tenant_id에 세션 "
+        "회사를 싣는다, #1700). 보고서 격리는 data 쪽 시험이 맡는다: "
+        "domains/data/tests/test_trend_report_isolation.py::test_a_cannot_read_b_reports"
     )
 )
 def test_2_a_cannot_read_b_reports() -> None:
-    raise AssertionError("경로가 생기면 채운다")
+    raise AssertionError("data 쪽 시험이 맡는다")
 
 
 # ---- 3. a 토큰으로 B 키 목록·키 값·키 바꾸기 → 404, B 키 이력에 줄 없음 ----
@@ -312,13 +312,6 @@ def test_3_b_keys_are_not_listed_and_change_requests_leave_no_trace(
     assert pending == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "격리 미완: POST /api/dashboard/secrets/{tenant}/{name}/* — 담당 아닌 회사를 "
-        f"403 TENANT_NOT_ASSIGNED로 답한다(404 아님) — {STAGE4}"
-    ),
-)
 def test_3_b_key_change_answers_404(client: TestClient, people: Any) -> None:
     _secret_add(client, people["b"], B)
     res = client.post(
@@ -327,13 +320,6 @@ def test_3_b_key_change_answers_404(client: TestClient, people: Any) -> None:
     assert res.status_code == 404
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "격리 미완: GET /api/dashboard/secrets — 키 담당 회사(secret_tenants)가 세션 회사(cid)와 "
-        f"묶이지 않아, A 관리자 계정에 B가 담당으로 들어가 있으면 B 키가 보인다 — {STAGE4}"
-    ),
-)
 def test_3_secret_grant_is_bound_to_the_session_company(
     client: TestClient, people: Any, tmp_path: Path
 ) -> None:
@@ -344,23 +330,32 @@ def test_3_secret_grant_is_bound_to_the_session_company(
     assert [t["tenant"] for t in data["tenants"]] == [A]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "격리 미완: /api/dashboard/company-ai — 회사가 세션 회사가 아니라 설치의 지금 회사"
-        f"(tenant.current())라 A 관리자가 B의 회사 AI 키·설정을 보고 바꾼다 — {STAGE4}"
-    ),
-)
 def test_3_a_cannot_see_or_change_b_company_ai_key(client: TestClient, people: Any) -> None:
+    """회사 AI 설정은 로그인 세션 회사 것만 보고 바꾼다(11/24). A는 B 키를 보지도 바꾸지도 못한다.
+
+    예전 기대(A의 GET·키 저장이 404)는 회사별 설정이 없을 때의 막기였다.
+    이제 A는 A 회사 설정(빈 값)을 보고 A 키만 넣는다. 격리는 더 세게 본다:
+    A 화면에 B 회사·B 키가 없고, A가 넣어도 B 키는 그대로다."""
     put = client.post(
         f"{API}/company-ai/keys/{LLM_KEY}", json={"value": DUMMY}, headers=people["b"]
     )
     assert put.status_code == 200, put.text  # 대조: B 관리자는 B 키를 넣는다
-    assert client.get(f"{API}/company-ai", headers=people["a"]).status_code == 404
-    res = client.post(
-        f"{API}/company-ai/keys/{LLM_KEY}", json={"value": DUMMY2}, headers=people["a"]
-    )
-    assert res.status_code == 404
+
+    def view(who: str) -> dict:
+        res = client.get(f"{API}/company-ai", headers=people[who])
+        assert res.status_code == 200, res.text
+        return res.json()["data"]
+
+    def llm(data: dict) -> dict:
+        return next(k for k in data["keys"] if k["name"] == LLM_KEY)
+
+    b_before = llm(view("b"))
+    seen = view("a")
+    assert seen["company"]["id"] == A
+    assert llm(seen)["has_key"] is False and llm(seen)["hint"] == ""  # B 키가 안 보인다
+    client.post(f"{API}/company-ai/keys/{LLM_KEY}", json={"value": DUMMY2}, headers=people["a"])
+    assert llm(view("b")) == b_before  # A가 넣어도 B 키는 그대로
+    assert view("a")["company"]["id"] == A
 
 
 # ---- 4. a 토큰으로 B 회사 연결·변환기 매핑 읽기·쓰기 → B 것은 안 보이고 안 바뀐다 ----
@@ -439,12 +434,13 @@ def test_5_a_sees_no_b_office_thread(client: TestClient, people: Any) -> None:
 @pytest.mark.skip(
     reason=(
         "dashboard-api에 승인 대기 경로가 없다(/reviews는 목 전용). 화면이 안전 관문 "
-        "/api/safety/reviews를 바로 읽고, 안전 관문 목록은 회사로 거르지 않는다 — "
-        f"안전 관문 담당 {STAGE4}에서 이 시험을 채운다"
+        "/api/safety/reviews를 바로 읽는다. 회사 거르기는 안전 관문 쪽 시험이 맡는다: "
+        "shared/safety/tests/test_session_tokens.py::"
+        "test_pending_approvals_are_kept_per_session_company"
     )
 )
 def test_5_a_sees_no_b_pending_approval() -> None:
-    raise AssertionError("경로가 생기면 채운다")
+    raise AssertionError("안전 관문 쪽 시험이 맡는다")
 
 
 # ---- 6. m(A 일반회원) 토큰으로 B 데이터 → 404 (회사 바꾸기 길은 없다) ----
