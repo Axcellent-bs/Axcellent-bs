@@ -131,7 +131,12 @@ def _period_rows(  # noqa: PLR0913
                 **base, dim_kind="attr", attr_cell={attr.key: UNKNOWN},
                 buyers=shown(unknown, unk_hidden), new_buyers=none, repeat_buyers=none,
             ))  # fmt: skip
+        if w.period == "365d":  # 인구 속성 조합 칸 (3-2 ⑥ 시장 대비 구매자 구성)
+            rows += _coverage_rows(base, cells, keys, cfg)
         items = s.item_counts({})
+        for kind, code, n, _ in items:  # 대상 × 속성 값 (3-2 ⑥ 고객 프로필)
+            if n >= k:
+                rows += _profile_rows(base, kind, code, n, s.item_cells(kind, code), cfg, k)
         products = [(code, n) for kind, code, n, _ in items if kind == "product" and n >= k]
         titles = s.titles(ids=[c for c, _ in products]) if products else {}
     for kind, code, n, _ in items:
@@ -152,6 +157,57 @@ def _period_rows(  # noqa: PLR0913
             new_buyers=none, repeat_buyers=none,
         ))  # fmt: skip
     return rows
+
+
+def _coverage_rows(
+    base: dict, cells: dict, keys: list[str], cfg: CatalogSales
+) -> list[BuyerPeriodRow]:
+    """카탈로그 인구 조합마다 칸별 구매자(숨김은 화면 `coverage_buyers` 그대로)와 답한 묶음 합."""
+    none = HiddenCount()
+    out = []
+    for pop in cfg.population:
+        at = [keys.index(k) for k in pop.attribute_keys]
+        counts: dict[tuple, int] = defaultdict(int)
+        for cell, n in cells.items():
+            counts[tuple(cell[i] for i in at)] += n
+        combos, found, hidden, answered = seg.coverage_cells(pop, cfg, counts)
+        key = seg.coverage_key(pop)
+        for i, combo in enumerate(combos):
+            out.append(BuyerPeriodRow(
+                **base, dim_kind="attr_combo", dim_code=key,
+                attr_cell=dict(zip(pop.attribute_keys, combo, strict=True)),
+                buyers=shown(found[i], i in hidden), new_buyers=none, repeat_buyers=none,
+            ))  # fmt: skip
+        out.append(BuyerPeriodRow(
+            **base, dim_kind="attr_combo", dim_code=f"{key}:{seg.ANSWERED}",
+            buyers=HiddenCount(value=sum(found[i] for i in answered)), new_buyers=none,
+            repeat_buyers=none,
+        ))  # fmt: skip
+    return out
+
+
+def _profile_rows(  # noqa: PLR0913
+    base: dict, kind: str, code: str, target_n: int, cells: dict, cfg: CatalogSales, k: int
+) -> list[BuyerPeriodRow]:
+    """대상(분류·장르·상품, 구매자 k 이상)을 산 사람의 속성 값별 수. 숨김은 화면(`profile`) 그대로
+    `profile_hidden`(값 칸 < k, 모름 0 < n < k, 보완 숨김)."""
+    none = HiddenCount()
+    out = []
+    for i, attr in enumerate(cfg.attributes):
+        values = list(attr.values)
+        counts = [sum(n for c, n in cells.items() if c[i] == v) for v in values]
+        unknown = target_n - sum(counts)
+        hid, unk_hidden = seg.profile_hidden(counts, unknown, k)
+        for j, v in enumerate(values):
+            out.append(BuyerPeriodRow(
+                **base, dim_kind=kind, dim_code=code, attr_cell={attr.key: v},
+                buyers=shown(counts[j], j in hid), new_buyers=none, repeat_buyers=none,
+            ))  # fmt: skip
+        out.append(BuyerPeriodRow(
+            **base, dim_kind=kind, dim_code=code, attr_cell={attr.key: UNKNOWN},
+            buyers=shown(unknown, unk_hidden), new_buyers=none, repeat_buyers=none,
+        ))  # fmt: skip
+    return out
 
 
 # ---------------------------------------------------------------- 3.4 코호트 · 3.5 떠날 위험
