@@ -269,7 +269,12 @@ class RequestIntake:
     ) -> str:
         first = request_tasks.dept_label(task.first_dept)
         head = f"의뢰를 접수했어요. (번호 {rid}) '{task.label}' 일로 분류했고 "
-        if started:
+        if started and task.asks_character_first:  # 11/24 홍보 영상: 캐릭터 답을 먼저 받는다
+            reply = (
+                f"의뢰를 접수했어요 (번호 {rid}). 영상에 쓸 회사 캐릭터가 있는지 먼저 알려 주세요. "
+                f"답하면 {first}부터 시작해요."
+            )
+        elif started:
             reply = head + f"{first}에 시켰어요."
         else:  # 아직 자동으로 돌릴 수 없는 일이거나 실행기가 없다: 접수만 하고 담당자가 확인한다
             reply = head + f"{first}부터 시작할 일이에요. 지금은 접수까지만 되고 담당자가 확인해요."

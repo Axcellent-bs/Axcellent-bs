@@ -161,6 +161,9 @@ async def promo_until_confirm(plan_output: dict, prepare_output: dict):
     )
     runner = RequestRunner(reqs, lambda: fake)
     await runner.run(rid)
+    assert fake.calls == []  # 11/24: 회사 캐릭터 답 전에는 데이터분석을 부르지 않는다
+    assert runner.set_brand_character(rid, None) == "ok"  # 없어요
+    await runner.wait_idle()
     done = {"task_id": TASK, "skill": "trend_report_create", "status": "done"}
     done["output"] = {"report_id": "rep_1"}
     runner.receive_async("completed", "data", done, f"ctx_{rid}")

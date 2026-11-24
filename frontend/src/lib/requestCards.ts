@@ -1,7 +1,7 @@
 // 대화방 "의뢰 진행" 카드(components/office/RequestProgressCard.tsx)의 순수 계산. node --test (requestCards.test.ts).
 // 전체 대화방·이슈 방(useOfficeTalk)과 총괄 1:1(DirectChat)은 총괄 글 한 줄("의뢰를 접수했어요 (번호 wr_…)" · "[의뢰 wr_…] …")만 보였다.
 // 의뢰 번호가 처음 나온 총괄 말풍선 아래에 카드 하나를 붙이고, 같은 의뢰의 다음 알림 줄("[의뢰 wr_…] …")은 그 방에서 숨긴다(원본 대화는 그대로).
-import { STEP_STATUS, canDecide, isRestartStuck, requestContext, type StepStatus, type WorkRequestPlanStep, type WorkRequestRow, type WorkRequestStep } from "./workRequests.ts";
+import { CHARACTER_WAIT_CHIP, STEP_STATUS, canDecide, isCharacterWait, isRestartStuck, requestContext, type StepStatus, type WorkRequestPlanStep, type WorkRequestRow, type WorkRequestStep } from "./workRequests.ts";
 import { planId } from "./format.ts";
 import { planDocPath } from "./planDoc.ts";
 import { videoPlanSummary, type VideoPlanView } from "./videoPlan.ts";
@@ -139,7 +139,8 @@ export function stepRows(r: Pick<WorkRequestRow, "plan" | "steps">): StepRow[] {
     const muted = status === "failed" || status === "skipped" ? (stepNoteText(s?.note) || STEP_STATUS[status].label) : null;
     return {
       stepId: p.step_id, dept: p.dept, label: p.label, skill: p.skill, status,
-      chip: restart ? RESTART_CHIP : STEP_STATUS[status], dot: DOT[status], decide, muted,
+      // 11/24 회사 캐릭터 답 대기: 버튼은 카드 맨 위 질문 상자에만 있다 (승인·거절 아님)
+      chip: restart ? RESTART_CHIP : s && isCharacterWait(s) ? CHARACTER_WAIT_CHIP : STEP_STATUS[status], dot: DOT[status], decide, muted,
       ...(restart ? { notice: RESTART_NOTICE } : {}),
     };
   });
