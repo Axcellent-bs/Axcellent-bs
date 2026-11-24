@@ -20,6 +20,8 @@ label = "server"      # 알림 문안 맨 앞에 붙는 이름(영어·숫자·-
 #       직접 더한다. _default 에는 둘 수 없다)
 #       autodeploy-pause autodeploy-resume (자동 배포 정지·재개. 쓰려면 권한자 줄에 직접 더한다.
 #       _default 에는 둘 수 없다: 넣으면 게이트가 정책을 거부한다)
+#       rollback-code uv-sync (v0.5.0. 서버 코드를 deploy-bundle 직전 HEAD 로 되돌림 / 서버 HEAD 가 그 SHA 일 때 uv sync --frozen.
+#       쓰려면 권한자·자동 배포 계정 줄에 직접 더한다. _default 에는 둘 수 없다. uv-sync 는 아래 [uv_sync] 도 채워야 한다)
 #
 # 단계 예시:
 #   모두        status, deploy-bundle(자동 배포가 막혔을 때의 수동 처리), record-pr
@@ -144,6 +146,12 @@ backup_dirs = []                # 재시작 전에 묶어 둘 폴더
 # (<이름>.bak-before-<SHA 8자>[.시각]의 .tgz / -sqlite / sqlite 파일 사본)를 최신 N세트만 남기고 지운다.
 # 이번에 만든 세트와 직전 세트는 N 과 상관없이 남는다. 번들 백업(www-*), .env 백업, deploy-* 파일은 건드리지 않는다.
 # backup_keep = 5
+
+# uv-sync 동작이 쓰는 값(v0.5.0). 쓰려면 아래 주석을 풀고 경로를 채운다. 이 구역의 키는 이 셋뿐이다(다른 키가 있으면 게이트가 정책을 거부한다).
+# [uv_sync]
+# uv_bin = "TODO"            # 배포 계정이 쓰는 uv 실행 파일의 전체 경로(게이트의 고정 PATH 에는 없을 수 있다)
+# project_dir = "TODO"       # paths.repo 안의 폴더(uv workspace 루트. 안에 uv.lock 이 있어야 한다)
+# timeout_seconds = 600      # uv sync 최대 시간(기본 600). 넘으면 멈추고 실패 처리
 
 [health]
 urls = ["http://127.0.0.1:8201/health"]   # 전부 200 이어야 정상. status 와 restart-backend 가 쓴다
