@@ -10,6 +10,7 @@ import { YoutubePanel } from "./YoutubePanel";
 import type { StoryboardResult } from "@/lib/storyboard";
 import { canToggleOriginal, overlayVisibleFor, playPartFor, type PlayPart } from "@/lib/videoOverlay";
 import { OverlayControls } from "./OverlayControls";
+import { videoSummaryLine } from "@/lib/creativeVideo";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
@@ -185,6 +186,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
     <OverlayControls recordId={recordId} overlay={render.overlay} shots={rec?.storyboard?.shots} showOriginal={showOriginal} canToggle={canToggleOriginal(render)}
       onToggle={() => setShowOriginal((v) => !v)} onChanged={() => { setOverlayNonce((n) => n + 1); setShowOriginal(false); void load(); }} />
   );
+  const summaryLine = videoSummaryLine(video?.status, video?.summary);
   const thumb = chosenThumb(render.thumbnails); // 인스타 릴스 표지 = 고른 썸네일(안 고르면 첫 장)
   const reelCover = thumb ? { url: thumbUrl(recordId, thumb.media_id), picked: thumb.picked } : null;
   const canAsk = render.board_image?.status === "done" && !["awaiting_approval", "running", "done"].includes(video?.status ?? "");
@@ -210,6 +212,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
         <Picture recordId={recordId} part="board_image" info={render.board_image} label="스토리보드 그림" onChanged={() => void load()} onError={setError} />
       </div>
       <div className="space-y-2 border-t border-ink-100 pt-3">
+        {summaryLine && <p className="text-xs text-ink-700" aria-label="영상 만들기 요약">{summaryLine}</p>}
         <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" onChanged={() => void load()} onError={setError}
           playPart={playPartFor("video", render, showOriginal)} version={overlayVersion} />
         {overlayControls("video")}
