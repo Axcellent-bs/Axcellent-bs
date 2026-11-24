@@ -65,6 +65,7 @@ TIMEOUT_SECONDS = 15.0
 NO_KEY = "키 등록 후 가능"
 OWNER_NAME = "owner_name"  # business_media가 게시물마다 붙이는 계정 표시 이름 (API 필드 아님)
 OWNER_FOLLOWERS = "owner_followers"  # 같은 방식으로 붙이는 계정 팔로워 수 (11/24, API 필드 아님)
+OWNER_BIO = "owner_bio"  # 계정 소개 앞 300자 (11/24 대상층 AI 태그용, untrusted, API 필드 아님)
 # 앱 검수 전에는 레이더·해시태그도 권한 오류가 날 수 있다 (Meta 메시지 원문은 넣지 않는다)
 PERMISSION_NOTE = "권한 필요(앱 검수·비즈니스 인증 필요할 수 있음)"
 # 데이터 토큰은 읽기 권한만 (instagram_basic·pages_show_list·pages_read_engagement, 필요하면
@@ -220,8 +221,9 @@ class InstagramGraph:
         media = f"media.limit({n}){{{','.join(MEDIA_FIELDS)}}}"
         # name(계정 표시 이름)·followers_count(팔로워, 11/24 밈 소스의 팔로워 대비 반응)는 같은
         # 호출에서 받는다 (호출 수 그대로). 게시물마다 OWNER_NAME·OWNER_FOLLOWERS로 붙인다
+        # 11/24 대상층 AI 태그: biography(계정 소개, untrusted)도 같은 호출에서 (호출 수 그대로)
         fields = (f"business_discovery.username({username})"
-                  f"{{username,{media},name,followers_count}}")  # fmt: skip
+                  f"{{username,{media},name,followers_count,biography}}")  # fmt: skip
         payload = await self._get(self.user_id, {"fields": fields})
         bd = payload.get("business_discovery") if isinstance(payload, dict) else None
         media = (bd or {}).get("media") if isinstance(bd, dict) else None
@@ -238,6 +240,10 @@ class InstagramGraph:
         if isinstance(followers, int) and not isinstance(followers, bool) and followers >= 0:
             for m in out:
                 m[OWNER_FOLLOWERS] = followers
+        bio = bd.get("biography") if isinstance(bd, dict) else None
+        if isinstance(bio, str) and bio.strip():
+            for m in out:
+                m[OWNER_BIO] = bio.strip()[:300]
         return out
 
     # ------------------------------------------------------------ 해시태그

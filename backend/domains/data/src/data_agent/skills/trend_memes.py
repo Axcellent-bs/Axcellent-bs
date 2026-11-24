@@ -921,6 +921,20 @@ async def trend_memes(
 
         why = f"쇼츠 검색 저장분을 읽지 못함 ({type(error).__name__})"
         out.shorts_search = MemeShortsSearch(status="unknown", reason=why)
+    # 11/24 조회 1,000만 이상 (레이더 릴스·쇼츠 저장분). 실존 인물·사건으로 뺀 쇼츠는 여기서도 뺀다
+    from data_agent.mega_views import mega_views
+
+    try:
+        out.mega_views = mega_views(env, now)
+        removed = {r.name for r in (out.shorts_search.removed if out.shorts_search else [])}
+        def kept(i: Any) -> bool:
+            return not (i.platform == "youtube" and (i.title or i.item_id) in removed)
+
+        out.mega_views.items = [i for i in out.mega_views.items if kept(i)]
+    except Exception as error:  # noqa: BLE001 - 천만 칸이 실패해도 유행 결과는 그대로
+        from ax_contracts.schemas.data import MegaViews
+
+        out.mega_views = MegaViews(reason=f"조회 천만 이상을 읽지 못함 ({type(error).__name__})")
     lines = [out.summary, *out.limits]
     if out.reason:
         lines.append(out.reason)

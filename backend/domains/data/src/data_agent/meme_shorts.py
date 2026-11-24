@@ -267,13 +267,85 @@ def ranked(rows: Sequence[Mapping[str, Any]]) -> list[MemeShortsVideo]:
     return sorted(items, key=order)
 
 
+async def classify(videos: Sequence[MemeShortsVideo], llm: Any, *, category_cache: Any = None,
+                   context_id: str | None = None, limit: int = SHOW_MAX,
+                   ) -> tuple[list[MemeShortsVideo], list[MemeSkipped]]:  # fmt: skip
+    """실존 인물·사건 분류기 (trend_memes와 같은 규칙): (남길 영상 limit개까지, 뺀 영상).
+
+    사람 이름 자체·뉴스·사건·기부·재난·정치·사회·인물 분류면 뺀다. 분류 실패는 "분류 대기"로 두고
+    남긴다(trend_memes와 같다)."""
+    from data_agent.skills.ad_material import NEVER_TREND
+    from data_agent.skills.topic_category import TopicInput, classify_topics
+
+    rest = list(videos)
+    picked: list[MemeShortsVideo] = []
+    removed: list[MemeSkipped] = []
+    while rest and len(picked) < limit:
+        batch, rest = rest[:limit], rest[limit:]
+        inputs = [TopicInput((v.title or v.video_id)[:60], (), (v.title,) if v.title else ())
+                  for v in batch]  # fmt: skip
+        try:
+            found = await classify_topics(inputs, llm, cache=category_cache, context_id=context_id)
+        except Exception:  # noqa: BLE001 - 분류 실패는 "분류 대기"로 두고 보여 준다
+            found = {}
+        for v, t in zip(batch, inputs, strict=True):
+            cat = found.get(t.keyword)
+            name = v.title or v.video_id
+            if cat is not None and cat.is_person:
+                removed.append(MemeSkipped(name=name, kind="person",
+                                           reason="사람 이름 자체라 뺌 (초상권)"))  # fmt: skip
+                continue
+            if cat is not None and cat.category in NEVER_TREND:
+                removed.append(MemeSkipped(name=name, kind="category",
+                                           reason=f"{cat.category} 분류라 뺌"))  # fmt: skip
+                continue
+            if len(picked) < limit:
+                picked.append(v)
+    return picked, removed
+
+
+async def search_extra(env: Mapping[str, str], connector: Any, queries: Sequence[tuple[str, str]],
+                       now: datetime, *, ledger: Any = None,
+                       ) -> tuple[list[MemeShortsVideo], list[str], int]:  # fmt: skip
+    """보고서용 추가 쇼츠 검색 (11/24 대상층): (키워드, 검색어) 몇 개만, 쿼터 30% 규칙 안에서.
+
+    (영상, 한계 문장, 쓴 단위). 저장하지 않는다. 분류는 부르는 쪽이 `classify`로."""
+    from data_agent import youtube_quota
+    from data_agent.connectors import ConnectorUnavailable
+
+    ledger = ledger or youtube_quota.LEDGER
+    cap = youtube_quota.cap(env)
+    rows: list[dict[str, Any]] = []
+    limits: list[str] = []
+    units = 0
+    for n, (word, query) in enumerate(queries):
+        if why := quota_reason(ledger.units(), cap):
+            limits.append(f"쇼츠 대상층 검색 {', '.join(q for _, q in queries[n:])}: {why}")
+            break
+        before = getattr(connector, "quota_used", 0)
+        try:
+            stats = await connector.search_query_shorts(
+                query, now - timedelta(days=DAYS), "KR", max_results=PER_KEYWORD)  # fmt: skip
+            subs = await connector.channels([s.channel_id for s in stats]) if stats else {}
+        except ConnectorUnavailable as error:
+            limits.append(f"쇼츠 대상층 검색 {query}: 검색 실패 ({error.code})")
+            units += getattr(connector, "quota_used", 0) - before
+            break
+        units += getattr(connector, "quota_used", 0) - before
+        rows += [{"video_id": s.video_id, "keyword": word, "title": s.title or None,
+                  "channel_id": s.channel_id or None, "channel_title": s.channel_title or None,
+                  "published_at": s.published_at.isoformat() if s.published_at else None,
+                  "views": s.view_count, "subscribers": subs.get(s.channel_id),
+                  "thumbnail_url": s.thumbnail_url} for s in stats]  # fmt: skip
+    seen: set[str] = set()
+    unique = [r for r in rows if not (r["video_id"] in seen or seen.add(r["video_id"]))]
+    return ranked(unique), limits, units
+
+
 async def shorts_search(env: Mapping[str, str], now: datetime, llm: Any, *,
                         category_cache: Any = None,
                         context_id: str | None = None) -> MemeShortsSearch:  # fmt: skip
     """저장된 오늘(없으면 마지막) 검색 결과 + 실존 인물·사건 분류. 새로 검색하지 않는다."""
-    from data_agent.skills.ad_material import NEVER_TREND
-    from data_agent.skills.topic_category import TopicInput, classify_topics
-
     keywords = load_keywords(env)
     out = MemeShortsSearch(keywords=keywords)
     if not keywords:
@@ -297,30 +369,10 @@ async def shorts_search(env: Mapping[str, str], now: datetime, llm: Any, *,
     out.searched_at = saved.get("searched_at")
     if day != _today(now):
         out.limits.insert(0, f"오늘 검색 전이라 {day} 결과예요")
-    rest = ranked(saved.get("videos") or [])
-    picked: list[MemeShortsVideo] = []
-    while rest and len(picked) < SHOW_MAX:
-        batch, rest = rest[:SHOW_MAX], rest[SHOW_MAX:]
-        inputs = [TopicInput((v.title or v.video_id)[:60], (), (v.title,) if v.title else ())
-                  for v in batch]  # fmt: skip
-        try:
-            found = await classify_topics(inputs, llm, cache=category_cache, context_id=context_id)
-        except Exception:  # noqa: BLE001 - 분류 실패는 "분류 대기"로 두고 보여 준다 (trend_memes와 같다)
-            found = {}
-        for v, t in zip(batch, inputs, strict=True):
-            cat = found.get(t.keyword)
-            name = v.title or v.video_id
-            if cat is not None and cat.is_person:
-                out.removed.append(MemeSkipped(name=name, kind="person",
-                                               reason="사람 이름 자체라 뺌 (초상권)"))  # fmt: skip
-                continue
-            if cat is not None and cat.category in NEVER_TREND:
-                out.removed.append(MemeSkipped(name=name, kind="category",
-                                               reason=f"{cat.category} 분류라 뺌"))  # fmt: skip
-                continue
-            if len(picked) < SHOW_MAX:
-                picked.append(v)
-    out.items = picked
+    videos = ranked(saved.get("videos") or [])
+    picked, removed = await classify(videos, llm, category_cache=category_cache,
+                                     context_id=context_id)  # fmt: skip
+    out.items, out.removed = picked, removed
     out.status = "known"
     if not picked:
         out.reason = "찾은 쇼츠가 없어요" if not out.removed else "찾은 쇼츠를 모두 분류에서 뺐어요"

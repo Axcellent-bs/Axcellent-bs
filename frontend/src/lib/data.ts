@@ -1784,7 +1784,49 @@ export interface InstagramAudioOutput {
   sources: InstagramSource[];
   generated_at: string | null;
 }
+/** 대상층 태그 (backend contracts data.py) */
+export type RadarKind = "industry" | "creator" | "meme" | "brand";
+export type AgeBand = "10s" | "20s" | "30s" | "40s" | "50s" | "60plus";
+export type AudienceGender = "male" | "female" | "all";
+export interface RadarAccountMeta {
+  account: string;
+  kind: RadarKind;
+  ages: AgeBand[];
+  genders: AudienceGender[];
+  topic: string | null;
+  tag_source: "ai" | "human" | null;
+  followers: number | null;
+  excluded_reason: string | null;
+}
+export interface MegaViewItem {
+  platform: "instagram" | "youtube";
+  account: string;
+  item_id: string;
+  views: number;
+  posted_at: string | null;
+  link: string | null;
+  thumbnail_url: string | null;
+  /** untrusted 유튜브 제목, 텍스트로만 */
+  title: string | null;
+  account_kind: RadarKind | null;
+  audience_ages: AgeBand[];
+  audience_genders: AudienceGender[];
+  topic: string | null;
+}
+export interface MegaViews {
+  status: "known" | "unknown";
+  reason: string | null;
+  instagram_min: number;
+  youtube_min: number;
+  days: number;
+  /** 조회수 내림차순 */
+  items: MegaViewItem[];
+}
 export interface InstagramRadarPost {
+  account_kind?: RadarKind | null;
+  audience_ages?: AgeBand[];
+  audience_genders?: AudienceGender[];
+  topic?: string | null;
   account: string;
   media_id: string;
   media_product_type: string | null;
@@ -1993,7 +2035,11 @@ interface SectionHead {
 export interface TrendReportSections {
   search: SectionHead & { filter_note: string; rows: TrendReportSearchRow[] };
   hashtags: SectionHead & { rows: TrendReportHashtagRow[]; account_names?: Record<string, string> };
-  content: SectionHead & { posts: InstagramRadarPost[]; memes: TrendReportMeme[] };
+  content: SectionHead & {
+    posts: InstagramRadarPost[]; memes: TrendReportMeme[];
+    audience_line?: string | null; audience_label?: string | null; audience_widened?: boolean; audience_thin?: boolean;
+    shorts?: MemeShortsVideo[]; mega?: MegaViewItem[];
+  };
   competitors: SectionHead & { rows: TrendReportCompetitorRow[]; accounts_failed: { account: string; reason: string }[] };
   /** beats: 옛 보고서의 시간별 콘티. 11/23부터 새 보고서는 비우고 materials(기획에 넘길 재료, 최대 4)를 쓴다 */
   recommendation: SectionHead & { conclusion: string | null; beats: TrendReportBeat[]; music_note: string; materials?: TrendReportMaterial[] };
@@ -2097,6 +2143,11 @@ export interface InstagramRadarOutput {
   meme_accounts_total?: number;
   /** 밈 계정에서 터진 게시물 (묶음과 상관없이, 배수 순 최대 12개) */
   meme_posts?: InstagramRadarPost[];
+  /** 계정별 대상층 태그 (옛 결과에는 없음) */
+  accounts_meta?: RadarAccountMeta[];
+  /** 대상층에 맞는 계정에서 뜬 게시물 */
+  audience_posts?: InstagramRadarPost[];
+  min_followers?: number | null;
 }
 export type InstagramMemoKind = "audio" | "format" | "hashtag" | "other";
 export interface InstagramMemoAddInput {
@@ -2171,6 +2222,8 @@ export interface MemeShortsSearch {
   searched_at: string | null;
 }
 export interface TrendMemesOutput {
+  /** 조회 천만 이상 영상 (옛 캐시 결과에는 없음) */
+  mega_views?: MegaViews | null;
   /** 회사 밈 키워드 쇼츠 검색 (옛 캐시 결과에는 없음) */
   shorts_search?: MemeShortsSearch | null;
   window: MemeWindow;
