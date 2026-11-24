@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
+import { Navigate } from 'react-router'
 import { DangerRow, Facts, PageHead, SectionHead, StatusChip, Tabs, TONE_DOT, type Tone } from '@/components/connect/parts'
 import CompanyAiTools from '@/components/connect/CompanyAiTools'
-import BrandPromoSettings from '@/components/connect/BrandPromoSettings'
 import type { ConnectionState } from '@/lib/companyConnection'
 import { useHosts } from './store'
 import { SERVICES } from './services'
@@ -21,13 +21,13 @@ import { useSession } from './session'
 const NO_NETWORK = ''
 
 // 탭: 사이트·API 연결(예전 이 화면 전체) / 공통 AI 도구 연결(회사 AI 모델·키·예산, 회사 AI 연결 설계)
-// 11/24 브랜드: 홍보 영상 방향(재미 먼저·제품 소개)·브랜드 노출 (BrandPromoSettings)
-const TABS = [{ id: 'site', label: '사이트·API 연결' }, { id: 'ai', label: '공통 AI 도구 연결' }, { id: 'brand', label: '브랜드' }] as const
+// 브랜드(홍보 영상 방향·브랜드 노출)는 마케팅 › 브랜드(/marketing/brand)로 옮겼다. 옛 주소 ?tab=brand는 그리로 보낸다
+const TABS = [{ id: 'site', label: '사이트·API 연결' }, { id: 'ai', label: '공통 AI 도구 연결' }] as const
+/** 옛 브랜드 탭 주소(/system/connect?tab=brand)가 가는 새 자리 */
+const BRAND_PATH = '/marketing/brand'
 type TabId = (typeof TABS)[number]['id']
-const readTab = (): TabId => {
-  const t = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') : null
-  return t === 'ai' || t === 'brand' ? t : 'site'
-}
+const tabParam = () => (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') : null)
+const readTab = (): TabId => (tabParam() === 'ai' ? 'ai' : 'site')
 
 type Phase = { at: 'key' } | { at: 'move'; key: IssuedKey } | { at: 'info'; key: IssuedKey }
 
@@ -35,6 +35,11 @@ const when = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('ko-KR', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
 
 export default function CompanyConnect() {
+  if (tabParam() === 'brand') return <Navigate to={BRAND_PATH} replace />
+  return <CompanyConnectScreen />
+}
+
+function CompanyConnectScreen() {
   const company = useCompany()
   const { account } = useSession()
   const [tab, setTab] = useState<TabId>(readTab)
@@ -132,7 +137,7 @@ export default function CompanyConnect() {
 
       <Tabs label="회사 연결" items={TABS} value={tab} onPick={setTab} />
 
-      {tab === 'brand' ? <BrandPromoSettings /> : tab === 'ai' ? <CompanyAiTools me={account?.name ?? ''} /> : <>
+      {tab === 'ai' ? <CompanyAiTools me={account?.name ?? ''} /> : <>
       <ConnectionMap company={company?.name ?? null} shop={company ? shop : null} pcs={{ online, total: hosts.length }} />
 
       <section className="space-y-4">

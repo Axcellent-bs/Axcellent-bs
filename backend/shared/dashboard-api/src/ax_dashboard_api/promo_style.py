@@ -1,6 +1,6 @@
 """회사 홍보 영상 방향 (11/24 "재미 먼저, 브랜드는 끝에").
 
-시스템 관리 › 회사 연결 › 브랜드의 두 줄.
+마케팅 › 브랜드(/marketing/brand)의 두 줄.
 - `GET  /api/dashboard/promo-style`: 지금 회사의 promo_style·brand_exposure와 칸마다 출처
   (`screen` 화면 저장 · `tenant` 회사 설정 tenant.toml [brand] · `default` 기본값).
   사람 토큰이면 누구나

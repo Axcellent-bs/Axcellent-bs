@@ -109,6 +109,7 @@ export const SERVICES: Service[] = [
       { href: '/marketing/briefs', label: '받은 기획안' },
       { href: '/marketing/sns', label: 'SNS·미디어' },
       { href: '/marketing/records', label: '제작 기록' },
+      { href: '/marketing/brand', label: '브랜드' },
     ],
   },
   {
