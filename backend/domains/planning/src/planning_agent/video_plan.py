@@ -48,7 +48,7 @@ STYLE_MAX = 300  # 계약 VideoPlan.style 상한
 FAN_THEME = "fan culture with glowing light sticks, photo cards and stage lights"
 NEGATIVE = (
     "No text, no letters, no numbers, no logos, no watermarks, no subtitles, no real people, "
-    "no celebrities, no real brands, no readable book covers"
+    "no celebrities, no real brands, no readable labels or covers"
 )
 _KST = timezone(timedelta(hours=9))
 # 방향 → 색감 (마케팅 scene_templates.toml color_theme 값 중 TONE 분위기에 맞는 것)
@@ -114,6 +114,12 @@ def _company() -> dict[str, str]:
         "industry": industry if isinstance(industry, str) else "",
         "about": about if isinstance(about, str) else "",
     }
+
+
+def company_info() -> dict[str, str]:
+    """다른 기획 LLM 지시(제안 초안·기획서 채우기)도 같은 회사 정보를 데이터 블록에 넣는다.
+    11/24: 지시문의 "고객사(온라인 서점)" 고정 글자를 걷어내고 회사는 이 값으로만 알린다."""
+    return _company()
 
 
 # 데이터분석 주제 후보 근거 줄 (trend_report_insight.row_facts, #1540):
