@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { InlineNote } from '@/components/InlineConfirm'
-import { INDUSTRIES, issueKey, revokeKey, useCompany, useKeys, type IssuedKey, type KeyStatus } from '@/demo/company'
+import { DEFAULT_INDUSTRY, INDUSTRIES, issueKey, revokeKey, useCompany, useKeys, type IssuedKey, type KeyStatus } from '@/demo/company'
 
 // 연결 키 발급 (AXcellent 운영팀). 새 고객사면 회사 이름·업종을 같이 넣어 발급한다: 회사 목록에 그 회사가 생기고
 // 키는 그 회사 전용이 된다(서버 명령 없이, 로드맵 7단계). 고객사는 이 키로 /setup에서 첫 관리자를 만들고 연결한다.
@@ -17,7 +17,7 @@ export default function KeyIssue() {
   const keys = useKeys()
   const current = useCompany()
   const [memo, setMemo] = useState('')
-  const [org, setOrg] = useState({ companyName: '', industry: INDUSTRIES[0], companyId: '', siteUrl: '' })
+  const [org, setOrg] = useState({ companyName: '', industry: DEFAULT_INDUSTRY, companyId: '', siteUrl: '' })
   const [fresh, setFresh] = useState<IssuedKey | null>(null)
   const [copied, setCopied] = useState(false)
   const [issueError, setIssueError] = useState<string | null>(null) // 실패는 alert 대신 칸 아래 한 줄(InlineNote)
@@ -27,7 +27,7 @@ export default function KeyIssue() {
     e.preventDefault()
     setIssueError(null)
     void issueKey(memo.trim(), org)
-      .then((k) => { setFresh(k); setMemo(''); setOrg({ companyName: '', industry: INDUSTRIES[0], companyId: '', siteUrl: '' }) })
+      .then((k) => { setFresh(k); setMemo(''); setOrg({ companyName: '', industry: DEFAULT_INDUSTRY, companyId: '', siteUrl: '' }) })
       .catch((x: Error) => setIssueError(x.message))
     setCopied(false)
   }

@@ -24,8 +24,10 @@ export type ConnectedCompany = {
   key?: string
   connectedAt?: string
 }
-/** 회사 업종 선택지 (키 발급·관리자 가입·회사 연결 화면이 같이 쓴다) */
-export const INDUSTRIES = ['온라인 쇼핑몰', '오프라인 유통', '여행사', '교육', '카페 체인', '병원', '제조', '기타']
+/** 회사 업종 선택지 (키 발급·관리자 가입·회사 연결 화면이 같이 쓴다). 업종별 낱말 표와 같은 이름(lib/industryTerms.ts) */
+export { INDUSTRIES } from '@/lib/industryTerms'
+/** 고르지 않았을 때의 업종 */
+export const DEFAULT_INDUSTRY = '기타'
 export type CompanyInfo = Pick<ConnectedCompany, 'name' | 'industry' | 'network' | 'siteUrl'>
 export type KeyStatus = 'issued' | 'connected' | 'revoked'
 export type IssuedKey = {

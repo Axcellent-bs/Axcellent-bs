@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { INDUSTRIES, checkKey, connectWithKey, signupWithKey, useCompany, type CompanyInfo, type IssuedKey } from './company'
+import { DEFAULT_INDUSTRY, INDUSTRIES, checkKey, connectWithKey, signupWithKey, useCompany, type CompanyInfo, type IssuedKey } from './company'
 import { sessionFromLogin, setSession } from '@/lib/humanSession'
 import { emailTaken, homeOf, registerAccount, useSession } from './session'
 
@@ -26,7 +26,7 @@ export default function Setup() {
   const [keyInput, setKeyInput] = useState(() => new URLSearchParams(window.location.search).get('key') ?? '')
   const [key, setKey] = useState<IssuedKey | null>(null)
   const [admin, setAdmin] = useState({ name: '', email: '', password: '' })
-  const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: INDUSTRIES[0], network: '' })
+  const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: DEFAULT_INDUSTRY, network: '' })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
