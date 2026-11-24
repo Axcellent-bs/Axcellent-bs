@@ -353,6 +353,7 @@ function ReportPost({ p, rank, domId }: { p: InstagramRadarPost; rank: number; d
         <b className="truncate text-[13px] text-ink-900"><span className="mr-1 font-normal text-ink-400">{rank}</span>{p.account}</b>
         <span className="text-ink-700">{[kind, `${METRIC[p.metric]} ${COMPACT.format(p.value)}`, posted].filter(Boolean).join(" · ")}</span>
         {p.standout && <span className="font-medium text-emerald-700">{p.standout}</span>}
+        {p.ad_excluded && <span className="font-medium text-ink-500">{p.ad_excluded}</span>}
       </span>
     </>
   );
@@ -403,7 +404,7 @@ function ContentBody({ s }: { s: TrendReportSections["content"] }) {
                 <li key={v.video_id} className="text-sm">
                   {link ? <a href={link} target="_blank" rel="noreferrer noopener" className="font-medium text-brand-700 underline-offset-2 hover:underline">{title}</a> : <b className="font-medium text-ink-900">{title}</b>}
                   <small className="block text-xs text-ink-500">
-                    {[v.channel_title, v.views !== null ? `조회 ${v.views.toLocaleString("ko-KR")}` : null, rel].filter(Boolean).join(" · ")}
+                    {[v.channel_title, v.views !== null ? `조회 ${v.views.toLocaleString("ko-KR")}` : null, rel, v.ad_excluded].filter(Boolean).join(" · ")}
                   </small>
                 </li>
               );

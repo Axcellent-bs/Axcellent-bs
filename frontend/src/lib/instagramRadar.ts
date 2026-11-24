@@ -20,6 +20,8 @@ export interface RadarState {
   /** 이 숫자보다 팔로워가 적은 밈·크리에이터 계정은 제외 (기본 5만) */
   min_followers?: number;
   meta_editable?: boolean;
+  /** 계정 이름에 욕설·성인 표현 → "광고 근거 제외: 표현" (계정 이름 → 표시, 옛 서버에는 없음) */
+  ad_excluded?: Record<string, string>;
 }
 
 export interface RadarMetaEntry {

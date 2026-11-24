@@ -25,7 +25,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from ax_agent_template import tenant
+from ax_agent_template import ad_words, tenant
 from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
 
@@ -111,7 +111,11 @@ def _state() -> dict[str, Any]:
     # 11/24 계정 메타 (지금 회사 것만). 목록에 있는 계정만 보여 준다
     listed = {a.lower() for a in [*accounts, *meme]}
     meta = {a: row for a, row in tenant.ig_radar_meta().items() if a.lower() in listed}
+    # 11/24 계정 이름에 욕설·성인 표현 → "광고 근거 제외: 표현" (보고서 근거에서 빠지는 계정)
+    extra = ad_words.words_from(_tenant_raw())
+    blocked = {a: m for a in [*accounts, *meme] if (m := ad_words.mark((a,), extra))}
     return {
+        "ad_excluded": blocked,
         "accounts": accounts,
         "source": source,
         "tenant_count": len(from_tenant),
