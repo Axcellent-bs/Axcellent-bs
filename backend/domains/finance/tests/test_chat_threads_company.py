@@ -16,5 +16,16 @@ def test_threads_are_kept_per_request_company() -> None:
     with company_scope.using("catbooks"):
         assert [t["id"] for t in store.list_all()] == [cat["id"]]
         assert store.get(nubi["id"]) is None
-    # 요청 밖(정리 루틴)은 회사를 보지 않는다
-    assert {t["id"] for t in store.list_all()} == {cat["id"], nubi["id"]}
+    # 회사가 안 걸린 요청(캣북스 세션·공용 토큰)은 캣북스만
+    assert [t["id"] for t in store.list_all()] == [cat["id"]]
+
+
+def test_cleanup_routines_see_every_company() -> None:
+    """30분 정리·재시작 복구는 모든 회사 대화를 다룬다."""
+    store = ChatStore()
+    with company_scope.using("nubi"):
+        nubi = store.create("누비 질문", "예진")
+        store.begin_turn(nubi["id"], "안녕")  # 답하는 중
+    assert store.recover_orphans() == [nubi["id"]]
+    with company_scope.using("nubi"):
+        assert store.get(nubi["id"])["status"] == "talking"

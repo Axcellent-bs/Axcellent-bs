@@ -12,6 +12,7 @@ status: `talking`(말 걸 수 있음) · `answering`(AI 답을 만드는 중) ·
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import sqlite3
@@ -55,6 +56,12 @@ CREATE TABLE IF NOT EXISTS finance_chat_threads (
 _REMOVED_COLUMNS = ("removed_at", "removed_by")
 
 
+# 정리 루틴이 모든 회사 대화를 볼 때만 켠다(요청 처리 중에는 늘 꺼져 있다)
+_EVERYWHERE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "finance_chat_all", default=False
+)
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -85,11 +92,11 @@ class ChatStore:
     def _mine() -> tuple[str, tuple[str, ...]]:
         """요청 회사의 대화만 보는 조건(11/24 회사 격리: 다른 회사에 같은 이름이 있어도 안 섞이게).
 
-        요청 밖(스스로 도는 정리 루틴)이면 회사를 보지 않는다."""
-        company = request_scope.active()
-        if company is None:
+        회사가 안 걸린 요청(캣북스 세션·공용 토큰)은 캣북스다. 모든 회사를 보는 건 정리 루틴
+        (`expire_idle`·`recover_orphans`, `_EVERYWHERE`)뿐이다."""
+        if _EVERYWHERE.get():
             return "1 = 1", ()
-        return "tenant_id = ?", (request_scope.scope_id(company),)
+        return "tenant_id = ?", (request_scope.scope_id(request_scope.active()),)
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
         with self._lock:
@@ -256,7 +263,14 @@ class ChatStore:
         return " ".join(str(first).split())[:SUMMARY_CHARS]
 
     def expire_idle(self, minutes: int = IDLE_CLOSE_MINUTES) -> list[str]:
-        """`minutes` 동안 말이 없는 `talking` 대화를 끝낸다. 끝낸 대화 id를 돌려준다."""
+        """`minutes` 동안 말이 없는 `talking` 대화를 끝낸다(모든 회사). 끝낸 대화 id를 돌려준다."""
+        token = _EVERYWHERE.set(True)
+        try:
+            return self._expire_idle(minutes)
+        finally:
+            _EVERYWHERE.reset(token)
+
+    def _expire_idle(self, minutes: int) -> list[str]:
         cut = (self.clock() - timedelta(minutes=minutes)).isoformat()
         rows = self._rows(
             "SELECT id FROM finance_chat_threads"
@@ -268,7 +282,14 @@ class ChatStore:
         return [r["id"] for r in rows]
 
     def recover_orphans(self) -> list[str]:
-        """켤 때: 답을 만들던 중에 서버가 꺼진 대화는 안내 한 줄을 붙여 `talking`으로 돌린다."""
+        """켤 때: 답을 만들다 꺼진 대화에 안내를 붙여 `talking`으로 돌린다(모든 회사)."""
+        token = _EVERYWHERE.set(True)
+        try:
+            return self._recover_orphans()
+        finally:
+            _EVERYWHERE.reset(token)
+
+    def _recover_orphans(self) -> list[str]:
         rows = self._rows(
             "SELECT id FROM finance_chat_threads WHERE status = 'answering' AND removed_at IS NULL"
         )
