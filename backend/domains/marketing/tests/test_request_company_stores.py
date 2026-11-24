@@ -27,3 +27,16 @@ def test_state_db_rows_are_kept_per_request_company() -> None:
     assert db.company_id == "catbooks"
     with request_scope.using("nubi"):
         assert db.company_id == "nubi"
+
+
+def test_notices_and_coupons_are_kept_per_request_company() -> None:
+    """공지·쿠폰은 켤 때 메모리로 읽어 두는 저장소라 회사마다 따로 둔다."""
+    from marketing_agent.handlers import State
+
+    state = State()
+    cat_notices, cat_coupons = state.notices, state.coupons
+    with request_scope.using("nubi"):
+        assert state.notices is not cat_notices and state.coupons is not cat_coupons
+        nubi_notices = state.notices
+        assert state.notices is nubi_notices  # 같은 회사는 같은 저장소
+    assert state.notices is cat_notices and state.coupons is cat_coupons

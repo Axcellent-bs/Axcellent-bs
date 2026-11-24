@@ -216,6 +216,10 @@ class State:
     def __init__(self) -> None:
         # 공지·쿠폰 기록과 못 보낸 이벤트(outbox)는 MARKETING_STATE_DB에 남는다(없으면 메모리)
         self.state_db = StateDb()
+        # 공지·쿠폰은 켤 때 DB를 메모리로 읽어 두므로 회사마다 따로 둔다(11/24 누비투어 연결).
+        # 캣북스 것은 지금 만들고, 다른 회사 것은 그 회사 요청이 처음 올 때 그 회사 줄로 읽는다
+        self._notices: dict[str, NoticeStore] = {}
+        self._coupons: dict[str, CouponLedger] = {}
         self.notices = NoticeStore(db=self.state_db)
         self.coupons = CouponLedger(db=self.state_db)
         self.briefs = BriefStore()
@@ -233,6 +237,32 @@ class State:
         self.chat.on_video = lambda meta, rid, who: _render.request_video(
             self.media_ledger, meta, rid, who
         )
+
+    @property
+    def notices(self) -> NoticeStore:
+        """요청 회사의 공지 저장소. 요청 밖(스스로 도는 루틴)이면 캣북스 것."""
+        cid = self.state_db.company_id
+        if cid not in self._notices:
+            self._notices[cid] = NoticeStore(db=self.state_db)
+        return self._notices[cid]
+
+    @notices.setter
+    def notices(self, store: NoticeStore) -> None:
+        self._notices.clear()
+        self._notices[self.state_db.company_id] = store
+
+    @property
+    def coupons(self) -> CouponLedger:
+        """요청 회사의 쿠폰 장부. 요청 밖이면 캣북스 것."""
+        cid = self.state_db.company_id
+        if cid not in self._coupons:
+            self._coupons[cid] = CouponLedger(db=self.state_db)
+        return self._coupons[cid]
+
+    @coupons.setter
+    def coupons(self, ledger: CouponLedger) -> None:
+        self._coupons.clear()
+        self._coupons[self.state_db.company_id] = ledger
 
     def chat_facts(self) -> dict[str, Any]:
         """대화에 넣는 사실. 마케팅 저장소를 읽기만 한다(구매자·고객 정보는 넣지 않는다)."""
