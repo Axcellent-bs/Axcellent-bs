@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from ax_contracts.schemas import Evidence
@@ -32,6 +32,8 @@ from ax_contracts.schemas.data import (
     ChannelValueRow,
     SegmentPeriod,
 )
+from data_agent.aggregate import read_buyers as rb
+from data_agent.aggregate.store import AggregateStore
 from data_agent.sales_store import SalesStore
 from data_agent.skills import segment_analysis as seg
 from data_agent.skills.retention import HISTORY_FROM
@@ -84,6 +86,36 @@ def build_rows(
     return out
 
 
+def from_snapshot(
+    agg: AggregateStore, tenant_id: str, period: SegmentPeriod, cfg: CatalogSales, as_of: date
+) -> tuple[list[ChannelValueRow], int, date]:
+    """어제 기준 채널 가치 스냅샷(묶기·숨김은 저장할 때 끝남)을 화면 행으로 (3-2 ③).
+    경로 하나가 카탈로그 출처 하나뿐이면 그 출처를 `source`로 둔다."""
+    stored = [r for r in agg.more_rows("agg_channel_value", tenant_id, as_of)
+              if r["period"] == period]  # fmt: skip
+    by_label: dict[str, list[str]] = defaultdict(list)
+    for src, label in cfg.source_labels.items():
+        by_label[label].append(src)
+    out = []
+    for r in stored:
+        label = r["source_label"]
+        one = by_label.get(label, [])
+        source = one[0] if len(one) == 1 and label not in (DIRECT, OTHER_SOURCE) else None
+        n = r["new_buyers"]
+        if r["new_hidden"] or not n:
+            out.append(ChannelValueRow(source=source, label=label, suppressed=True))
+            continue
+        out.append(ChannelValueRow(
+            source=source, label=label, new_customers=n,
+            revenue_per_customer=max(0, round(r["horizon_net"] / n)),
+            repeat_rate=seg.ratio(r["repeaters"], n),
+            orders_per_customer=round(r["horizon_orders"] / n, 2),
+        ))  # fmt: skip
+    out.sort(key=lambda r: (r.suppressed, -(r.revenue_per_customer or 0), r.label))
+    excluded = stored[0]["excluded_incomplete"] if stored else 0
+    return out, excluded, as_of
+
+
 def summary_of(out: ChannelValueOutput) -> str:
     label = seg.SEGMENT_LABEL[out.period]
     if out.status != "ok":
@@ -126,6 +158,15 @@ def channel_value(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
         out = ChannelValueOutput(**common, status="insufficient",
                                  insufficient_reasons=snap.reasons)  # fmt: skip
         return out.model_copy(update={"summary": summary_of(out)}), 0
+    sales_cfg = cfg
+    got = rb.from_snapshot(
+        tenant_id, now, lambda agg, day: from_snapshot(agg, tenant_id, period, sales_cfg, day)
+    )
+    if got is not None:
+        rows_out, excluded, as_of = got
+        common["basis"] = rb.basis_at(snap.basis, rb.window_of(period, as_of))
+        out = ChannelValueOutput(**common, rows=rows_out)
+        return out.model_copy(update={"summary": rb.with_note(summary_of(out), as_of)}), excluded
     w = snap.window
     with store.segment_session(tenant_id, HISTORY_FROM, now, []) as s:
         rows, refunds, excluded = s.channel_value(w.start, w.end, cfg.value_horizon_days, now)
