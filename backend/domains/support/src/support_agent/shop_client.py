@@ -110,7 +110,7 @@ def _headers() -> dict[str, str]:
                 service_name(),
                 ", ".join(sorted(keys)),
             )  # 키 값은 싣지 않는다
-            raise ShopError("NO_SERVICE_KEY", "이 서비스의 판매 서버 연결 키가 설정돼 있지 않다")
+            raise ShopError("NO_SERVICE_KEY", "이 서비스의 사이트 서버 연결 키가 설정돼 있지 않다")
         return {"Authorization": f"Bearer {key}"}
     return {"Authorization": f"Bearer {config.agent_token('support')}"}
 
@@ -147,7 +147,7 @@ async def _send(
             # 읽어 가기의 읽은 표시·되돌려 쓰기·실패 알림: 쓰지 않고 아무 일도 안 한다.
             # 그래서 쓰기 권한이 있는 설치(251)가 처리 상태를 그대로 쥔다
             return httpx.Response(200, json={"data": {}, "meta": {}})
-        raise ShopError("READ_ONLY", "읽기 전용 설치라 판매 서버에 쓰지 않는다")
+        raise ShopError("READ_ONLY", "읽기 전용 설치라 사이트 서버에 쓰지 않는다")
     shared = client or _client  # 여러 번 부르는 읽기는 하나를 넘겨 재사용한다 (shared_client)
     http = shared or httpx.AsyncClient(
         timeout=TIMEOUT_SECONDS, transport=pinned_http.company_transport()
@@ -159,7 +159,7 @@ async def _send(
             logger.warning("판매 서버가 이 설치의 연결 키를 read 키로 알려 와 관찰 모드로 바뀐다")
             if path.startswith("/admin/"):
                 return httpx.Response(200, json={"data": {}, "meta": {}})
-            raise ShopError("READ_ONLY", "읽기 전용 키라 판매 서버에 쓰지 않는다")
+            raise ShopError("READ_ONLY", "읽기 전용 키라 사이트 서버에 쓰지 않는다")
         return response
     except httpx.HTTPError as exc:
         raise ShopError("UNAVAILABLE", f"shop-api에 연결할 수 없다 ({type(exc).__name__})") from exc
@@ -588,7 +588,7 @@ async def fetch_stuck_intake() -> list[dict[str, Any]]:
 async def retry_stuck_intake(kind: str, seq: int) -> dict[str, Any]:
     """실패로 뺀 접수를 다시 읽는 차례로 돌린다 (`kind`는 inquiry·claim)."""
     if read_only():  # 쓰기 없이 가짜 200으로 받으면 "이유 없는 실패"로 보인다. 이유를 분명히 낸다
-        raise ShopError("READ_ONLY", "읽기 전용 설치라 판매 서버의 접수를 다시 돌리지 않는다")
+        raise ShopError("READ_ONLY", "읽기 전용 설치라 사이트 서버의 접수를 다시 돌리지 않는다")
     path = f"/admin/{'inquiries' if kind == 'inquiry' else 'claims'}/{seq}/retry"
     response = await _send("POST", path)
     if response.status_code != 200:

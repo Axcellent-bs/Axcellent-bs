@@ -31,6 +31,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from ax_agent_template import company_scope
 from ax_agent_template import config as template_config
 from ax_agent_template.llm import LLMClient, LLMSettings
 from ax_contracts.schemas.finance import FINANCE_CHAT_MESSAGE_MAX as CHAT_MESSAGE_MAX
@@ -45,7 +46,7 @@ TITLE_CHARS = 30
 ANSWER_TIMEOUT_SEC = 120
 
 SYSTEM_PROMPT = (
-    "너는 회사(온라인 쇼핑몰 중개 플랫폼)의 재무 AI다. 사람이 손익·결산·판매자 정산 결과·통장 대조·"
+    "너는 회사의 재무 AI다. 사람이 손익·결산·판매자 정산 결과·통장 대조·"
     "현금 흐름·캠페인 손익·장애 이슈 비용을 물으면 아래 데이터의 facts로만 답한다.\n"
     "- facts에 없는 숫자·날짜·상태는 말하지 않는다. 모르면(unavailable 포함) 모른다고 하고 "
     "재무 화면 어디서 확인하는지 알려 준다(① 결산·리포트 ② 매출·PG 대사 ③ 판매자 정산(보기만) "
@@ -230,7 +231,10 @@ class ChatService:
         allowed = verify.allowed_numbers(data["facts"], said)
         try:
             out = await asyncio.wait_for(
-                llm.structured(SYSTEM_PROMPT, ChatOut, untrusted=data), ANSWER_TIMEOUT_SEC
+                llm.structured(
+                    company_scope.prompt_line() + SYSTEM_PROMPT, ChatOut, untrusted=data
+                ),
+                ANSWER_TIMEOUT_SEC,
             )
             reply = out.reply.strip()
             bad = verify.bad_numbers(reply, allowed) if reply else []
@@ -238,7 +242,7 @@ class ChatService:
                 logger.info("재무 대화 답에 facts에 없는 숫자 %d개, 다시 쓴다", len(bad))
                 again = await asyncio.wait_for(
                     llm.structured(
-                        SYSTEM_PROMPT + RETRY_NOTE,
+                        company_scope.prompt_line() + SYSTEM_PROMPT + RETRY_NOTE,
                         ChatOut,
                         untrusted=data | {"numbers_not_in_facts": bad},
                     ),

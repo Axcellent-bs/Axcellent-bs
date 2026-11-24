@@ -507,7 +507,7 @@ def random_reaction(rng: random.Random) -> Reaction:
         flagged = tuple(
             Flag(
                 product_id=f"prd_{k}",
-                title=f"책 {k}",
+                title=f"상품 {k}",
                 sold_qty=rng.randint(5, 200),
                 claim_count=rng.randint(2, 30),
                 defect_claim_count=rng.randint(0, 5),
@@ -519,8 +519,8 @@ def random_reaction(rng: random.Random) -> Reaction:
     return Reaction(
         status="flagged" if flagged else "clear",
         flagged=flagged,
-        low_sales=tuple(f"적은 책 {k}" for k in range(rng.randint(0, 2))),
-        sales_unread=tuple(f"못 읽은 책 {k}" for k in range(rng.randint(0, 2))),
+        low_sales=tuple(f"적은 상품 {k}" for k in range(rng.randint(0, 2))),
+        sales_unread=tuple(f"못 읽은 상품 {k}" for k in range(rng.randint(0, 2))),
         checked=rng.randint(1, 10),
     )
 
@@ -650,7 +650,7 @@ def case_campaign_opinion(g: Gen) -> tuple[Any, Any, dict[str, Any]]:
             "request": request,
             "cash": cash,
             "budget": budget["amount_krw"],
-            "reaction": f"{reaction.status}·걸린 책 {len(reaction.flagged)}권",
+            "reaction": f"{reaction.status}·걸린 상품 {len(reaction.flagged)}개",
         },
     )
 

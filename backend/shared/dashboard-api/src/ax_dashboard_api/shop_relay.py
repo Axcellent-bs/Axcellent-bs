@@ -54,7 +54,7 @@ def _token() -> str:
         raise ApiError(
             503,
             "SHOP_VIEWER_TOKEN_TOO_SHORT",
-            f"{VIEWER_TOKEN_ENV}가 {VIEWER_TOKEN_MIN_LENGTH}자보다 짧아 판매 서버가 받지 않아요",
+            f"{VIEWER_TOKEN_ENV}가 {VIEWER_TOKEN_MIN_LENGTH}자보다 짧아 사이트 서버가 받지 않아요",
         )
     if token:
         return token
@@ -63,7 +63,7 @@ def _token() -> str:
     raise ApiError(
         503,
         "SHOP_VIEWER_TOKEN_NOT_SET",
-        "판매 서버 열람 토큰(SHOP_VIEWER_TOKEN)이 화면 중계 서버에 설정되지 않았어요",
+        "사이트 서버 열람 토큰(SHOP_VIEWER_TOKEN)이 화면 중계 서버에 설정되지 않았어요",
     )
 
 
@@ -93,11 +93,11 @@ def _upstream_error(res: httpx.Response) -> ApiError:
         return ApiError(
             503,
             "UPSTREAM_AUTH",
-            "판매 서버가 화면 중계 서버의 열람 토큰을 받지 않았어요 (SHOP_VIEWER_TOKEN 확인)",
+            "사이트 서버가 화면 중계 서버의 열람 토큰을 받지 않았어요 (SHOP_VIEWER_TOKEN 확인)",
         )
     if status == 404:
         return ApiError(
-            404, "UPSTREAM_NOT_FOUND", "판매 서버에 이 경로가 없어요 (판매 서버 버전 확인)"
+            404, "UPSTREAM_NOT_FOUND", "사이트 서버에 이 경로가 없어요 (사이트 서버 버전 확인)"
         )
     if status in (502, 504):  # 판매 서버가 총괄·마케팅에 닿지 못한 경우
         try:
@@ -105,8 +105,10 @@ def _upstream_error(res: httpx.Response) -> ApiError:
         except (ValueError, AttributeError):
             error = {}
         message = error.get("message") if isinstance(error, dict) else None
-        return ApiError(status, "UPSTREAM_RELAY", message or f"판매 서버 중계 실패 (HTTP {status})")
-    return ApiError(502, "UPSTREAM_ERROR", f"판매 서버에서 오류가 났어요 (HTTP {status})")
+        return ApiError(
+            status, "UPSTREAM_RELAY", message or f"사이트 서버 중계 실패 (HTTP {status})"
+        )
+    return ApiError(502, "UPSTREAM_ERROR", f"사이트 서버에서 오류가 났어요 (HTTP {status})")
 
 
 async def relay_get(key: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -118,13 +120,13 @@ async def relay_get(key: str, params: dict[str, Any] | None = None) -> dict[str,
             res = await client.get(f"{agent_url('shop-api')}{path}", params=params, headers=headers)
     except httpx.TimeoutException as error:
         raise ApiError(
-            504, "UPSTREAM_TIMEOUT", f"판매 서버가 {TIMEOUT_SECONDS:g}초 안에 응답하지 않았어요"
+            504, "UPSTREAM_TIMEOUT", f"사이트 서버가 {TIMEOUT_SECONDS:g}초 안에 응답하지 않았어요"
         ) from error
     except httpx.HTTPError as error:
         raise ApiError(
             502,
             "UPSTREAM_UNAVAILABLE",
-            "판매 서버에 연결하지 못했어요(꺼져 있거나 회사 연결의 주소가 다를 수 있어요)",
+            "사이트 서버에 연결하지 못했어요(꺼져 있거나 회사 연결의 주소가 다를 수 있어요)",
         ) from error
     if res.status_code >= 400:
         raise _upstream_error(res)
@@ -133,7 +135,7 @@ async def relay_get(key: str, params: dict[str, Any] | None = None) -> dict[str,
     except ValueError:
         body = None
     if not isinstance(body, dict) or "data" not in body:
-        raise ApiError(502, "UPSTREAM_ERROR", "판매 서버가 {data} 모양이 아닌 응답을 보냈어요")
+        raise ApiError(502, "UPSTREAM_ERROR", "사이트 서버가 {data} 모양이 아닌 응답을 보냈어요")
     out = ok(body["data"])
     upstream_meta = body.get("meta")
     if isinstance(upstream_meta, dict):
