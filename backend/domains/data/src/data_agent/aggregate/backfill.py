@@ -108,10 +108,13 @@ def backfill(  # noqa: PLR0913 - 두 저장소·회사·카탈로그·시각·�
         if cfg is not None and first is not None:  # [sales]가 없으면 k도 속성도 몰라 안 만든다
             # 기준일 + 지난 13개월 월말 기준일 (설계 5.4: 달 행 보관용, 첫 주문 달 뒤만)
             ends = [d for d in month_ends(as_of, KEEP_DAILY_MONTHS) if d >= kst_day(first)]
-            for d in [*ends, as_of]:
-                counts = snapshot_day(sales, agg, tenant_id, d, cfg, run, now)
-            rows |= counts | {"month_end_snapshots": len(ends),
-                              "pruned_snapshot_rows": agg.prune_snapshots(tenant_id, as_of)}  # fmt: skip
+            for d in ends:  # 월말은 구매자·코호트·떠날 위험만 (함께 산 상품 등은 기준일부터 쌓인다)
+                b, c, r = build_snapshots(sales, tenant_id, d, cfg, run.run_id, now,
+                                          source_cursor=run.source_cursor)  # fmt: skip
+                agg.replace_snapshots(tenant_id, d, b, c, r)
+            counts = snapshot_day(sales, agg, tenant_id, as_of, cfg, run, now)
+            pruned = agg.prune_snapshots(tenant_id, as_of)
+            rows |= counts | {"month_end_snapshots": len(ends), "pruned_snapshot_rows": pruned}
         done = run.model_copy(update={
             "status": "done", "finished_at": datetime.now(now.tzinfo), "rows": rows,
         })  # fmt: skip

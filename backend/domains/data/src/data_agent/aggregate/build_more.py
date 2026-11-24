@@ -82,14 +82,22 @@ def build_more(  # noqa: PLR0913 - 저장소·회사·기준일·카탈로그·�
 
 
 def _pairs(  # noqa: PLR0913
-    s, cells: dict, keys: list[str], f: dict[str, str], level: str, cfg: CatalogSales, base: dict  # noqa: ANN001
+    s,
+    cells: dict,
+    keys: list[str],
+    f: dict[str, str],
+    level: str,
+    cfg: CatalogSales,
+    base: dict,  # noqa: ANN001
 ) -> list[PairRow]:
     k = cfg.min_group_size
     overall = seg.cell_count(cells, keys, f) if f else sum(cells.values())
     if overall < k:
         return []  # 화면도 쌍을 내지 않는다
     items, together = s.pair_counts(level, f, k)
-    known: Callable[[str], bool] = (lambda c: c in cfg.genres) if level == "genre" else (lambda c: True)
+    known: Callable[[str], bool] = (
+        (lambda c: c in cfg.genres) if level == "genre" else (lambda c: True)
+    )
     top = basket_pairs.ranked_pairs(items, together, overall, known, MAX_PAIRS)
     slots = 0
     if len(top) < MAX_PAIRS:
@@ -107,7 +115,12 @@ def _pairs(  # noqa: PLR0913
 
 
 def _favorites(  # noqa: PLR0913
-    s, cells: dict, keys: list[str], f: dict[str, str], cfg: CatalogSales, base: dict  # noqa: ANN001
+    s,
+    cells: dict,
+    keys: list[str],
+    f: dict[str, str],
+    cfg: CatalogSales,
+    base: dict,  # noqa: ANN001
 ) -> list[SegmentProfileRow]:
     k = cfg.min_group_size
     overall_n = sum(cells.values())
@@ -142,7 +155,8 @@ def _channels(
     sales: SalesStore, tenant_id: str, w: Window, cfg: CatalogSales, base: dict
 ) -> list[ChannelValueRow]:
     """첫 구매가 기간 안인 새 고객을 첫 유입 경로 이름(직접 유입·기타 경로 묶은 뒤)별로.
-    첫 구매 + value_horizon_days가 기준일 24시보다 뒤인 사람은 빼고 그 수를 남긴다(지금 화면 그대로)."""
+    첫 구매 + value_horizon_days가 기준일 24시보다 뒤인 사람은 빼고 그 수를 남긴다
+    (지금 화면 그대로)."""
     with sales.segment_session(tenant_id, retention.HISTORY_FROM, w.end, []) as s:
         rows, refunds, excluded = s.channel_value(w.start, w.end, cfg.value_horizon_days, w.end)
     grouped: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0])

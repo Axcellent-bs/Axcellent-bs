@@ -186,6 +186,8 @@ def _channel_values(tenant_id: str, as_of: str, r: ChannelValueRow) -> tuple:
         *_common(tenant_id, r), as_of, r.period, r.source_label, *_hc(r.new_buyers),
         r.horizon_net, r.horizon_orders, r.repeaters, r.excluded_incomplete, r.horizon_days,
     )  # fmt: skip
+
+
 SNAPSHOT_DAILY_DAYS = 35
 KEEP_SNAPSHOT_MONTHS = 60
 _INSERT_BUYERS = (
@@ -434,7 +436,9 @@ class AggregateStore:
         a = as_of.isoformat()
         with self._tx() as conn:
             for table in MORE_TABLES:
-                conn.execute(f"DELETE FROM {table} WHERE tenant_id = ? AND as_of = ?", (tenant_id, a))
+                conn.execute(
+                    f"DELETE FROM {table} WHERE tenant_id = ? AND as_of = ?", (tenant_id, a)
+                )
             conn.executemany(_INSERT_PAIR, [_pair_values(tenant_id, a, r) for r in pairs])
             conn.executemany(_INSERT_PROFILE, [_profile_values(tenant_id, a, r) for r in profiles])
             conn.executemany(_INSERT_CHANNEL, [_channel_values(tenant_id, a, r) for r in channels])
