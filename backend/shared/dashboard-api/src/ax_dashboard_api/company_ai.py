@@ -48,10 +48,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from ax_agent_template import companies as company_list
 from ax_agent_template import human_auth, llm_usage
 from ax_agent_template import tenant as tenants
 from ax_contracts.data_access.llm_usage import LlmCallRecord, LlmUsageQuery
 from ax_contracts.schemas import TENANT_ID_ALIASES
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 from ax_contracts.schemas.company_ai import (
     COMPANY_AI_KEY_NAMES,
     CompanyAiCoder,
@@ -60,7 +62,7 @@ from ax_contracts.schemas.company_ai import (
 )
 from ax_dashboard_api import accounts
 from ax_dashboard_api.auth import require_human
-from ax_dashboard_api.envelope import ApiError, ok
+from ax_dashboard_api.envelope import ApiError, ok, session_company
 from ax_dashboard_api.secret_routes import ReasonBody, ValueBody, _api_error
 from ax_secret_store import resolver
 from ax_secret_store.errors import SecretStoreError
@@ -97,10 +99,25 @@ def _admin(authorization: str | None) -> human_auth.Human:
 
 
 def _admin_count() -> int:
-    return sum(1 for r in accounts.load_accounts() if r.get("role") == "admin")
+    """이 회사 관리자 수(교체·삭제 승인 방식을 정한다). 다른 회사 관리자는 세지 않는다."""
+    cid = _company_id()
+    return sum(
+        1
+        for r in accounts.load_accounts()
+        if r.get("role") == "admin"
+        and (cid is None or any(m.company_id == cid for m in accounts.memberships_of(r)))
+    )
 
 
 def _company_id() -> str | None:
+    """이 요청의 회사. 다른 회사 로그인 세션이면 그 세션 회사(회사 목록에 없으면 404),
+    캣북스 세션·공용 토큰은 예전처럼 설치의 지금 회사(`tenant.current()`)다(11/24, 회사 격리)."""
+    session = session_company()
+    cid = TENANT_ID_ALIASES.get(session, session) if session else None
+    if cid and cid != TENANT_ID_CATBOOKS:
+        if not company_list.is_company(cid):
+            raise ApiError(404, "NOT_FOUND", "회사 설정이 없어요")
+        return cid
     now = tenants.current()
     return TENANT_ID_ALIASES.get(now, now) if now else None
 
