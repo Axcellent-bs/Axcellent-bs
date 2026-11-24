@@ -1050,4 +1050,10 @@ def secret_flags(authorization: str | None) -> tuple[human_auth.Human, bool, lis
     if row is None:
         raise ApiError(401, "ACCOUNT_GONE", "계정이 없어졌어요. 다시 로그인해 주세요")
     editor = row.get("secret_editor") is True
-    return human, editor, secret_tenants_of(row) if editor else []
+    tenants = secret_tenants_of(row) if editor else []
+    mine = company_list.canonical_company_id(human.company_id)
+    if human.role != "operator" and mine and mine != TENANT_ID_CATBOOKS:
+        # 다른 회사 관리자는 세션 회사의 키만(담당 목록에 다른 회사가 있어도 못 본다, 11/24).
+        # 캣북스(설치 회사) 세션은 예전처럼 담당 목록 그대로
+        tenants = [t for t in tenants if company_list.canonical_company_id(t) == mine]
+    return human, editor, tenants

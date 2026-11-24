@@ -22,9 +22,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 
+from ax_agent_template.companies import canonical_company_id
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 from ax_dashboard_api import accounts, marketing_client
 from ax_dashboard_api.auth import require_human
-from ax_dashboard_api.envelope import ApiError, ok
+from ax_dashboard_api.envelope import ApiError, ok, session_company
 from ax_secret_store import resolver
 from ax_secret_store.errors import SecretStoreError
 from ax_secret_store.service import SecretService
@@ -106,6 +108,10 @@ def _need_editor(editor: bool, tenants: list[str], tenant: str) -> None:
     if not editor:
         raise ApiError(403, "SECRET_EDITOR_REQUIRED", "키 담당 권한이 있는 계정만 바꿀 수 있어요")
     if tenant not in tenants:
+        mine = canonical_company_id(session_company())
+        if mine and mine != TENANT_ID_CATBOOKS and canonical_company_id(tenant) != mine:
+            # 다른 회사 세션이 남의 회사 키를 건드리면 없는 것처럼 404(있는지 안 알린다, 11/24)
+            raise ApiError(404, "NOT_FOUND", "그런 회사 키가 없어요")
         raise ApiError(403, "TENANT_NOT_ASSIGNED", "담당 고객사가 아니에요")
 
 
@@ -225,4 +231,3 @@ def _safe(out: dict[str, Any]) -> dict[str, Any]:
         "outcome": out.get("outcome"),
         "output": {k: v for k, v in (output or {}).items() if k in keep},
     }
-
