@@ -204,10 +204,15 @@ def test_rule_plan_sentences_fit_singular_and_plural(
     monkeypatch: pytest.MonkeyPatch, tenant_id: str, who: str
 ) -> None:
     monkeypatch.setenv("AX_TENANT", tenant_id)
-    plan = vp.rule_plan(_idol())
+    plan = vp.rule_plan(_idol(), (vp.PRODUCT, vp.END_CARD))  # 상품 홍보 흐름
     first, last = plan.scenes[0].prompt, plan.scenes[-1].prompt
     assert f"{who} noticing something surprising and turning toward the camera" in first
     assert f"Closing shot: {who} waving at the camera" in last
     # 수에 따라 틀리는 꼴(notice/notices, wave/waves)이 없다
     for wrong in (f"{who} notice ", f"{who} notices ", f"{who} wave ", f"{who} waves "):
         assert all(wrong not in s.prompt for s in plan.scenes)
+    # 재미 먼저(11/24 기본) 흐름도 -ing 꼴만 쓴다 (freeze/freezes, do/does)
+    fun = vp.rule_plan(_idol())
+    assert f"{who} suddenly freezing, then doing a surprised double take" in fun.scenes[0].prompt
+    for wrong in (f"{who} freeze", f"{who} freezes", f"{who} does ", f"{who} do "):
+        assert all(wrong not in s.prompt for s in fun.scenes)
