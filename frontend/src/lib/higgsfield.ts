@@ -19,6 +19,10 @@ export interface HiggsfieldStatus {
   source?: "mcp" | "api_key" | null;
   credits?: number | null;
   plan?: string | null;
+  /** 11/24 실패 사유 코드(network·http_<n>·tool_error·client_error…). 성공·옛 서버는 없음 */
+  reason_code?: string | null;
+  /** 11/24 Higgsfield가 준 문장(주소·토큰 모양 가림, 120자). 없으면 null */
+  detail_ko?: string | null;
 }
 
 const PATH = "/api/dashboard/marketing/higgsfield/status";

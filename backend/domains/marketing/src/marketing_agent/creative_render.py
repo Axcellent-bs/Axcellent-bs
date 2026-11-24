@@ -57,7 +57,7 @@ from marketing_agent import company_scope as _company_scope
 from marketing_agent import creative_mcp as _mcp
 from marketing_agent import creative_records as _creative
 from marketing_agent import higgsfield_mcp_auth as _mcp_auth
-from marketing_agent.higgsfield_mcp import McpError
+from marketing_agent.higgsfield_mcp import McpError, log_line
 from marketing_agent.higgsfield_mcp_auth import McpAuthError
 from marketing_agent.media import usage as usage_mod
 from marketing_agent.media.config import (
@@ -517,6 +517,9 @@ async def _render_image(
         try:
             credits = await _mcp_preflight(cid, "image", params)
         except _ERRORS as error:
+            # 11/24: 미리 보기(예상 크레딧·잔액) 실패도 원인을 남긴다 (값 없이)
+            logger.warning("%s", log_line(f"creative_render: Higgsfield {part} 미리 보기", error,
+                                          record_id))  # fmt: skip
             _set(record_id, part, status="blocked", error=_code(error))
             if part == "sheet_image":
                 maybe_start_board(ledger, meta, record_id)
@@ -535,7 +538,8 @@ async def _render_image(
                 sha = await _api_image(client, record_id, part, prompt, negative, ref, aspect)
     except _ERRORS as error:
         code = _code(error)
-        logger.warning("Higgsfield %s 실패: %s (%s)", part, code, record_id)
+        # 11/24: 사유·단계·도구·예외 종류·정리한 문장·시각 (값 없이)
+        logger.warning("%s", log_line(f"creative_render: Higgsfield {part}", error, record_id))
         _safe(lambda: ledger.mark_failed(seq, _now()))
         _set(record_id, part, status="failed", error=code)
         if part == "sheet_image":
@@ -845,7 +849,7 @@ async def _render_video(
                 sha = await _api_video(client, record_id, _video_prompt(rec), ref, seconds)
     except _ERRORS as error:
         code = _code(error)
-        logger.warning("Higgsfield video 실패: %s (%s)", code, record_id)
+        logger.warning("%s", log_line("creative_render: Higgsfield video", error, record_id))
         _safe(lambda: ledger.mark_failed(seq, _now()))
         _set(record_id, "video", status="failed", error=code)
         return

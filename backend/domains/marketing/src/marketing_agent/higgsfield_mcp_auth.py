@@ -38,8 +38,20 @@ ROTATED_BY = "higgsfield_mcp_refresh"
 
 
 class McpAuthError(Exception):
-    """사유 코드만 담는다(`not_connected`·`client_id_missing`·`reconnect_needed`·
-    `refresh_failed`)."""
+    """사유 코드(`str(오류)`)와 원인 칸 (값 없이).
+
+    코드: `not_connected`·`client_id_missing`·`reconnect_needed`·`refresh_failed`(+갱신 응답 코드
+    `status`)·갱신 요청이 닿지 않으면 `network`·`timeout`·`client_error`(11/24).
+    단계는 늘 refresh."""
+
+    def __init__(self, code: str, *, status: int | None = None, detail: str | None = None,
+                 error_class: str | None = None) -> None:  # fmt: skip
+        super().__init__(code)
+        self.stage = "refresh"
+        self.tool = None
+        self.status = status
+        self.detail = detail
+        self.error_class = error_class
 
 
 @dataclass
@@ -152,19 +164,27 @@ async def access_token(client: httpx.AsyncClient, cid: str, *, force: bool = Fal
             if res.status_code in (400, 401):
                 again = stored_refresh_token(cid)
                 if not again or again == old:
-                    raise McpAuthError("reconnect_needed")
+                    raise McpAuthError("reconnect_needed", status=res.status_code)
                 old = again  # 다른 곳이 이미 바꿔 둔 토큰으로 한 번 더
                 res = await _refresh(client, old, app)
                 if res.status_code in (400, 401):
-                    raise McpAuthError("reconnect_needed")
+                    raise McpAuthError("reconnect_needed", status=res.status_code)
             if res.status_code != 200:
-                raise McpAuthError("refresh_failed")
+                raise McpAuthError("refresh_failed", status=res.status_code)
             body = res.json()
-        except (httpx.HTTPError, ValueError) as error:
-            raise McpAuthError("refresh_failed") from error
+        except (httpx.HTTPError, httpx.InvalidURL) as error:
+            # 11/24: 갱신 요청이 닿지 않음 → network·timeout·client_error
+            # (예전에는 모두 refresh_failed)
+            from marketing_agent.higgsfield_mcp import from_http_error
+
+            got = from_http_error(error, stage="refresh", tool=None)
+            raise McpAuthError(got.code, detail=got.detail, error_class=got.error_class) from error
+        except ValueError as error:  # 200인데 JSON이 아님
+            raise McpAuthError("refresh_failed", status=200,
+                               error_class=type(error).__name__) from error  # fmt: skip
         token = body.get("access_token") if isinstance(body, dict) else None
         if not isinstance(token, str) or not token:
-            raise McpAuthError("refresh_failed")
+            raise McpAuthError("refresh_failed", status=200)
         new = body.get("refresh_token")
         if isinstance(new, str) and new and new != old:
             _keep_rotated(cid, old, new)
