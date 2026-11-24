@@ -80,8 +80,21 @@ async def _resync_peer_on_start() -> None:
         logging.getLogger("ax.dev").exception("기획 서비스와 맞추기 실패")
 
 
+async def _resume_after_restart_on_start() -> None:
+    """켤 때 서버를 다시 켜서 멈춘 서버 AI 코딩 작업을 한 번 이어서 다시 한다 (사람 다시 시도와
+    같은 길). 상태는 서비스를 만들 때 이미 읽었다 (store.load가 표시). 실행 관문(safety)이 같이
+    다시 켜지는 중일 수 있어 뜰 때까지 기다린 뒤 잇는다 (wait_gate)."""
+    try:
+        done = await get_service().resume_after_restart(wait_gate=True)
+        if done:
+            logging.getLogger("ax.dev").info("재시작 뒤 이어서 다시 시도: %s", ", ".join(done))
+    except Exception:  # 켤 때 뒷일이라 서버를 멈추지 않는다
+        logging.getLogger("ax.dev").exception("재시작 뒤 이어서 하기 실패")
+
+
 def _runs_loops() -> bool:
-    """주기 루프(PR 맞추기·연결 대장)를 켤지. 목 모드(시험 전용)에서는 켜지 않는다.
+    """주기 루프(PR 맞추기·연결 대장)와 재시작 뒤 이어서 하기를 켤지. 목 모드(시험 전용)에서는
+    켜지 않는다.
 
     시험이 `with TestClient(app)`로 앱을 켤 때마다 대화 되돌리기·형상관리 읽기가 돌지 않게 한다."""
     return not template_config.is_mock("dev")
@@ -108,20 +121,24 @@ def _start_loops() -> Callable[[], None]:
 
 
 # 템플릿 앱은 `lifespan`을 써서 `on_startup`이 실행되지 않는다 (기획 main과 같다, 11/23 확인).
-# 켤 때 도는 일(기획과 맞추기·PR 맞추기 루프·연결 대장)은 템플릿 lifespan을 감싸 띄우고
-# 끌 때 멈춘다
+# 켤 때 도는 일(기획과 맞추기·재시작 뒤 이어서 하기·PR 맞추기 루프·연결 대장)은 템플릿
+# lifespan을 감싸 띄우고 끌 때 멈춘다
 _template_lifespan = app.router.lifespan_context
 
 
 @asynccontextmanager
 async def _lifespan(a: Any) -> AsyncIterator[None]:
     async with _template_lifespan(a):
-        task = asyncio.get_running_loop().create_task(_resync_peer_on_start())
+        loop = asyncio.get_running_loop()
+        tasks = [loop.create_task(_resync_peer_on_start())]
+        if _runs_loops():
+            tasks.append(loop.create_task(_resume_after_restart_on_start()))
         stop_loops = _start_loops()
         try:
             yield
         finally:
-            task.cancel()
+            for task in tasks:
+                task.cancel()
             stop_loops()
 
 

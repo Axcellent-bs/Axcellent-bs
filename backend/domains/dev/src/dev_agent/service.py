@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
 import uuid
@@ -122,6 +123,8 @@ from dev_agent.external_actions import MOCK_CONNECTION, VCS_WRITE_ACTIONS
 from dev_agent.vcs import inventory
 from dev_agent.vcs.base import VcsError
 from dev_agent.wording import gate_text
+
+_log = logging.getLogger("ax.dev")
 
 MAX_INSTRUCTION_CHARS = 1000  # 사람 수정 지시 길이
 
@@ -1657,6 +1660,64 @@ class DevService(PlanningCore):
             done.append(task_id)
         return done
 
+    async def resume_after_restart(self, wait_gate: bool = False) -> list[str]:
+        """서버를 다시 켜서 멈춘 서버 AI 코딩 작업(store.load가 `restart_resume` 표시)을 켤 때 한 번
+        이어서 다시 한다. 다시 한 작업 id.
+
+        사람 다시 시도와 같은 길(`retry_dev_task`, 관문 dev_task_retry)로 간다. 상태 순서(먼저
+        만든 작업 먼저)로 다시 대기열에 올려, 순서 기다림(coder._wait_turn)은 평소처럼 앞 작업을
+        기다린다. 열린 PR·내 Claude(구독형)·폐기 작업은 하지 않는다. 작업마다
+        RESTART_RESUME_MAX번까지 (켤 때마다 같은 작업에서 꺼져도 끝없이 돌지 않게).
+        표시는 이번 켜기에서 한 번만 본다: 다시 하면 새 실행이라 표시가 없고, 못 하면(예산·관문
+        거절·사람 중단 등) 표시를 지워 사람 다시 시도로 남긴다.
+        `wait_gate`면(켤 때) 관문(safety)이 뜰 때까지 기다린 뒤 잇는다. 같이 다시 켜질 때 관문에
+        닿지 못한 것(exe_unavailable)은 판단이 아니라 표시를 남긴다 (다음 켤 때 다시 본다)."""
+        ids = [
+            t.id for t in self.state.tasks
+            if t.coding is not None and t.coding.restart_resume
+        ]  # fmt: skip
+        done: list[str] = []
+        if ids and wait_gate and not await self.wait_for_safety():
+            _log.warning("실행 관문이 뜨지 않아 그대로 이어서 해 본다")
+        for task_id in ids:
+            task = next((t for t in self.state.tasks if t.id == task_id), None)
+            cr = task.coding if task is not None else None
+            if task is None or cr is None or not cr.restart_resume:
+                continue
+            ok = (
+                cr.status == "failed" and cr.mode == "agent" and not task.discarded
+                and task_id not in self._coding and self._open_pr(self.state, task_id) is None
+                and cr.restart_resumes < RESTART_RESUME_MAX
+            )  # fmt: skip
+            if ok:
+                try:
+                    await self.retry_dev_task(task_id, restart=True)
+                except GateRefused as exc:
+                    if exc.decision.execution_id == GATE_UNAVAILABLE:
+                        # 관문에 닿지 못함(판단 아님): 표시를 남겨 다음 켤 때 다시 본다
+                        _log.warning("%s 재시작 뒤 이어서 하기: 관문에 닿지 못함", task_id)
+                        continue
+                    _log.info("%s 재시작 뒤 이어서 하기 못 함 (%s)", task_id, exc)
+                except ActionError as exc:
+                    _log.info("%s 재시작 뒤 이어서 하기 못 함 (%s)", task_id, exc.code)
+                except Exception:  # noqa: BLE001 - 한 작업이 안 돼도 나머지는 잇는다
+                    _log.exception("%s 재시작 뒤 이어서 하기 실패", task_id)
+                else:
+                    done.append(task_id)
+                    continue
+            await self._drop_restart_mark(task_id)
+        return done
+
+    async def _drop_restart_mark(self, task_id: str) -> None:
+        """재시작 뒤 이어서 하기 표시를 지운다 (사람 다시 시도로 남긴다)."""
+
+        async def run(s: State) -> None:
+            x = next((t for t in s.tasks if t.id == task_id), None)
+            if x is not None and x.coding is not None:
+                x.coding.restart_resume = False
+
+        await self._apply(run)
+
     async def recheck_ci(self) -> int:
         """CI 실패·시간 초과로 사람 확인에 둔 PR의 CI를 다시 본다. 다시 판단한 PR 수.
 
@@ -2783,6 +2844,7 @@ class DevService(PlanningCore):
         approved: bool = False,
         paths: list[str] | None = None,
         auto: bool = False,
+        restart: bool = False,
     ) -> ActionResult:
         """실패·사람 확인으로 멈췄거나 사람이 중단한 코딩 작업을 처음부터 다시 돌린다 (재개).
 
@@ -2791,7 +2853,9 @@ class DevService(PlanningCore):
         다시 돌 때 레포의 최신 코드를 다시 읽는다.
         `approved`: 사람이 generate_pr 보류 건을 승인함 → 보류 때 키로 보낸다 (같은 경로일 때).
         `paths`: 사람이 직접 고른 고칠 파일. AI가 파일을 고르지 않고 이 파일을 바로 쓴다.
-        `auto`: 잠깐 생긴 오류 뒤 에이전트가 스스로 다시 함 (`auto_retry_stuck`). 횟수를 잇는다."""
+        `auto`: 잠깐 생긴 오류 뒤 에이전트가 스스로 다시 함 (`auto_retry_stuck`). 횟수를 잇는다.
+        `restart`: 서버를 다시 켜서 멈춘 작업을 켤 때 이어서 함 (`resume_after_restart`).
+        자동 다시 하기 횟수는 그대로 두고 이어서 한 횟수(`restart_resumes`)를 하나 늘린다."""
         task = next((t for t in self.state.tasks if t.id == task_id), None)
         if task is None or task.coding is None:
             raise ActionError("NOT_FOUND", f"코딩 작업 {task_id}가 없다")
@@ -2860,6 +2924,8 @@ class DevService(PlanningCore):
                 how = f"사람이 고른 파일 {len(picked)}개로 다시 쓰기"
             if auto:
                 how = f"잠깐 생긴 오류 → 에이전트가 다시 시도 ({x.coding.error or ''})"
+            if restart:
+                how = "서버 재시작 뒤 이어서 다시 시도"
             if x.coding.merge_conflict:
                 how = "충돌 → 최신 코드로 다시 쓰기"
                 for pr in [p for p in s.prs if p.task == task_id and not p.closed]:
@@ -2875,15 +2941,22 @@ class DevService(PlanningCore):
             who = "개발자 Claude 대기열" if sub else "코딩 에이전트"
             text = f"{task_id} {who} {how} (연결 {cid})"
             n = sum(1 for g in self.gate_calls if g.action == "dev_task_retry") + 1
-            await self._execute("dev_task_retry", ctx, f"{task_id}:{n}", text, {"connection": cid})
+            # 켤 때 세는 값(gate_calls)은 0부터라 이어서 하기는 겹치지 않는 키를 붙인다
+            key = f"{task_id}:restart:{uuid.uuid4().hex[:12]}" if restart else f"{task_id}:{n}"
+            await self._execute("dev_task_retry", ctx, key, text, {"connection": cid})
+            if restart:
+                auto_n = x.coding.auto_retries
+            else:
+                auto_n = x.coding.auto_retries + 1 if auto else 0
+            resumes = x.coding.restart_resumes + 1 if restart else x.coding.restart_resumes
             x.coding = CodingRun(
                 status="queued", model=coder.model_name(llm) if llm else None, updated_at=t,
                 connection=cid, llm_calls=x.coding.llm_calls, llm_tokens=x.coding.llm_tokens,
                 mode=x.coding.mode, hold_key=x.coding.hold_key, hold_review=x.coding.hold_review,
                 hold_paths=x.coding.hold_paths, hold_ok=approved and x.coding.hold_key is not None,
                 text_warnings=x.coding.text_warnings, text_ok_by=x.coding.text_ok_by,
-                picked=picked,
-                auto_retries=x.coding.auto_retries + 1 if auto else 0,
+                picked=picked, auto_retries=auto_n,
+                restart_resumes=resumes if (auto or restart) else 0,
             )  # fmt: skip
             x.state = "진행 중"
             s.activity.append(self._act(t, ctx, "dev", "dev", "dev_task_retry", "A2A", text, "A"))
@@ -4479,6 +4552,11 @@ PR_SYNC_SECONDS = 60  # 형상관리에서 직접 머지·닫은 PR을 맞추는
 
 AUTO_RETRY_SECONDS = 60  # 잠깐 생긴 오류로 멈춘 뒤 에이전트가 다시 하기까지 기다리는 시간
 AUTO_RETRY_MAX = 1  # 작업마다 에이전트가 스스로 다시 하는 횟수 (넘으면 사람 확인)
+# 서버를 다시 켜서 멈춘 작업을 켤 때 이어서 하는 횟수 (작업마다, 사람이 다시 시도하면 0부터).
+# 켤 때마다 같은 작업에서 꺼지면 이만큼 뒤에는 사람 다시 시도로 남긴다
+RESTART_RESUME_MAX = 3
+# 관문(safety)에 닿지 못했을 때 execute()가 돌려주는 거부의 실행 번호 (정책 거절이 아니다)
+GATE_UNAVAILABLE = "exe_unavailable"
 
 
 def _cross_check_timeout_min() -> int:
