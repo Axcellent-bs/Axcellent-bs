@@ -251,8 +251,8 @@ def test_lifespan_resumes_only_outside_mock_mode(monkeypatch: pytest.MonkeyPatch
     async def fake_resync(wait_peer: bool = False) -> None:
         return None
 
-    async def fake_resume() -> list[str]:
-        calls.append("resume")
+    async def fake_resume(wait_gate: bool = False) -> list[str]:
+        calls.append(f"resume wait_gate={wait_gate}")
         return []
 
     monkeypatch.setattr(svc, "resync_peer", fake_resync)
@@ -272,4 +272,91 @@ def test_lifespan_resumes_only_outside_mock_mode(monkeypatch: pytest.MonkeyPatch
             if calls:
                 break
             asyncio.run(asyncio.sleep(0.02))
-    assert calls == ["resume"]
+    assert calls == ["resume wait_gate=True"]  # 켤 때는 관문이 뜰 때까지 기다린 뒤 잇는다
+
+
+# ---------------------------------------------------------------- 관문이 같이 다시 켜질 때
+
+
+def test_resume_waits_until_gate_is_up(tmp_path, monkeypatch, adapter) -> None:
+    from ax_workflow import base as workflow_base
+
+    again = _stopped_by_restart(tmp_path, monkeypatch)
+    probes: list[bool] = []
+    sleeps: list[float] = []
+
+    async def probe() -> bool:
+        probes.append(len(probes) >= 2)  # 세 번째에 뜬다
+        return probes[-1]
+
+    async def no_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(again, "_safety_up", probe)
+    monkeypatch.setattr(workflow_base, "_sleep", no_sleep)
+    coder.set_llm(FakeLLM())
+
+    async def go() -> list[str]:
+        out = await again.resume_after_restart(wait_gate=True)
+        await again.wait_coding()
+        return out
+
+    assert run(go()) == ["T-D1"]
+    assert probes == [False, False, True] and len(sleeps) == 2
+    assert _task(again).coding.status == "merged"
+
+
+def test_unreachable_gate_keeps_mark_for_next_boot(tmp_path, monkeypatch, adapter) -> None:
+    """관문에 닿지 못한 거부(exe_unavailable)는 판단이 아니다: 표시를 남겨 다음 켤 때 다시 본다."""
+    again = _stopped_by_restart(tmp_path, monkeypatch)
+    ok_gate = again._gate
+
+    async def down(action, params, meta, evidence):
+        raise ConnectionError("safety 아직 안 뜸")  # core가 exe_unavailable 거부로 바꾼다
+
+    again._gate = down
+    coder.set_llm(FakeLLM())
+    assert run(_resume(again)) == []
+    cr = _task(again).coding
+    assert cr.status == "failed" and cr.restart_resume and cr.restart_resumes == 0
+    assert again.gate_calls[-1].execution_id == dev_service.GATE_UNAVAILABLE
+
+    again._gate = ok_gate  # 관문이 떴다 (다음 켜기)
+    assert run(_resume(again)) == ["T-D1"]
+    assert _task(again).coding.status == "merged"
+
+
+def test_gate_policy_rejection_drops_mark(tmp_path, monkeypatch, adapter) -> None:
+    """관문이 판단해 거절한 것은 사람 다시 시도로 남긴다 (표시를 지운다)."""
+    from ax_contracts.schemas import ExecuteDecision
+
+    again = _stopped_by_restart(tmp_path, monkeypatch)
+
+    async def refuse(action, params, meta, evidence):
+        return ExecuteDecision(execution_id="exe_no", grade="C", status="rejected")
+
+    again._gate = refuse
+    assert run(_resume(again)) == []
+    cr = _task(again).coding
+    assert cr.status == "failed" and not cr.restart_resume
+
+
+def test_human_retry_and_resume_at_once_run_once(tmp_path, monkeypatch, adapter) -> None:
+    """사람 "다시 시도"와 켤 때 이어서 하기가 겹쳐도 한 번만 돈다 (잠금 안에서 다시 본다)."""
+    again = _stopped_by_restart(tmp_path, monkeypatch)
+    coder.set_llm(FakeLLM())
+
+    async def both() -> list[Any]:
+        out = await asyncio.gather(
+            again.retry_dev_task("T-D1"), again.resume_after_restart(), return_exceptions=True
+        )
+        await again.wait_coding()
+        return out
+
+    human, resumed = run(both())
+    assert not isinstance(human, BaseException)  # 사람이 먼저 잡았다
+    assert resumed == []
+    assert [g.action for g in again.gate_calls].count("dev_task_retry") == 1
+    assert sum(1 for p in again.state.prs if p.task == "T-D1") == 1  # PR도 하나
+    cr = _task(again).coding
+    assert cr.status == "merged" and not cr.restart_resume

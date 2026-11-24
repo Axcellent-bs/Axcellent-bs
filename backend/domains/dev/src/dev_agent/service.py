@@ -124,6 +124,8 @@ from dev_agent.vcs import inventory
 from dev_agent.vcs.base import VcsError
 from dev_agent.wording import gate_text
 
+_log = logging.getLogger("ax.dev")
+
 MAX_INSTRUCTION_CHARS = 1000  # 사람 수정 지시 길이
 
 
@@ -1658,7 +1660,7 @@ class DevService(PlanningCore):
             done.append(task_id)
         return done
 
-    async def resume_after_restart(self) -> list[str]:
+    async def resume_after_restart(self, wait_gate: bool = False) -> list[str]:
         """서버를 다시 켜서 멈춘 서버 AI 코딩 작업(store.load가 `restart_resume` 표시)을 켤 때 한 번
         이어서 다시 한다. 다시 한 작업 id.
 
@@ -1666,13 +1668,17 @@ class DevService(PlanningCore):
         만든 작업 먼저)로 다시 대기열에 올려, 순서 기다림(coder._wait_turn)은 평소처럼 앞 작업을
         기다린다. 열린 PR·내 Claude(구독형)·폐기 작업은 하지 않는다. 작업마다
         RESTART_RESUME_MAX번까지 (켤 때마다 같은 작업에서 꺼져도 끝없이 돌지 않게).
-        표시는 이번 켜기에서 한 번만 본다: 다시 하면 새 실행이라 표시가 없고, 못 하면(예산·관문·
-        사람 중단 등) 표시를 지워 사람 다시 시도로 남긴다."""
+        표시는 이번 켜기에서 한 번만 본다: 다시 하면 새 실행이라 표시가 없고, 못 하면(예산·관문
+        거절·사람 중단 등) 표시를 지워 사람 다시 시도로 남긴다.
+        `wait_gate`면(켤 때) 관문(safety)이 뜰 때까지 기다린 뒤 잇는다. 같이 다시 켜질 때 관문에
+        닿지 못한 것(exe_unavailable)은 판단이 아니라 표시를 남긴다 (다음 켤 때 다시 본다)."""
         ids = [
             t.id for t in self.state.tasks
             if t.coding is not None and t.coding.restart_resume
         ]  # fmt: skip
         done: list[str] = []
+        if ids and wait_gate and not await self.wait_for_safety():
+            _log.warning("실행 관문이 뜨지 않아 그대로 이어서 해 본다")
         for task_id in ids:
             task = next((t for t in self.state.tasks if t.id == task_id), None)
             cr = task.coding if task is not None else None
@@ -1686,8 +1692,16 @@ class DevService(PlanningCore):
             if ok:
                 try:
                     await self.retry_dev_task(task_id, restart=True)
+                except GateRefused as exc:
+                    if exc.decision.execution_id == GATE_UNAVAILABLE:
+                        # 관문에 닿지 못함(판단 아님): 표시를 남겨 다음 켤 때 다시 본다
+                        _log.warning("%s 재시작 뒤 이어서 하기: 관문에 닿지 못함", task_id)
+                        continue
+                    _log.info("%s 재시작 뒤 이어서 하기 못 함 (%s)", task_id, exc)
+                except ActionError as exc:
+                    _log.info("%s 재시작 뒤 이어서 하기 못 함 (%s)", task_id, exc.code)
                 except Exception:  # noqa: BLE001 - 한 작업이 안 돼도 나머지는 잇는다
-                    logging.getLogger("ax.dev").info("%s 재시작 뒤 이어서 하기 못 함", task_id)
+                    _log.exception("%s 재시작 뒤 이어서 하기 실패", task_id)
                 else:
                     done.append(task_id)
                     continue
@@ -4541,6 +4555,8 @@ AUTO_RETRY_MAX = 1  # 작업마다 에이전트가 스스로 다시 하는 횟�
 # 서버를 다시 켜서 멈춘 작업을 켤 때 이어서 하는 횟수 (작업마다, 사람이 다시 시도하면 0부터).
 # 켤 때마다 같은 작업에서 꺼지면 이만큼 뒤에는 사람 다시 시도로 남긴다
 RESTART_RESUME_MAX = 3
+# 관문(safety)에 닿지 못했을 때 execute()가 돌려주는 거부의 실행 번호 (정책 거절이 아니다)
+GATE_UNAVAILABLE = "exe_unavailable"
 
 
 def _cross_check_timeout_min() -> int:

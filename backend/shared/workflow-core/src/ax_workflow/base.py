@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Literal
 
@@ -701,19 +702,28 @@ class PlanningCore(StateService):
         """받는 서비스가 뜰 때까지 2초·4초·8초… 최대 30초 간격으로 묻는다. 모두 합쳐 5분까지.
 
         떴으면 True, 끝내 안 뜨면 False (그래도 보내고 닿지 못한 건 간격을 늘려 다시 보낸다)."""
-        waited, gap = 0.0, PEER_WAIT_FIRST_SECONDS
-        while True:
-            try:
-                if await self._peer_up():
-                    return True
-            except Exception:  # noqa: BLE001 - 묻다 난 오류는 아직 안 뜬 것으로 본다
-                pass
-            if waited >= PEER_WAIT_MAX_SECONDS:
-                return False
-            step = min(gap, PEER_WAIT_MAX_SECONDS - waited)
-            await _sleep(step)
-            waited += step
-            gap = min(gap * 2, PEER_WAIT_STEP_MAX_SECONDS)
+        return await wait_until_up(self._peer_up)
+
+    async def _safety_up(self) -> bool:
+        """실행 관문(safety)의 `/health`가 답하는지. 목 모드에서 `AX_SAFETY_URL`이 없으면 관문은
+        safety를 부르지 않으니 뜬 것으로 본다 (`ax_agent_template.execute`와 같은 기준)."""
+        if template_config.is_mock() and not os.getenv("AX_SAFETY_URL"):
+            return True
+        try:
+            url = f"{template_config.agent_url('safety')}/health"
+        except KeyError:
+            return True
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=PEER_PROBE_TIMEOUT_SECONDS)
+        except httpx.HTTPError:
+            return False
+        return response.status_code == 200
+
+    async def wait_for_safety(self) -> bool:
+        """실행 관문(safety)이 뜰 때까지 기다린다 (`wait_for_peer`와 같은 간격, 최대 5분).
+        같이 다시 켜질 때 관문을 먼저 부르면 닿지 못해 거부(exe_unavailable)로 끝나기 때문이다."""
+        return await wait_until_up(self._safety_up)
 
     async def resync_peer(self, wait_peer: bool = False) -> None:
         """다시 켰을 때 상대 서비스와 맞춘다: 못 보낸 것을 다시 보내고, 넘긴 기획서 중 받는 쪽이
@@ -1021,3 +1031,21 @@ def _monotonic() -> float:
 
 async def _sleep(seconds: float) -> None:
     await asyncio.sleep(seconds)
+
+
+async def wait_until_up(probe: Callable[[], Awaitable[bool]]) -> bool:
+    """`probe`가 True일 때까지 2초·4초·8초… 최대 30초 간격으로 묻는다. 모두 합쳐 5분까지.
+    떴으면 True, 끝내 안 뜨면 False. 묻다 난 오류는 아직 안 뜬 것으로 본다."""
+    waited, gap = 0.0, PEER_WAIT_FIRST_SECONDS
+    while True:
+        try:
+            if await probe():
+                return True
+        except Exception:  # noqa: BLE001 - 묻다 난 오류는 아직 안 뜬 것으로 본다
+            pass
+        if waited >= PEER_WAIT_MAX_SECONDS:
+            return False
+        step = min(gap, PEER_WAIT_MAX_SECONDS - waited)
+        await _sleep(step)
+        waited += step
+        gap = min(gap * 2, PEER_WAIT_STEP_MAX_SECONDS)

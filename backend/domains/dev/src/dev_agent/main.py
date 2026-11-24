@@ -82,9 +82,10 @@ async def _resync_peer_on_start() -> None:
 
 async def _resume_after_restart_on_start() -> None:
     """켤 때 서버를 다시 켜서 멈춘 서버 AI 코딩 작업을 한 번 이어서 다시 한다 (사람 다시 시도와
-    같은 길). 상태는 서비스를 만들 때 이미 읽었다 (store.load가 표시)."""
+    같은 길). 상태는 서비스를 만들 때 이미 읽었다 (store.load가 표시). 실행 관문(safety)이 같이
+    다시 켜지는 중일 수 있어 뜰 때까지 기다린 뒤 잇는다 (wait_gate)."""
     try:
-        done = await get_service().resume_after_restart()
+        done = await get_service().resume_after_restart(wait_gate=True)
         if done:
             logging.getLogger("ax.dev").info("재시작 뒤 이어서 다시 시도: %s", ", ".join(done))
     except Exception:  # 켤 때 뒷일이라 서버를 멈추지 않는다
