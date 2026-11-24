@@ -5,7 +5,7 @@ import BrandPromoSettings from '@/components/connect/BrandPromoSettings'
 import type { ConnectionState } from '@/lib/companyConnection'
 import { useHosts } from './store'
 import { SERVICES } from './services'
-import { INDUSTRIES, checkKey, connectWithKey, disconnect, moveCompany, updateCompanyInfo, useCompany, type CompanyInfo, type IssuedKey } from './company'
+import { checkKey, connectWithKey, disconnect, moveCompany, updateCompanyInfo, useCompany, type CompanyInfo, type IssuedKey } from './company'
 import { sessionFromLogin, setSession } from '@/lib/humanSession'
 import SiteConnect from './SiteConnect'
 import { useSession } from './session'
@@ -40,7 +40,7 @@ export default function CompanyConnect() {
   const [tab, setTab] = useState<TabId>(readTab)
   const [phase, setPhase] = useState<Phase>({ at: 'key' })
   const [input, setInput] = useState('')
-  const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: INDUSTRIES[0], network: NO_NETWORK })
+  const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: '', network: NO_NETWORK })
   const [error, setError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [confirmOff, setConfirmOff] = useState(false)
@@ -67,7 +67,7 @@ export default function CompanyConnect() {
     setError(null)
     // 같은 키로 다시 연결하면 지난번에 입력한 회사 정보를 미리 채운다
     const prev = r.issued.company
-    setInfo(prev ? { name: prev.name, industry: prev.industry, network: prev.network, siteUrl: prev.siteUrl } : { name: '', industry: INDUSTRIES[0], network: NO_NETWORK, siteUrl: '' })
+    setInfo(prev ? { name: prev.name, industry: prev.industry, network: prev.network, siteUrl: prev.siteUrl } : { name: '', industry: '', network: NO_NETWORK, siteUrl: '' })
     setPhase({ at: 'info', key: r.issued })
   }
   const [moving, setMoving] = useState(false)
@@ -80,7 +80,7 @@ export default function CompanyConnect() {
       if (!session) throw new Error('옮겼는데 로그인 정보를 받지 못했어요. 다시 로그인해 주세요.')
       setSession(session) // 새 회사 세션으로 바꾸면 회사·키 목록을 다시 읽는다
       const c = phase.key.company
-      setInfo({ name: c?.name ?? '', industry: INDUSTRIES.includes(c?.industry ?? '') ? c!.industry : INDUSTRIES[0], network: NO_NETWORK, siteUrl: c?.siteUrl ?? '' })
+      setInfo({ name: c?.name ?? '', industry: c?.industry ?? '', network: NO_NETWORK, siteUrl: c?.siteUrl ?? '' })
       setError(null)
       setPhase({ at: 'info', key: phase.key })
     } catch (x) {
@@ -146,7 +146,7 @@ export default function CompanyConnect() {
                 <div className="min-w-0">
                   <p className="text-xs text-ink-500">연결된 회사</p>
                   <p className="mt-0.5 text-3xl font-semibold tracking-tight">{company.name}</p>
-                  <p className="mt-1 text-sm text-ink-500">{company.industry} · {when(company.connectedAt)}에 연결</p>
+                  <p className="mt-1 text-sm text-ink-500">{when(company.connectedAt)}에 연결</p>
                 </div>
                 {!editing && (
                   <button type="button" className="btn-ghost"
@@ -162,12 +162,6 @@ export default function CompanyConnect() {
                     <label className="block space-y-1 text-sm">
                       <span className="text-ink-700">회사 이름</span>
                       <input className="field" value={info.name} onChange={(e) => setInfo({ ...info, name: e.target.value })} />
-                    </label>
-                    <label className="block space-y-1 text-sm">
-                      <span className="text-ink-700">업종</span>
-                      <select className="field" value={info.industry} onChange={(e) => setInfo({ ...info, industry: e.target.value })}>
-                        {[...new Set([info.industry, ...INDUSTRIES])].map((x) => <option key={x}>{x}</option>)}
-                      </select>
                     </label>
                   </div>
                   <label className="block space-y-1 text-sm">
@@ -263,12 +257,6 @@ export default function CompanyConnect() {
                   <label className="block space-y-1 text-sm">
                     <span className="text-ink-700">회사 이름</span>
                     <input className="field" value={info.name} onChange={(e) => setInfo({ ...info, name: e.target.value })} placeholder="예: 새벽커피" />
-                  </label>
-                  <label className="block space-y-1 text-sm">
-                    <span className="text-ink-700">업종</span>
-                    <select className="field" value={info.industry} onChange={(e) => setInfo({ ...info, industry: e.target.value })}>
-                      {INDUSTRIES.map((x) => <option key={x}>{x}</option>)}
-                    </select>
                   </label>
                 </div>
                 <label className="block space-y-1 text-sm">

@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { InlineNote } from '@/components/InlineConfirm'
-import { INDUSTRIES, issueKey, revokeKey, useCompany, useKeys, type IssuedKey, type KeyStatus } from '@/demo/company'
+import { issueKey, revokeKey, useCompany, useKeys, type IssuedKey, type KeyStatus } from '@/demo/company'
 
-// 연결 키 발급 (AXcellent 운영팀). 새 고객사면 회사 이름·업종을 같이 넣어 발급한다: 회사 목록에 그 회사가 생기고
+// 연결 키 발급 (AXcellent 운영팀). 새 고객사면 회사 이름을 같이 넣어 발급한다: 회사 목록에 그 회사가 생기고
 // 키는 그 회사 전용이 된다(서버 명령 없이, 로드맵 7단계). 고객사는 이 키로 /setup에서 첫 관리자를 만들고 연결한다.
 // 회사 이름을 비우면 예전 키(회사 정보 없음)다. 누구에게 보냈는지는 운영팀 메모로만 남긴다.
 const STATUS: Record<KeyStatus, { label: string; tone: string }> = {
@@ -17,7 +17,7 @@ export default function KeyIssue() {
   const keys = useKeys()
   const current = useCompany()
   const [memo, setMemo] = useState('')
-  const [org, setOrg] = useState({ companyName: '', industry: INDUSTRIES[0], companyId: '', siteUrl: '' })
+  const [org, setOrg] = useState({ companyName: '', industry: '', companyId: '', siteUrl: '' })
   const [fresh, setFresh] = useState<IssuedKey | null>(null)
   const [copied, setCopied] = useState(false)
   const [issueError, setIssueError] = useState<string | null>(null) // 실패는 alert 대신 칸 아래 한 줄(InlineNote)
@@ -27,7 +27,7 @@ export default function KeyIssue() {
     e.preventDefault()
     setIssueError(null)
     void issueKey(memo.trim(), org)
-      .then((k) => { setFresh(k); setMemo(''); setOrg({ companyName: '', industry: INDUSTRIES[0], companyId: '', siteUrl: '' }) })
+      .then((k) => { setFresh(k); setMemo(''); setOrg({ companyName: '', industry: '', companyId: '', siteUrl: '' }) })
       .catch((x: Error) => setIssueError(x.message))
     setCopied(false)
   }
@@ -51,11 +51,8 @@ export default function KeyIssue() {
       <section className="card p-6">
         <h2 className="card-title">새 키 발급</h2>
         <form onSubmit={submit} className="mt-4 space-y-3">
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-3">
             <input className="field" placeholder="회사 이름 (새 고객사)" value={org.companyName} onChange={(e) => setOrg({ ...org, companyName: e.target.value })} aria-label="회사 이름" />
-            <select className="field" value={org.industry} onChange={(e) => setOrg({ ...org, industry: e.target.value })} aria-label="업종">
-              {INDUSTRIES.map((i) => <option key={i}>{i}</option>)}
-            </select>
             <input className="field font-mono" placeholder="회사 ID (비우면 자동) · 예: nubi" value={org.companyId} onChange={(e) => setOrg({ ...org, companyId: e.target.value })} aria-label="회사 ID" />
             <input className="field font-mono" placeholder="사이트 주소 (선택) https://" value={org.siteUrl} onChange={(e) => setOrg({ ...org, siteUrl: e.target.value })} aria-label="사이트 주소" />
           </div>
@@ -96,7 +93,6 @@ export default function KeyIssue() {
                   {k.company ? (
                     <>
                       <p className="font-medium">{k.company.name}</p>
-                      <p className="text-xs text-ink-500">{k.company.industry}</p>
                     </>
                   ) : k.forCompany ? <span className="text-ink-700">회사 <span className="font-mono">{k.forCompany}</span> 전용 · 연결 전</span> : <span className="text-ink-500">아직 없음</span>}
                 </td>

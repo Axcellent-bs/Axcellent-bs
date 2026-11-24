@@ -24,8 +24,6 @@ export type ConnectedCompany = {
   key?: string
   connectedAt?: string
 }
-/** 회사 업종 선택지 (키 발급·관리자 가입·회사 연결 화면이 같이 쓴다) */
-export const INDUSTRIES = ['온라인 쇼핑몰', '오프라인 유통', '여행사', '교육', '카페 체인', '병원', '제조', '기타']
 export type CompanyInfo = Pick<ConnectedCompany, 'name' | 'industry' | 'network' | 'siteUrl'>
 export type KeyStatus = 'issued' | 'connected' | 'revoked'
 export type IssuedKey = {
