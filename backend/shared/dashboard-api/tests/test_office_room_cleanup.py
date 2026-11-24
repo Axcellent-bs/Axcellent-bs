@@ -183,3 +183,40 @@ def test_clear_is_kept_per_company(client: TestClient, orch: Orchestrator) -> No
     assert client.get(f"{BASE}/clears", headers=cat).json()["data"] == []
     mine = client.get(f"{BASE}/clears", headers=nubi).json()["data"]
     assert [r["room_id"] for r in mine] == ["all"]
+
+
+# ---------------------------------------------------------------- 11/24 대화 목록도 회사별
+
+
+def test_chat_room_threads_are_kept_per_company(client: TestClient, orch: Orchestrator) -> None:
+    """캣북스 세션에서 올린 대화는 누비투어 세션의 목록·방에 보이지 않는다(반대도 같다)."""
+    body = {"agent": "hr", "thread_id": "th_cat", "from_id": "acc_a", "from_name": "재현"}
+    assert (
+        client.post(
+            "/api/dashboard/office-room", json=body, headers=_session("catbooks")
+        ).status_code
+        == 201
+    )
+    nubi = {**body, "thread_id": "th_nubi", "from_id": "acc_n"}
+    assert (
+        client.post(
+            "/api/dashboard/office-room", json=nubi, headers=_session("nubi", "누비")
+        ).status_code
+        == 201
+    )
+
+    def ids(company: str) -> set[str]:
+        res = client.get("/api/dashboard/office-room", headers=_session(company, "보는사람"))
+        return {r["thread_id"] for r in res.json()["data"]}
+
+    assert ids("catbooks") == {"th_cat"}
+    assert ids("nubi") == {"th_nubi"}
+    # 다른 회사 대화를 내 회사로 다시 올리거나 그 방을 지울 수 없다(없는 것처럼 404)
+    again = client.post("/api/dashboard/office-room", json=body, headers=_session("nubi", "누비"))
+    assert again.status_code == 404
+    # 누비투어 방에는 acc_a가 만든 줄이 없다(캣북스 줄은 안 셈) → 403, 캣북스 대화는 그대로
+    res = client.post(
+        "/api/dashboard/office-room/all/remove", json={"from_id": "acc_a"}, headers=_session("nubi")
+    )
+    assert res.status_code == 403
+    assert ids("catbooks") == {"th_cat"}
