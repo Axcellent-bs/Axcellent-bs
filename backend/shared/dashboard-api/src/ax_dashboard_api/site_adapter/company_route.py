@@ -22,10 +22,12 @@ Starlette는 나중에 더한 미들웨어가 바깥이다).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ax_agent_template import company_scope
 from ax_agent_template.companies import canonical_company_id
+from ax_agent_template.company_connection import CALLER_COMPANY_HEADER
 from ax_dashboard_api.envelope import session_company
 
 ADAPTER_PREFIX = "/site-adapter"
@@ -65,6 +67,30 @@ def _screen(path: str) -> bool:
     return any(path == p or path.startswith(p + "/") for p in SCREEN_PREFIXES)
 
 
+def _caller_company(scope: Any) -> str | None:
+    """호출 회사 머리글(`X-AX-Company`). 없으면 None(예전 호출은 그대로 통과)."""
+    want = CALLER_COMPANY_HEADER.lower().encode("latin-1")
+    for key, value in scope.get("headers", ()):
+        if key.lower() == want:
+            return canonical_company_id(value.decode("latin-1").strip()) or "invalid"
+    return None
+
+
+async def _refuse(send: Any) -> None:
+    body = json.dumps(
+        {"error": {"code": "COMPANY_MISMATCH", "message": "호출 회사와 경로 회사가 달라요"}},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 403,
+            "headers": [(b"content-type", b"application/json; charset=utf-8")],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
 class CompanyRouteMiddleware:
     """요청의 회사를 `company_scope.using`으로 걸어 둔다 (변환기 경로·회사 연결 화면만)."""
 
@@ -79,10 +105,20 @@ class CompanyRouteMiddleware:
         found = adapter_company(path)
         if found is not None:
             cid, rest = found
+            caller = _caller_company(scope)
+            if caller is not None and caller != cid:
+                await _refuse(send)  # 경로 회사 ≠ 호출 회사(#1649)
+                return
             inner = {**scope, "path": rest, "raw_path": rest.encode("utf-8")}
             with company_scope.using(cid):
                 await self.app(inner, receive, send)
             return
+        if path.startswith(ADAPTER_PREFIX + "/"):
+            # 예전 캣북스 주소(`/site-adapter/api/...`)를 다른 회사가 부르면 막는다(#1649)
+            caller = _caller_company(scope)
+            if caller is not None and caller != company_scope.CATBOOKS:
+                await _refuse(send)
+                return
         if _screen(path):
             with company_scope.using(session_company()):
                 await self.app(scope, receive, send)

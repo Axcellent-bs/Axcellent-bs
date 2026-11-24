@@ -37,7 +37,7 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import pinned_http
+from ax_agent_template import company_connection, pinned_http
 from ax_agent_template.companies import canonical_company_id
 from ax_agent_template.config import agent_token, agent_url, is_mock
 from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
@@ -619,7 +619,10 @@ async def _live_books(
     try:
         shop, safety = agent_url("shop-api"), agent_url("safety")
         try:
-            headers = {"Authorization": f"Bearer {agent_token('finance')}"}
+            headers = {
+                "Authorization": f"Bearer {agent_token('finance')}",
+                **company_connection.caller_headers(),  # 호출 회사(#1649)
+            }
         except RuntimeError:
             headers = {}
         # 주문 조회에도 재무 토큰을 붙인다(shop-api `SHOP_ORDERS_PUBLIC_READ=off` 대비)

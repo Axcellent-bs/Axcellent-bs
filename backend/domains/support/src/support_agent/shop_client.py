@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import config, pinned_http
+from ax_agent_template import company_connection, config, pinned_http
 from support_agent import orders
 from support_agent.orders import Order, OrderItem
 
@@ -111,8 +111,11 @@ def _headers() -> dict[str, str]:
                 ", ".join(sorted(keys)),
             )  # 키 값은 싣지 않는다
             raise ShopError("NO_SERVICE_KEY", "이 서비스의 사이트 서버 연결 키가 설정돼 있지 않다")
-        return {"Authorization": f"Bearer {key}"}
-    return {"Authorization": f"Bearer {config.agent_token('support')}"}
+        return {"Authorization": f"Bearer {key}", **company_connection.caller_headers()}
+    return {
+        "Authorization": f"Bearer {config.agent_token('support')}",
+        **company_connection.caller_headers(),  # 호출 회사(#1649)
+    }
 
 
 ENV_MODE = "SUPPORT_SHOP_MODE"  # write(기본)·read(읽기 전용 설치, 관찰 모드)
