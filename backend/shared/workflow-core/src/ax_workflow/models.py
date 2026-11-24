@@ -248,6 +248,11 @@ class CodingRun(DomainModel):
     # auto_retries는 에이전트가 스스로 다시 한 횟수 (사람이 다시 시도하면 0부터)
     transient: bool = False
     auto_retries: int = 0
+    # 서버를 다시 켜서 멈춤 (store.load가 표시): 켤 때 개발 서비스가 한 번 이어서 다시 시도한다
+    # (dev `resume_after_restart`). restart_resumes는 그렇게 이어서 한 횟수 (사람이 다시 시도하면
+    # 0부터). 켤 때마다 같은 작업에서 꺼지면 끝없이 돌지 않게 횟수를 센다
+    restart_resume: bool = False
+    restart_resumes: int = 0
     # 바뀐 파일로 정한 위험도 (dev_agent.risk): low·medium·high와 이유 한 줄
     risk: Literal["low", "medium", "high"] | None = None
     risk_why: str | None = None

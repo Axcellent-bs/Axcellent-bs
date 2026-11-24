@@ -11,6 +11,8 @@
 - 읽을 때 돌던 서버 AI 코딩 작업(대기·읽기·쓰기·리뷰 중, PR 연 직후)은 다시 켜면 그 실행이 없다.
   열린 PR이 없으면 실패로 바꿔 사람이 다시 시도·재개로 잇고, 열린 PR이 있으면 사람 확인으로
   바꿔 머지·추가 지시로 잇는다 (열린 PR이 있으면 다시 시도는 거절되기 때문이다).
+  실패로 바꾼 작업은 `restart_resume`을 켜 둔다. 개발 서비스가 켤 때 사람 다시 시도와 같은
+  길로 한 번 이어서 한다 (dev `resume_after_restart`).
   내 Claude(구독형) 작업은 이 서버가 돌리지 않아 그대로 둔다.
 """
 
@@ -86,6 +88,7 @@ def load(path: str) -> tuple[State, dict[str, dict], dict[str, str], dict[str, l
             continue
         cr.status = "failed"
         cr.error = "서버를 다시 켜서 멈춤 → 다시 시도로 이어서"
+        cr.restart_resume = True  # 개발 서비스가 켤 때 한 번 이어서 다시 시도한다
     return (
         state,
         dict(data.get("idempotent") or {}),
