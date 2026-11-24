@@ -412,15 +412,15 @@ def test_default_direction_is_fun_first_with_end_card() -> None:
 
 
 def test_fun_timings_hook_two_seconds_and_short_end_card() -> None:
-    assert vp.fun_timings(15, 4) == [(0, 2), (2, 8), (8, 13), (13, 15)]
+    assert vp.fun_timings(15, 4) == [(0, 2), (2, 7), (7, 12), (12, 15)]
     assert vp.fun_timings(30, 4) == [(0, 2), (2, 14), (14, 27), (27, 30)]
-    assert vp.fun_timings(15, 3) == [(0, 2), (2, 13), (13, 15)]
+    assert vp.fun_timings(15, 3) == [(0, 2), (2, 12), (12, 15)]
 
 
 def test_fun_rule_plan_keeps_product_out_of_body_and_brand_at_end() -> None:
     p = _prop(format="숏폼 15초", idea="밤의 도서관을 소개하는 숏츠")
     plan = vp.rule_plan(p)
-    assert [(s.start_s, s.end_s) for s in plan.scenes] == [(0, 2), (2, 8), (8, 13), (13, 15)]
+    assert [(s.start_s, s.end_s) for s in plan.scenes] == [(0, 2), (2, 7), (7, 12), (12, 15)]
     body = " ".join(f"{s.visual} {s.prompt}" for s in plan.scenes[:3])
     assert "밤의 도서관" not in body  # 본론에 상품을 앞세우지 않는다
     assert "엔드 카드" in plan.scenes[-1].visual
@@ -445,7 +445,7 @@ def test_llm_concept_starting_with_product_is_rejected_in_fun_first() -> None:
 def test_llm_fun_first_prompt_and_timing() -> None:
     llm = _mock(_llm_out())
     plan = asyncio.run(vp.write(llm, _prop(format="숏폼 15초"), "ctx"))
-    assert [(s.start_s, s.end_s) for s in plan.scenes] == [(0, 2), (2, 8), (8, 13), (13, 15)]
+    assert [(s.start_s, s.end_s) for s in plan.scenes] == [(0, 2), (2, 7), (7, 12), (12, 15)]
     sent = str(llm.calls[-1])
     assert "재미 먼저, 브랜드는 끝에" in sent and "엔드 카드" in sent
     assert "상품 홍보" not in sent

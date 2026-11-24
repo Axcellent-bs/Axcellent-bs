@@ -213,8 +213,8 @@ def promo_of(p: Proposal) -> tuple[str, str]:
 
 
 def fun_timings(duration: int, n: int) -> list[tuple[int, int]]:
-    """재미 먼저: 장면 1은 0~2초 훅, 마지막 장면은 2초(20초 이상 3초), 본론은 그 사이를 고르게."""
-    last = duration - (3 if duration >= 20 else 2)
+    """재미 먼저: 장면 1은 0~2초 훅, 마지막 장면은 3초(15초 미만 2초), 본론은 그 사이를 고르게."""
+    last = duration - (3 if duration >= 15 else 2)
     mid = n - 2
     cuts = [0, HOOK_SECONDS]
     cuts += [round(HOOK_SECONDS + (last - HOOK_SECONDS) * i / mid) for i in range(1, mid)]
