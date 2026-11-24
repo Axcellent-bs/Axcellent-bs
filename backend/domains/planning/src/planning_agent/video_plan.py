@@ -211,6 +211,41 @@ def _theme(p: Proposal) -> str:
     return "everyday life" if problems else theme
 
 
+# 마케팅 "영상 초안 준비"가 콘셉트·대본에서 막는 말 (11/24 재현 님: PROP-22 콘셉트의 "공유"로 실패).
+# 마케팅 sns.FORBIDDEN_PHRASES·FORBIDDEN_CLAIM_PATTERNS와 같은 값 (도메인끼리 import 안 해 옮김).
+# 참여 유도(좋아요·팔로우·공유·댓글하면 혜택)와 성과 과장 표현. 과장은 공백을 뺀 글에서 찾는다
+ENGAGEMENT_WORDS = ("좋아요", "팔로우", "공유", "댓글")
+CLAIM_PATTERNS = (
+    r"인건비(를|가|은|는)?절감",
+    r"직원(을|이|은|는)?(모두|전부)?대체",
+    r"에이전트(가|는|들이)?(더|훨씬)?빨라",
+    r"최고",
+    r"무조건",
+    r"획기적",
+    r"압도적",
+    r"혁신적",
+)
+
+
+def text_problems(text: str) -> list[str]:
+    """마케팅이 받지 않는 말이 들어 있나: engagement_word·claim_word (없으면 빈 목록)."""
+    out = []
+    if any(w in text for w in ENGAGEMENT_WORDS):
+        out.append("engagement_word")
+    squeezed = re.sub(r"\s+", "", text)
+    if any(re.search(pat, squeezed) for pat in CLAIM_PATTERNS):
+        out.append("claim_word")
+    return out
+
+
+def _pick(*texts: str) -> str:
+    """마케팅이 받는 첫 문장 (모두 걸리면 마지막 것). 규칙 제작안이 제안 글을 그대로 쓸 때."""
+    for t in texts:
+        if not text_problems(t):
+            return t
+    return texts[-1]
+
+
 def _short(text: str, n: int) -> str:
     one = " ".join(text.split())
     return one if len(one) <= n else one[: n - 1].rstrip() + "…"
@@ -234,6 +269,11 @@ def media_hints(p: Proposal) -> VideoMediaHints:
     )
 
 
+OPEN_VISUAL = "시선을 끄는 장면으로 시작한다 (주인공: {})"
+AGAIN_VISUAL = "핵심 장면을 한 번 더 크게 보여 준다"
+PLAIN_CONCEPT = "주인공이 일상 속 재미있는 순간을 보여 주는 짧은 홍보 영상"
+
+
 def rule_plan(p: Proposal) -> VideoPlan:
     """LLM 없이 쓰는 제작안. 같은 제안·같은 회사 설정이면 같은 결과.
 
@@ -246,22 +286,22 @@ def rule_plan(p: Proposal) -> VideoPlan:
     product = _CLEAN.sub(" ", p.products[0]).strip()[:40] if p.products else ""
     beats = [
         (
-            f"'{theme}' 장면으로 시선을 끈다 (주인공: {who_ko})",
-            _short(p.title, 60),
+            _pick(f"'{theme}' 장면으로 시선을 끈다 (주인공: {who_ko})", OPEN_VISUAL.format(who_ko)),
+            _pick(_short(p.title, 60), ""),
             f"Opening hook in {where}: {who} noticing something surprising and turning toward "
             f"the camera with curious expressions, {tone} mood, themed around {theme}",
         ),
         (
             "공감 가는 일상 장면으로 기획의 핵심을 보여 준다",
-            _short(p.idea, 60),
+            _pick(_short(p.idea, 60), ""),
             f"A relatable everyday moment about {theme} acted out by {who} with playful "
             f"gestures in {where}, {tone} mood",
         ),
         (
-            f"연결 상품 '{p.products[0]}'을 자연스럽게 보여 준다"
+            _pick(f"연결 상품 '{p.products[0]}'을 자연스럽게 보여 준다", AGAIN_VISUAL)
             if p.products
-            else "핵심 장면을 한 번 더 크게 보여 준다",
-            _short(p.products[0], 60) if p.products else "",
+            else AGAIN_VISUAL,
+            _pick(_short(p.products[0], 60), "") if p.products else "",
             f"Close-up of {who} happily presenting {product}, delighted expressions, {where}"
             if product
             else f"The key moment about {theme} repeated by {who} in a bigger, funnier way",
@@ -279,8 +319,9 @@ def rule_plan(p: Proposal) -> VideoPlan:
         )
     ]
     script = " → ".join(f"{s.start_s}~{s.end_s}초 {s.visual}" for s in scenes)
+    concept = _pick(_short(p.idea, 200), _short(p.title, 200), PLAIN_CONCEPT)
     return VideoPlan(
-        concept=_short(p.idea, 200), duration_s=d, script=_short(script, 800), scenes=scenes,
+        concept=concept, duration_s=d, script=_short(script, 800), scenes=scenes,
         style=style(b), negative=NEGATIVE, written_by="rule", media_hints=media_hints(p),
     )  # fmt: skip
 
@@ -309,6 +350,8 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
 - 주제가 실존 인물·연예인·팬덤이면 이름·얼굴·음원 대신 팬 문화의 소품·분위기(응원봉, 포토카드,
   무대 조명, 팬 굿즈처럼 꾸민 상품)로 표현한다
 - 근거(facts)에 없는 숫자를 지어내지 않는다. 과장 광고 표현(최고·1위·보장)을 쓰지 않는다
+- concept·script·caption에 "좋아요·팔로우·공유·댓글"이라는 말을 쓰지 않는다 (참여하면 혜택 같은
+  참여 유도 게시는 마케팅이 받지 않는다). 최고·무조건·획기적·압도적·혁신적도 쓰지 않는다
 - 방향: {angle}
 """
 
@@ -375,6 +418,8 @@ def reject_reason(p: Proposal, got: _PlanOut) -> str | None:
         return "prompt_rule"
     if has_real_name(p, got):
         return "real_name_in_scene"
+    if text_problems(f"{got.concept} {got.script}"):  # 마케팅이 초안 준비를 거절하는 말
+        return "marketing_word"
     return None
 
 

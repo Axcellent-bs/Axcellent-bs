@@ -366,3 +366,35 @@ def test_no_length_in_request_keeps_planning_format() -> None:
         asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp)).output
     )
     assert out.video_plan is not None and out.video_plan.duration_s == 15
+
+
+# ---------------------------------------------------------------- 마케팅이 막는 말 (11/24 재현 님)
+
+
+def test_text_problems_matches_what_marketing_blocks() -> None:
+    assert vp.text_problems("이십대가 웃으며 공유할 책 읽는 일상 밈") == ["engagement_word"]
+    assert vp.text_problems("댓글 달면 선물") == ["engagement_word"]
+    assert vp.text_problems("최 고 의 책") == ["claim_word"]  # 띄어써도 걸린다
+    assert vp.text_problems("주말에 소설 한 권 읽는 일상") == []
+
+
+def test_llm_plan_with_engagement_word_falls_back_to_rule_plan() -> None:
+    out = _llm_out()
+    out.concept = "이십대가 웃으며 공유할 책 읽는 일상 밈"  # PROP-22 사례
+    assert vp.reject_reason(_prop(), out) == "marketing_word"
+    plan = vp._from_llm(_prop(), out, 30, vp.tenant.brand())
+    assert plan is None
+
+
+def test_rule_plan_skips_proposal_text_marketing_blocks() -> None:
+    p = _prop(idea="좋아요 누르고 팔로우하면 책 선물", title="공유하고 싶은 최고의 책")
+    plan = vp.rule_plan(p)
+    assert vp.text_problems(f"{plan.concept} {plan.script}") == []
+    assert plan.concept == vp.PLAIN_CONCEPT
+    assert plan.scenes[0].caption == "" and plan.scenes[1].caption == ""
+    ok = vp.rule_plan(_prop())  # 걸리는 말이 없으면 지금 그대로
+    assert ok.concept == _prop().idea and ok.scenes[0].caption == _prop().title
+
+
+def test_prompt_tells_llm_not_to_use_engagement_words() -> None:
+    assert "좋아요·팔로우·공유·댓글" in vp.PROMPT
