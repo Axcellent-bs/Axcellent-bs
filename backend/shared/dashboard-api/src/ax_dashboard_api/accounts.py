@@ -49,6 +49,10 @@
   기존 세션을 모두 끊고 새 세션 토큰을 돌려준다
 - `POST /api/dashboard/auth/accounts/{id}/reset-password` {new_password}
   (운영자: 모든 계정 / 고객사 관리자: 일반회원만) → 임시 비밀번호로 초기화, 그 계정의 세션을 끊는다
+
+고객사 관리자는 자기 세션 회사 계정만 보고·바꾸고·초기화한다(다른 회사 계정은 404).
+마지막 관리자 검사도 회사마다 센다. 고객사 첫 관리자는 그 회사 전용 연결 키로 가입한다
+(`create_first_admin`, 경로는 `connection_keys.py`의 `POST /connection-keys/signup`).
 """
 
 from __future__ import annotations
@@ -390,6 +394,15 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _in_my_company(human: human_auth.Human, row: dict[str, Any]) -> bool:
+    """고객사 관리자가 다룰 수 있는 계정인가: 내 세션 회사에 소속된 고객사 계정."""
+    return (
+        row.get("role") in CUSTOMER_ROLES
+        and human.company_id is not None
+        and human.company_id in _company_ids(row)
+    )
+
+
 # ---- 실패 횟수 제한 ----
 
 
@@ -590,7 +603,7 @@ def list_accounts(authorization: str | None = Header(None)) -> dict:
     if human.role == "operator":
         visible = load_accounts()
     elif human.role == "admin":
-        visible = [r for r in load_accounts() if r.get("role") in CUSTOMER_ROLES]
+        visible = [r for r in load_accounts() if _in_my_company(human, r)]
     else:
         raise ApiError(403, "ROLE_REQUIRED", "운영자와 고객사 관리자만 볼 수 있어요")
     rows = [_public(r) for r in visible]
@@ -619,6 +632,53 @@ def create_account(body: AccountIn, authorization: str | None = Header(None)) ->
         _write(path, rows)
     logger.info("계정을 만들었다: %s(%s) by %s", email, body.role, human.name)
     return ok(_public(row))
+
+
+def company_has_admin(company_id: str) -> bool:
+    """그 회사에 고객사 관리자가 있나 (키 가입은 첫 관리자만)."""
+    return any(r.get("role") == "admin" and company_id in _company_ids(r) for r in load_accounts())
+
+
+def create_first_admin(
+    name: str, email: str, password: str, company_id: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """회사 전용 연결 키로 그 회사의 첫 관리자를 만든다(`connection_keys.signup`이 부른다).
+
+    키 검사·키 쓰임 표시는 부르는 쪽(키 파일 잠금 안)에서 한다. 여기서는 계정 파일 잠금 안에서
+    이메일·이름 중복과 "그 회사에 관리자가 이미 있는가"를 다시 보고 만든 뒤, 로그인 응답을 돌려준다.
+    돌려주는 값: (공개 계정, 로그인 데이터 {token, expires_at, account, companies})
+    """
+    email = _norm_email(email)
+    if not EMAIL_RE.match(email):
+        raise ApiError(422, "EMAIL_INVALID", "이메일 형식이 아니에요")
+    _check_new_password(password)
+    path = _editable_path()
+    with _file_lock:
+        rows = _bootstrap(path, _read(path))
+        if any(r.get("email") == email for r in rows):
+            raise ApiError(409, "EMAIL_TAKEN", "이미 있는 이메일이에요")
+        if any(r.get("role") == "admin" and company_id in _company_ids(r) for r in rows):
+            raise ApiError(
+                409,
+                "COMPANY_HAS_ADMIN",
+                "이 회사에는 관리자가 있어요. 그 관리자에게 계정을 받아요",
+            )
+        row = _new_row(name.strip(), email, "admin", password, company_id)
+        if company_id not in _company_ids(row):  # 회사 목록에 없는 회사(읽을 때 버려진다)
+            raise ApiError(409, "UNKNOWN_COMPANY", "등록되지 않은 회사예요")
+        if _name_taken(rows, row["name"], _company_ids(row)):
+            raise ApiError(409, "NAME_TAKEN", "같은 회사에 이름이 같은 계정이 있어요")
+        rows.append(row)
+        _write(path, rows)
+    logger.info("키로 첫 관리자를 만들었다: %s(%s)", email, company_id)
+    token, exp, memberships = _issue_for(row)
+    login = {
+        "token": token,
+        "expires_at": exp,
+        "account": _public(row),
+        "companies": _companies_out(memberships),
+    }
+    return _public(row), login
 
 
 @router.post("/password")
@@ -676,12 +736,23 @@ def reset_password(
             raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
         if human.role == "admin" and row.get("role") != "member":
             raise ApiError(403, "ROLE_REQUIRED", "고객사 관리자는 일반회원만 초기화할 수 있어요")
+        if human.role == "admin" and not _in_my_company(human, row):
+            raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
         _set_password(row, body.new_password)
         _write(path, rows)
     _clear_failures(str(row.get("email", "")))
     human_auth.end_account_sessions(account_id)
     logger.info("비밀번호를 초기화했다: %s by %s", account_id, human.name)
     return ok(_public(row))
+
+
+def _last_admin(row: dict[str, Any], rows: list[dict[str, Any]]) -> bool:
+    """이 관리자를 내리면 관리자가 0명이 되는 회사가 있나. 소속이 없으면 예전처럼 전체로 센다."""
+    admins = [r for r in rows if r.get("role") == "admin"]
+    companies = _company_ids(row)
+    if not companies:
+        return len(admins) <= 1
+    return any(sum(1 for r in admins if cid in _company_ids(r)) <= 1 for cid in companies)
 
 
 def _check_role_change(
@@ -695,7 +766,8 @@ def _check_role_change(
         raise ApiError(409, "SELF_ROLE_CHANGE", "자기 역할은 스스로 바꿀 수 없어요")
     if human.role == "admin" and new_role not in CUSTOMER_ROLES:
         raise ApiError(403, "ROLE_REQUIRED", "고객사 관리자는 운영자 역할을 줄 수 없어요")
-    if old_role == "admin" and sum(1 for r in rows if r.get("role") == "admin") <= 1:
+    # 마지막 관리자는 회사마다 센다(그 계정이 속한 회사 중 하나라도 관리자가 그 사람뿐이면 막는다)
+    if old_role == "admin" and _last_admin(row, rows):
         raise ApiError(409, "LAST_ADMIN", "마지막 남은 고객사 관리자는 내릴 수 없어요")
 
 
@@ -767,6 +839,8 @@ def update_account(
             raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
         if human.role == "admin" and row.get("role") not in CUSTOMER_ROLES:
             raise ApiError(403, "ROLE_REQUIRED", "고객사 관리자는 고객사 계정만 바꿀 수 있어요")
+        if human.role == "admin" and not _in_my_company(human, row):
+            raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
         if "policy_editor" in patch and human.role != "operator":
             mine = next((r for r in rows if r.get("id") == human.account_id), {})
             if mine.get("policy_editor") is not True:
@@ -780,7 +854,12 @@ def update_account(
             _check_role_change(human, row, patch["role"], rows)
             row["role"] = patch["role"]
             if role_changed:
-                _sync_company_membership(row, patch["role"], human.company_id)
+                # 운영자는 세션 회사가 없다: 그 계정이 속한 회사들의 역할을 맞춘다
+                targets = (
+                    [human.company_id] if human.role != "operator" else sorted(_company_ids(row))
+                )
+                for cid in targets or [None]:
+                    _sync_company_membership(row, patch["role"], cid)
         if "name" in patch:
             name = patch["name"].strip()
             if not name:

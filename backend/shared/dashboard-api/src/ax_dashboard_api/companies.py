@@ -55,6 +55,41 @@ def save(rows: Iterable[Company]) -> None:
         os.replace(tmp, path)
 
 
+class CompanyExists(ValueError):
+    """같은 회사 ID(별칭 포함)가 이미 있다."""
+
+
+class CompaniesFileBroken(RuntimeError):
+    """목록 파일이 있는데 읽을 수 없다. 덮어쓰면 회사가 사라지므로 쓰지 않는다."""
+
+
+_add_lock = threading.Lock()
+
+
+def add(company: Company) -> Company:
+    """회사 한 줄을 더한다. 있는 회사는 그대로 둔다(운영자 화면의 고객사 등록).
+
+    파일이 없으면 지금 목록(캣북스)에 더해 만든다. 파일이 있는데 깨졌으면 쓰지 않는다
+    (읽기 쪽은 깨진 파일을 캣북스 하나로 보므로, 그대로 쓰면 다른 회사가 지워진다).
+    """
+    company = Company.model_validate(company.model_dump())
+    path = _place()
+    with _add_lock:
+        if path.exists():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                ok = isinstance(raw, dict) and isinstance(raw.get("companies"), list)
+            except (OSError, ValueError):
+                ok = False
+            if not ok:
+                raise CompaniesFileBroken(f"회사 목록 파일을 읽을 수 없어 쓰지 않는다: {path}")
+        rows = read.list_companies()
+        if any(c.company_id == company.company_id for c in rows):
+            raise CompanyExists(company.company_id)
+        save([*rows, company])
+    return company
+
+
 def init_file() -> bool:
     """파일이 없으면 지금 목록으로 만들고 True. 이미 있으면(깨졌어도) 건드리지 않고 False."""
     path = _place()
