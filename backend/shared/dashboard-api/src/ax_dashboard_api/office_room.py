@@ -128,6 +128,9 @@ _LATE_COLUMNS = {
     # 단톡방 대화를 다른 계정이 원문으로 읽을 때 부서에 이 이름으로 묻는다(`read_who`).
     # 예전 줄은 비어 있다(채우지 않음: from_id는 화면 계정 id라 부서가 저장한 who를 확실히 모른다)
     "owner_who": "TEXT",
+    # 11/24: 대화를 올린 회사(로그인 세션의 회사). 예전 줄은 캣북스(회사별 전에는 캣북스뿐이었다).
+    # 목록·방 읽기·지우기는 요청 회사의 줄만 본다(다른 회사 대화가 보이지 않게)
+    "tenant_id": "TEXT NOT NULL DEFAULT 'catbooks'",
 }
 # 원문을 읽을 때 dashboard-api가 부서 대화 창구(A2A)로 중계하는 부서.
 # 단톡방에 처음 올릴 때 그 대화가 올리는 사람 것인지 이 창구로 확인한다.
@@ -178,14 +181,18 @@ class OfficeRoomStore:
         return dict(row) if row else None
 
     def touch(
-        self, body: OfficeThreadBody, now: datetime, owner_who: str | None = None
+        self,
+        body: OfficeThreadBody,
+        now: datetime,
+        owner_who: str | None = None,
+        tenant: str = "catbooks",
     ) -> dict[str, Any]:
-        """처음이면 넣고, 있으면 마지막 시각만 바꾼다(보낸 사람·방·건 사람은 처음 그대로)."""
+        """처음이면 넣고, 있으면 마지막 시각만 바꾼다(보낸 사람·방·건 사람·회사는 처음 그대로)."""
         at = now.isoformat()
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO office_threads (agent, thread_id, from_id, from_name, created_at,"
-                " updated_at, room_id, owner_who) VALUES (?,?,?,?,?,?,?,?)"
+                " updated_at, room_id, owner_who, tenant_id) VALUES (?,?,?,?,?,?,?,?,?)"
                 " ON CONFLICT (agent, thread_id) DO UPDATE SET updated_at = excluded.updated_at",
                 (
                     body.agent,
@@ -196,6 +203,7 @@ class OfficeRoomStore:
                     at,
                     body.room_id,
                     owner_who,
+                    tenant,
                 ),
             )
             row = self._conn.execute(
@@ -204,9 +212,12 @@ class OfficeRoomStore:
             ).fetchone()
         return dict(row)
 
-    def recent(self, since: datetime, room: str | None = None) -> list[dict[str, Any]]:
-        """`since` 뒤에 말이 오간 대화. `room`을 주면 그 방만. 숨긴(지운) 줄은 뺀다."""
-        where, args = f"updated_at >= ? AND {_SHOWN}", [since.isoformat()]
+    def recent(
+        self, since: datetime, room: str | None = None, tenant: str = "catbooks"
+    ) -> list[dict[str, Any]]:
+        """그 회사의 `since` 뒤에 말이 오간 대화. `room`을 주면 그 방만. 숨긴(지운) 줄은 뺀다."""
+        where = f"updated_at >= ? AND tenant_id = ? AND {_SHOWN}"
+        args: list[str] = [since.isoformat(), tenant]
         if room is not None:
             where += " AND room_id = ?"
             args.append(room)
@@ -218,13 +229,13 @@ class OfficeRoomStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def in_room(self, room: str) -> list[dict[str, Any]]:
-        """그 방의 보이는 대화 줄 전부 (기간과 상관없이, 숨긴 줄은 뺀다)."""
+    def in_room(self, room: str, tenant: str = "catbooks") -> list[dict[str, Any]]:
+        """그 회사·그 방의 보이는 대화 줄 전부 (기간과 상관없이, 숨긴 줄은 뺀다)."""
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT * FROM office_threads WHERE room_id = ? AND {_SHOWN}"
+                f"SELECT * FROM office_threads WHERE room_id = ? AND tenant_id = ? AND {_SHOWN}"
                 " ORDER BY created_at, rowid",
-                (room,),
+                (room, tenant),
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -333,6 +344,10 @@ def shared_owner(agent: str, thread_id: str) -> str | None:
     row = get_store().get(agent, thread_id)
     if row is None or row.get("removed_at") or not row.get("owner_who"):
         return None
+    if (
+        scope_id(row.get("tenant_id")) != request_company()
+    ):  # 다른 회사 단톡방 대화는 빌려 읽지 않는다
+        return None
     return str(row["owner_who"])
 
 
@@ -374,9 +389,13 @@ async def touch_office_thread(body: OfficeThreadBody, request: Request) -> dict[
     것인지 먼저 확인한다. 이미 있는 줄은 마지막 시각만 바꾼다."""
     store = get_store()
     who = human_from_authorization(request.headers.get("authorization"))
-    if store.get(body.agent, body.thread_id) is None and body.agent in RELAY_AGENTS:
+    tenant = request_company()
+    found = store.get(body.agent, body.thread_id)
+    if found is not None and scope_id(found.get("tenant_id")) != tenant:
+        raise ApiError(404, "NOT_FOUND", "없는 대화예요")  # 다른 회사 대화는 없는 것처럼
+    if found is None and body.agent in RELAY_AGENTS:
         await _check_owner(body.agent, body.thread_id, request, who)
-    return ok(store.touch(body, _now(), owner_who=who))
+    return ok(store.touch(body, _now(), owner_who=who, tenant=tenant))
 
 
 @router.get("/office-room")
@@ -384,7 +403,7 @@ def list_office_threads(
     hours: int = Query(default=DEFAULT_HOURS, ge=1, le=MAX_HOURS),
     room: str | None = Query(default=None, min_length=1, max_length=64),
 ) -> dict[str, Any]:
-    rows = get_store().recent(_now() - timedelta(hours=hours), room)
+    rows = get_store().recent(_now() - timedelta(hours=hours), room, request_company())
     return ok(rows, total=len(rows))
 
 
@@ -415,7 +434,7 @@ async def remove_office_room(
     다른 화면은 목록(GET)을 다시 읽을 때 사라진 것을 본다.
     """
     store = get_store()
-    rows = store.in_room(room_id)
+    rows = store.in_room(room_id, request_company())
     if not rows:
         raise ApiError(404, "NOT_FOUND", "없는 단톡방이에요")
     mine = [r for r in rows if r["from_id"] == body.from_id]

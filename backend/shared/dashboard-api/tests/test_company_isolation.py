@@ -426,18 +426,12 @@ def test_5_a_sees_no_b_handoff_and_cannot_close_one(
     assert published == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "격리 미완: GET /api/dashboard/office-room — 오피스 대화 목록 저장소에 회사 칸이 없어 "
-        f"B 관리자가 올린 대화가 A에게도 보인다 — {STAGE4}"
-    ),
-)
 def test_5_a_sees_no_b_office_thread(client: TestClient, people: Any) -> None:
+    """오피스 대화 목록은 회사 칸(tenant_id)으로 나뉜다(11/24). B 회사 줄은 A에게 안 보인다."""
     body = office_room.OfficeThreadBody(
         agent="dev", thread_id="th_b_only", from_id="acc-b", from_name="비"
     )
-    office_room.get_store().touch(body, datetime.now(UTC), owner_who="비")
+    office_room.get_store().touch(body, datetime.now(UTC), owner_who="비", tenant=B)
     rows = client.get(f"{API}/office-room", headers=people["a"]).json()["data"]
     assert all(r["thread_id"] != "th_b_only" for r in rows)
 
