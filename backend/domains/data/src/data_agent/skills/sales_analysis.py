@@ -40,6 +40,7 @@ from ax_contracts.schemas.data import (
     SalesPeriod,
     SalesProductMove,
 )
+from data_agent.aggregate.read import read_tally
 from data_agent.sales_quality import KST, PERIOD_LABEL, Window, gate, quality_counted, window
 from data_agent.sales_sql import LineNet, Tally, allocate, line_nets, product_names, tally
 from data_agent.sales_store import FAKE_SOURCE, SalesStore
@@ -251,8 +252,9 @@ def analyze(
     now: datetime,
 ) -> SalesAnalysisOutput:
     w: Window = window(period, now)
-    cur, created = tally(store, tenant_id, w.start, w.end)
-    prev, _ = tally(store, tenant_id, w.previous_start, w.previous_end)
+    # 다 지난 날은 일별 집계, 덜 끝난 날만 원본 (`DATA_SALES_READ=aggregate`일 때, 3-2 ①)
+    cur, created = read_tally(store, tenant_id, w.start, w.end)
+    prev, _ = read_tally(store, tenant_id, w.previous_start, w.previous_end)
     report = quality_counted(store, tenant_id, w, created, cfg)
     fake = store.sync_state(tenant_id).source == FAKE_SOURCE
     basis = SalesBasis(
