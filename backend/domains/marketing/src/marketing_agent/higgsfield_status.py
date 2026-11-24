@@ -134,15 +134,16 @@ async def probe_mcp(cid: str, client: httpx.AsyncClient | None = None) -> Higgsf
     return _out(key, "ok", message, source="mcp", credits=credits, plan=plan)
 
 
-def higgsfield_key() -> str:
-    """로그인한 회사의 Higgsfield 키(키 저장소 tenant=회사 ID). 회사에 없으면 설치 기본 키.
+def higgsfield_key(cid: str | None = None) -> str:
+    """그 회사의 Higgsfield 키(키 저장소 tenant=회사 ID). 회사에 없으면 설치 기본 키.
 
     회사마다 자기 Higgsfield 계정을 쓴다(SNS·미디어 › 계정·연결, 11/23). env 모드는 환경변수와 같다.
+    `cid`를 주면 그 회사(11/24, 뒤에서 도는 그림·영상), 없으면 로그인한 회사(예전 그대로).
     """
     from ax_agent_template import company_ai
 
     try:
-        own = get_secret(HIGGSFIELD_API_KEY_ENV, tenant=company_ai.company_id()).strip()
+        own = get_secret(HIGGSFIELD_API_KEY_ENV, tenant=cid or company_ai.company_id()).strip()
     except Exception:  # noqa: BLE001 - 키 저장소 장애는 기본 키로
         own = ""
     return own or get_secret(HIGGSFIELD_API_KEY_ENV).strip()

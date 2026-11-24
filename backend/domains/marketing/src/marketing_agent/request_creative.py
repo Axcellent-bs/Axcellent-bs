@@ -188,16 +188,25 @@ def _thumb_ref(rec: dict[str, Any]) -> bytes | None:
 async def _ensure_images(
     request: AgentRequest, ledger: MediaLedger, record_id: str, rec: dict[str, Any]
 ) -> str | None:
-    """시트 그림(없을 때만)·스토리보드 그림을 만든다. 못 만들면 이유 코드."""
+    """시트 그림(없을 때만)·스토리보드 그림을 만든다. 못 만들면 이유 코드.
+
+    11/24: 회사를 요청 메타에서 한 번 정해(`request_company`) 경로·키·설정·폴더에 같은 값을 쓴다.
+    예전에는 `_render_image`에 경로를 넘기지 않아 회사 계정을 연결했어도 늘 키 길(기본값 API)로 갔다
+    (운영 wr_aa0669b6f7·wr_cb45ce73c4: 안전 기록 provider "higgsfield")."""
     meta = request.meta
+    cid = _render.request_company(meta)
     sheet = await _wait_part(record_id, "sheet_image")
     if sheet.get("status") != "done":
-        why = _render.configured("image")
+        via = _render.route(cid)
+        _render._log_route(via, cid, "sheet_image", record_id)  # noqa: SLF001
+        why = _render.configured("image", via, cid)
         if why:
             return why
         prompt = str((rec.get("sheet") or {}).get("prompt_en") or "")
         negative = str((rec.get("sheet") or {}).get("negative_prompt_en") or "")
-        _render._set(record_id, "sheet_image", status="running", error=None)  # noqa: SLF001
+        _render._set(  # noqa: SLF001
+            record_id, "sheet_image", status="running", error=None, route=via, company_id=cid
+        )
         await _render._render_image(  # noqa: SLF001 - 같은 관문·장부 순서를 그대로 쓴다
             ledger,
             meta,
@@ -207,11 +216,13 @@ async def _ensure_images(
             negative,
             _thumb_ref(rec),
             _render.SHEET_ASPECT,
+            via,
+            cid,
         )
         sheet = _part(record_id, "sheet_image")
         if sheet.get("status") != "done":
             return f"sheet_image_{sheet.get('status') or 'failed'}"
-    _render.maybe_start_board(ledger, meta, record_id)  # 이미 만들었거나 도는 중이면 안 한다
+    _render.maybe_start_board(ledger, meta, record_id, cid)  # 이미 만들었거나 도는 중이면 안 한다
     board = await _wait_part(record_id, "board_image")
     if board.get("status") != "done":
         return f"board_image_{board.get('status') or 'missing'}"
@@ -281,7 +292,9 @@ async def make_video(request: AgentRequest, ledger: MediaLedger) -> AgentResult:
     elif video.get("status") not in ("running", "done"):
         who = f"의뢰 {request.meta.context_id.removeprefix('ctx_')}"
         try:
-            await _render.request_video(ledger, request.meta, record_id, who)
+            await _render.request_video(
+                ledger, request.meta, record_id, who, _render.request_company(request.meta)
+            )
         except _render.RenderError as error:
             return _result(request, TaskStatus.FAILED, str(error), **out)
     video = await _wait_part(record_id, "video")
