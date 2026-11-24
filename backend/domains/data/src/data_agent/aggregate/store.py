@@ -1,7 +1,8 @@
 """일별 집계 저장소 `aggregates.db` (설계 3절·5.5절).
 
 - 표: `agg_sales_daily`(일별 매출, 13개월) · `agg_sales_monthly`(그보다 오래된 달, 5년) ·
-  `agg_quality_daily`(품질) · `agg_runs`(계산 기록)
+  `agg_quality_daily`(품질) · `agg_runs`(계산 기록) · 기간 스냅샷 `agg_buyers_period`·`agg_cohorts`·
+  `agg_at_risk`(사람 수 칸은 숨긴 채 저장: 숫자 NULL + `*_hidden` 1)
 - 어떤 표에도 구매자 id·주문 id·주문 시각 칸이 없다(`SCHEMA` 시험으로 확인).
 - 회사는 모든 표의 `tenant_id` 칸으로 나눈다. 모든 읽기·쓰기가 `tenant_id`로 거른다.
 - 일별 매출 행에는 k 숨김을 쓰지 않는다(사람 수·속성이 없는 칸, 설계 0.2·결정 필요 3).
@@ -15,10 +16,19 @@ import os
 import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from ax_contracts.data_access.sales_aggregates import AggRun, QualityDailyRow, SalesDailyRow
+from ax_contracts.data_access.sales_aggregates import (
+    AggRowBase,
+    AggRun,
+    AtRiskRow,
+    BuyerPeriodRow,
+    CohortRow,
+    HiddenCount,
+    QualityDailyRow,
+    SalesDailyRow,
+)
 
 DB_ENV = "DATA_AGGREGATES_DB"
 DEFAULT_DB = Path(__file__).resolve().parents[5] / ".data" / "aggregates.db"
@@ -59,6 +69,27 @@ CREATE TABLE IF NOT EXISTS agg_quality_daily (
     unmapped_attributes TEXT NOT NULL DEFAULT '{{}}', customers INTEGER,
     PRIMARY KEY (tenant_id, day)
 );
+CREATE TABLE IF NOT EXISTS agg_buyers_period (
+    {_COMMON}, as_of TEXT NOT NULL, period TEXT NOT NULL, dim_kind TEXT NOT NULL,
+    dim_code TEXT NOT NULL, attr_cell TEXT NOT NULL,
+    buyers INTEGER, buyers_hidden INTEGER NOT NULL DEFAULT 0,
+    new_buyers INTEGER, new_hidden INTEGER NOT NULL DEFAULT 0,
+    repeat_buyers INTEGER, repeat_hidden INTEGER NOT NULL DEFAULT 0,
+    new_revenue INTEGER, repeat_revenue INTEGER, title TEXT,
+    PRIMARY KEY (tenant_id, as_of, period, dim_kind, dim_code, attr_cell)
+);
+CREATE TABLE IF NOT EXISTS agg_cohorts (
+    {_COMMON}, as_of TEXT NOT NULL, cohort_month TEXT NOT NULL, attr_cell TEXT NOT NULL,
+    first_buyers INTEGER, first_hidden INTEGER NOT NULL DEFAULT 0, repeat TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, as_of, cohort_month, attr_cell)
+);
+CREATE TABLE IF NOT EXISTS agg_at_risk (
+    {_COMMON}, as_of TEXT NOT NULL, attr_cell TEXT NOT NULL,
+    regulars INTEGER, regulars_hidden INTEGER NOT NULL DEFAULT 0,
+    at_risk INTEGER, at_risk_hidden INTEGER NOT NULL DEFAULT 0, top_genre TEXT,
+    churn_days INTEGER NOT NULL, repeat_min_orders INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, as_of, attr_cell)
+);
 CREATE TABLE IF NOT EXISTS agg_runs (
     run_id TEXT NOT NULL PRIMARY KEY, tenant_id TEXT NOT NULL, as_of TEXT NOT NULL,
     input TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,
@@ -90,6 +121,67 @@ _ROLL_UP = (
     "FROM agg_sales_daily WHERE tenant_id = ? AND day < ? "
     f"GROUP BY tenant_id, substr(day, 1, 7), {_SALES_KEY_SQL}"
 )
+
+
+SNAPSHOT_TABLES = ("agg_buyers_period", "agg_cohorts", "agg_at_risk")
+SNAPSHOT_DAILY_DAYS = 35
+KEEP_SNAPSHOT_MONTHS = 60
+_INSERT_BUYERS = (
+    f"INSERT INTO agg_buyers_period ({_COMMON_COLS}, as_of, period, dim_kind, dim_code, "
+    "attr_cell, buyers, buyers_hidden, new_buyers, new_hidden, repeat_buyers, repeat_hidden, "
+    "new_revenue, repeat_revenue, title) VALUES "
+    f"({', '.join('?' * 18)})"
+)
+_INSERT_COHORT = (
+    f"INSERT INTO agg_cohorts ({_COMMON_COLS}, as_of, cohort_month, attr_cell, first_buyers, "
+    "first_hidden, repeat) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+_INSERT_AT_RISK = (
+    f"INSERT INTO agg_at_risk ({_COMMON_COLS}, as_of, attr_cell, regulars, regulars_hidden, "
+    "at_risk, at_risk_hidden, top_genre, churn_days, repeat_min_orders) "
+    f"VALUES ({', '.join('?' * 13)})"
+)
+
+
+def cell_text(cell: dict[str, str]) -> str:
+    """속성 칸 글: `age_band=20s;gender=female` (넣은 순서 = 카탈로그 순서). 비면 빈 글자."""
+    return ";".join(f"{k}={v}" for k, v in cell.items())
+
+
+def _months_back(day: date, months: int) -> date:
+    index = day.year * 12 + (day.month - 1) - months
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def _common(tenant_id: str, r: AggRowBase) -> tuple:
+    return (tenant_id, r.run_id, _iso(r.computed_at), r.source_cursor)
+
+
+def _hc(h: HiddenCount) -> tuple[int | None, int]:
+    return (None if h.hidden else h.value), int(h.hidden)
+
+
+def _buyer_values(tenant_id: str, as_of: str, r: BuyerPeriodRow) -> tuple:
+    return (
+        *_common(tenant_id, r), as_of, r.period, r.dim_kind, r.dim_code, cell_text(r.attr_cell),
+        *_hc(r.buyers), *_hc(r.new_buyers), *_hc(r.repeat_buyers), r.new_revenue,
+        r.repeat_revenue, r.title,
+    )  # fmt: skip
+
+
+def _cohort_values(tenant_id: str, as_of: str, r: CohortRow) -> tuple:
+    repeat = {d: (None if h is None else h.model_dump()) for d, h in r.repeat.items()}
+    return (
+        *_common(tenant_id, r), as_of, r.cohort_month, cell_text(r.attr_cell),
+        *_hc(r.first_buyers), _json(repeat),
+    )  # fmt: skip
+
+
+def _at_risk_values(tenant_id: str, as_of: str, r: AtRiskRow) -> tuple:
+    return (
+        *_common(tenant_id, r), as_of, cell_text(r.attr_cell), *_hc(r.regulars),
+        *_hc(r.at_risk), r.top_genre, r.churn_days, r.repeat_min_orders,
+    )  # fmt: skip
 
 
 def _json(value: dict) -> str:
@@ -208,6 +300,69 @@ class AggregateStore:
                 (tenant_id, month_of(drop_before)),
             ).rowcount
         return merged, dropped
+
+    # ------------------------------------------------------------------ 기간 스냅샷 (설계 3.3~3.5)
+
+    def replace_snapshots(
+        self,
+        tenant_id: str,
+        as_of: date,
+        buyers: Sequence[BuyerPeriodRow],
+        cohorts: Sequence[CohortRow],
+        at_risk: Sequence[AtRiskRow],
+    ) -> None:
+        """그 회사·그 기준일의 스냅샷을 통째로 바꿔 넣는다. 숨김은 행을 만들 때 이미 적용돼 있다
+        (숨긴 칸은 숫자 NULL + hidden 1)."""
+        a = as_of.isoformat()
+        with self._tx() as conn:
+            for table in SNAPSHOT_TABLES:
+                conn.execute(
+                    f"DELETE FROM {table} WHERE tenant_id = ? AND as_of = ?", (tenant_id, a)
+                )
+            conn.executemany(_INSERT_BUYERS, [_buyer_values(tenant_id, a, r) for r in buyers])
+            conn.executemany(_INSERT_COHORT, [_cohort_values(tenant_id, a, r) for r in cohorts])
+            conn.executemany(_INSERT_AT_RISK, [_at_risk_values(tenant_id, a, r) for r in at_risk])
+
+    def prune_snapshots(self, tenant_id: str, as_of: date) -> int:
+        """스냅샷 보관 (설계 5.5·결정 필요 4): 최근 35일 기준일은 날마다, 그 앞은 달의 마지막
+        기준일 하나만 5년(60개월) 둔다. 지운 행 수를 돌려준다."""
+        recent = (as_of - timedelta(days=SNAPSHOT_DAILY_DAYS)).isoformat()
+        oldest = _months_back(as_of, KEEP_SNAPSHOT_MONTHS).isoformat()
+        removed = 0
+        with self._tx() as conn:
+            for table in SNAPSHOT_TABLES:
+                removed += conn.execute(
+                    f"DELETE FROM {table} WHERE tenant_id = ? AND (as_of < ? OR (as_of < ? AND "
+                    f"as_of != (SELECT MAX(t2.as_of) FROM {table} t2 WHERE t2.tenant_id = "
+                    f"{table}.tenant_id AND substr(t2.as_of, 1, 7) = "
+                    f"substr({table}.as_of, 1, 7))))",
+                    (tenant_id, oldest, recent),
+                ).rowcount
+        return removed
+
+    def buyer_rows(self, tenant_id: str, as_of: date) -> list[sqlite3.Row]:
+        return self._conn.execute(
+            "SELECT * FROM agg_buyers_period WHERE tenant_id = ? AND as_of = ? "
+            "ORDER BY period, dim_kind, dim_code, attr_cell",
+            (tenant_id, as_of.isoformat()),
+        ).fetchall()
+
+    def cohort_rows(self, tenant_id: str, as_of: date) -> list[sqlite3.Row]:
+        return self._conn.execute(
+            "SELECT * FROM agg_cohorts WHERE tenant_id = ? AND as_of = ? "
+            "ORDER BY cohort_month, attr_cell",
+            (tenant_id, as_of.isoformat()),
+        ).fetchall()
+
+    def at_risk_rows(self, tenant_id: str, as_of: date) -> list[sqlite3.Row]:
+        return self._conn.execute(
+            "SELECT * FROM agg_at_risk WHERE tenant_id = ? AND as_of = ? ORDER BY attr_cell",
+            (tenant_id, as_of.isoformat()),
+        ).fetchall()
+
+    def snapshot_days(self, tenant_id: str) -> list[str]:
+        sql = "SELECT DISTINCT as_of FROM agg_buyers_period WHERE tenant_id = ? ORDER BY as_of"
+        return [r[0] for r in self._conn.execute(sql, (tenant_id,))]
 
     # ------------------------------------------------------------------ 읽기
 
