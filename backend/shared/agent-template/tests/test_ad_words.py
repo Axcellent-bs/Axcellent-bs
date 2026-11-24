@@ -13,7 +13,6 @@ from ax_agent_template.ad_words import ALLOWED_WORDS, blocked_word, mark
         "서울 시발역 근처",
         "신제품 출시발표",
         "동시발생 이벤트",
-        "병신년 기념",
         "Middlesex 대학",
         "XXXL 사이즈",
         "2019금요일 특가",
@@ -26,7 +25,9 @@ def test_common_words_pass(text):
     assert mark([text]) is None
 
 
-@pytest.mark.parametrize("text", ["시발", "시 발", "씨발", "fuckjerry", "F.U.C.K", "병신", "19금"])
+@pytest.mark.parametrize(
+    "text", ["시발", "시 발", "씨발", "fuckjerry", "F.U.C.K", "병신", "19금", "개시발", "병신년"]
+)
 def test_blocked_words_still_blocked(text):
     assert blocked_word([text]) is not None
 
