@@ -30,6 +30,13 @@ class ShopSalesExportQuery(AxModel):
     cursor: str | None = Field(default=None, max_length=200)
     limit: int = Field(default=500, ge=1, le=SALES_EXPORT_LIMIT_MAX)
     tenant_id: str = TENANT_ID_DEFAULT
+    # 아래는 예전 요청은 없다 (11/24 일별 집계 3-1). 범위로 거르기: 접수 시각(날짜 하나 다시 계산,
+    # 오늘 0시~지금) · 환불 시각(그날 환불이 있는 옛 주문). cursor와 같이 쓰면 범위 안에서
+    # (updated_at, order_id) 순으로 이어 받는다. [from, to) 반열린 구간
+    created_from: UtcDatetime | None = None
+    created_to: UtcDatetime | None = None
+    refunded_from: UtcDatetime | None = None
+    refunded_to: UtcDatetime | None = None
 
 
 class SalesOrderLine(AxModel):
