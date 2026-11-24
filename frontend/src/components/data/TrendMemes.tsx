@@ -4,7 +4,10 @@ import { useSkill, type SkillState } from "@/components/data/useSkill";
 import { safeLink } from "@/lib/safeLink";
 import { judgedByShare, shareLine } from "@/lib/memeView";
 import { SummaryBody, SummaryCard } from "@/components/data/KeywordTrend";
-import { dataAi, type MemeWindow, type TrendMeme, type TrendMemesOutput } from "@/lib/data";
+import { Thumb } from "@/components/data/VideoExplorer";
+import { thumbSrc } from "@/lib/igRadarGrid";
+import { perSubscriberLabel, shortsNote, splitShorts } from "@/lib/memeShorts";
+import { dataAi, type MemeShortsSearch, type MemeShortsVideo, type MemeWindow, type TrendMeme, type TrendMemesOutput } from "@/lib/data";
 import type { DetectView } from "@/lib/detectView";
 
 // 트렌드 1 감지 하위 탭의 "요즘 유행·밈" (trend_memes, 오늘 가장 큰 화제 한 줄 바로 아래 플랫폼 칩 안). 영상 하나가 아니라 여러 채널에서 같이 늘어난 해시태그·구절 묶음.
@@ -163,6 +166,73 @@ function Table({ out, span, before, youtube }: { out: TrendMemesOutput; span: st
   );
 }
 
+function ShortsCard({ v, rank }: { v: MemeShortsVideo; rank: number }) {
+  const link = safeLink(v.video_url);
+  const rel = perSubscriberLabel(v);
+  const body = (
+    <>
+      <Thumb src={thumbSrc(v.thumbnail_url)} alt={v.title ?? `${v.channel_title ?? "쇼츠"} 영상`} wide={false} rank={rank} tall />
+      <span className="mt-1 line-clamp-2 text-[13px] font-semibold text-ink-900">{v.title || v.video_id}</span>
+      <span className="truncate text-xs text-ink-700">
+        {[v.channel_title, v.views !== null ? `조회 ${v.views.toLocaleString("ko-KR")}` : null].filter(Boolean).join(" · ")}
+      </span>
+      {rel && <span className="text-xs font-medium text-emerald-700">{rel}</span>}
+      <span><span className="chip text-[11px]">{v.keyword}</span></span>
+    </>
+  );
+  const cls = "flex flex-col gap-1 rounded-lg";
+  return (
+    <li className="min-w-0">
+      {link ? (
+        <a href={link} target="_blank" rel="noreferrer noopener" className={`${cls} transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500`}>{body}</a>
+      ) : <div className={cls}>{body}</div>}
+    </li>
+  );
+}
+
+function ShortsList({ label, list }: { label: string; list: MemeShortsVideo[] }) {
+  if (list.length === 0) return null;
+  return (
+    <div>
+      <h4 className="mb-1.5 text-xs font-semibold text-ink-700">{label} <small className="font-normal text-ink-500">{list.length}개</small></h4>
+      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {list.map((v, i) => <ShortsCard key={v.video_id} v={v} rank={i + 1} />)}
+      </ul>
+    </div>
+  );
+}
+
+/** 회사 밈 키워드로 하루 1번 찾은 최근 7일 쇼츠 (shorts_search). 구독자 10만 이상 채널은 따로 */
+function ShortsSearch({ s }: { s: MemeShortsSearch | null | undefined }) {
+  if (!s) return null;
+  const note = shortsNote(s);
+  const { small, big } = splitShorts(s.items);
+  const removed = s.removed ?? [];
+  const limits = s.limits ?? [];
+  return (
+    <section aria-label="쇼츠 검색" className="space-y-2 border-t border-ink-100 pt-3">
+      <h3 className="text-sm font-semibold text-ink-900">쇼츠 검색 <small className="font-normal text-ink-500">
+        {s.status === "known" ? `${s.searched.length ? `키워드 ${s.searched.join(", ")} · ` : ""}최근 7일 · 구독자 대비 조회수 순` : "회사 밈 키워드"}</small></h3>
+      {note && <p className="text-sm text-ink-700">{note}</p>}
+      <ShortsList label="구독자 10만 미만 채널" list={small} />
+      <ShortsList label="구독자 10만 이상 채널" list={big} />
+      {removed.length > 0 && (
+        <details className="text-xs text-ink-500">
+          <summary className="cursor-pointer select-none">실존 인물·사건이라 뺀 영상 {removed.length}개</summary>
+          <ul className="mt-1 space-y-0.5">
+            {removed.map((k, i) => <li key={`${i}-${k.name}`}><b className="font-medium text-ink-700">{k.name}</b> · {k.reason}</li>)}
+          </ul>
+        </details>
+      )}
+      {limits.length > 0 && (
+        <ul className="list-disc space-y-0.5 pl-5 text-xs text-ink-500">
+          {limits.map((l, i) => <li key={`${i}-${l}`}>{l}</li>)}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 /** focus: 감지 플랫폼 칩 (all = 종합: 요약 줄 + 전체 칸(네이버 검색·인스타·광고 재료), youtube = 쇼츠 칸 중심). 기획 넘기기 버튼은 그리지 않는다.
  *  유행 이름 옆 "3곳 동시" 칩 = 쇼츠·검색·인스타가 모두 오름 (risingEverywhere)
  *  summaryCards: 종합 요약 줄에서 1위 유행 칸 뒤에 붙일 칸 (검색 급상승 1위·이달 시즌 1위 = 부모가 받은 keyword_trend, 인스타 인기 오디오 1위 = instagram_audio) */
@@ -217,6 +287,7 @@ export function TrendMemes({ focus = "all", summaryCards }: { focus?: DetectView
                 </ul>
               </details>
             )}
+            <ShortsSearch s={s.out.shorts_search} />
           </div>
         )}
     </Panel>

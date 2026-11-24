@@ -41,6 +41,7 @@ from ax_dashboard_api.site_adapter.company_route import CompanyRouteMiddleware
 from ax_dashboard_api.site_adapter.router import router as site_adapter_router
 from ax_dashboard_api.site_adapter.setup import router as site_adapter_setup_router
 from ax_dashboard_api.site_adapter.write_setup import router as site_adapter_write_router
+from ax_dashboard_api.youtube_meme_keywords import router as youtube_meme_keywords_router
 from ax_dashboard_api.youtube_oauth import router as youtube_oauth_router
 from ax_secret_store import startup_check
 
@@ -162,6 +163,7 @@ app.include_router(accounts_router)
 # 로그인 전 화면이 읽는 공개 정보 (설치된 회사 이름만, 토큰 없이. auth.PUBLIC_ROUTES)
 app.include_router(public_info.router)
 app.include_router(instagram_radar_router)
+app.include_router(youtube_meme_keywords_router)  # 11/24 밈 소스: 쇼츠 검색 키워드
 app.include_router(youtube_oauth_router)
 # 회사 Higgsfield 계정 연결(원격 MCP + OAuth, 구독 크레딧). 콜백만 토큰 없이(auth.PUBLIC_ROUTES)
 app.include_router(higgsfield_mcp_router)

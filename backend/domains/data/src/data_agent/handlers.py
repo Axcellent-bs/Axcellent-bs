@@ -1247,6 +1247,7 @@ def _trend_report_deps() -> Any:
     return Deps(env=os.environ, llm=get_llm(), graph=get_instagram_graph(),
                 search=get_trend_connector(), shopping=get_shopping_connector(),
                 memes=lambda: RESPONSES.latest("trend_memes"),
+                radar=lambda: RESPONSES.latest("instagram_radar"),
                 searchad=get_searchad_connector(), pool_path=pool,
                 company=_trend_report_company, theme_inputs=_trend_report_theme_inputs)  # fmt: skip
 

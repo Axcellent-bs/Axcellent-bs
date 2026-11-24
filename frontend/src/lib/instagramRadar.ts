@@ -10,13 +10,18 @@ export interface RadarState {
   tenant_count: number;
   max: number;
   editable: boolean;
+  /** 밈·크리에이터 계정 (옛 서버에는 없음) */
+  meme_accounts?: string[];
+  meme_source?: "screen" | "tenant" | "none";
+  meme_tenant_count?: number;
 }
 
 const PATH = "/api/dashboard/instagram-radar";
 
 export const instagramRadar = {
   get: () => call<RadarState>("GET", PATH),
-  save: (accounts: string[]) => call<RadarState>("POST", `${PATH}/save`, { accounts }),
+  save: (accounts: string[], memeAccounts?: string[]) =>
+    call<RadarState>("POST", `${PATH}/save`, memeAccounts ? { accounts, meme_accounts: memeAccounts } : { accounts }),
   clear: () => call<RadarState>("POST", `${PATH}/clear`),
 };
 

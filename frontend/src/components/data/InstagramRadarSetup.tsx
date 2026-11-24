@@ -17,7 +17,8 @@ export default function InstagramRadarSetup() {
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
 
-  const take = (s: RadarState) => { setState(s); setText(s.accounts.join('\n')) }
+  const [memeText, setMemeText] = useState('')
+  const take = (s: RadarState) => { setState(s); setText(s.accounts.join('\n')); setMemeText((s.meme_accounts ?? []).join('\n')) }
   useEffect(() => {
     let live = true
     instagramRadar.get().then((s) => { if (live) take(s) }).catch((e) => { if (live) setError(message(e)) })
@@ -29,9 +30,13 @@ export default function InstagramRadarSetup() {
     try { take(await work()); setDone(ok) } catch (e) { setError(message(e)) } finally { setBusy(false) }
   }
   const typed = splitAccounts(text)
+  const typedMeme = splitAccounts(memeText)
   const canWrite = HUMAN_TOKEN_SET && (state?.editable ?? false)
-  const status = !state ? null : state.accounts.length
-    ? <StatusChip tone="ok">{state.accounts.length}곳 · {SOURCE[state.source]}</StatusChip>
+  const max = state?.max ?? 200
+  const savedMeme = state?.meme_accounts?.length ?? 0
+  const canClear = state !== null && ((state.source === 'screen' && state.tenant_count > 0) || (state.meme_source === 'screen' && (state.meme_tenant_count ?? 0) > 0))
+  const status = !state ? null : state.accounts.length + savedMeme
+    ? <StatusChip tone="ok">{state.accounts.length + savedMeme}곳 · {SOURCE[state.source]}</StatusChip>
     : <StatusChip tone="wait">계정 없음</StatusChip>
 
   return (
@@ -41,24 +46,30 @@ export default function InstagramRadarSetup() {
       {!HUMAN_TOKEN_SET && <Notice>로그인이 필요해요. 로그인하면 저장할 수 있어요.</Notice>}
       {state && !state.editable && <Notice>서버에 회사 연결 파일 설정이 없어 저장할 수 없어요.</Notice>}
       <label className="block space-y-1 text-sm">
-        <span className="text-ink-700">계정 이름 (최대 {state?.max ?? 200}곳, @는 빼도 돼요)</span>
+        <span className="text-ink-700">벤치마크 계정 (@는 빼도 돼요)</span>
         <textarea className="field h-48 w-full font-mono text-xs" value={text} onChange={(e) => { setText(e.target.value); setDone(null) }}
           placeholder={'catbooks_official\nbook_reviewer'} />
       </label>
+      <label className="block space-y-1 text-sm">
+        <span className="text-ink-700">밈·크리에이터 계정 (한 줄에 하나)</span>
+        <textarea className="field h-32 w-full font-mono text-xs" value={memeText} onChange={(e) => { setMemeText(e.target.value); setDone(null) }}
+          placeholder={'meme_creator_a\nmeme_creator_b'} />
+      </label>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn-primary" disabled={busy || !canWrite}
-          onClick={() => void run(() => instagramRadar.save(typed), `${typed.length}곳을 저장했어요. 데이터 AI 레이더가 다음 회차부터 이 목록을 써요.`)}>
+          onClick={() => void run(() => instagramRadar.save(typed, typedMeme), `벤치마크 ${typed.length}곳 + 밈 ${typedMeme.length}곳을 저장했어요. 데이터 AI 레이더가 다음 회차부터 이 목록을 써요.`)}>
           {busy ? '저장 중…' : '저장'}
         </button>
-        {state?.source === 'screen' && state.tenant_count > 0 && (
+        {canClear && state && (
           <button type="button" className="btn-ghost" disabled={busy || !canWrite}
-            onClick={() => void run(() => instagramRadar.clear(), `회사 설정 파일 목록(${state.tenant_count}곳)으로 되돌렸어요.`)}>
-            회사 설정 파일로 되돌리기 ({state.tenant_count}곳)
+            onClick={() => void run(() => instagramRadar.clear(), '회사 설정 파일 목록으로 되돌렸어요.')}>
+            회사 설정 파일로 되돌리기 ({state.tenant_count}곳{(state.meme_tenant_count ?? 0) > 0 ? ` + 밈 ${state.meme_tenant_count}곳` : ''})
           </button>
         )}
-        <span className="text-xs text-ink-500">입력 {typed.length}곳</span>
+        <span className="text-xs text-ink-500">벤치마크 {typed.length}곳 + 밈 {typedMeme.length}곳 / {max}</span>
       </div>
       <More summary="어떻게 쓰이나요">
+        <p>밈·크리에이터 계정은 갑자기 뜬 게시물에서 따로 보고, 팔로워 대비 반응도 같이 봐요.</p>
         <p>저장하면 회사 설정 파일(trends.toml)에 적힌 목록 대신 이 목록을 써요. 한 번에 많이 부르지 않게 묶음으로 나눠 읽어요.</p>
         <p>둘 다 없으면 분석 보고서의 경쟁사 찾기가 공식 API로 확인한 계정을 자동으로 써요.</p>
         <p>인스타 API 키(데이터용 계정)는 서버 설정에 있어야 실제로 읽혀요.</p>

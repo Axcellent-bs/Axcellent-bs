@@ -293,6 +293,58 @@ def ig_radar_accounts() -> list[str] | None:
     return [a for a in accounts if isinstance(a, str) and a]
 
 
+def ig_radar_meme_accounts() -> list[str] | None:
+    """화면에서 저장한 밈·크리에이터 계정 (같은 파일의 `meme_accounts`, 11/24).
+
+    저장한 적 없으면 None(회사 설정 trends.toml [instagram] radar_meme_accounts를 쓴다)."""
+    import json
+
+    path = ig_radar_file()
+    if path is None:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    accounts = data.get("meme_accounts") if isinstance(data, dict) else None
+    if not isinstance(accounts, list):
+        return None
+    return [a for a in accounts if isinstance(a, str) and a]
+
+
+# ---------------------------------------------------------------- 유튜브 밈 키워드 (11/24)
+# 회사 연결 › 유튜브 밈 키워드에서 저장한 목록. 있으면 회사 설정 trends.toml [youtube] meme_keywords
+# 보다 먼저다. 파일: `AX_YT_MEME_KEYWORDS_FILE` → 회사 연결 파일 옆 `youtube_meme_keywords.json`.
+# dashboard-api가 쓰고 data가 읽는다
+YT_MEME_KEYWORDS_FILE_ENV = "AX_YT_MEME_KEYWORDS_FILE"
+YT_MEME_KEYWORDS_FILE = "youtube_meme_keywords.json"
+
+
+def yt_meme_keywords_file() -> Path | None:
+    raw = os.getenv(YT_MEME_KEYWORDS_FILE_ENV, "").strip()
+    if raw:
+        return Path(raw)
+    conn = os.getenv("AX_COMPANY_CONNECTION_FILE", "").strip()
+    return Path(conn).with_name(YT_MEME_KEYWORDS_FILE) if conn else None
+
+
+def yt_meme_keywords() -> list[str] | None:
+    """화면에서 저장한 유튜브 밈 키워드. 저장한 적 없거나 깨졌으면 None(회사 설정 파일을 쓴다)."""
+    import json
+
+    path = yt_meme_keywords_file()
+    if path is None:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    words = data.get("keywords") if isinstance(data, dict) else None
+    if not isinstance(words, list):
+        return None
+    return [w for w in words if isinstance(w, str) and w.strip()]
+
+
 # ---------------------------------------------------------------- 인스타 레이더 자동 목록
 # data 경쟁사 찾기(company_accounts.find)가 business_discovery로 확인한 계정 + 사람 include
 # (exclude 뺌, 팔로워 큰 순). 화면 저장 목록도 회사 trends.toml 목록도 없을 때만 레이더가 쓴다.

@@ -131,6 +131,8 @@ SYSTEM_PROMPT = (
     "- facts의 출처(묶음의 근거 이름)가 둘 이상이면 플랫폼별로 나눠 말한다"
     '("인스타에서는 … / YouTube에서는 …"). 사람이 묻지 않은 플랫폼 이야기는 하지 않는다.\n'
     "- facts에 없는 지표(시간당 조회 등)가 없다는 말은 사람이 그 지표를 물었을 때만 한다.\n"
+    "- 인스타 게시물에 종류(밈·크리에이터 계정/벤치마크 계정)가 있으면 "
+    '"밈 계정에서는 … / 벤치마크 계정에서는 …"으로 나눠 말한다.\n'
     "- 근거 줄은 서버가 붙이니 쓰지 않는다.\n"
     "- reply는 짧은 한국어 해요체. summary는 이 대화 전체를 한두 줄로 요약한다.\n"
     '- JSON {"reply": "...", "summary": "..."} 로만 답한다.'
@@ -685,6 +687,7 @@ def radar_posts(judged: Mapping[str, Any], now: datetime) -> list[dict[str, Any]
     캡션(caption_excerpt, untrusted)·썸네일·LLM 설명은 넣지 않는다."""
     groups = [g for g in judged.get("groups") or [] if isinstance(g, Mapping)]
     groups.sort(key=lambda g: g.get("best_ratio") or 0, reverse=True)
+    kinds = has_meme_accounts(judged)
     left = MATERIAL_ROWS
     out = []
     for g in groups[:IG_GROUPS]:
@@ -695,13 +698,49 @@ def radar_posts(judged: Mapping[str, Any], now: datetime) -> list[dict[str, Any]
         out.append({
             "이름": g.get("name"), "계정 수": g.get("accounts"), "게시물 수": g.get("posts"),
             "해시태그": list(g.get("members") or [])[:3], "왜": g.get("why_line"),
-            "게시물": [{"계정": p.get("account"), "형식": _ig_format(p),
-                       "지표": _IG_METRIC.get(str(p.get("metric")), p.get("metric")),
-                       "값": p.get("value"), "평소 대비": ratio_words(p.get("ratio")),
-                       "며칠 전": _days_ago(p.get("posted_at"), now),
-                       "링크": p.get("permalink")} for p in picked],
+            "게시물": [post_row(p, now, kinds=kinds) for p in picked],
         })  # fmt: skip
     return out
+
+
+IG_KIND = {"meme": "밈·크리에이터 계정", "benchmark": "벤치마크 계정"}
+MEME_ROWS = 3  # 밈 계정 게시물 칸 (묶음과 따로, 배수 순)
+
+
+def has_meme_accounts(judged: Mapping[str, Any]) -> bool:
+    """판정에 밈·크리에이터 계정이 있었나 (11/24). 없으면 재료 모양은 지금과 같다."""
+    return bool(judged.get("meme_accounts_total")) or bool(judged.get("meme_posts"))
+
+
+def engagement_words(value: Any) -> str | None:
+    """팔로워 대비 반응을 코드가 반올림한 말로: 0.0423 → "팔로워의 약 4.2%"."""
+    if not isinstance(value, int | float) or isinstance(value, bool) or value < 0:
+        return None
+    pct = Decimal(repr(float(value))) * 100
+    text = str(pct.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)).removesuffix(".0")
+    return f"팔로워의 약 {text}%"
+
+
+def post_row(p: Mapping[str, Any], now: datetime, *, kinds: bool = False) -> dict[str, Any]:
+    """게시물 한 줄 (캡션 없음). `kinds`면 계정 종류(밈·크리에이터/벤치마크)도 넣는다."""
+    row: dict[str, Any] = {
+        "계정": p.get("account"), "형식": _ig_format(p),
+        "지표": _IG_METRIC.get(str(p.get("metric")), p.get("metric")),
+        "값": p.get("value"), "평소 대비": ratio_words(p.get("ratio")),
+        "며칠 전": _days_ago(p.get("posted_at"), now), "링크": p.get("permalink"),
+    }  # fmt: skip
+    if kinds:
+        row["종류"] = IG_KIND.get(str(p.get("source_kind") or "benchmark"), "벤치마크 계정")
+        if p.get("source_kind") == "meme" and (e := engagement_words(p.get("follower_engagement"))):
+            row["팔로워 대비 반응"] = e
+    return row
+
+
+def meme_rows(judged: Mapping[str, Any], now: datetime) -> list[dict[str, Any]]:
+    """밈·크리에이터 계정 뜬 게시물 상위 3개 (묶음과 상관없이, 판정 저장분 meme_posts)."""
+    posts = [p for p in judged.get("meme_posts") or [] if isinstance(p, Mapping)]
+    posts.sort(key=lambda p: p.get("ratio") or 0, reverse=True)
+    return [post_row(p, now, kinds=True) for p in posts[:MEME_ROWS]]
 
 
 def read_instagram(env: Mapping[str, str], now: datetime,
@@ -758,6 +797,8 @@ def read_instagram(env: Mapping[str, str], now: datetime,
             facts["뜬 묶음"] = groups
             if not groups:
                 facts["뜬 묶음 없음 이유"] = judged.get("reason") or "판정에 뜬 묶음이 없음"
+            if has_meme_accounts(judged):  # 11/24 밈 소스: 밈 계정 게시물은 따로 나눠 답하게
+                facts["밈·크리에이터 계정 뜬 게시물"] = meme_rows(judged, now) or "없음"
     elif with_posts:
         pos = cursor[0][1] if cursor else 0
         facts["레이더 판정"] = f"아직 한 바퀴를 못 돌았어요(진행 {pos}/{total}곳)"

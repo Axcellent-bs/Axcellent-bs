@@ -18,6 +18,10 @@ grade read, 메모 쓰기만 A. Meta 공식 Graph API(Facebook 로그인, graph.
 - 레이더(`instagram_radar`): 터짐 = 그 계정 최근 20개 지표(릴스는 view_count, 아니면 like_count)
   중앙값의 `burst_ratio`(2.5)배 이상이고 게시 `burst_days`(7)일 안. 묶기 = 해시태그·캡션 구절
   (trend_memes 정규화)이 겹치는 게시물끼리, `min_accounts`(2) 이상 계정만. 광고 재료 = 공용 분류기
+- 밈 소스(11/24): 레이더 계정에 종류를 단다(benchmark | meme). 밈·크리에이터 계정은 화면 저장 >
+  trends.toml `[instagram] radar_meme_accounts`, 벤치마크와 합쳐 200곳. 같은 business_discovery
+  (followers_count도 같은 호출)로 읽고, 뜬 게시물에 `source_kind`·팔로워 대비 반응
+  ((좋아요+댓글) ÷ 팔로워)을 붙인다. 밈 계정 게시물은 묶음과 상관없이 `meme_posts`(배수 순 12개)
 - 해시태그 확인(`fill_instagram`): trend_memes 앞 `search_top`개 중 해시태그 단위만
   recent_media(24시간)·top_media. 7일 30개 한도는 `ig_hashtags.db`로 관리,
   남은 수 ≤ `hashtag_reserve`(5)면 새로 조회 안 함
@@ -38,7 +42,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from ax_agent_template.tenant import ig_radar_accounts, ig_radar_auto_accounts
+from ax_agent_template.tenant import (
+    ig_radar_accounts,
+    ig_radar_auto_accounts,
+    ig_radar_meme_accounts,
+)
 from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import (
@@ -62,6 +70,7 @@ from data_agent import instagram_store as st
 from data_agent.connectors.instagram_graph import (
     AUDIO_PERMISSION_NOTE,
     NO_KEY,
+    OWNER_FOLLOWERS,
     PERMISSION_NOTE,
     IgError,
 )
@@ -86,7 +95,11 @@ MEMO_OFF = ("쓰기는 safety 등록(add_instagram_memo)이 필요해 사람이 
 
 @dataclass(frozen=True)
 class IgConfig:
+    # 레이더가 읽는 모든 계정 (벤치마크 먼저, 그다음 밈·크리에이터, 합쳐 200곳까지)
     radar_accounts: tuple[str, ...] = ()
+    # 11/24 밈 소스: radar_accounts 중 밈·크리에이터 계정 (화면 저장 > trends.toml
+    # [instagram] radar_meme_accounts). 빈 목록이면 지금과 같다
+    meme_accounts: tuple[str, ...] = ()
     media_per_account: int = 20
     burst_ratio: float = 2.5
     burst_days: int = 7
@@ -102,6 +115,21 @@ class IgConfig:
     # 레이더 계정 출처 (screen · tenant · auto · none)와 비었을 때 무엇이 없는지
     radar_source: str = "none"
     radar_missing: str = NO_RADAR
+
+    def kind_of(self, account: str) -> str:
+        """레이더 계정 종류: meme(밈·크리에이터) · benchmark(그 밖)."""
+        return "meme" if account in self.meme_accounts else "benchmark"
+
+
+def _meme_list(raw: Mapping[str, Any], benchmark: Sequence[str]) -> tuple[str, ...]:
+    """밈·크리에이터 계정: 화면 저장 > 회사 trends.toml radar_meme_accounts > 없음.
+
+    벤치마크와 겹치면 벤치마크로 두고, 합계 200곳(`RADAR_MAX_ACCOUNTS`)을 넘는 만큼은 뺀다."""
+    saved = ig_radar_meme_accounts()
+    listed = _clean_list(saved if saved is not None else raw.get("radar_meme_accounts", []))
+    taken = {a.lower() for a in benchmark}
+    room = max(0, RADAR_MAX_ACCOUNTS - len(benchmark))
+    return tuple(a for a in listed if a.lower() not in taken)[:room]
 
 
 def _clean_list(listed: Any) -> tuple[str, ...]:
@@ -143,11 +171,13 @@ def load_config(env: Mapping[str, str]) -> IgConfig:
         # 회사 설정 파일이 없어도 화면 저장·자동 목록은 쓴다 (누비투어처럼 키워드 파일이 없는
         # 회사). 그때 나머지 값은 IgConfig 기본값
         accounts, source, missing = _radar_list(raw, has_file)
+        memes = _meme_list(raw, accounts)
         base = IgConfig()
         return IgConfig(
-            radar_accounts=accounts,
+            radar_accounts=accounts + memes,
+            meme_accounts=memes,
             radar_source=source,
-            radar_missing=missing,
+            radar_missing="" if memes else missing,
             media_per_account=max(1, min(50, int(raw.get("media_per_account", 20)))),
             burst_ratio=max(1.0, float(raw.get("burst_ratio", base.burst_ratio))),
             burst_days=max(1, int(raw.get("burst_days", base.burst_days))),
@@ -587,6 +617,7 @@ def bursts(media: Mapping[str, Sequence[Mapping[str, Any]]], now: datetime,
             if value < median * config.burst_ratio:
                 continue
             cap = str(m.get("caption") or "")
+            followers = _int(m, OWNER_FOLLOWERS)
             out.append(InstagramRadarPost(
                 account=account, media_id=str(m["id"]),
                 media_product_type=m.get("media_product_type"),
@@ -595,8 +626,30 @@ def bursts(media: Mapping[str, Sequence[Mapping[str, Any]]], now: datetime,
                 caption_excerpt=cap[:80] or None,
                 thumbnail_url=safe_thumb(m.get("thumb_url") or st.thumb_of(m), now),
                 media_type=m.get("media_type"),
+                source_kind=config.kind_of(account),  # type: ignore[arg-type]
+                followers=followers, comments=_int(m, "comments_count"),
+                follower_engagement=follower_engagement(m),
             ))  # fmt: skip
     return out
+
+
+def follower_engagement(m: Mapping[str, Any]) -> float | None:
+    """팔로워 대비 반응 = (좋아요 + 댓글) ÷ 팔로워 (순수 계산, 소수 넷째 자리).
+
+    팔로워·좋아요를 모르거나 팔로워가 0이면 None (0으로 채우지 않음). 댓글을 모르면 좋아요만."""
+    followers, likes = _int(m, OWNER_FOLLOWERS), _int(m, "like_count")
+    if not followers or likes is None:
+        return None
+    return round((likes + (_int(m, "comments_count") or 0)) / followers, 4)
+
+
+MEME_POSTS_MAX = 12
+
+
+def meme_posts(posts: Sequence[InstagramRadarPost]) -> list[InstagramRadarPost]:
+    """밈·크리에이터 계정의 뜬 게시물 (묶음과 상관없이, 평소 대비 배수 순, 최대 12개)."""
+    mine = [p for p in posts if p.source_kind == "meme"]
+    return sorted(mine, key=lambda p: (-p.ratio, p.media_id))[:MEME_POSTS_MAX]
 
 
 THUMB_HOSTS = ("cdninstagram.com", "fbcdn.net")
@@ -760,7 +813,8 @@ async def instagram_radar(
     now = now or datetime.now(UTC)
     config = load_config(env)
     out = InstagramRadarOutput(generated_at=now, sources=sources(env),
-                               accounts_total=len(config.radar_accounts))  # fmt: skip
+                               accounts_total=len(config.radar_accounts),
+                               meme_accounts_total=len(config.meme_accounts))  # fmt: skip
     out.criteria = (
         f"터짐 = 계정 최근 {config.media_per_account}개(릴스는 조회수, 아니면 좋아요)"
         f" 중앙값의 {config.burst_ratio:g}배 이상, 게시 {config.burst_days}일 안."
@@ -786,6 +840,10 @@ async def instagram_radar(
                                     collected_at=now))  # fmt: skip
     posts = bursts(media, now, config)
     out.bursts, out.status = len(posts), "known"
+    if config.meme_accounts:  # 밈·크리에이터 계정은 같은 해시태그로 잘 안 묶여 따로 둔다
+        out.meme_posts = meme_posts(posts)
+        out.criteria += (" · 밈·크리에이터 계정 게시물은 묶음과 상관없이 따로"
+                         " (팔로워 대비 반응 = (좋아요+댓글) ÷ 팔로워)")  # fmt: skip
     captions = {str(m["id"]): str(m.get("caption") or "") for ms in media.values() for m in ms}
     groups = group_bursts(posts, captions, config.min_accounts)[: config.max_groups]
     if not groups:

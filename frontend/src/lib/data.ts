@@ -1802,6 +1802,13 @@ export interface InstagramRadarPost {
   media_type?: string | null;
   /** 계정 평소와 가장 크게 다른 점 한 줄 (코드 템플릿, LLM 없음) */
   standout?: string | null;
+  /** 어느 목록의 계정인지 (없으면 벤치마크, 옛 저장 결과) */
+  source_kind?: "benchmark" | "meme";
+  /** 계정 팔로워 수 */
+  followers?: number | null;
+  comments?: number | null;
+  /** (좋아요 + 댓글) ÷ 팔로워, 서버 값 (예: 0.042). 화면에서 계산하지 않는다 */
+  follower_engagement?: number | null;
 }
 export interface InstagramRadarGroup {
   name: string;
@@ -2086,6 +2093,10 @@ export interface InstagramRadarOutput {
   limits: string[];
   sources: InstagramSource[];
   generated_at: string | null;
+  /** accounts_total 중 밈·크리에이터 계정 수 (옛 결과에는 없음) */
+  meme_accounts_total?: number;
+  /** 밈 계정에서 터진 게시물 (묶음과 상관없이, 배수 순 최대 12개) */
+  meme_posts?: InstagramRadarPost[];
 }
 export type InstagramMemoKind = "audio" | "format" | "hashtag" | "other";
 export interface InstagramMemoAddInput {
@@ -2129,7 +2140,39 @@ export interface MemeCriteria {
   overlap: number;
   search_top: number;
 }
+export interface MemeShortsVideo {
+  video_id: string;
+  keyword: string;
+  /** untrusted, 텍스트로만 */
+  title: string | null;
+  channel_id: string | null;
+  channel_title: string | null;
+  published_at: string | null;
+  views: number | null;
+  subscribers: number | null;
+  views_per_subscriber: number | null;
+  /** 구독자 10만 이상 채널: 따로 보여 준다 */
+  big_channel: boolean;
+  video_url: string | null;
+  thumbnail_url: string | null;
+}
+export interface MemeShortsSearch {
+  status: "known" | "unknown" | "not_set";
+  reason: string | null;
+  day: string | null;
+  keywords: string[];
+  searched: string[];
+  limits: string[];
+  units: number;
+  /** 구독자 대비 조회수 내림차순 */
+  items: MemeShortsVideo[];
+  /** 실존 인물·사건이라 뺀 영상 */
+  removed: MemeSkipped[];
+  searched_at: string | null;
+}
 export interface TrendMemesOutput {
+  /** 회사 밈 키워드 쇼츠 검색 (옛 캐시 결과에는 없음) */
+  shorts_search?: MemeShortsSearch | null;
   window: MemeWindow;
   status: "known" | "unknown";
   reason: string | null;
