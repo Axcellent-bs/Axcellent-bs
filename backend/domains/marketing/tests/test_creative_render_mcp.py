@@ -240,7 +240,8 @@ def test_connected_company_makes_the_sheet_with_its_own_account(
         "jobs_wait",
     ]
     params = dict(hf.tools)["generate_image_batch"]["requests"][0]["params"]
-    assert params["model"] == "nano_banana_pro" and params["use_unlim"] is False
+    # 11/24: 의뢰 영상의 그림은 무제한으로만 (creative_mcp.IMAGE_USE_UNLIM). 영상은 그대로 크레딧
+    assert params["model"] == "nano_banana_pro" and params["use_unlim"] is True
     assert params["medias"] == [{"value": "media-1", "role": "image_references"}]
     assert "Avoid: blurry" in params["prompt"]
     assert hf.put_auth == [None]  # 업로드 PUT에는 토큰을 보내지 않는다
@@ -263,7 +264,15 @@ def test_company_without_a_connection_keeps_the_api_key_path(env: dict[str, Any]
     assert part["status"] == "blocked" and part["error"] == "quota_not_configured"
 
 
-def test_not_enough_credits_stops_before_the_gate(env: dict[str, Any]) -> None:
+def test_not_enough_credits_stops_before_the_gate(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 11/24: 그림은 기본이 무제한이라 크레딧을 보지 않는다.
+    # 크레딧으로 만드는 설정(나중에 회사 설정)이면 지금처럼 모자랄 때 관문 전에 멈춘다
+    # (무제한은 test_creative_image_unlim.py)
+    from marketing_agent import creative_mcp
+
+    monkeypatch.setattr(creative_mcp, "IMAGE_USE_UNLIM", False)
     env["hf"].credits = 1.0
     rid = _sheet(env)
     part = env["store"].get_render(rid)["sheet_image"]

@@ -349,7 +349,9 @@ async def _request(
     cid = _mcp_auth.company() if via == _render.MCP else None
     credits: float | None = None
     if via == _render.MCP:
-        params = _mcp.image_params(_render.mcp_image_model(), planned[0]["prompt"], "", aspect)
+        # 11/24: 썸네일은 지금처럼 크레딧(의뢰 영상의 시트·스토리보드 그림만 무제한)
+        params = _mcp.image_params(_render.mcp_image_model(), planned[0]["prompt"], "", aspect,
+                                   unlim=False)  # fmt: skip
         try:
             credits = await _preflight(cid, params)
         except _ERRORS as error:
@@ -489,7 +491,7 @@ async def _one_api(
 async def _one_mcp(
     hf: _mcp.Higgsfield, prompt: str, negative: str, aspect: str, media: str | None
 ) -> str:
-    params = _mcp.image_params(_render.mcp_image_model(), prompt, negative, aspect)
+    params = _mcp.image_params(_render.mcp_image_model(), prompt, negative, aspect, unlim=False)
     if media:
         params = _mcp.with_media(params, media, _mcp.IMAGE_REF_ROLE)
     job = await _mcp.submit(hf, "image", params)

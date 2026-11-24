@@ -221,7 +221,9 @@ def _code(error: Exception) -> str:
     if isinstance(error, McpAuthError):
         return _AUTH_CODES.get(str(error), f"higgsfield_{error}")
     if isinstance(error, McpError):
-        return "credits_insufficient" if error.code == "credits_insufficient" else f"mcp_{error}"
+        if error.code in ("credits_insufficient", _mcp.UNLIM_UNAVAILABLE):  # 사유 코드 그대로
+            return error.code
+        return f"mcp_{error}"
     return type(error).__name__
 
 
@@ -619,7 +621,9 @@ async def _render_image(
         # 11/24: 사유·단계·도구·예외 종류·정리한 문장·시각 (값 없이)
         logger.warning("%s", log_line(f"creative_render: Higgsfield {part}", error, record_id))
         _safe(lambda: ledger.mark_failed(seq, _now()))
-        _set(record_id, part, status="failed", error=code)
+        # 무제한이 안 되면 실패가 아니라 멈춤(크레딧으로 다시 시도하지 않는다, 11/24)
+        stopped = code == _mcp.UNLIM_UNAVAILABLE
+        _set(record_id, part, status="blocked" if stopped else "failed", error=code)
         if part == "sheet_image":
             maybe_start_board(ledger, meta, record_id, cid)
         return
@@ -703,9 +707,15 @@ async def _mcp_render(
         media = await _mcp.upload(hf, ref, f"{record_id}-{part}-ref.jpg", "image/jpeg")
         role = _mcp.IMAGE_REF_ROLE if kind == "image" else _mcp.VIDEO_START_ROLE
         params = _mcp.with_media(params, media, role)
-    job = await _mcp.submit(hf, kind, params)
-    _set(record_id, part, request_id=job)
-    url = await _mcp.wait(hf, job, SLEEP)
+    try:
+        job = await _mcp.submit(hf, kind, params)
+        _set(record_id, part, request_id=job)
+        url = await _mcp.wait(hf, job, SLEEP)
+    except McpError as error:
+        # 11/24: 무제한으로 만들던 그림이 무제한이 안 된다면 크레딧으로 다시 시도하지 않고 멈춘다
+        if _mcp.uses_unlim(params) and (no := _mcp.unlim_unavailable(error)) is not None:
+            raise no from error
+        raise
     return await _download(client, url, asset_path(record_id, part, cid))
 
 

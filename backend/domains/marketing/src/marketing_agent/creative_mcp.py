@@ -12,8 +12,12 @@
 - 만들기: 화면(위젯)을 여는 `generate_image`·`generate_video` 대신 `generate_image_batch`·
   `generate_video_batch`(요청 1개) → `job_id`
 - 기다리기: `jobs_wait`(`timeout_seconds` 15 이하, 오래 기다려 주는 조회) → completed면 `result_url`
-- `use_unlim=false`를 늘 보낸다. 안 보내면 무료 무제한이 있는 계정에서 작업을 만들지 않고 "무제한을
-  쓸까요" 질문(`unlim_choice`)만 돌려준다. 사람이 승인한 것은 크레딧으로 만드는 일이다
+- 영상은 `use_unlim=false`를 늘 보낸다. 안 보내면 무료 무제한이 있는 계정에서 작업을 만들지 않고
+  "무제한을 쓸까요" 질문(`unlim_choice`)만 돌려준다. 사람이 승인한 것은 크레딧으로 만드는 일이다
+- 11/24 그림(이미지 시트·스토리보드 그림)은 무제한(`use_unlim=true`)으로만 만든다
+  (`IMAGE_USE_UNLIM`). 무제한이 안 되는 응답(`unlim_choice`·크레딧이 필요하다는 오류·
+  `credits_insufficient`)이면 크레딧으로 다시 시도하지 않고 `image_unlim_unavailable`로 멈춘다.
+  미리 보기도 무제한 기준이라 크레딧 잔액으로 막지 않는다
 """
 
 from __future__ import annotations
@@ -37,6 +41,36 @@ FAILED = {"failed", "nsfw", "canceled", "ip_detected", "submission_failed"}
 CONTEXT = "AXcellent marketing creative record render"
 _UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _CREDIT_WORDS = ("insufficient", "not enough credit", "credits")
+
+# 그림을 무제한으로만 만드나 (11/24). 나중에 회사 설정(무제한만 / 크레딧 써도 됨)으로 바꿀 자리는
+# 여기 한 곳이다(`image_unlim()`만 바꾸면 그림 params·미리 보기·멈춤 판단이 같이 따라간다)
+IMAGE_USE_UNLIM = True
+UNLIM_UNAVAILABLE = "image_unlim_unavailable"
+# 무제한이 안 된다는 뜻으로 보는 사유 코드 (크레딧으로 다시 시도하지 않는다)
+_NO_UNLIM_CODES = ("unlim_choice", "credits_insufficient")
+
+
+def image_unlim() -> bool:
+    """그림을 무제한으로만 만드나. 지금은 늘 True(회사 설정은 나중에)."""
+    return IMAGE_USE_UNLIM
+
+
+def uses_unlim(params: dict[str, Any]) -> bool:
+    return params.get("use_unlim") is True
+
+
+def unlim_unavailable(error: McpError) -> McpError | None:
+    """무제한으로 만들던 그림이 무제한이 안 된다는 답을 받았으면 `image_unlim_unavailable`.
+
+    unlim_choice·credits_insufficient, 또는 크레딧이 필요하다는 문장의 tool_error·작업 실패.
+    원인 칸(단계·도구·문장)은 그대로 옮기고 원래 사유는 error_class 자리에 남긴다."""
+    detail = (getattr(error, "detail", None) or "").lower()
+    credit_said = any(w in detail for w in (*_CREDIT_WORDS, "unlim", "upgrade"))
+    if error.code in _NO_UNLIM_CODES or (error.code in ("tool_error",) and credit_said):
+        return McpError(UNLIM_UNAVAILABLE, stage=getattr(error, "stage", None),
+                        tool=getattr(error, "tool", None), detail=getattr(error, "detail", None),
+                        error_class=error.code)  # fmt: skip
+    return None
 
 
 class Higgsfield:
@@ -76,14 +110,23 @@ async def balance(hf: Higgsfield) -> tuple[float | None, str | None]:
 
 
 async def preflight(hf: Higgsfield, kind: str, params: dict[str, Any]) -> float | None:
-    """만들기 전 예상 크레딧과 남은 크레딧을 본다. 모자라면 `credits_insufficient`."""
-    est = await hf.call(ESTIMATE_TOOLS[kind], {"params": params})
+    """만들기 전 예상 크레딧과 남은 크레딧을 본다. 모자라면 `credits_insufficient`.
+
+    무제한 params(`use_unlim=true`, 11/24 그림)는 크레딧을 쓰지 않으므로 잔액으로 막지 않는다
+    (예상 0도 그대로 통과). 무제한이 안 된다는 답이면 `image_unlim_unavailable`."""
+    unlim = uses_unlim(params)
+    try:
+        est = await hf.call(ESTIMATE_TOOLS[kind], {"params": params})
+    except McpError as error:
+        if unlim and (no := unlim_unavailable(error)) is not None:
+            raise no from error
+        raise
     cost_box = est.get("cost") if isinstance(est.get("cost"), dict) else {}
     cost = _number(cost_box.get("credits_exact"))
     if cost is None:
         cost = _number(cost_box.get("credits"))
     credits, _ = await balance(hf)
-    if cost is not None and credits is not None and credits < cost:
+    if not unlim and cost is not None and credits is not None and credits < cost:
         raise McpError("credits_insufficient")
     return cost
 
@@ -218,12 +261,16 @@ async def wait(hf: Higgsfield, job_id: str, sleep: Callable[[float], Awaitable[N
     raise McpError("job_timeout")
 
 
-def image_params(model: str, prompt: str, negative: str, aspect: str) -> dict[str, Any]:
-    """그림 요청 params(참조 그림 없이. 미리 보기에도 쓴다). 피할 것은 프롬프트 끝에 붙인다."""
+def image_params(model: str, prompt: str, negative: str, aspect: str,
+                 unlim: bool | None = None) -> dict[str, Any]:  # fmt: skip
+    """그림 요청 params(참조 그림 없이. 미리 보기에도 쓴다). 피할 것은 프롬프트 끝에 붙인다.
+
+    `use_unlim`은 `image_unlim()`(11/24: 무제한만). 부르는 쪽이 `unlim`을 주면 그 값."""
     text = prompt[:8000]
     if negative:
         text = f"{text}\n\nAvoid: {negative[:1000]}"
-    return {"model": model, "prompt": text, "aspect_ratio": aspect, "use_unlim": False}
+    use = image_unlim() if unlim is None else unlim
+    return {"model": model, "prompt": text, "aspect_ratio": aspect, "use_unlim": use}
 
 
 def video_params(model: str, prompt: str, aspect: str, seconds: int) -> dict[str, Any]:
