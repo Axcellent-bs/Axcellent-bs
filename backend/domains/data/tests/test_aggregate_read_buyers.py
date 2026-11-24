@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -159,3 +160,72 @@ def test_basket_pairs_with_two_filters_stays_on_source(world, cat, monkeypatch) 
     want = bp.basket(world, TENANT, "genre", "90d", f, 10, cat.sales, cat.id, NOW)
     monkeypatch.setenv(read.READ_ENV, read.READ_AGGREGATE)
     assert bp.basket(world, TENANT, "genre", "90d", f, 10, cat.sales, cat.id, NOW) == want
+
+
+def _same_window(monkeypatch, period: str):  # noqa: ANN001, ANN202
+    """원본 경로를 스냅샷과 같은 기간(기준일까지 꽉 찬 N일)으로 계산하게."""
+    w = rb.window_of(period, AS_OF)
+    same = seg.Window(start=w.start, end=w.end, previous_start=w.start, previous_end=w.start)
+    monkeypatch.setattr(seg, "segment_window", lambda p, now: same)
+    return w.end
+
+
+@pytest.mark.parametrize("n_attrs", [1, 2])
+def test_favorites_reads_yesterday_snapshot(world, cat, n_attrs, monkeypatch) -> None:  # noqa: ANN001
+    attrs = cat.sales.attributes[:n_attrs]
+    checked = 0
+    for values in itertools.product(*(list(a.values) for a in attrs)):
+        f = {a.key: v for a, v in zip(attrs, values, strict=True)}
+        with monkeypatch.context() as m:
+            end = _same_window(m, "90d")
+            want = seg.favorites(world, TENANT, dict(reversed(f.items())), "90d", 10, cat.sales,
+                                 cat.id, end)  # fmt: skip
+        with monkeypatch.context() as m:
+            m.setenv(read.READ_ENV, read.READ_AGGREGATE)
+            out = seg.favorites(world, TENANT, dict(reversed(f.items())), "90d", 10, cat.sales,
+                                cat.id, NOW)  # fmt: skip
+        assert out.segment_buyers == want.segment_buyers
+        assert out.segment_suppressed == want.segment_suppressed
+        assert out.internal == want.internal
+        assert out.summary.endswith("(11월 15일 기준)")
+        checked += not want.segment_suppressed
+    assert checked
+
+
+@pytest.mark.parametrize(("kind", "code"), [("genre", None), ("category", None), ("product", None)])
+def test_profile_reads_yesterday_snapshot(world, cat, kind, code, monkeypatch) -> None:  # noqa: ANN001
+    agg = AggregateStore(read.db_path())
+    rows = [r for r in agg.buyer_rows(TENANT, AS_OF)
+            if r["period"] == "30d" and r["dim_kind"] == kind and r["attr_cell"] == ""
+            and r["dim_code"] and not r["buyers_hidden"]]  # fmt: skip
+    agg.close()
+    assert rows
+    for target in [rows[0]["dim_code"], "nothing"]:
+        if kind != "product" and target == "nothing":
+            continue
+        with monkeypatch.context() as m:
+            end = _same_window(m, "30d")
+            want = seg.profile(world, TENANT, kind, target, [], "30d", cat.sales, cat.id, end)
+        with monkeypatch.context() as m:
+            m.setenv(read.READ_ENV, read.READ_AGGREGATE)
+            out = seg.profile(world, TENANT, kind, target, [], "30d", cat.sales, cat.id, NOW)
+        assert want.status == "ok"
+        for name in ("target_buyers", "target_suppressed", "overall_buyers", "attributes"):
+            assert getattr(out, name) == getattr(want, name), (target, name)
+        assert out.summary.endswith("(11월 15일 기준)")
+
+
+def test_coverage_reads_yesterday_snapshot(world, cat, monkeypatch) -> None:  # noqa: ANN001
+    pops = cat.sales.population
+    assert pops
+    for pop in pops:
+        keys = list(pop.attribute_keys)
+        with monkeypatch.context() as m:
+            end = _same_window(m, "365d")
+            want = seg.coverage_buyers(world, TENANT, keys, cat.sales, cat.id, end)
+        with monkeypatch.context() as m:
+            m.setenv(read.READ_ENV, read.READ_AGGREGATE)
+            out = seg.coverage_buyers(world, TENANT, keys, cat.sales, cat.id, NOW)
+        assert want.status == "ok" and any(not r.suppressed for r in want.rows)
+        assert out.rows == want.rows
+        assert out.summary.endswith("(11월 15일 기준)")

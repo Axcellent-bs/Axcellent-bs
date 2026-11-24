@@ -116,6 +116,8 @@ from ax_contracts.schemas.data import (
     SegmentShare,
     SegmentTargetKind,
 )
+from data_agent.aggregate import read_buyers as rb
+from data_agent.aggregate.store import AggregateStore, cell_text
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.data4library import Data4LibraryConnector
 from data_agent.connectors.kosis import KosisConnector, KosisDataPoint
@@ -565,6 +567,14 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
 
     least = cfg.min_group_size
     ordered = sorted(keys, key=[a.key for a in cfg.attributes].index)
+    sales_cfg = cfg
+    got = rb.from_snapshot(tenant_id, now, lambda agg, day: profile_from_snapshot(
+        agg, tenant_id, target_kind, target_code, ordered, period, sales_cfg, day))  # fmt: skip
+    if got is not None:
+        fields, as_of = got
+        common["basis"] = rb.basis_at(snap.basis, rb.window_of(period, as_of))
+        out = SegmentProfileOutput(**common, **fields)
+        return out.model_copy(update={"summary": rb.with_note(profile_summary(out, least), as_of)})
     with snap.session(ordered) as s:
         overall_cells = s.buyer_cells()
         target_cells = s.item_cells(target_kind, target_code)
@@ -606,6 +616,73 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
         attributes=breakdowns,
     )
     return out.model_copy(update={"summary": profile_summary(out, least)})
+
+
+def profile_from_snapshot(  # noqa: PLR0913 - 입력 칸 그대로
+    agg: AggregateStore,
+    tenant_id: str,
+    target_kind: SegmentTargetKind,
+    target_code: str,
+    ordered: list[str],
+    period: SegmentPeriod,
+    cfg: CatalogSales,
+    as_of: date,
+) -> tuple[dict[str, Any], date] | None:
+    """어제 기준 고객 프로필 스냅샷(대상 × 속성 값, 숨김은 저장 때 끝남)을 화면 칸으로 (3-2 ⑥).
+
+    분모(그 속성을 아는 사람)를 숨긴 칸 때문에 알 수 없거나, 전체 구매자 속성 칸이 숨겨져 있으면
+    None(원본). 대상 구매자가 k 미만이면 줄이 없거나 숨겨져 있어 전체를 숨긴다."""
+    rows = [r for r in agg.buyer_rows(tenant_id, as_of) if r["period"] == period]
+    whole = next((r for r in rows if r["dim_kind"] == "all"), None)
+    if whole is None or whole["buyers_hidden"]:
+        return None
+    mine = {r["attr_cell"]: r for r in rows
+            if r["dim_kind"] == target_kind and r["dim_code"] == target_code}  # fmt: skip
+    overall = {r["attr_cell"]: r for r in rows if r["dim_kind"] == "attr"}
+    target = mine.get("")
+    suppressed = target is None or bool(target["buyers_hidden"])
+    breakdowns = []
+    for key in ordered:
+        attr = next(a for a in cfg.attributes if a.key == key)
+        o = [overall.get(cell_text({key: v})) for v in attr.values]
+        if any(r is None or r["buyers_hidden"] for r in o):
+            return None
+        o_known = sum(r["buyers"] for r in o if r is not None)
+        if suppressed:
+            shares = [SegmentShare(value_code=c, label=lb, suppressed=True)
+                      for c, lb in attr.values.items()]  # fmt: skip
+            breakdowns.append(SegmentAttributeBreakdown(key=key, label=attr.label, values=shares))
+            continue
+        t = [mine.get(cell_text({key: v})) for v in attr.values]
+        unk = mine.get(cell_text({key: ""}))
+        if any(r is None for r in t) or unk is None:
+            return None
+        unknown = None if unk["buyers_hidden"] else unk["buyers"]
+        if unknown is not None:
+            t_known = target["buyers"] - unknown
+        elif all(not r["buyers_hidden"] for r in t):
+            t_known = sum(r["buyers"] for r in t)
+        elif all(r["buyers_hidden"] for r in t):
+            t_known = 0  # 보이는 칸이 없어 분모를 쓰지 않는다
+        else:
+            return None  # 보이는 칸의 분모를 알 수 없다
+        shares = []
+        for (c, lb), r, orow in zip(attr.values.items(), t, o, strict=True):
+            if r["buyers_hidden"]:
+                shares.append(SegmentShare(value_code=c, label=lb, suppressed=True))
+                continue
+            ts, os_ = ratio(r["buyers"], t_known), ratio(orow["buyers"], o_known)
+            shares.append(SegmentShare(value_code=c, label=lb, target_share=ts, overall_share=os_,
+                                       lift=lift(ts, os_), buyers=r["buyers"]))  # fmt: skip
+        breakdowns.append(SegmentAttributeBreakdown(key=key, label=attr.label, values=shares,
+                                                    unknown_buyers=unknown))  # fmt: skip
+    fields = {
+        "target_buyers": None if suppressed else target["buyers"],
+        "target_suppressed": suppressed,
+        "overall_buyers": whole["buyers"],
+        "attributes": breakdowns,
+    }
+    return fields, as_of
 
 
 def profile_summary(out: SegmentProfileOutput, least: int | None = None) -> str:
@@ -667,6 +744,17 @@ def favorites(  # noqa: PLR0913
     if reasons or cfg is None:
         out = SegmentFavoritesOutput(**common, status="insufficient", insufficient_reasons=reasons)
         return out.model_copy(update={"summary": favorites_summary(out)})
+    sales_cfg = cfg
+    got = rb.from_snapshot(tenant_id, now, lambda agg, day: favorites_from_snapshot(
+        agg, tenant_id, filters, period, top, sales_cfg, day))  # fmt: skip
+    if got is not None:
+        segment, items, as_of = got
+        common["basis"] = rb.basis_at(snap.basis, rb.window_of(period, as_of))
+        out = SegmentFavoritesOutput(
+            **common, segment_buyers=segment, segment_suppressed=segment is None, internal=items
+        )
+        text = favorites_summary(out, cfg.min_group_size)
+        return out.model_copy(update={"summary": rb.with_note(text, as_of)})
     least = cfg.min_group_size
     keys = list(filters)
     with snap.session(keys) as s:
@@ -696,6 +784,53 @@ def favorites(  # noqa: PLR0913
         internal=internal,
     )
     return out.model_copy(update={"summary": favorites_summary(out, least)})
+
+
+GROUP = ""  # 스냅샷의 묶음 크기 줄 (item_code, build_more.GROUP과 같다)
+
+
+def favorites_from_snapshot(  # noqa: PLR0913 - 입력 칸 그대로
+    agg: AggregateStore,
+    tenant_id: str,
+    filters: dict[str, str],
+    period: SegmentPeriod,
+    top: int,
+    cfg: CatalogSales,
+    as_of: date,
+) -> tuple[int | None, list[FavoriteItem], date] | None:
+    """어제 기준 즐겨 사는 것 스냅샷을 화면 순위로 (3-2 ⑥).
+    (묶음 크기 또는 숨김 None, 순위, 기준일)
+
+    조건은 속성 1~2개만 저장돼 있다. 그 밖이거나 묶음 크기 줄이 없는 옛 스냅샷이면 None(원본).
+    숨긴 항목은 숫자 없이 저장돼 있어 순위에서는 "기준 미만"으로만 쓴다(이름 순으로 뒤)."""
+    ordered = {a.key: filters[a.key] for a in cfg.attributes if a.key in filters}
+    if len(ordered) != len(filters) or not 1 <= len(ordered) <= 2:  # noqa: PLR2004 - 속성 1~2개
+        return None
+    cell = cell_text(ordered)
+    rows = [r for r in agg.more_rows("agg_segment_profile", tenant_id, as_of)
+            if r["period"] == period and r["attr_cell"] == cell]  # fmt: skip
+    size = next((r for r in rows if r["item_code"] == GROUP), None)
+    if size is None:
+        return None
+    if size["buyers_hidden"]:
+        return None, [], as_of
+    segment_n, overall_n = size["buyers"], size["item_buyers"]
+    least = cfg.min_group_size
+    bought = [
+        (r["item_level"], r["item_code"], r["item_buyers"],
+         1 if r["buyers_hidden"] else r["buyers"])  # 숨김 = 0 < n < k
+        for r in rows if r["item_code"] != GROUP
+    ]  # fmt: skip
+    titles = {r["item_code"]: r["title"] for r in rows if r["item_level"] == "product"}
+    names: dict[str, Callable[[str], str | None]] = {
+        "genre": cfg.genres.get,
+        "category": lambda c: cfg.categories.get(c, NO_CATEGORY),
+        "product": lambda c: titles.get(c) or NO_PRODUCT,
+    }
+    items: list[FavoriteItem] = []
+    for kind in ("genre", "category", "product"):
+        items += ranked(kind, bought, segment_n, overall_n, names[kind], least, top)
+    return segment_n, items, as_of
 
 
 def products_to_name(
@@ -979,6 +1114,76 @@ async def favorites_with_external(  # noqa: PLR0913
 # ---------------------------------------------------------------- market_coverage
 
 
+
+def coverage_cells(
+    pop: PopulationSource, cfg: CatalogSales, counts: Cells
+) -> tuple[list[tuple[str, ...]], list[int], set[int], list[int]]:
+    """인구 속성 조합 칸별 구매자 수와 숨길 칸 (조합, 수, 숨김, 답한 조합 위치).
+    1차(기준 미만, 0 포함) + 2차 숨김(줄·열·전체 합, 답한 묶음 합으로 계산되지 않게)."""
+    values = attribute_values(cfg)
+    keys = list(pop.attribute_keys)
+    combos = list(itertools.product(*(list(values[k]) for k in keys)))
+    found = [counts.get(combo, 0) for combo in combos]
+    answered = answered_combos(pop, keys, combos)
+    groups = coverage_groups([len(values[k]) for k in keys])
+    if 0 < len(answered) < len(combos):
+        # 구성 지수(11/17): 비중의 분모(답한 구매자 합)가 buyers ÷ buyer_share로 계산되므로
+        # "답한 묶음 전체 합"도 공개된 합계로 본다 (보이는 비중 합으로 숨긴 칸을 풀 수 없게)
+        groups.append(list(answered))
+    least = cfg.min_group_size
+    hidden = protect(found, {i for i, n in enumerate(found) if n < least}, groups)
+    return combos, found, hidden, list(answered)
+
+
+def coverage_rows(  # noqa: PLR0913
+    pop: PopulationSource,
+    cfg: CatalogSales,
+    combos: list[tuple[str, ...]],
+    shown: list[int | None],
+    answered_total: int,
+    answered: Sequence[int],
+) -> list[CoverageRow]:
+    """칸 수(숨긴 칸은 None) → 화면 줄."""
+    values = attribute_values(cfg)
+    keys = list(pop.attribute_keys)
+    rows = []
+    for i, combo in enumerate(combos):
+        n = shown[i]
+        rows.append(CoverageRow(
+            values=dict(zip(keys, combo, strict=True)),
+            label=" · ".join(values[k][c] for k, c in zip(keys, combo, strict=True)),
+            buyers=n, suppressed=n is None, base_year=pop.base_year,
+            buyer_share=ratio(n, answered_total) if i in answered and n is not None else None,
+        ))  # fmt: skip
+    return rows
+
+
+ANSWERED = "answered"  # 스냅샷: 답한 묶음 전체 구매자 수 줄 (dim_code 끝)
+
+
+def coverage_key(pop: PopulationSource) -> str:
+    return ",".join(pop.attribute_keys)
+
+
+def coverage_from_snapshot(
+    agg: AggregateStore, tenant_id: str, pop: PopulationSource, cfg: CatalogSales, as_of: date
+) -> tuple[list[CoverageRow], date] | None:
+    """어제 기준 365일 인구 조합 칸 스냅샷(숨김은 저장 때 끝남)을 화면 줄로 (3-2 ⑥)."""
+    key = coverage_key(pop)
+    rows = [r for r in agg.buyer_rows(tenant_id, as_of)
+            if r["period"] == "365d" and r["dim_kind"] == "attr_combo"]  # fmt: skip
+    cells = {r["attr_cell"]: r for r in rows if r["dim_code"] == key}
+    total = next((r for r in rows if r["dim_code"] == f"{key}:{ANSWERED}"), None)
+    values = attribute_values(cfg)
+    keys = list(pop.attribute_keys)
+    combos = list(itertools.product(*(list(values[k]) for k in keys)))
+    texts = [cell_text(dict(zip(keys, c, strict=True))) for c in combos]
+    if total is None or any(t not in cells for t in texts):
+        return None
+    shown = [None if cells[t]["buyers_hidden"] else cells[t]["buyers"] for t in texts]
+    answered = answered_combos(pop, keys, combos)
+    return coverage_rows(pop, cfg, combos, shown, total["buyers"] or 0, list(answered)), as_of
+
 def find_population(keys: Sequence[str], cfg: CatalogSales) -> PopulationSource | None:
     return next((p for p in cfg.population if set(p.attribute_keys) == set(keys)), None)
 
@@ -1009,41 +1214,23 @@ def coverage_buyers(
     if reasons or cfg is None or pop is None:
         out = MarketCoverageOutput(**common, status="insufficient", insufficient_reasons=reasons)
         return out.model_copy(update={"summary": coverage_summary(out)})
-    values = attribute_values(cfg)
     keys = list(pop.attribute_keys)  # 카탈로그 순서
+    sales_cfg, population = cfg, pop
+    got = rb.from_snapshot(tenant_id, now, lambda agg, day: coverage_from_snapshot(
+        agg, tenant_id, population, sales_cfg, day))  # fmt: skip
+    if got is not None:
+        rows, as_of = got
+        common["basis"] = rb.basis_at(snap.basis, rb.window_of("365d", as_of))
+        out = MarketCoverageOutput(**{**common, "attribute_keys": keys}, rows=rows)
+        return out.model_copy(update={"summary": rb.with_note(coverage_summary(out), as_of)})
     # 셀 = 구매자의 속성 값 묶음. 아래 조합(카탈로그 값만)으로 찾으므로 하나라도 모름이거나
     # 카탈로그에 없는 값인 구매자는 세지 않는다
     with snap.session(keys) as s:
         counts = s.buyer_cells()
-    least = cfg.min_group_size
-    combos = list(itertools.product(*(list(values[k]) for k in keys)))
-    found = [counts.get(combo, 0) for combo in combos]
-    answered = answered_combos(pop, keys, combos)
-    groups = coverage_groups([len(values[k]) for k in keys])
-    if 0 < len(answered) < len(combos):
-        # 구성 지수(11/17): 비중의 분모(답한 구매자 합)가 buyers ÷ buyer_share로 계산되므로
-        # "답한 묶음 전체 합"도 공개된 합계로 본다 (보이는 비중 합으로 숨긴 칸을 풀 수 없게)
-        groups.append(list(answered))
-    hidden = protect(  # 1차(기준 미만) + 2차 숨김 (줄·전체 합계로 계산되지 않게)
-        found,
-        {i for i, n in enumerate(found) if n < least},
-        groups,
-    )
-    answered_total = sum(found[i] for i in answered)
-    rows = []
-    for i, combo in enumerate(combos):
-        rows.append(
-            CoverageRow(
-                values=dict(zip(keys, combo, strict=True)),
-                label=" · ".join(values[k][c] for k, c in zip(keys, combo, strict=True)),
-                buyers=None if i in hidden else found[i],
-                suppressed=i in hidden,
-                base_year=pop.base_year,
-                buyer_share=(
-                    ratio(found[i], answered_total) if i in answered and i not in hidden else None
-                ),
-            )
-        )
+    combos, found, hidden, answered = coverage_cells(pop, cfg, counts)
+    rows = coverage_rows(pop, cfg, combos, [None if i in hidden else n for i, n in
+                                            enumerate(found)],
+                         sum(found[i] for i in answered), answered)  # fmt: skip
     out = MarketCoverageOutput(**{**common, "attribute_keys": keys}, rows=rows)
     return out.model_copy(update={"summary": coverage_summary(out)})
 

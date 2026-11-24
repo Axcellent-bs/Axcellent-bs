@@ -130,20 +130,25 @@ def _favorites(  # noqa: PLR0913
                                   buyers=HiddenCount(hidden=True), item_buyers=0)]  # fmt: skip
     bought = s.item_counts(f)
     totals = {(kind, code): total for kind, code, total, _ in bought}
+    # 묶음 크기 한 줄 (3-2 ⑥: 읽을 때 비율 분모. item_buyers = 그 기간 전체 구매자)
+    size = SegmentProfileRow(
+        **base, attr_cell=f, item_level="category", item_code=GROUP,
+        buyers=HiddenCount(value=segment_n), item_buyers=overall_n,
+    )  # fmt: skip
     titles = s.titles(ids=seg.products_to_name(bought, segment_n, overall_n, k, TOP_ITEMS))
     names: dict[str, Callable[[str], str | None]] = {
         "genre": cfg.genres.get,
         "category": lambda c: cfg.categories.get(c, NO_CATEGORY),
         "product": lambda c: titles.get(c, NO_PRODUCT),
     }
-    out: list[SegmentProfileRow] = []
+    out: list[SegmentProfileRow] = [size]
     for kind in ("genre", "category", "product"):
         for item in seg.ranked(kind, bought, segment_n, overall_n, names[kind], k, TOP_ITEMS):
             out.append(SegmentProfileRow(
                 **base, attr_cell=f, item_level=kind, item_code=item.code,
                 buyers=shown(item.buyers or 0, item.suppressed),
                 item_buyers=totals.get((kind, item.code), 0),
-                title=item.label if kind == "product" and not item.suppressed else None,
+                title=item.label if kind == "product" else None,
             ))  # fmt: skip
     return out
 
