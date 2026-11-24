@@ -141,9 +141,13 @@ def _folder(record_id: str) -> Path:
 
 
 def source_video(rec: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
-    """후보를 맞출 영상 칸(완성 영상 우선). 둘 다 없으면 None."""
+    """후보를 맞출 영상 칸: 내보낼 영상(`creative_render.publish_video_part`, 약속 B 한 곳).
+
+    그 칸에 파일 정보가 모자라면 예전처럼 완성 영상 → 영상 순. 없으면 None."""
     render = rec.get("render") or {}
-    for part in SOURCES:
+    for part in (_render.publish_video_part(rec), *SOURCES):
+        if part is None:
+            continue
         info = render.get(part) or {}
         if info.get("status") == "done" and info.get("sha256") and info.get("asset"):
             return part, info
@@ -163,8 +167,9 @@ def aspect_for(record_id: str, part: str, info: dict[str, Any]) -> str:
         return _render.VIDEO_ASPECT
     path = _video_path(record_id, info)
     size = PROBE(path) if path is not None and path.is_file() else None
-    if size is None:
-        return WIDE if part == "final_video" else _render.VIDEO_ASPECT
+    if size is None:  # 자막을 얹은 영상은 원본 칸(source_part)을 따른다
+        origin = info.get("source_part") if part == _render.OVERLAY_PART else part
+        return WIDE if origin == "final_video" else _render.VIDEO_ASPECT
     return TALL if size[1] > size[0] else WIDE
 
 

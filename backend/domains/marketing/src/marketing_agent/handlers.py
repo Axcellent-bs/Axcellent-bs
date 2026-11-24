@@ -58,6 +58,8 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeInstagramDraftInput,
     CreativeInstagramOutput,
     CreativeInstagramRequestInput,
+    CreativeOverlayRedoInput,
+    CreativeOverlayRedoOutput,
     CreativeRecordAttachInput,
     CreativeRecordAttachOutput,
     CreativeRecordGetInput,
@@ -112,6 +114,7 @@ from marketing_agent import (
     video_providers,
 )
 from marketing_agent import character_sheet as _character_sheet
+from marketing_agent import creative_overlay as _overlay
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import creative_script as _script
@@ -1161,6 +1164,32 @@ async def creative_thumbnail_select(request: AgentRequest) -> AgentResult:
             [request.skill],
             f"제작 기록 썸네일 {data.record_id}: {data.media_id}"
             + (f" (승인 무효: {', '.join(out.approvals_reset)})" if out.approvals_reset else ""),
+            [data.record_id],
+        ),
+    )
+
+
+async def creative_overlay_redo(request: AgentRequest) -> AgentResult:
+    """사람이 고친 자막으로 최신 영상에 자막·엔드카드를 다시 얹는다(read, 크레딧·관문 없음)."""
+    data = _parse(request, CreativeOverlayRedoInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        done = await _overlay.redo(
+            data.record_id, {str(c.no): c.caption_ko for c in data.captions}
+        )
+    except _overlay.OverlayRefused as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome=error.code, output={"message": error.code}
+        )
+    out = CreativeOverlayRedoOutput(record_id=data.record_id, **done)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill],
+            f"자막 다시 얹기 {data.record_id}: {out.overlay.get('status')}",
             [data.record_id],
         ),
     )
@@ -2639,6 +2668,7 @@ HANDLERS = {
     "youtube_video_stats": youtube_video_stats,
     "youtube_uploads_list": youtube_uploads_list,
     "creative_record_attach": creative_record_attach,
+    "creative_overlay_redo": creative_overlay_redo,
     "creative_thumbnails_request": creative_thumbnails_request,
     "creative_thumbnail_select": creative_thumbnail_select,
     "brand_characters_list": brand_characters_list,

@@ -63,6 +63,7 @@ class CreativeRecordGetOutput(AxModel):
     script: dict[str, Any] | None = None
     # Higgsfield 그림·영상:
     # {sheet_image|board_image|video: {status, error, asset, sha256, review_id, at}}
+    # 자막 얹기(11/25, 추가): overlay {status, error, captions, source_part, ...}, overlay_video {…}
     render: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -126,7 +127,7 @@ class CreativeYoutubeDraftInput(AxModel):
     description: str | None = Field(default=None, max_length=5000)
     tags: list[str] | None = Field(default=None, max_length=15)
     privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
-    part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+    part: str | None = Field(default=None, pattern=r"^(video|final_video|overlay_video)$")
     # 어느 캠페인(cmp_…) 영상인지(11/23, 추가). 비우면(None) 그대로, ""면 연결을 푼다.
     # 올린 뒤에도 바꿀 수 있다(올리기와 상관없는 표시라 승인이 필요 없다)
     campaign_id: str | None = Field(default=None, pattern=YOUTUBE_CAMPAIGN_LINK_PATTERN)
@@ -224,7 +225,7 @@ class CreativeInstagramDraftInput(AxModel):
     regenerate: bool = False
     caption: str | None = Field(default=None, max_length=INSTAGRAM_CAPTION_MAX)
     hashtags: list[str] | None = Field(default=None, max_length=INSTAGRAM_HASHTAG_MAX)
-    part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+    part: str | None = Field(default=None, pattern=r"^(video|final_video|overlay_video)$")
 
 
 class CreativeInstagramRequestInput(AxModel):
@@ -320,3 +321,30 @@ class CreativeThumbnailSelectOutput(AxModel):
     changed: bool  # 같은 것을 다시 고르면 false(승인은 그대로)
     cover_rev: int = Field(ge=0)
     approvals_reset: list[str] = Field(default_factory=list)  # 무효가 된 승인: youtube
+
+
+# ---- 자막·엔드카드 얹기 (2026-11-25). 영상이 붙으면 코드(ffmpeg)로 자동 한 번,
+# 사람이 자막을 고치면 `creative_overlay_redo`로 다시. 크레딧 0·안전 관문 없음.
+# 상태는 기록의 render.overlay
+# {status: applied|skipped|failed|running, error, captions, source_part: video|final_video},
+# 결과 영상은 render.overlay_video(파일 overlay.mp4)
+CREATIVE_OVERLAY_REDO_SKILL = "creative_overlay_redo"
+
+
+class CreativeOverlayCaption(AxModel):
+    no: int = Field(ge=1, le=12)  # 스토리보드 칸 번호
+    caption_ko: str = Field(default="", max_length=60)  # 비우면 그 칸은 자막 없음
+
+
+class CreativeOverlayRedoInput(AxModel):
+    """사람이 자막을 고친 뒤 최신 영상에 다시 얹는다(read: 기록만 바꾸고 외부 호출·비용 없음)."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    captions: list[CreativeOverlayCaption] = Field(min_length=1, max_length=12)
+    who: str | None = Field(default=None, max_length=80)
+
+
+class CreativeOverlayRedoOutput(AxModel):
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    overlay: dict[str, Any]  # render.overlay
+    overlay_video: dict[str, Any] = Field(default_factory=dict)  # render.overlay_video (없으면 빈)
