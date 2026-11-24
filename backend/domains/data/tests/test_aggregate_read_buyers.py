@@ -22,8 +22,10 @@ from data_agent.aggregate.store import DB_ENV, AggregateStore
 from data_agent.sales_collect import collect_once
 from data_agent.sales_fake import FAKE_DIR, FakeSalesSource, load_config
 from data_agent.sales_store import SalesStore
+from data_agent.skills import basket_pairs as bp
 from data_agent.skills import channel_value as cv
 from data_agent.skills import retention as rt
+from data_agent.skills import segment_analysis as seg
 from data_agent.skills.retention import HISTORY_FROM
 
 TENANT = "shop-demo"
@@ -132,3 +134,28 @@ def test_retention_with_filters_stays_on_source(world, cat, monkeypatch) -> None
     want = rt.retention(world, TENANT, 3, f, cat.sales, cat.id, NOW)
     monkeypatch.setenv(read.READ_ENV, read.READ_AGGREGATE)
     assert rt.retention(world, TENANT, 3, f, cat.sales, cat.id, NOW) == want
+
+
+@pytest.mark.parametrize("level", ["genre", "product"])
+def test_basket_pairs_reads_yesterday_snapshot(world, cat, level, monkeypatch) -> None:  # noqa: ANN001
+    """보이는 쌍(순서·수·이름)은 같은 기준 시각 원본 계산과 같다. 숨긴 쌍은 자리 수만."""
+    w = rb.window_of("30d", AS_OF)
+    same = seg.Window(start=w.start, end=w.end, previous_start=w.start, previous_end=w.start)
+    with monkeypatch.context() as m:  # 원본 경로를 스냅샷과 같은 기간(꽉 찬 30일)으로
+        m.setattr(seg, "segment_window", lambda period, now: same)
+        want = bp.basket(world, TENANT, level, "30d", {}, 10, cat.sales, cat.id, w.end)
+    monkeypatch.setenv(read.READ_ENV, read.READ_AGGREGATE)
+    out = bp.basket(world, TENANT, level, "30d", {}, 10, cat.sales, cat.id, NOW)
+    shown = [p for p in want.pairs if not p.suppressed]
+    assert out.status == "ok" and shown
+    assert [p for p in out.pairs if not p.suppressed] == shown
+    assert sum(p.suppressed for p in out.pairs) == sum(p.suppressed for p in want.pairs)
+    assert out.summary.endswith("(11월 15일 기준)")
+
+
+def test_basket_pairs_with_two_filters_stays_on_source(world, cat, monkeypatch) -> None:  # noqa: ANN001
+    a, b = cat.sales.attributes[:2]
+    f = {a.key: next(iter(a.values)), b.key: next(iter(b.values))}
+    want = bp.basket(world, TENANT, "genre", "90d", f, 10, cat.sales, cat.id, NOW)
+    monkeypatch.setenv(read.READ_ENV, read.READ_AGGREGATE)
+    assert bp.basket(world, TENANT, "genre", "90d", f, 10, cat.sales, cat.id, NOW) == want
