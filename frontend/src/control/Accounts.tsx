@@ -4,11 +4,11 @@ import { createAccount, listAccounts, resetPassword } from '@/lib/authApi'
 import { accountInputProblem, canResetPassword, getSession, MIN_PASSWORD_LENGTH, type ServerAccount, type ServerRole } from '@/lib/humanSession'
 import { PreparingChip } from '@/components/Preparing'
 
-// 계정 (AXcellent 운영팀, /control/accounts). dashboard-api `/auth/accounts`: 운영자는 모든 역할의 계정을 만들고 목록을 본다.
-// 운영자 계정은 팀원마다 하나씩(설계 "정한 것"). 고객사 관리자 계정을 만들어 주면 그 관리자가 일반회원을 만든다.
+// 계정 (AXcellent 운영팀, /control/accounts). 여기서는 운영자 계정만 만든다(팀원마다 하나씩, 설계 "정한 것").
+// 고객사 관리자는 우리가 만들지 않는다: 고객사가 /setup에서 우리가 발급한 회사 전용 키로 직접 가입하고(비밀번호도
+// 고객사가 정한다), 일반회원은 그 관리자가 만든다(노예진 11/24). 고객사 계정 비밀번호도 여기서 초기화하지 않는다.
 // 서버 로그인이 꺼져 있으면(데모 로그인) 서버 계정이 없어 이 화면은 "준비 중"이다.
 const ROLE_LABEL: Record<ServerRole, string> = { operator: '운영자', admin: '고객사 관리자', member: '일반회원' }
-const ROLES = Object.keys(ROLE_LABEL) as ServerRole[]
 const day = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—')
 
 export default function Accounts() {
@@ -16,7 +16,7 @@ export default function Accounts() {
   const serverOperator = mode === 'server' && !!account?.server && !!account.operator
   const [rows, setRows] = useState<ServerAccount[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [form, setForm] = useState<{ name: string; email: string; role: ServerRole; password: string }>({ name: '', email: '', role: 'admin', password: '' })
+  const [form, setForm] = useState<{ name: string; email: string; role: ServerRole; password: string }>({ name: '', email: '', role: 'operator', password: '' })
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -77,7 +77,7 @@ export default function Accounts() {
       <header>
         <p className="text-sm text-ink-500">관제 센터</p>
         <h1 className="flex items-center gap-2 text-2xl font-semibold">계정 {!serverOperator && <PreparingChip />}</h1>
-        <p className="mt-1 text-sm text-ink-500">서버 로그인 계정을 만들어요. 운영자 계정은 팀원마다 하나씩 만들어 기록에 실제 이름이 남게 해요.</p>
+        <p className="mt-1 text-sm text-ink-500">AXcellent 운영자 계정을 만들어요. 팀원마다 하나씩 만들어 기록에 실제 이름이 남게 해요. 고객사 관리자는 고객사가 발급 키로 직접 가입해요(연결 키 발급에서 회사 이름을 넣어 발급).</p>
       </header>
 
       {!serverOperator ? (
@@ -89,13 +89,10 @@ export default function Accounts() {
       ) : (
         <>
           <form onSubmit={(e) => void submit(e)} className="card space-y-3 p-6">
-            <h2 className="card-title">새 계정</h2>
-            <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto_1fr_auto]">
+            <h2 className="card-title">새 운영자 계정</h2>
+            <div className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto]">
               <input className="field" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="이름" aria-label="이름" />
               <input className="field" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="이메일" aria-label="이메일" autoComplete="off" />
-              <select className="field" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as ServerRole })} aria-label="역할">
-                {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-              </select>
               <input className="field" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={`처음 비밀번호 (${MIN_PASSWORD_LENGTH}자 이상)`} aria-label="처음 비밀번호" autoComplete="new-password" />
               <button className="btn-primary px-5" disabled={busy}>{busy ? '만드는 중…' : '만들기'}</button>
             </div>
@@ -120,8 +117,8 @@ export default function Accounts() {
                     <td className="px-4 py-2.5"><span className="chip bg-ink-100 text-ink-700">{ROLE_LABEL[r.role] ?? r.role}</span></td>
                     <td className="px-4 py-2.5 text-ink-500">{day(r.created_at)}</td>
                     <td className="px-4 py-2.5">
-                      {!me || !canResetPassword(me, r) ? (
-                        <span className="text-xs text-ink-500">{me?.id === r.id ? '내 계정은 오른쪽 위 메뉴에서 바꿔요' : '—'}</span>
+                      {!me || r.role !== 'operator' || !canResetPassword(me, r) ? (
+                        <span className="text-xs text-ink-500">{me?.id === r.id ? '내 계정은 오른쪽 위 메뉴에서 바꿔요' : r.role !== 'operator' ? '고객사가 직접 관리해요' : '—'}</span>
                       ) : resetFor === r.id ? (
                         <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); void submitReset(r) }}>
                           <input className="field w-56" type="password" value={resetPw} onChange={(e) => setResetPw(e.target.value)}

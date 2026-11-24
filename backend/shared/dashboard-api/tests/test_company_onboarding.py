@@ -322,3 +322,41 @@ def test_move_needs_a_company_key_and_an_empty_target(client, tmp_path) -> None:
     assert res.json()["error"]["code"] in {"KEY_SIGNUP_USED", "COMPANY_HAS_ADMIN"}
     rows = {r["email"]: r for r in _rows(tmp_path)}
     assert accounts.memberships_of(rows["a@example.com"])[0].company_id == "catbooks"
+
+
+def _unlink(client, token, account_id):
+    return client.post(BASE + f"/accounts/{account_id}/unlink", headers=_bearer(token))
+
+
+def test_admin_unlinks_only_own_members_and_they_lose_the_company(client, tmp_path) -> None:
+    op = _op(client)
+    assert _account(client, op, "캣관리", "a@example.com").status_code == 200
+    assert _account(client, op, "캣관리2", "a2@example.com").status_code == 200
+    mine = _login(client, "a@example.com", PW)
+    other = _login(client, "a2@example.com", PW)
+    assert _account(client, mine, "내회원", "m@example.com", role="member").status_code == 200
+    assert _account(client, other, "남회원", "s@example.com", role="member").status_code == 200
+    member_session = _login(client, "m@example.com", PW)
+    rows = {r["email"]: r for r in _rows(tmp_path)}
+    assert rows["m@example.com"]["linked_admin"] == rows["a@example.com"]["id"]
+
+    # 다른 관리자가 연결한 회원은 못 끊는다
+    res = _unlink(client, mine, rows["s@example.com"]["id"])
+    assert res.status_code == 403 and res.json()["error"]["code"] == "NOT_MY_MEMBER"
+    # 관리자는 못 끊는다(일반회원만)
+    res = _unlink(client, mine, rows["a2@example.com"]["id"])
+    assert res.status_code == 409 and res.json()["error"]["code"] == "MEMBER_ONLY"
+
+    res = _unlink(client, mine, rows["m@example.com"]["id"])
+    assert res.status_code == 200, res.text
+    assert res.json()["data"]["linked_admin"] is None
+    rows = {r["email"]: r for r in _rows(tmp_path)}
+    assert rows["m@example.com"]["memberships"] == []  # 연결 대기(계정은 남는다)
+    assert accounts.memberships_of(rows["s@example.com"])[0].company_id == "catbooks"
+    # 끊긴 회원의 세션은 끊기고, 다시 로그인해도 회사가 없다
+    assert client.get(BASE + "/me", headers=_bearer(member_session)).status_code == 401
+    again = _login(client, "m@example.com", PW)
+    assert client.get(BASE + "/me", headers=_bearer(again)).json()["data"]["company_id"] is None
+    # 일반회원은 끊을 수 없다
+    res = _unlink(client, again, rows["s@example.com"]["id"])
+    assert res.status_code == 403

@@ -1,24 +1,21 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { privateIp } from './store'
-import { checkKey, connectWithKey, useCompany, useKeys, type CompanyInfo, type IssuedKey } from './company'
+import { INDUSTRIES, checkKey, connectWithKey, signupWithKey, useCompany, type CompanyInfo, type IssuedKey } from './company'
+import { sessionFromLogin, setSession } from '@/lib/humanSession'
 import { emailTaken, homeOf, registerAccount, useSession } from './session'
 
 // 관리자(회사 계정) 가입: 운영자에게 받은 키 확인 → 관리자 계정 → 회사 정보 → 연결. 끝나면 그 관리자로 바로 들어간다.
 // 이 설치에 이미 연결된 회사의 키면 회사 정보·연결은 건너뛰고 그 회사의 관리자 계정만 만든다.
 // 데모 로그인(서버 로그인이 꺼져 있을 때)에서는 계정을 이 브라우저에만 저장하고 비밀번호는 저장하지 않는다(session.tsx).
-// 서버 로그인이 켜져 있으면 키로 관리자 계정을 만드는 서버 경로가 아직 없다. 운영자가 관제 센터(계정)에서 만든
-// 관리자 계정으로 먼저 로그인하고, 이 화면에서는 키 확인·회사 정보·연결만 한다.
+// 서버 로그인이 켜져 있으면: 회사 전용 키(관제 센터에서 회사 이름을 넣어 발급한 키)는 로그인 전에 확인하고,
+// 그 키로 그 회사의 첫 관리자 계정을 서버에 만든 뒤(세션 받음) 그 회사로 연결한다(로드맵 7단계, 캣북스는 그대로).
+// 예전 키(회사 정보 없음)는 지금처럼 운영자가 만든 관리자 계정으로 먼저 로그인해야 한다.
+// 회사는 계정으로 정한다. 사내망·PC IP는 쓰지 않아 화면에 묻지 않는다(노예진 11/24).
 const WORDMARK = `${import.meta.env.BASE_URL}axcellent-wordmark.webp`
 const STAGES = ['발급 키 확인', '관리자 계정', '회사 정보', '연결'] as const
-const RUN_STEPS = ['관리자 계정 만들기', '회사 정보 저장', '사내망 확인', '첫 상태 신호 보내기', '설정 완료'] as const
-const INDUSTRIES = ['온라인 쇼핑몰', '오프라인 유통', '여행사', '카페 체인', '병원', '제조', '기타']
-const DETECTED_NETWORK = '192.168.30.0/24'
-const validNetwork = (v: string) => /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(v.trim()) && privateIp(v.trim().split('/')[0])
 
 export default function Setup() {
   const company = useCompany()
-  const keys = useKeys()
   const { signIn, mode, account } = useSession()
   const serverMode = mode === 'server'
   // 서버 로그인으로 들어온 고객사 관리자 (서버 로그인일 때 연결은 이 계정으로 한다)
@@ -29,21 +26,9 @@ export default function Setup() {
   const [keyInput, setKeyInput] = useState(() => new URLSearchParams(window.location.search).get('key') ?? '')
   const [key, setKey] = useState<IssuedKey | null>(null)
   const [admin, setAdmin] = useState({ name: '', email: '', password: '' })
-  const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: INDUSTRIES[0], network: DETECTED_NETWORK })
+  const [info, setInfo] = useState<CompanyInfo>({ name: '', industry: INDUSTRIES[0], network: '' })
   const [error, setError] = useState<string | null>(null)
-  const [run, setRun] = useState(-1)
-
-  // 연결 단계 진행. 끝나면 회사를 연결하고 시스템 관리자로 로그인한다
-  useEffect(() => {
-    if (run < 0 || !key) return
-    if (run >= RUN_STEPS.length - 1) {
-      void connectWithKey(key, info).catch((x: Error) => setError(x.message))
-      const t = setTimeout(finish, 1200)
-      return () => clearTimeout(t)
-    }
-    const t = setTimeout(() => setRun((r) => r + 1), 1000)
-    return () => clearTimeout(t)
-  }, [run]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [busy, setBusy] = useState(false)
 
   // 관리자 계정을 만들고 그 계정으로 들어간다
   function finish() {
@@ -59,6 +44,8 @@ export default function Setup() {
       setError(x instanceof Error ? x.message : '관리자 계정을 만들지 못했어요.')
     }
   }
+  // 회사 전용 키로 첫 관리자 가입을 하는가 (서버 로그인, 로그인 전, 키 확인에서 가입 가능)
+  const keySignup = serverMode && !serverAdmin && !!key?.forCompany && !!key.signup
   // 이 설치에 이미 연결된 회사의 키인가 (그러면 회사 정보·연결은 건너뛴다)
   const sameCompany = !!company && !!key && key.company?.id === company.id
 
@@ -66,11 +53,24 @@ export default function Setup() {
     e.preventDefault()
     if (stage === 0) {
       let r: Awaited<ReturnType<typeof checkKey>>
-      try { r = await checkKey(keyInput) } catch (x) { return setError((x as Error).message) }
+      // 서버 로그인인데 아직 로그인 전이면 로그인 없이 확인한다(회사 전용 키의 첫 관리자 가입)
+      try { r = await checkKey(keyInput, serverMode && !account) } catch (x) { return setError((x as Error).message) }
       if (!r.ok) return setError(r.reason)
       setKey(r.issued)
+      if (r.issued.company) setInfo((prev) => ({ ...prev, name: r.issued.company?.name || prev.name, industry: INDUSTRIES.includes(r.issued.company?.industry ?? '') ? r.issued.company!.industry : prev.industry, siteUrl: r.issued.company?.siteUrl }))
     }
-    if (stage === 1 && serverMode) {
+    if (stage === 1 && serverMode && keySignup) {
+      // 회사 전용 키로 그 회사의 첫 관리자 가입 → 받은 세션으로 이어서 연결
+      if (!admin.name.trim()) return setError('관리자 이름을 입력하세요.')
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(admin.email.trim())) return setError('관리자 이메일을 확인하세요.')
+      if (admin.password.length < 8) return setError('비밀번호는 8자 이상이에요.')
+      try {
+        const data = await signupWithKey(keyInput, { name: admin.name.trim(), email: admin.email.trim(), password: admin.password })
+        const session = sessionFromLogin(data)
+        if (!session) return setError('가입은 됐는데 로그인 정보를 받지 못했어요. 로그인 화면에서 들어가 주세요.')
+        setSession(session)
+      } catch (x) { return setError((x as Error).message) }
+    } else if (stage === 1 && serverMode) {
       if (!serverAdmin) return setError('운영자에게 받은 관리자 계정으로 먼저 로그인해 주세요.')
       if (sameCompany) return finish()
     }
@@ -83,24 +83,23 @@ export default function Setup() {
     }
     if (stage === 2) {
       if (!info.name.trim()) return setError('회사 이름을 입력하세요.')
-      if (!validNetwork(info.network)) return setError('사내망 주소를 192.168.30.0/24 같은 형태로 입력하세요. 사내 IP 대역만 돼요.')
-      setInfo({ ...info, name: info.name.trim(), network: info.network.trim() })
-      setRun(0)
+      if (info.siteUrl?.trim() && !/^https?:\/\/\S+$/.test(info.siteUrl.trim())) return setError('사이트 주소는 http:// 또는 https://로 시작해야 해요.')
+      if (!key) return setError('키를 다시 확인해 주세요.')
+      // 서버에 바로 연결한다(꾸민 진행 단계 없음). 실패하면 이 단계에 머문다
+      setBusy(true)
+      try {
+        if (serverMode) await connectWithKey(key, { ...info, name: info.name.trim(), siteUrl: info.siteUrl?.trim() })
+      } catch (x) {
+        setBusy(false)
+        return setError((x as Error).message)
+      }
+      setBusy(false)
+      setError(null)
+      setStage(3)
+      return finish()
     }
     setError(null)
     setStage((s) => s + 1)
-  }
-
-  // 데모 편의: 칸 채우기
-  // 아직 어느 회사도 쓴 적 없는 키를 먼저 고른다
-  // 이미 연결된 회사가 있으면 그 회사 키(관리자 추가 가입), 없으면 아직 안 쓴 키
-  // 키는 서버에 있고 목록에는 가린 키만 와서 미리 채울 수 없다(발급받은 키를 직접 넣는다)
-  const demoKey: IssuedKey | undefined = keys.length < 0 ? keys[0] : undefined
-  const fillDemo = () => {
-    setError(null)
-    if (stage === 0 && demoKey) setKeyInput(demoKey.key)
-    if (stage === 1) setAdmin({ name: '관리자', email: `admin${Date.now() % 1000}@company.example`, password: 'demo-password' })
-    if (stage === 2) setInfo({ name: '새벽커피', industry: '카페 체인', network: DETECTED_NETWORK })
   }
 
   return (
@@ -130,7 +129,6 @@ export default function Setup() {
               <div className="flex items-center gap-2">
                 <button className="btn-primary px-5">키 확인</button>
                 <Link to="/plans" className="btn-quiet">키가 없나요? 조직 플랜 시작</Link>
-                {demoKey && <button type="button" className="btn-ghost ml-auto px-2.5 py-1 text-xs" onClick={fillDemo}>데모: 발급된 키 넣기</button>}
               </div>
             </form>
           )}
@@ -140,11 +138,12 @@ export default function Setup() {
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-lg font-semibold">관리자 계정 만들기</h1>
                 {sameCompany && <span className="chip bg-ink-100 text-ink-700">{company?.name}</span>}
-                {company && !sameCompany && <span className="chip bg-amber-50 text-amber-700">새 회사로 연결 · 지금 연결된 {company.name}은 끊겨요</span>}
+                {key?.forCompany && <span className="chip bg-ink-100 text-ink-700">{key.company?.name ?? key.forCompany} 전용 키</span>}
+                {company && !sameCompany && !key?.forCompany && <span className="chip bg-amber-50 text-amber-700">새 회사로 연결 · 지금 연결된 {company.name}은 끊겨요</span>}
                 <span className="chip bg-emerald-50 text-emerald-700">키 확인됨</span>
               </div>
               <p className="text-sm text-ink-500">이 계정으로 회사 연결과 회원·서버 관리(회원 연결, 사내 PC 연결)를 해요.</p>
-              {serverMode ? (
+              {serverMode && !keySignup ? (
                 serverAdmin && account ? (
                   <p className="rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-700">로그인한 관리자 계정 <span className="font-medium text-ink-900">{account.name}</span> <span className="font-mono text-xs text-ink-500">{account.email}</span>으로 연결해요.</p>
                 ) : (
@@ -160,8 +159,7 @@ export default function Setup() {
               </>}
               {error && <p className="text-sm text-red-700">{error}</p>}
               <div className="flex items-center gap-2">
-                <button className="btn-primary px-5" disabled={serverMode && !serverAdmin}>{sameCompany ? '가입하기' : '다음'}</button>
-                {!serverMode && <button type="button" className="btn-ghost ml-auto px-2.5 py-1 text-xs" onClick={fillDemo}>데모: 채우기</button>}
+                <button className="btn-primary px-5" disabled={serverMode && !serverAdmin && !keySignup}>{sameCompany ? '가입하기' : '다음'}</button>
               </div>
             </form>
           )}
@@ -175,38 +173,20 @@ export default function Setup() {
                   {INDUSTRIES.map((x) => <option key={x}>{x}</option>)}
                 </select>
               </div>
-              <label className="block space-y-1 text-sm">
-                <span className="text-ink-700">사내망 주소 <span className="text-xs text-ink-500">(이 서버에서 찾은 값, 다르면 고치세요)</span></span>
-                <input className="field font-mono" value={info.network} onChange={(e) => setInfo({ ...info, network: e.target.value })} />
-              </label>
               <p className="text-xs text-ink-500">회사 이름은 직원 화면 상단 "AXcellent with ○○"에 나와요. AXcellent에는 회사 이름과 상태 신호만 전달돼요.</p>
               {error && <p className="text-sm text-red-700">{error}</p>}
               <div className="flex items-center gap-2">
-                <button className="btn-primary px-5">연결</button>
+                <button className="btn-primary px-5" disabled={busy}>{busy ? '연결하는 중…' : '연결'}</button>
                 <button type="button" className="btn-quiet" onClick={() => { setStage(1); setError(null) }}>이전</button>
-                <button type="button" className="btn-ghost ml-auto px-2.5 py-1 text-xs" onClick={fillDemo}>데모: 채우기</button>
               </div>
             </form>
           )}
 
           {stage === 3 && (
-            <div className="space-y-3" aria-live="polite">
-              <h1 className="text-lg font-semibold">{info.name} 설정하는 중</h1>
-              <ol className="space-y-2">
-                {RUN_STEPS.map((s, i) => {
-                  const done = i < run || (i === run && run === RUN_STEPS.length - 1)
-                  const nowStep = i === run && !done
-                  return (
-                    <li key={s} className={`flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm ${nowStep ? 'bg-brand-50 font-semibold text-brand-700' : done ? 'text-ink-900' : 'text-ink-500'}`}>
-                      <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${done ? 'bg-emerald-700 text-white' : nowStep ? 'animate-pulse bg-brand-600 text-white' : 'bg-ink-100 text-ink-500'}`}>{done ? '✓' : i + 1}</span>
-                      {s}
-                      {done && i === 0 && <span className="ml-auto text-xs font-normal text-ink-500">{serverMode ? account?.email : admin.email}</span>}
-                      {done && i === 2 && <span className="ml-auto font-mono text-xs font-normal text-ink-500">{info.network}</span>}
-                    </li>
-                  )
-                })}
-              </ol>
-              {run >= RUN_STEPS.length - 1 && <p className="text-sm text-emerald-700">설정이 끝났어요. 관리자로 들어가요.</p>}
+            <div className="space-y-2" aria-live="polite">
+              <h1 className="text-lg font-semibold">{info.name} 연결했어요</h1>
+              <p className="text-sm text-ink-700">관리자로 들어가요. 회사 연결 화면에서 사이트 데이터 연결(사이트 주소·API 키)을 이어서 해 주세요.</p>
+              {error && <p className="text-sm text-red-700">{error}</p>}
             </div>
           )}
         </div>

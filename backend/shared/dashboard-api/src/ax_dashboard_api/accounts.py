@@ -391,6 +391,8 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     out["policy_editor"] = can_edit and row.get("policy_editor") is True
     out["secret_editor"] = can_edit and row.get("secret_editor") is True
     out["secret_tenants"] = secret_tenants_of(row) if can_edit else []
+    linked = row.get("linked_admin")
+    out["linked_admin"] = linked if isinstance(linked, str) and linked else None
     return out
 
 
@@ -801,6 +803,46 @@ def reset_password(
     _clear_failures(str(row.get("email", "")))
     human_auth.end_account_sessions(account_id)
     logger.info("비밀번호를 초기화했다: %s by %s", account_id, human.name)
+    return ok(_public(row))
+
+
+@router.post("/accounts/{account_id}/unlink")
+def unlink_member(account_id: str, authorization: str | None = Header(None)) -> dict:
+    """관리자가 연결한 일반회원을 회사에서 끊는다(그 회원은 연결 대기: 할 수 있는 일이 없다).
+
+    고객사 관리자는 내 세션 회사의 일반회원 중 내가 연결한 회원(또는 연결 표시가 없는 옛 회원)만,
+    운영자는 어느 일반회원이든(그 회원의 모든 회사에서). 계정은 지우지 않고 그 회사 소속만 뺀다.
+    끊은 회원의 지금 세션은 끊는다. 다시 연결하려면 관리자가 회원 연결로 다시 데려온다.
+    """
+    human = session_human(authorization)
+    if human.role not in ("operator", "admin"):
+        raise ApiError(403, "ROLE_REQUIRED", "회원 연결을 끊을 권한이 없어요")
+    path = _editable_path()
+    with _file_lock:
+        rows = _bootstrap(path, _read(path))
+        row = next((r for r in rows if r.get("id") == account_id), None)
+        if row is None:
+            raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
+        if row.get("role") != "member":
+            raise ApiError(409, "MEMBER_ONLY", "일반회원만 연결을 끊을 수 있어요")
+        if human.role == "admin":
+            if not _in_my_company(human, row):
+                raise ApiError(404, "ACCOUNT_NOT_FOUND", "그런 계정이 없어요")
+            linked = row.get("linked_admin")
+            if linked and linked != human.account_id:
+                raise ApiError(
+                    403, "NOT_MY_MEMBER", "다른 관리자가 연결한 회원이에요. 그 관리자가 끊어요"
+                )
+            drop = {human.company_id}
+        else:
+            drop = _company_ids(row)
+        row["memberships"] = [
+            m.model_dump(mode="json") for m in memberships_of(row) if m.company_id not in drop
+        ]
+        row.pop("linked_admin", None)
+        _write(path, rows)
+    human_auth.end_account_sessions(account_id)
+    logger.info("회원 연결을 끊었다: %s (%s) by %s", account_id, ",".join(sorted(drop)), human.name)
     return ok(_public(row))
 
 

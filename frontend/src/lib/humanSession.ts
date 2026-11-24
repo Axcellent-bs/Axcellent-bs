@@ -33,6 +33,8 @@ export interface ServerAccount {
   secret_tenants?: string[];
   /** 열람 담당: 인사·재무 AI의 다른 사람 대화 요약을 본다 */
   readers?: ReaderAreaId[];
+  /** 이 일반회원을 연결한(만든) 관리자 계정 ID. 그 관리자가 회사를 옮기면 같이 가고, 그 관리자만 끊는다 */
+  linked_admin?: string | null;
 }
 
 /**
@@ -56,6 +58,7 @@ export function readServerAccount(v: unknown): ServerAccount | null {
   if (typeof a.secret_editor === "boolean") out.secret_editor = a.secret_editor;
   if (Array.isArray(a.secret_tenants)) out.secret_tenants = a.secret_tenants.filter((x): x is string => typeof x === "string");
   if (Array.isArray(a.readers)) out.readers = READER_AREA_IDS.filter((r) => (a.readers as unknown[]).includes(r));
+  if (a.linked_admin === null || typeof a.linked_admin === "string") out.linked_admin = a.linked_admin || null;
   return out;
 }
 
