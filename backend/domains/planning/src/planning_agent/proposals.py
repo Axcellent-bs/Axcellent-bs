@@ -59,6 +59,7 @@ from ax_contracts.schemas.planning import (
 )
 from ax_workflow.hr_link import AgentCaller
 from ax_workflow.models import IdeaOption, Proposal
+from planning_agent import video_plan
 from planning_agent.video_plan import company_info
 
 TIMEOUT_SECONDS = 60.0  # promo_concepts는 LLM을 써서 느리다 (하루 캐시가 있으면 빠름)
@@ -270,8 +271,14 @@ async def write_for_angle(
     facts = [InsightFact(label=f.label, value=f.value, source=f.source) for f in p.facts]
     texts = {"할 일": d.idea, "이유": d.why, "설명": p.body_md or ""}
     allowed = [*facts, *_ref_facts(option), *_scale_facts(p)]
-    d.warnings = number_warnings(texts, allowed, d.target, p.title)
+    d.warnings = number_warnings(texts, allowed, d.target, _known_text(p.title, p.format, d.format))
     return d
+
+
+def _known_text(title: str, *formats: str | None) -> str:
+    """경고에서 통과시키는 숫자 글: 데이터분석 제목 + 형식(숏폼 15초·30초, 의뢰 길이로 정한 형식).
+    11/24 재현 님 PROP-23: 의뢰 길이 15초가 "근거·목표에 없는 숫자"로 경고됐다."""
+    return " ".join([title, *(f for f in formats if f)])
 
 
 def _scale_facts(p: Proposal) -> list[InsightFact]:
@@ -292,7 +299,10 @@ async def write(writer: ProposalWriter | None, inp: ReceiveInsightInput, ctx: st
     """초안을 쓰고 숫자를 검사한다. 본문(body_md) 숫자도 근거·목표와 대조한다 (원칙 3)."""
     d = (await writer.draft(inp, ctx) if writer else None) or rule_draft(inp)
     texts = {"할 일": d.idea, "이유": d.why, "설명": inp.body_md or ""}
-    d.warnings = number_warnings(texts, inp.facts, d.target, inp.title)
+    asked = video_plan.requested_format(inp.request_text)
+    d.warnings = number_warnings(
+        texts, inp.facts, d.target, _known_text(inp.title, d.format, asked)
+    )
     return d
 
 

@@ -59,7 +59,7 @@ class Higgsfield:
                     raise
                 auth.forget(self.company_id)
                 self._session = None
-        raise McpError("unauthorized")  # pragma: no cover - 위에서 끝난다
+        raise McpError("unauthorized", tool=name)  # pragma: no cover - 위에서 끝난다
 
 
 def _number(value: object) -> float | None:
@@ -88,20 +88,84 @@ async def preflight(hf: Higgsfield, kind: str, params: dict[str, Any]) -> float 
     return cost
 
 
+# 11/24 presigned 업로드 헤더. media_upload 결과에 헤더 칸(headers·required_headers)이 있으면
+# 이 허용 목록 안의 것만 붙인다. 없어도 주소의 X-Amz-SignedHeaders에 if-none-match가 있으면
+# `If-None-Match: *`를 붙인다(11/24 Claude 쪽 연결로 본 주소가 content-type;host;if-none-match였다)
+UPLOAD_HEADER_FIELDS = ("headers", "required_headers")
+_ALLOWED_UPLOAD = ("content-type", "if-none-match", "content-md5", "cache-control")
+
+
+def _allowed_upload(name: str) -> bool:
+    low = name.strip().lower()
+    return low in _ALLOWED_UPLOAD or low.startswith("x-amz-")
+
+
+def signed_headers(url: str) -> set[str]:
+    """presigned 주소의 `X-Amz-SignedHeaders` (소문자 이름들). 없으면 빈 집합."""
+    from urllib.parse import parse_qs, urlsplit
+
+    query = parse_qs(urlsplit(url).query)
+    raw = next((v[0] for k, v in query.items() if k.lower() == "x-amz-signedheaders" and v), "")
+    return {h.strip().lower() for h in raw.split(";") if h.strip()}
+
+
+def upload_headers(first: dict[str, Any], url: str, content_type: str) -> dict[str, str]:
+    """업로드 PUT에 붙일 헤더.
+
+    결과 헤더 칸이 먼저, 없으면 Content-Type + 서명에 든 If-None-Match."""
+    headers = {"Content-Type": content_type}
+    given: dict[str, Any] = {}
+    for field in UPLOAD_HEADER_FIELDS:
+        box = first.get(field)
+        if isinstance(box, dict):
+            given = box
+            break
+    for name, value in given.items():
+        if isinstance(name, str) and isinstance(value, str | int) and _allowed_upload(name):
+            if name.strip().lower() == "content-type":
+                headers["Content-Type"] = str(value)
+            else:
+                headers[name.strip()] = str(value)
+    has_inm = any(n.lower() == "if-none-match" for n in headers)
+    if not has_inm and "if-none-match" in signed_headers(url):
+        headers["If-None-Match"] = "*"
+    return headers
+
+
 async def upload(hf: Higgsfield, data: bytes, filename: str, content_type: str) -> str:
     """참조 그림을 올리고 확인한 `media_id`."""
-    out = await hf.call("media_upload", {"filename": filename, "content_type": content_type})
+    from marketing_agent.higgsfield_mcp import (
+        bad_header,
+        clean_detail,
+        clean_value,
+        from_http_error,
+    )
+
+    tool, stage = "media_upload", "upload_put"
+    out = await hf.call(tool, {"filename": filename, "content_type": content_type})
     uploads = out.get("uploads")
     first = uploads[0] if isinstance(uploads, list) and uploads else None
     if not isinstance(first, dict):
-        raise McpError("upload_url_missing")
+        raise McpError("upload_url_missing", stage=stage, tool=tool)
     url, media_id = first.get("upload_url"), first.get("media_id")
-    if not (isinstance(url, str) and url.startswith("https://") and isinstance(media_id, str)):
-        raise McpError("upload_url_missing")
-    headers = {"Content-Type": str(first.get("content_type") or content_type)}
-    put = await hf.client.put(url, content=data, headers=headers)  # 인증 헤더는 보내지 않는다
+    if not (isinstance(url, str) and isinstance(media_id, str)):
+        raise McpError("upload_url_missing", stage=stage, tool=tool)
+    # MCP가 준 칸은 앞뒤 공백을 지우고, 공백·제어문자가 남으면 client_error (칸 이름만)
+    url = clean_value(url, "upload_url", stage=stage, tool=tool)
+    if not url.startswith("https://"):
+        raise McpError("upload_url_missing", stage=stage, tool=tool)
+    kind = clean_value(first.get("content_type") or content_type, "content_type",
+                       stage=stage, tool=tool)  # fmt: skip
+    headers = upload_headers(first, url, kind)
+    if (name := bad_header(headers)) is not None:  # 보내기 전에: 헤더 이름만
+        raise McpError("client_error", stage=stage, tool=tool, detail=f"header {name}")
+    try:
+        put = await hf.client.put(url, content=data, headers=headers)  # 인증 헤더는 보내지 않는다
+    except (httpx.HTTPError, httpx.InvalidURL) as error:
+        raise from_http_error(error, stage=stage, tool=tool) from error
     if put.status_code not in (200, 201, 204):
-        raise McpError(f"upload_http_{put.status_code}")
+        raise McpError(f"upload_http_{put.status_code}", stage=stage, tool=tool,
+                       status=put.status_code, detail=clean_detail(put.text[:400]))  # fmt: skip
     await hf.call("media_confirm", {"type": "image", "media_id": media_id})
     return media_id
 

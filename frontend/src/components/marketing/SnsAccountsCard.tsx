@@ -5,6 +5,7 @@ import {
   instagramComplete, instagramConnectUrl, instagramDisconnect, putCompanyAiKey, youtubeComplete, youtubeConnectUrl, youtubeDisconnect,
 } from "@/lib/companyAiApi";
 import { fetchHiggsfieldStatus, type HiggsfieldStatus } from "@/lib/higgsfield";
+import { checkedAt, reasonLine, reasonView } from "@/lib/higgsfieldReason";
 import { fetchInstagramStatus, fetchYoutubeStatus, type InstagramStatus, type YoutubeStatus } from "@/lib/youtube";
 import { useVisibleInterval } from "@/lib/visibleInterval";
 
@@ -56,6 +57,9 @@ function hfView(s: HiggsfieldStatus | null): { tone: Tone; label: string } {
     const credits = mcp && typeof s.credits === "number" ? ` · 남은 크레딧 ${s.credits.toLocaleString("ko-KR")}` : "";
     return { tone: "ok", label: mcp ? `계정 연결됨${s.plan ? ` · ${s.plan}` : ""}${credits}` : "연결됨" };
   }
+  // 11/24: 사유 코드가 있으면 시안 표의 표시(서버 오류·토큰 갱신 실패·도구 오류…). 없으면 아래 그대로
+  const why = reasonView(s.reason_code);
+  if (why) return why;
   if (s.connection === "invalid_key") return { tone: "bad", label: mcp ? "다시 연결 필요" : "키 거절" };
   if (s.connection === "unreachable") return { tone: "wait", label: "닿지 않음" };
   return { tone: "off", label: "연결 전" };
@@ -215,6 +219,13 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
         <div className="space-y-2 rounded-xl border border-ink-100 p-4">
           <Status name="Higgsfield" {...hfLook} href={hfLink} />
           <p className="text-xs text-ink-500">스토리보드로 영상을 만들 때 써요. {hf?.message_ko}{hf?.image_model ? ` · 이미지 모델 ${hf.image_model}` : ""}</p>
+          {/* 11/24: 사유 코드 · 확인 시각 (reasonLine과 같은 줄을 코드만 글꼴을 바꿔 그린다) */}
+          {hf?.reason_code && (
+            <p className="text-xs text-ink-500" title={reasonLine(hf.reason_code, hf.checked_at) ?? undefined}>
+              사유 <code className="rounded bg-ink-50 px-1 font-mono">{hf.reason_code}</code>
+              {checkedAt(hf.checked_at) ? ` · 확인 ${checkedAt(hf.checked_at)}` : ""}
+            </p>
+          )}
           {canEdit && (
             <>
               <p className="text-xs text-ink-500">

@@ -1,5 +1,6 @@
 // content.mjs를 읽어 index.html을 만든다. 사용: `node build.mjs` (이 폴더에서). 외부 패키지는 쓰지 않는다.
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import C from "./content.mjs";
@@ -9,6 +10,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const lines = (arr, sep = "<br>") => arr.map(esc).join(sep);
 const has = (v) => typeof v === "string" && v.trim() !== "";
+// style.css·app.js 주소 끝에 파일 내용에서 만든 짧은 값을 붙인다. 파일을 고치면 값이 바뀌어, 브라우저가 옛 파일을 계속 쓰지 않는다
+const ver = (f) => createHash("sha1").update(readFileSync(join(HERE, f))).digest("hex").slice(0, 8);
 
 // ----- 링크 버튼 (비어 있으면 안 나온다)
 const brochureBtn = (cls = "btn btn-gold") => (has(C.links.brochureUrl) ? `<a class="${cls}" href="${esc(C.links.brochureUrl)}" download>${esc(C.links.brochureLabel)}</a>` : "");
@@ -275,7 +278,7 @@ const html = `<!doctype html>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"></noscript>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=${ver("style.css")}">
   ${bgNoscript}
 </head>
 <body>
@@ -283,7 +286,7 @@ const html = `<!doctype html>
 ${header}
 ${mainHtml}
 ${footer}
-<script src="app.js" defer></script>
+<script src="app.js?v=${ver("app.js")}" defer></script>
 </body>
 </html>
 `;

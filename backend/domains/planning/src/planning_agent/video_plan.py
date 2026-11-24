@@ -86,12 +86,17 @@ _CLEAN = re.compile(r"[^0-9A-Za-z가-힣 ]+")
 _SECONDS = re.compile(r"(\d{1,3})\s*(?:초|s\b|sec)")
 
 
-def style(b: dict[str, str] | None = None) -> str:
-    """공통 화풍 한 줄 (지금 회사 [brand], 없으면 기본값)."""
+FREE_SETTING_EN = "a place that fits the story"
+
+
+def style(b: dict[str, str] | None = None, *, fixed_setting: bool = True) -> str:
+    """공통 화풍 한 줄 (지금 회사 [brand], 없으면 기본값).
+
+    `fixed_setting=False`(재미 먼저): 회사 배경을 묶지 않고 장면마다 이야기에 맞는 배경
+    (11/24 재현 님 PROP-23: 재미 먼저인데 장면이 책장·책 더미로만 나왔다)."""
     b = b or tenant.brand()
-    text = STYLE_TEMPLATE.format(
-        style=b["style_en"], character=b["character_en"], setting=b["setting_en"]
-    )
+    setting = b["setting_en"] if fixed_setting else FREE_SETTING_EN
+    text = STYLE_TEMPLATE.format(style=b["style_en"], character=b["character_en"], setting=setting)
     return _short(text, STYLE_MAX)
 
 
@@ -170,6 +175,18 @@ def prompt_problems(prompt: str) -> list[str]:
 
 _REQ_SECONDS = re.compile(r"(\d{1,3})\s*(?:초|sec\b|s\b)")
 _REQ_MINUTES = re.compile(r"(\d)\s*분")
+
+
+# 영상이 아닌 게시물 형식 (데이터분석이 인스타 게시물에서 가장 많은 형식을 보낼 때 나올 수 있다)
+NOT_SHORTS = frozenset({"사진", "캐러셀", "게시물", "카드뉴스"})
+
+
+def shorts_only(fmt: str | None) -> str | None:
+    """ "숏츠 형식" 칸에는 영상 형식만 둔다. 사진·캐러셀은 비운다 (지어내지 않고 빈 칸).
+    11/24 재현 님 PROP-23: 쇼츠 의뢰인데 숏츠 형식이 "캐러셀"로 나왔다."""
+    if fmt is None or fmt.strip() in NOT_SHORTS:
+        return None
+    return fmt
 
 
 def requested_format(text: str | None) -> str | None:
@@ -384,7 +401,7 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     caption: 화면엔 안 넣고 마무리 자막에만 회사 이름."""
     d = duration_of(p)
     b = tenant.brand()
-    who, where, who_ko = b["character_en"], b["setting_en"], b["character_ko"]
+    who, where, who_ko = b["character_en"], FREE_SETTING_EN, b["character_ko"]  # 배경 묶지 않음
     theme = _theme(p)
     tone = TONE.get(p.angle or "", "warm and friendly")
     product = _CLEAN.sub(" ", p.products[0]).strip()[:40] if p.products else ""
@@ -417,7 +434,7 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
             if exposure == END_CARD
             else f"마무리: {who_ko}가 손을 흔들며 끝낸다",
             _pick(company, ""),
-            f"Simple calm background in {where} with soft light and empty space in the center"
+            "Simple calm plain background with soft light and empty space in the center"
             if exposure == END_CARD
             else f"Closing shot: {who} waving at the camera in {where}, warm inviting ending",
         ),
@@ -437,7 +454,8 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     concept = _pick(*ideas, FUN_CONCEPT)
     return VideoPlan(
         concept=concept, duration_s=d, script=_short(script, 800), scenes=scenes,
-        style=style(b), negative=NEGATIVE, written_by="rule", media_hints=media_hints(p),
+        style=style(b, fixed_setting=False), negative=NEGATIVE, written_by="rule",
+        media_hints=media_hints(p),
     )  # fmt: skip
 
 
@@ -454,7 +472,7 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
   - visual: 화면 구성 (한국어, 200자 이내)
   - caption: 자막 (한국어, 30자 안팎, 편집 때 화면 위에 얹는다. 없으면 빈 문자열)
   - prompt: 그 장면을 만들 영상 생성 프롬프트 (영어, 500자 이내). 카메라·동작·분위기·배경을
-    구체적으로. 등장인물은 {character_ko}, 배경은 {setting_ko}
+    구체적으로. 등장인물은 {character_ko}, {setting_rule}
 
 지킬 것:
 - 영상 길이 {d}초, 장면 {n}개. 첫 장면은 3초 안에 시선을 끄는 훅, 마지막 장면은 마무리
@@ -492,6 +510,16 @@ EXPOSURE = {
     ),
     CAPTION: "  - 회사 이름·상품은 화면에 넣지 않고 마지막 장면 caption에만 쓴다\n",
 }
+
+
+def setting_rule(style_: str, b: dict[str, str]) -> str:
+    """프롬프트의 배경 줄. 재미 먼저면 회사 배경을 묶지 않는다(소재에 맞게)."""
+    if style_ == FUN_FIRST:
+        return (
+            f"배경은 장면 이야기에 맞게 고른다(회사 배경 '{b['setting_ko']}'에 묶지 않는다. "
+            "회사 업종을 드러내는 진열대·상품 더미 같은 소품을 본론에 일부러 넣지 않는다)"
+        )
+    return f"배경은 {b['setting_ko']}"
 
 
 def direction(style_: str, exposure: str) -> str:
@@ -592,7 +620,8 @@ def _from_llm(
         ]
         return VideoPlan(
             concept=_short(got.concept, 200), duration_s=d, script=_short(got.script, 800),
-            scenes=scenes, style=style(b), negative=NEGATIVE, written_by="llm",
+            scenes=scenes, style=style(b, fixed_setting=style_ != FUN_FIRST), 
+            negative=NEGATIVE, written_by="llm",
             media_hints=media_hints(p),
         )  # fmt: skip
     except ValidationError:
@@ -624,7 +653,7 @@ async def write(
     style_, exposure = promo
     prompt = PROMPT.format(
         n=RULE_SCENES, d=d, angle=ANGLE_TEXT.get(p.angle or "", "정하지 않음"),
-        character_ko=b["character_ko"], setting_ko=b["setting_ko"],
+        character_ko=b["character_ko"], setting_rule=setting_rule(style_, b),
         direction=direction(style_, exposure),
     )  # fmt: skip
     try:
