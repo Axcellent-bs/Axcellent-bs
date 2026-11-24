@@ -3,7 +3,8 @@ import { useNavigate } from "react-router";
 import { TONE, Waiting } from "@/components/finance/bits";
 import { PreparingChip } from "@/components/Preparing";
 import { when } from "@/components/data/Sources";
-import { AD, times } from "@/components/data/TrendMemes";
+import { AD, MegaRow, times } from "@/components/data/TrendMemes";
+import { perSubscriberLabel } from "@/lib/memeShorts";
 import { safeLink } from "@/lib/safeLink";
 import { printWithClass, usePrinting } from "@/lib/print";
 import { waitForImages } from "@/lib/printImages";
@@ -369,11 +370,44 @@ function ReportPost({ p, rank, domId }: { p: InstagramRadarPost; rank: number; d
 function ContentBody({ s }: { s: TrendReportSections["content"] }) {
   return (
     <>
+      {(s.audience_line || s.audience_widened || s.audience_thin) && (
+        <div className="space-y-1">
+          {s.audience_line && <p className="text-sm font-medium text-ink-900">{s.audience_line}</p>}
+          {s.audience_widened && !s.audience_line?.includes("넓혀") && <p className="text-xs text-ink-500">대상층에 맞는 계정이 적어 전체 계정으로 넓혀 봤어요</p>}
+          {s.audience_thin && <span className={`chip text-[11px] ${TONE.warn}`}>인스타 표본 적음 · 검색·유튜브 근거를 앞에 뒀어요</span>}
+        </div>
+      )}
       {s.posts.length === 0 ? <p className="text-sm text-ink-500">갑자기 뜬 게시물이 없어요.</p> : (
         <section aria-label="갑자기 뜬 게시물">
           <h4 className="mb-1.5 text-sm font-semibold text-ink-900">갑자기 뜬 게시물 <small className="font-normal text-ink-500">평소 대비 배수 · {n(s.posts.length)}개</small></h4>
           <ul className="print-keep-grid trend-print-posts grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {s.posts.map((p, i) => <ReportPost key={p.media_id} p={p} rank={i + 1} domId={evidenceDomId(`content:${i + 1}`)} />)}
+          </ul>
+        </section>
+      )}
+      {(s.mega?.length ?? 0) > 0 && (
+        <section aria-label="조회 천만 이상" className="space-y-1.5">
+          <h4 className="text-sm font-semibold text-ink-900">조회 천만 이상 <small className="font-normal text-ink-500">조회수 순 · {n(s.mega!.length)}개</small></h4>
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{s.mega!.map((x) => <MegaRow key={`${x.platform}:${x.item_id}`} x={x} />)}</ul>
+        </section>
+      )}
+      {(s.shorts?.length ?? 0) > 0 && (
+        <section aria-label="쇼츠 검색 근거" className="space-y-1.5">
+          <h4 className="text-sm font-semibold text-ink-900">쇼츠 검색 근거 <small className="font-normal text-ink-500">구독자 대비 조회수 순 · {n(s.shorts!.length)}개</small></h4>
+          <ul className="space-y-1.5">
+            {s.shorts!.map((v) => {
+              const link = safeLink(v.video_url);
+              const rel = perSubscriberLabel(v);
+              const title = v.title || v.video_id;
+              return (
+                <li key={v.video_id} className="text-sm">
+                  {link ? <a href={link} target="_blank" rel="noreferrer noopener" className="font-medium text-brand-700 underline-offset-2 hover:underline">{title}</a> : <b className="font-medium text-ink-900">{title}</b>}
+                  <small className="block text-xs text-ink-500">
+                    {[v.channel_title, v.views !== null ? `조회 ${v.views.toLocaleString("ko-KR")}` : null, rel].filter(Boolean).join(" · ")}
+                  </small>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

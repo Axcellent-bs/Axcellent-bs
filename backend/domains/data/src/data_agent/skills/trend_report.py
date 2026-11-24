@@ -60,7 +60,9 @@ from ax_contracts.schemas.data import (
 )
 from data_agent import instagram_store as st
 from data_agent import number_words as nw
+from data_agent import radar_meta as rm
 from data_agent.skills import caption_noise
+from data_agent.skills import trend_report_audience as ra
 from data_agent.skills import trend_report_brief as tb
 
 KST = timezone(timedelta(hours=9))
@@ -663,6 +665,7 @@ def meme_source_posts(stored: Any) -> list[InstagramRadarPost]:
 def content_section(posts: Sequence[InstagramRadarPost], read_any: bool, stored_memes: Any,
                     why_none: str | None, read_count: int | None = None, *,
                     meme_first: Sequence[InstagramRadarPost] = (),
+                    audience: ra.AudiencePick | None = None,
                     ) -> tuple[TrendContentSection, list[str]]:  # fmt: skip
     """터진 게시물·ok 밈. 계정을 읽었는데 둘 다 없으면 empty(봤지만 없음), 못 읽었으면 unknown.
 
@@ -677,6 +680,13 @@ def content_section(posts: Sequence[InstagramRadarPost], read_any: bool, stored_
     if meme_first:
         limits.append(f"의뢰에 밈·유행 말이 있어 밈·크리에이터 계정 게시물 {len(meme_first)}개를"
                       " 먼저 씀 (인스타 레이더 저장분)")  # fmt: skip
+    if audience is not None:  # 11/24: 대상층에 맞는 레이더 게시물 먼저, 의뢰 계정 게시물은 뒤에
+        merged = list({p.media_id: p for p in [*audience.posts, *posts]}.values())
+        out.posts = merged[:MAX_POSTS]
+        out.audience_line, out.audience_label = audience.line, audience.audience.label
+        out.audience_widened, out.audience_thin = audience.widened, audience.thin
+        out.shorts, out.mega = audience.shorts, audience.mega
+        limits.extend(audience.limits)
     where = f"읽은 계정 {read_count}곳에" if read_count else "읽은 계정에"
     no_burst = f"{where} 이번 7일 터진 게시물이 없음"
     if out.posts or out.memes:
@@ -880,11 +890,29 @@ def evidence_catalog(report: TrendReport) -> Catalog:
         extra = f" · {p.standout}" if p.standout else ""
         # 추천 LLM에 넘기는 말(word)에는 캡션을 넣지 않는다(외부 글. 11/20 콘티에 경쟁사 캡션의
         # "펀딩 소식"이 들어감). 캡션 발췌는 보고서 화면 콘텐츠 칸에만 있다
-        who_p = f"밈·크리에이터 계정 {p.account}" if p.source_kind == "meme" else p.account
+        who_p = p.account
+        if p.account_kind in ("meme", "creator"):
+            who_p = f"{rm.KIND_WORD[p.account_kind]} 계정 {p.account}"
+        elif p.source_kind == "meme":
+            who_p = f"밈·크리에이터 계정 {p.account}"
         out[f"content:{n}"] = (
             f"{who_p} {_fmt_word(p)}: {metric} {p.value:,} · 평소의 {p.ratio:g}배{extra}",
             f"{who_p}의 {_fmt_word(p)}가 평소보다 크게 뜸",
             short_of(f"{p.account} {_fmt_word(p)} {metric} ×{p.ratio:g}"))  # fmt: skip
+    for n, v in enumerate(s.content.mega, start=1):  # 11/24 조회 천만 이상 (우선 근거)
+        where = "인스타" if v.platform == "instagram" else "유튜브"
+        out[f"mega:{n}"] = (
+            f"{where} {v.account}: 조회 {v.views:,}회 (최근 30일 안 게시)",
+            f"{where} {v.account}의 영상이 조회 천만을 넘음",
+            short_of(f"{v.account} 조회 {v.views // 10_000:,}만"))  # fmt: skip
+    for n, v in enumerate(s.content.shorts, start=1):  # 11/24 쇼츠 검색 근거 (제목은 안 넘김)
+        ratio = f" · 구독자 대비 {v.views_per_subscriber:g}배" if v.views_per_subscriber else ""
+        views = f" · 조회 {v.views:,}" if v.views is not None else ""
+        many = "구독자보다 훨씬 많이" if (v.views_per_subscriber or 0) >= 1 else "많이"
+        out[f"shorts:{n}"] = (
+            f"유튜브 쇼츠 '{v.keyword}' 검색 · {v.channel_title or '채널 모름'}{views}{ratio}",
+            f"'{v.keyword}' 쇼츠 검색에서 {many} 본 영상이 있음",
+            short_of(f"쇼츠 {v.keyword}{ratio}"))  # fmt: skip
     for n, m in enumerate(s.content.memes, start=1):
         desc = f": {m.description}" if m.description else ""
         out[f"meme:{n}"] = (f"같이 뜬 밈 '{m.name}' (광고 재료 가능)",
@@ -909,7 +937,8 @@ def evidence_catalog(report: TrendReport) -> Catalog:
                      else "지표")  # fmt: skip
         out[f"competitor:{n}"] = (f"{c.account}: {', '.join(nums) or '지표 없음'}{traits}",
                                   ", ".join(words), short_of(f"{who_c} {brief_num}"))  # fmt: skip
-    return out
+    # 11/24: 조회 천만 이상을 앞에, 인스타 표본이 적은 대상층이면 검색·유튜브를 앞에
+    return ra.order_catalog(out, s.content.audience_thin)
 
 
 _PROMPT = (
@@ -1032,7 +1061,8 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
         data["의뢰_주제"] = brief.theme
     data.update({f"근거_{k}": word for k, (_, word, _) in catalog.items()})
     memes = meme_ids(report) if wants_memes(brief) else set()
-    prompt = _PROMPT + (_MEME_TEXT if memes else "")
+    thin = report.sections.content.audience_thin  # 11/24: 인스타 표본이 적은 대상층
+    prompt = _PROMPT + (_MEME_TEXT if memes else "") + (_THIN_TEXT if thin else "")
     try:
         answer = await llm.structured(prompt, _Recommendation, untrusted=data,
                                       context_id=context_id)  # fmt: skip
@@ -1051,6 +1081,8 @@ async def recommendation_section(report: TrendReport, llm: Any, *,
     out.materials, dropped, partial = pick_materials(answer.materials, catalog)
     if memes:  # 11/24: 밈 소스 근거를 쓴 재료를 먼저 (나머지 순서는 그대로)
         out.materials = meme_materials_first(out.materials, memes)
+    # 11/24 대상층: 조회 천만 이상(표본이 적으면 검색·유튜브) 근거를 쓴 재료를 맨 앞으로
+    out.materials = ra.order_materials(out.materials, thin, memes)
     limits += partial
     if dropped:
         limits.append("버린 재료: " + "; ".join(dropped))
@@ -1085,10 +1117,17 @@ _MEME_TEXT = (
 )
 
 
+_THIN_TEXT = (
+    "\n- 이 대상층은 인스타 표본이 적다: 결론은 검색(근거_search·근거_shopping)·유튜브(근거_shorts·"
+    "근거_mega) 근거를 먼저 쓸 것"
+)
+
+
 def meme_ids(report: TrendReport) -> set[str]:
     """콘텐츠 섹션에서 밈·크리에이터 계정 게시물의 근거 id (content:n)."""
     posts = report.sections.content.posts
-    return {f"content:{n}" for n, p in enumerate(posts, start=1) if p.source_kind == "meme"}
+    return {f"content:{n}" for n, p in enumerate(posts, start=1)
+            if p.source_kind == "meme" or p.account_kind in ("meme", "creator")}  # fmt: skip
 
 
 def meme_materials_first(materials: Sequence[TrendMaterial],
@@ -1149,6 +1188,9 @@ class Deps:
     memes: Callable[[], Any] | None = None  # trend_memes 저장 결과 (없으면 None)
     # 11/24 밈 소스: instagram_radar 저장 결과 (meme_posts). 의뢰에 밈·유행 말이 있을 때만 쓴다
     radar: Callable[[], Any] | None = None
+    # 11/24 대상층: 대상층 말을 붙인 추가 쇼츠 검색(YouTube, 없으면 안 함)·주제 분류 저장소
+    youtube: Any = None
+    category_cache: Any = None
     age_store: Any = None
     searchad: Any = None  # 검색광고 키워드 도구 (월 검색량, 없으면 안 부름)
     pool_path: Any = None  # keyword_pool DB (그날 값이 있으면 월 검색량 재사용)
@@ -1325,10 +1367,21 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
         stored = deps.memes() if deps.memes is not None else None
         # 11/24: 의뢰에 밈·유행 말이 있으면 레이더 밈·크리에이터 계정 게시물을 먼저
         first: list[InstagramRadarPost] = []
-        if wants_memes(report.brief) and deps.radar is not None:
-            first = meme_source_posts(deps.radar())
+        radar = deps.radar() if deps.radar is not None else None
+        # 11/24 대상층: 계정 메타가 있는 레이더 저장분이면 의뢰 대상층으로 고른다
+        # (없으면 #1671 규칙)
+        audience = ra.pick(report.brief, radar, stored, wants_memes(report.brief))
+        if audience is not None:
+            from data_agent import meme_shorts
+
+            words = meme_shorts.load_keywords(deps.env) or list(report.brief.keywords)
+            await ra.add_extra_shorts(audience, deps.env, deps.youtube, words, now, deps.llm,
+                                      category_cache=deps.category_cache,
+                                      context_id=context_id)  # fmt: skip
+        elif wants_memes(report.brief) and radar is not None:
+            first = meme_source_posts(radar)
         section, more = content_section(posts, bool(ig.media), stored, why_none, len(ig.media),
-                                        meme_first=first)  # fmt: skip
+                                        meme_first=first, audience=audience)  # fmt: skip
         report.sections.content = section
         limits.extend(more)
 

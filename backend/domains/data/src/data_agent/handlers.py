@@ -1239,6 +1239,13 @@ def get_shopping_connector() -> Any:
     return NaverShoppingConnector(os.environ, caller="trend_report")
 
 
+def _report_youtube() -> Any:
+    """보고서 대상층 추가 쇼츠 검색용 YouTube (키가 없으면 None: 검색하지 않는다)."""
+    from data_agent.connectors.youtube import KEY_ENV, YouTubeConnector
+
+    return YouTubeConnector(os.environ, caller="trend_report") if os.environ.get(KEY_ENV) else None
+
+
 def _trend_report_deps() -> Any:
     from data_agent import keyword_pool
     from data_agent.skills.trend_report import Deps
@@ -1248,6 +1255,7 @@ def _trend_report_deps() -> Any:
                 search=get_trend_connector(), shopping=get_shopping_connector(),
                 memes=lambda: RESPONSES.latest("trend_memes"),
                 radar=lambda: RESPONSES.latest("instagram_radar"),
+                youtube=_report_youtube(), category_cache=get_category_cache(),
                 searchad=get_searchad_connector(), pool_path=pool,
                 company=_trend_report_company, theme_inputs=_trend_report_theme_inputs)  # fmt: skip
 

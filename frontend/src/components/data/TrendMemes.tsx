@@ -7,7 +7,8 @@ import { SummaryBody, SummaryCard } from "@/components/data/KeywordTrend";
 import { Thumb } from "@/components/data/VideoExplorer";
 import { thumbSrc } from "@/lib/igRadarGrid";
 import { perSubscriberLabel, shortsNote, splitShorts } from "@/lib/memeShorts";
-import { dataAi, type MemeShortsSearch, type MemeShortsVideo, type MemeWindow, type TrendMeme, type TrendMemesOutput } from "@/lib/data";
+import { daysAgoLabel, layerChips, megaNote, megaSorted, platformLabel, viewsLabel } from "@/lib/radarMeta";
+import { dataAi, type MegaViewItem, type MegaViews, type MemeShortsSearch, type MemeShortsVideo, type MemeWindow, type TrendMeme, type TrendMemesOutput } from "@/lib/data";
 import type { DetectView } from "@/lib/detectView";
 
 // 트렌드 1 감지 하위 탭의 "요즘 유행·밈" (trend_memes, 오늘 가장 큰 화제 한 줄 바로 아래 플랫폼 칩 안). 영상 하나가 아니라 여러 채널에서 같이 늘어난 해시태그·구절 묶음.
@@ -202,6 +203,43 @@ function ShortsList({ label, list }: { label: string; list: MemeShortsVideo[] })
   );
 }
 
+/** 영상 줄 하나: 계정 · 플랫폼 · 조회수 · 며칠 전 · 층 칩. 제목은 유튜브만(텍스트로만), 썸네일은 https만 */
+export function MegaRow({ x }: { x: MegaViewItem }) {
+  const link = safeLink(x.link);
+  const thumb = thumbSrc(x.thumbnail_url);
+  const when = daysAgoLabel(x.posted_at);
+  const chips = layerChips(x);
+  const body = (
+    <>
+      {thumb && <img src={thumb} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-[54px] w-[40px] shrink-0 object-cover" />}
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate text-[13px] font-semibold text-ink-900">{x.account}{x.title ? ` · ${x.title}` : ""}</span>
+        <span className="text-xs text-ink-700">{[platformLabel(x.platform), viewsLabel(x.views), when].filter(Boolean).join(" · ")}</span>
+        {chips.length > 0 && <span className="flex flex-wrap gap-1">{chips.map((c) => <span key={c} className="chip text-[11px]">{c}</span>)}</span>}
+      </span>
+    </>
+  );
+  const cls = "flex min-w-0 gap-2 border border-ink-100 p-1.5";
+  return (
+    <li className="min-w-0">
+      {link ? <a href={link} target="_blank" rel="noreferrer noopener" className={`${cls} hover:bg-ink-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500`}>{body}</a> : <div className={cls}>{body}</div>}
+    </li>
+  );
+}
+
+/** 조회 천만 이상 영상 (mega_views). 조회수 내림차순, 모르면 서버 이유 */
+function MegaViewsPanel({ m }: { m: MegaViews }) {
+  const note = megaNote(m);
+  return (
+    <section aria-label="조회 천만 이상" className="space-y-2 border-t border-ink-100 pt-3">
+      <h3 className="text-sm font-semibold text-ink-900">조회 천만 이상 <small className="font-normal text-ink-500">최근 {m.days}일 · 조회수 순</small></h3>
+      {note ? <p className="text-sm text-ink-700">{note}</p> : (
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{megaSorted(m.items).map((x) => <MegaRow key={`${x.platform}:${x.item_id}`} x={x} />)}</ul>
+      )}
+    </section>
+  );
+}
+
 /** 회사 밈 키워드로 하루 1번 찾은 최근 7일 쇼츠 (shorts_search). 구독자 10만 이상 채널은 따로 */
 function ShortsSearch({ s }: { s: MemeShortsSearch | null | undefined }) {
   if (!s) return null;
@@ -239,6 +277,7 @@ function ShortsSearch({ s }: { s: MemeShortsSearch | null | undefined }) {
 export function TrendMemes({ focus = "all", summaryCards }: { focus?: DetectView; summaryCards?: ReactNode }) {
   const youtube = focus === "youtube";
   const [win, setWin] = useState<MemeWindow>("week");
+  const [showMega, setShowMega] = useState(false);
   const res = useSkill(() => dataAi.trendMemes(win));
   const meta = WINDOWS.find((w) => w.key === win)!;
   const pick = (key: MemeWindow) => {
@@ -286,6 +325,15 @@ export function TrendMemes({ focus = "all", summaryCards }: { focus?: DetectView
                   {s.out.skipped.map((k) => <li key={`${k.kind}-${k.name}`}><b className="font-medium text-ink-700">{k.name}</b> · {k.reason}</li>)}
                 </ul>
               </details>
+            )}
+            {s.out.mega_views && (
+              <>
+                <button type="button" aria-pressed={showMega} onClick={() => setShowMega((v) => !v)}
+                  className={`rounded-md px-2.5 py-1 text-xs ring-1 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${showMega ? "bg-brand-50 font-bold text-brand-700 ring-brand-500" : "text-ink-500 ring-ink-100 hover:bg-ink-50"}`}>
+                  조회 천만 이상
+                </button>
+                {showMega && <MegaViewsPanel m={s.out.mega_views} />}
+              </>
             )}
             <ShortsSearch s={s.out.shorts_search} />
           </div>
