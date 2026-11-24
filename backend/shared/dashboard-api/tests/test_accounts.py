@@ -405,6 +405,7 @@ def test_admin_list_hides_operators_and_internal_values(client) -> None:
                 "policy_editor",
                 "secret_editor",
                 "secret_tenants",
+                "linked_admin",  # 이 계정을 회사에 연결한 관리자 계정 번호(없으면 None)
             }
     admin_rows = client.get(BASE + "/accounts", headers=_bearer(admin)).json()["data"]
     assert {r["role"] for r in admin_rows} == {"admin", "member"}

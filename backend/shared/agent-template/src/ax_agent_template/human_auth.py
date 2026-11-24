@@ -153,12 +153,15 @@ def issue_session(
     gen: int | None = None,
     company_id: str | None = None,
     company_role: str | None = None,
+    no_company: bool = False,
 ) -> tuple[str, int]:
     """세션 토큰과 만료 시각(유닉스 초)을 만든다. 서명 키가 없으면 RuntimeError.
 
     gen을 안 주면 그 계정의 지금 세대 번호를 담는다.
     company_id를 주면 정식 회사 ID로 `cid`에, company_role은 `crole`에 담는다.
     회사 없이 회사 역할만 주거나, 형식이 맞지 않으면 ValueError.
+    no_company=True는 "소속 회사가 없는 고객사 계정"이다(`nocid`). `cid`가 없는 옛 토큰은
+    캣북스로 읽으므로, 회사에서 끊긴 계정이 캣북스로 들어가지 않게 따로 표시한다.
     """
     secret = _secret()
     if secret is None:
@@ -183,6 +186,10 @@ def issue_session(
         "jti": secrets.token_hex(12),
         "gen": account_generation(account_id) if gen is None else gen,
     }
+    if no_company:
+        if cid is not None:
+            raise ValueError("no_company는 회사와 같이 줄 수 없다")
+        payload["nocid"] = True
     if cid is not None:
         payload["cid"] = cid
         if company_role is not None:
@@ -195,8 +202,13 @@ def _invalid() -> HumanAuthError:
     return HumanAuthError(403, "HUMAN_TOKEN_INVALID", "사람 토큰을 검증할 수 없다")
 
 
-def verify_session(token: str, *, now: int | None = None) -> Human:
-    """세션 토큰의 서명·만료·끊은 목록을 확인한다."""
+def verify_session(token: str, *, now: int | None = None, allow_no_company: bool = False) -> Human:
+    """세션 토큰의 서명·만료·끊은 목록을 확인한다.
+
+    소속 회사가 없는 계정의 토큰(`nocid`)은 기본으로 거절한다(403 `NO_COMPANY`): 어느 회사
+    자료도 읽거나 바꿀 수 없다. 내 정보·로그아웃·비밀번호 바꾸기처럼 회사와 무관한 경로만
+    allow_no_company=True로 받는다(그때 `company_id`는 None).
+    """
     secret = _secret()
     parts = token.split(".")
     if secret is None or len(parts) != 3 or parts[0] != PREFIX:
@@ -228,7 +240,7 @@ def verify_session(token: str, *, now: int | None = None) -> Human:
         raise HumanAuthError(
             401, "SESSION_ENDED", "비밀번호가 바뀌어 로그인이 끊겼어요. 다시 로그인해 주세요"
         )
-    company_id, company_role = _session_company(payload, str(role))
+    company_id, company_role = _session_company(payload, str(role), allow_no_company)
     return Human(
         name=name,
         role=str(role),
@@ -240,11 +252,22 @@ def verify_session(token: str, *, now: int | None = None) -> Human:
     )
 
 
-def _session_company(payload: dict, role: str) -> tuple[str, str | None]:
+def _session_company(
+    payload: dict, role: str, allow_no_company: bool = False
+) -> tuple[str | None, str | None]:
     """토큰 내용의 회사·회사 역할. 서명은 이미 확인했다. 형식이 깨졌으면 받지 않는다.
 
     `cid`가 없는 옛 토큰은 캣북스로 보고, 회사 역할은 계정 역할을 그대로 읽는다(1단계).
+    `nocid`(소속 회사 없음) 토큰은 회사가 None이고, 허용한 경로가 아니면 거절한다.
     """
+    if payload.get("nocid") is True:
+        if "cid" in payload or "crole" in payload:
+            raise _invalid()
+        if not allow_no_company:
+            raise HumanAuthError(
+                403, "NO_COMPANY", "소속 회사가 없어요. 회사 관리자에게 연결을 요청해 주세요"
+            )
+        return None, None
     if "cid" not in payload:
         if "crole" in payload:
             raise _invalid()

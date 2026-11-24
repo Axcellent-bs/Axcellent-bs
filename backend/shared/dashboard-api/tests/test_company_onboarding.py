@@ -294,7 +294,9 @@ def test_admin_moves_to_a_new_company_with_members_after_disconnecting(client, t
     assert rows["m@example.com"]["memberships"] == [{"company_id": "nubi", "role": "member"}]
     # 다른 캣북스 관리자와 그 관리자가 데려온 회원은 그대로 캣북스
     assert accounts.memberships_of(rows["s@example.com"])[0].company_id == "catbooks"
-    assert {"company_id": "catbooks", "role": "admin"} in rows["a2@example.com"]["memberships"]
+    # 소속 칸이 없는 예전 캣북스 계정은 읽을 때 캣북스 소속이다(파일을 고쳐 쓰지 않는다)
+    kept = accounts.memberships_of(rows["a2@example.com"])
+    assert [(m.company_id, m.role) for m in kept] == [("catbooks", "admin")]
     # 옮긴 일반회원의 옛 세션은 끊기고, 다시 로그인하면 누비투어
     assert client.get(BASE + "/me", headers=_bearer(member_old)).status_code == 401
     member_new = _login(client, "m@example.com", PW)
@@ -358,6 +360,9 @@ def test_admin_unlinks_only_own_members_and_they_lose_the_company(client, tmp_pa
     assert client.get(BASE + "/me", headers=_bearer(member_session)).status_code == 401
     again = _login(client, "m@example.com", PW)
     assert client.get(BASE + "/me", headers=_bearer(again)).json()["data"]["company_id"] is None
+    # 소속이 없는 세션은 어느 회사 자료도 못 본다(캣북스로 읽히지 않는다)
+    res = client.get("/api/dashboard/connection-keys", headers=_bearer(again))
+    assert res.status_code == 403 and res.json()["error"]["code"] == "NO_COMPANY"
     # 일반회원은 끊을 수 없다
     res = _unlink(client, again, rows["s@example.com"]["id"])
     assert res.status_code == 403

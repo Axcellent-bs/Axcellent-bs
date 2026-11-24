@@ -337,6 +337,8 @@ def _issue_for(row: dict[str, Any]) -> tuple[str, int, list[Membership]]:
         role=str(row["role"]),
         company_id=first.company_id if first else None,
         company_role=first.role if first else None,
+        # 고객사 계정인데 소속이 없으면(회사에서 끊김) 캣북스로 읽히지 않게 표시한다
+        no_company=first is None and row.get("role") in CUSTOMER_ROLES,
     )
     return token, exp, memberships
 
@@ -446,15 +448,19 @@ def _api_error(err: human_auth.HumanAuthError) -> ApiError:
     return ApiError(err.status_code, err.code, err.message)
 
 
-def session_human(authorization: str | None) -> human_auth.Human:
-    """로그인 세션 토큰만 받는다(공용 토큰은 계정이 아니라 여기서 거절)."""
+def session_human(authorization: str | None, *, allow_no_company: bool = False) -> human_auth.Human:
+    """로그인 세션 토큰만 받는다(공용 토큰은 계정이 아니라 여기서 거절).
+
+    소속 회사가 없는 계정의 세션은 403 `NO_COMPANY`로 거절한다. 내 정보·로그아웃·비밀번호
+    바꾸기만 allow_no_company=True로 받는다.
+    """
     token = human_auth.bearer(authorization)
     if not token:
         raise ApiError(401, "AUTH_REQUIRED", "로그인이 필요하다 (Authorization: Bearer 토큰)")
     if not human_auth.is_session_token(token):
         raise ApiError(403, "SESSION_REQUIRED", "로그인한 계정의 토큰이 필요하다")
     try:
-        return human_auth.verify_session(token)
+        return human_auth.verify_session(token, allow_no_company=allow_no_company)
     except human_auth.HumanAuthError as err:
         raise _api_error(err) from None
 
@@ -587,14 +593,14 @@ def login(body: LoginIn) -> dict:
 
 @router.post("/logout")
 def logout(authorization: str | None = Header(None)) -> dict:
-    human = session_human(authorization)
+    human = session_human(authorization, allow_no_company=True)
     human_auth.revoke_session(human)
     return ok({"logged_out": True})
 
 
 @router.get("/me")
 def me(authorization: str | None = Header(None)) -> dict:
-    human = session_human(authorization)
+    human = session_human(authorization, allow_no_company=True)
     row = next((r for r in load_accounts() if r.get("id") == human.account_id), None)
     if row is None:
         raise ApiError(401, "ACCOUNT_GONE", "계정이 없어졌어요. 다시 로그인해 주세요")
@@ -758,7 +764,7 @@ def move_company(admin_id: str, old: str, new: str) -> tuple[list[str], dict[str
 @router.post("/password")
 def change_password(body: PasswordChangeIn, authorization: str | None = Header(None)) -> dict:
     """내 비밀번호 바꾸기. 성공하면 이 계정의 기존 세션을 모두 끊고 새 세션을 준다."""
-    human = session_human(authorization)
+    human = session_human(authorization, allow_no_company=True)
     _check_new_password(body.new_password)
     path = _editable_path()
     now = time.time()

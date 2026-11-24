@@ -442,17 +442,17 @@ def check_public(body: KeyIn, request: Request) -> dict:
     회사 정보(미리 채울 값)를 내주지 않는다(재헌 리뷰 11/24).
     """
     _limit_public(request, body.key)
-    return ok(_check(body.key, None))
+    return ok(_check(body.key, None, public=True))
 
 
-def _check(key: str, authorization: str | None) -> dict[str, Any]:
+def _check(key: str, authorization: str | None, *, public: bool = False) -> dict[str, Any]:
     data = _load()
     found = _find(data, key)
     bound = (
         company_scope.scope_id(found["for_company"]) if found and found.get("for_company") else None
     )
     session = _session_cid(authorization)
-    if session is None and not bound:
+    if public and not bound:  # 로그인 전 경로는 예전 키가 있는지조차 알려 주지 않는다
         return {"ok": False, "reason": _UNKNOWN_KEY}
     if bound and session is None:
         # 로그인 전: 그 회사 전용 키. 첫 관리자 가입이 되는지만 본다(연결은 가입·로그인 뒤)
