@@ -24,10 +24,13 @@ from ax_contracts.data_access.sales_aggregates import (
     AggRun,
     AtRiskRow,
     BuyerPeriodRow,
+    ChannelValueRow,
     CohortRow,
     HiddenCount,
+    PairRow,
     QualityDailyRow,
     SalesDailyRow,
+    SegmentProfileRow,
 )
 
 DB_ENV = "DATA_AGGREGATES_DB"
@@ -90,6 +93,27 @@ CREATE TABLE IF NOT EXISTS agg_at_risk (
     churn_days INTEGER NOT NULL, repeat_min_orders INTEGER NOT NULL,
     PRIMARY KEY (tenant_id, as_of, attr_cell)
 );
+CREATE TABLE IF NOT EXISTS agg_pairs (
+    {_COMMON}, as_of TEXT NOT NULL, period TEXT NOT NULL, level TEXT NOT NULL,
+    attr_cell TEXT NOT NULL, code_a TEXT NOT NULL, code_b TEXT NOT NULL,
+    together_buyers INTEGER NOT NULL, a_buyers INTEGER NOT NULL, b_buyers INTEGER NOT NULL,
+    overall_buyers INTEGER NOT NULL, together_orders INTEGER, hidden_slots INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, as_of, period, level, attr_cell, code_a, code_b)
+);
+CREATE TABLE IF NOT EXISTS agg_segment_profile (
+    {_COMMON}, as_of TEXT NOT NULL, period TEXT NOT NULL, attr_cell TEXT NOT NULL,
+    item_level TEXT NOT NULL, item_code TEXT NOT NULL,
+    buyers INTEGER, buyers_hidden INTEGER NOT NULL DEFAULT 0, item_buyers INTEGER NOT NULL,
+    orders INTEGER, revenue INTEGER, title TEXT,
+    PRIMARY KEY (tenant_id, as_of, period, attr_cell, item_level, item_code)
+);
+CREATE TABLE IF NOT EXISTS agg_channel_value (
+    {_COMMON}, as_of TEXT NOT NULL, period TEXT NOT NULL, source_label TEXT NOT NULL,
+    new_buyers INTEGER, new_hidden INTEGER NOT NULL DEFAULT 0, horizon_net INTEGER,
+    horizon_orders INTEGER, repeaters INTEGER, excluded_incomplete INTEGER NOT NULL,
+    horizon_days INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, as_of, period, source_label)
+);
 CREATE TABLE IF NOT EXISTS agg_runs (
     run_id TEXT NOT NULL PRIMARY KEY, tenant_id TEXT NOT NULL, as_of TEXT NOT NULL,
     input TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,
@@ -124,6 +148,44 @@ _ROLL_UP = (
 
 
 SNAPSHOT_TABLES = ("agg_buyers_period", "agg_cohorts", "agg_at_risk")
+MORE_TABLES = ("agg_pairs", "agg_segment_profile", "agg_channel_value")
+_INSERT_PAIR = (
+    f"INSERT INTO agg_pairs ({_COMMON_COLS}, as_of, period, level, attr_cell, code_a, code_b, "
+    "together_buyers, a_buyers, b_buyers, overall_buyers, together_orders, hidden_slots) "
+    f"VALUES ({', '.join('?' * 16)})"
+)
+_INSERT_PROFILE = (
+    f"INSERT INTO agg_segment_profile ({_COMMON_COLS}, as_of, period, attr_cell, item_level, "
+    "item_code, buyers, buyers_hidden, item_buyers, orders, revenue, title) "
+    f"VALUES ({', '.join('?' * 15)})"
+)
+_INSERT_CHANNEL = (
+    f"INSERT INTO agg_channel_value ({_COMMON_COLS}, as_of, period, source_label, new_buyers, "
+    "new_hidden, horizon_net, horizon_orders, repeaters, excluded_incomplete, horizon_days) "
+    f"VALUES ({', '.join('?' * 14)})"
+)
+
+
+def _pair_values(tenant_id: str, as_of: str, r: PairRow) -> tuple:
+    return (
+        *_common(tenant_id, r), as_of, r.period, r.level, cell_text(r.attr_cell), r.code_a,
+        r.code_b, r.together_buyers, r.a_buyers, r.b_buyers, r.overall_buyers, r.together_orders,
+        r.hidden_slots,
+    )  # fmt: skip
+
+
+def _profile_values(tenant_id: str, as_of: str, r: SegmentProfileRow) -> tuple:
+    return (
+        *_common(tenant_id, r), as_of, r.period, cell_text(r.attr_cell), r.item_level,
+        r.item_code, *_hc(r.buyers), r.item_buyers, r.orders, r.revenue, r.title,
+    )  # fmt: skip
+
+
+def _channel_values(tenant_id: str, as_of: str, r: ChannelValueRow) -> tuple:
+    return (
+        *_common(tenant_id, r), as_of, r.period, r.source_label, *_hc(r.new_buyers),
+        r.horizon_net, r.horizon_orders, r.repeaters, r.excluded_incomplete, r.horizon_days,
+    )  # fmt: skip
 SNAPSHOT_DAILY_DAYS = 35
 KEEP_SNAPSHOT_MONTHS = 60
 _INSERT_BUYERS = (
@@ -330,7 +392,7 @@ class AggregateStore:
         oldest = _months_back(as_of, KEEP_SNAPSHOT_MONTHS).isoformat()
         removed = 0
         with self._tx() as conn:
-            for table in SNAPSHOT_TABLES:
+            for table in (*SNAPSHOT_TABLES, *MORE_TABLES):
                 removed += conn.execute(
                     f"DELETE FROM {table} WHERE tenant_id = ? AND (as_of < ? OR (as_of < ? AND "
                     f"as_of != (SELECT MAX(t2.as_of) FROM {table} t2 WHERE t2.tenant_id = "
@@ -357,6 +419,31 @@ class AggregateStore:
     def at_risk_rows(self, tenant_id: str, as_of: date) -> list[sqlite3.Row]:
         return self._conn.execute(
             "SELECT * FROM agg_at_risk WHERE tenant_id = ? AND as_of = ? ORDER BY attr_cell",
+            (tenant_id, as_of.isoformat()),
+        ).fetchall()
+
+    def replace_more(
+        self,
+        tenant_id: str,
+        as_of: date,
+        pairs: Sequence[PairRow],
+        profiles: Sequence[SegmentProfileRow],
+        channels: Sequence[ChannelValueRow],
+    ) -> None:
+        """함께 산 상품·즐겨 사는 것·채널 가치 스냅샷을 그 기준일만 통째로 바꿔 넣는다."""
+        a = as_of.isoformat()
+        with self._tx() as conn:
+            for table in MORE_TABLES:
+                conn.execute(f"DELETE FROM {table} WHERE tenant_id = ? AND as_of = ?", (tenant_id, a))
+            conn.executemany(_INSERT_PAIR, [_pair_values(tenant_id, a, r) for r in pairs])
+            conn.executemany(_INSERT_PROFILE, [_profile_values(tenant_id, a, r) for r in profiles])
+            conn.executemany(_INSERT_CHANNEL, [_channel_values(tenant_id, a, r) for r in channels])
+
+    def more_rows(self, table: str, tenant_id: str, as_of: date) -> list[sqlite3.Row]:
+        if table not in MORE_TABLES:
+            raise ValueError(table)
+        return self._conn.execute(
+            f"SELECT * FROM {table} WHERE tenant_id = ? AND as_of = ?",
             (tenant_id, as_of.isoformat()),
         ).fetchall()
 
