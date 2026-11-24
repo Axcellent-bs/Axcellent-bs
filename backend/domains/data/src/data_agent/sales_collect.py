@@ -390,6 +390,33 @@ def lock_path(env: Mapping[str, str]) -> Path:
     return db_path(env).with_name("sales_collect.lock")
 
 
+AGGREGATE_ENV = "DATA_AGGREGATE_DAILY"  # "1"이면 하루 집계 계산 (3-1b). 기본 끔 (run_all.sh가 켠다)
+AGGREGATE_AFTER = (0, 30)  # 한국 00:30 뒤 첫 회차에 (설계 5.1)
+
+
+def aggregate_daily(store: SalesStore, tenant: str, env: Mapping[str, str], now: datetime) -> None:
+    """일별 집계 하루 계산 (회사마다 하루 한 번). 실패해도 판매 수집은 그대로 이어 간다."""
+    if env.get(AGGREGATE_ENV, "").strip() != "1":
+        return
+    from data_agent import catalog
+    from data_agent.aggregate.daily import run_daily
+    from data_agent.aggregate.store import AggregateStore
+    from data_agent.aggregate.store import db_path as agg_db_path
+    from data_agent.sales_quality import KST
+
+    local = now.astimezone(KST)
+    if (local.hour, local.minute) < AGGREGATE_AFTER:
+        return
+    try:
+        agg = AggregateStore(agg_db_path(dict(env)))
+        try:
+            run_daily(store, agg, tenant, catalog.current(env).sales, now)
+        finally:
+            agg.close()
+    except Exception as error:  # noqa: BLE001 - 집계 때문에 수집이 멈추지 않게
+        print(f"[aggregate] 하루 계산을 시작하지 못함 {describe(error)}", flush=True)
+
+
 async def run(every: int | None, env: Mapping[str, str]) -> int:
     store = SalesStore(db_path(env))
     tenant = (env.get(TENANT_ENV) or TENANT_ID_DEFAULT).strip()
@@ -406,6 +433,7 @@ async def run(every: int | None, env: Mapping[str, str]) -> int:
                 result = await collect_once(source, store, tenant_id=tenant, source_name=name)
             for line in streak.lines(result):
                 print(line, flush=True)
+            aggregate_daily(store, tenant, env, datetime.now(UTC))
             if every is None:
                 return 1 if result.errors else 0
             await asyncio.sleep(every)

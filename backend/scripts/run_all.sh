@@ -634,6 +634,8 @@ if echo "$RUN_APPS" | awk '$1 == "data" {found=1} END {exit !found}'; then
   # 간격은 DATA_SALES_SYNC_SECONDS(기본 300초). 잠금(backend/.data/sales_collect.lock)으로 하나만 돈다
   keep_log sales-collect
   echo "$START_LINE" > "$LOGS/sales-collect.log"
+  # 일별 집계 하루 계산(3-1b): 한국 00:30 뒤 첫 회차에 회사마다 하루 한 번. 끄려면 DATA_AGGREGATE_DAILY=0
+  DATA_AGGREGATE_DAILY="${DATA_AGGREGATE_DAILY:-1}" \
   "$PY" -m data_agent.sales_collect --every "${DATA_SALES_SYNC_SECONDS:-300}" >> "$LOGS/sales-collect.log" 2>&1 &
   winpid_of $! > "$LOGS/sales-collect.pid"
   # 수집기 세 개를 켰다는 줄 (잠금을 못 잡아 끝났는지는 각 로그 첫 줄, 상태는 data_sources 출처 현황)
