@@ -14,10 +14,11 @@
 - 기다리기: `jobs_wait`(`timeout_seconds` 15 이하, 오래 기다려 주는 조회) → completed면 `result_url`
 - 영상은 `use_unlim=false`를 늘 보낸다. 안 보내면 무료 무제한이 있는 계정에서 작업을 만들지 않고
   "무제한을 쓸까요" 질문(`unlim_choice`)만 돌려준다. 사람이 승인한 것은 크레딧으로 만드는 일이다
-- 11/24 그림(이미지 시트·스토리보드 그림)은 무제한(`use_unlim=true`)으로만 만든다
-  (`IMAGE_USE_UNLIM`). 무제한이 안 되는 응답(`unlim_choice`·크레딧이 필요하다는 오류·
-  `credits_insufficient`)이면 크레딧으로 다시 시도하지 않고 `image_unlim_unavailable`로 멈춘다.
-  미리 보기도 무제한 기준이라 크레딧 잔액으로 막지 않는다
+- 그림(이미지 시트·스토리보드·썸네일)의 무제한 여부는 `image_unlim()` 한 곳(`IMAGE_USE_UNLIM`).
+  11/24 운영 계정이 무제한 불가라 지금은 False(크레딧: 잔액으로 미리 막고 `credits_insufficient`).
+  무제한 설정일 때 무제한이 안 되는 응답(`unlim_choice`·"Unlimited generations aren't available"·
+  크레딧이 필요하다는 오류·`credits_insufficient`)이면 크레딧으로 다시 시도하지 않고
+  `image_unlim_unavailable`로 멈춘다. 무제한이면 미리 보기도 잔액으로 막지 않는다
 """
 
 from __future__ import annotations
@@ -44,14 +45,26 @@ _CREDIT_WORDS = ("insufficient", "not enough credit", "credits")
 
 # 그림을 무제한으로만 만드나 (11/24). 나중에 회사 설정(무제한만 / 크레딧 써도 됨)으로 바꿀 자리는
 # 여기 한 곳이다(`image_unlim()`만 바꾸면 그림 params·미리 보기·멈춤 판단이 같이 따라간다)
-IMAGE_USE_UNLIM = True
+# 11/24 운영(wr_e783b8075f)에서 이 계정은 무제한이 안 된다고 확인했다
+# ("Unlimited generations aren't available on this account", 그림 모델 모두 unlim.available=false).
+# 재현 님 결정: 그림은 크레딧으로. 모델은 서버 설정 MARKETING_HIGGSFIELD_MCP_IMAGE_MODEL
+# (예: gpt_image_2_6, 코드에 박지 않는다)
+IMAGE_USE_UNLIM = False
 UNLIM_UNAVAILABLE = "image_unlim_unavailable"
 # 무제한이 안 된다는 뜻으로 보는 사유 코드 (크레딧으로 다시 시도하지 않는다)
 _NO_UNLIM_CODES = ("unlim_choice", "credits_insufficient")
+# 무제한을 거절하는 Higgsfield 문장 (11/24 실제 응답:
+# "Unlimited generations aren't available on this account. Retry without use_unlim to generate
+# with credits.")
+_UNLIM_REFUSED = re.compile(
+    r"unlimited[^.]{0,60}(?:aren'?t|are not|is not|isn'?t|not)\s+available"
+    r"|retry without use_unlim|unlim[^.]{0,30}not available",
+    re.IGNORECASE,
+)
 
 
 def image_unlim() -> bool:
-    """그림을 무제한으로만 만드나. 지금은 늘 True(회사 설정은 나중에)."""
+    """그림을 무제한으로만 만드나. 지금은 False(크레딧). 회사 설정(hf-settings)은 나중에 여기로."""
     return IMAGE_USE_UNLIM
 
 
@@ -66,7 +79,9 @@ def unlim_unavailable(error: McpError) -> McpError | None:
     원인 칸(단계·도구·문장)은 그대로 옮기고 원래 사유는 error_class 자리에 남긴다."""
     detail = (getattr(error, "detail", None) or "").lower()
     credit_said = any(w in detail for w in (*_CREDIT_WORDS, "unlim", "upgrade"))
-    if error.code in _NO_UNLIM_CODES or (error.code in ("tool_error",) and credit_said):
+    refused = bool(_UNLIM_REFUSED.search(detail))  # 무제한 거절 문장 (tool_error·rpc_error 모두)
+    said = error.code in ("tool_error", "rpc_error") and (credit_said or refused)
+    if error.code in _NO_UNLIM_CODES or said:
         return McpError(UNLIM_UNAVAILABLE, stage=getattr(error, "stage", None),
                         tool=getattr(error, "tool", None), detail=getattr(error, "detail", None),
                         error_class=error.code)  # fmt: skip

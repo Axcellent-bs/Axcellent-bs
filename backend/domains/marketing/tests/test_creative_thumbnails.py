@@ -282,9 +282,10 @@ def test_three_candidates_after_human_approval_with_ai_mark(env: dict[str, Any])
     action, params, key = env["gate"].calls[0]
     assert action == "generate_creative_thumbnails" and params["count"] == 3
     assert params["aspect_ratio"] == "9:16"  # Higgsfield 영상은 세로
-    # 11/24: 썸네일도 무제한 (기록·요약 "무제한")
-    assert params["billing"] == "unlim" and params["credits_estimate"] == 6.0
-    assert "Higgsfield 무제한" in params["summary"]
+    # 11/24: 썸네일도 그림 설정(image_unlim)을 따른다. 기본은 크레딧이라 기록·요약도 구독 크레딧
+    assert params["billing"] == "company_subscription" and params["credits_estimate"] == 6.0
+    # 11/24: 그림은 크레딧(무제한 설정은 test_thumbnail_unlim.py)
+    assert "구독 크레딧" in params["summary"]
     assert params["ai_generated"] is True and params["source_part"] == "video"
     # 같은 키로 다시 물어 승인되면 만든다
     env["gate"].status[ct.ACTION] = "executed"
