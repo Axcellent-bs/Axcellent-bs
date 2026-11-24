@@ -1,4 +1,4 @@
-// node --test로 돈다 (npm test). 시스템 관리 › 회사 연결 › 브랜드: 홍보 영상 방향 두 줄 (11/24).
+// node --test로 돈다 (npm test). 마케팅 › 브랜드(/marketing/brand): 홍보 영상 방향 두 줄 (11/24).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { EXPOSURE_ROW, STYLE_ROW, canSave, exposureActive, hasScreenValue, sourceLine, type PromoState } from "./promoStyleView.ts";

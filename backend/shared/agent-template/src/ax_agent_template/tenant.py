@@ -279,7 +279,7 @@ def brand_section(name: str | None = None) -> dict[str, Any]:
 # "재미 먼저, 브랜드는 끝에": 대상층이 좋아하는 형식·소재로 웃기고 브랜드는 끝에 붙인다.
 # 같은 `[brand]` 섹션의 두 칸(promo_style·brand_exposure). brand() 5칸과 따로 읽는다
 # (5칸은 영상 프롬프트에 그대로 들어가는 글이라 금칙·길이 규칙이 다르다).
-# 고르는 순서: 화면 저장(시스템 관리 › 회사 연결 › 브랜드, 회사별) → tenant.toml [brand] → 기본값.
+# 고르는 순서: 화면 저장(마케팅 › 브랜드(/marketing/brand), 회사별) → tenant.toml [brand] → 기본값.
 # 화면 저장 파일: `AX_PROMO_FILE` → 회사 연결 파일 옆 `promo_style.json`
 # ({"companies": {"<회사>": {"promo_style": …, "brand_exposure": …}}}).
 # dashboard-api가 쓰고 data가 읽는다
