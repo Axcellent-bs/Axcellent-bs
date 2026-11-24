@@ -20,7 +20,13 @@ from marketing_agent.media.prompts import (
 
 FIELDS = {"season": "spring", "color_theme": "soft pastel", "category": "그림책"}
 VIDEO = "cat_bookstore_video"
-BASE = render_prompt(VIDEO, FIELDS)
+
+
+def _base() -> str:
+    """기획 필드 없는 기준 문장. 브랜드 자리를 요청 회사 설정으로 채워서 시험 안에서 만든다."""
+    return render_prompt(VIDEO, FIELDS)
+
+
 CLAUSE_START = "Story theme guidance"
 
 
@@ -72,8 +78,8 @@ def _render(**plan: str):  # noqa: ANN202
 
 
 def test_without_plan_fields_prompt_is_unchanged() -> None:
-    assert CLAUSE_START not in BASE
-    assert "themed around 그림책. Gentle camera" in BASE
+    assert CLAUSE_START not in _base()
+    assert "themed around 그림책. Gentle camera" in _base()
     assert render_prompt_detailed(VIDEO, FIELDS).plan_record() is None
 
 
@@ -87,13 +93,13 @@ def test_plan_fields_are_inserted_before_fixed_negatives() -> None:
     assert "core message 그림책으로 따뜻한 겨울 독서;" in out.prompt
     assert "tone warm and product focused" in out.prompt
     assert out.prompt.index(CLAUSE_START) < out.prompt.index("Gentle camera")
-    assert out.prompt.endswith("no readable book covers.")  # 고정 금지 문구는 그대로
+    assert out.prompt.endswith("no readable labels or covers.")  # 고정 금지 문구는 그대로
     assert out.plan_record()["fields_used"] == ["plan_idea", "plan_why", "plan_tone"]
 
 
 def test_empty_plan_fields_behave_as_before() -> None:
     out = _render(plan_idea="   ", plan_why="")
-    assert out.prompt == BASE
+    assert out.prompt == _base()
     assert out.plan_record()["fields_used"] == []
     assert {s["reason"] for s in out.plan_record()["skipped"]} == {"empty"}
 
@@ -234,3 +240,25 @@ async def test_generation_records_names_hash_len_in_meta_and_ledger(gate: Gate) 
 async def test_generation_without_plan_has_no_plan_context(gate: Gate) -> None:
     result = await _generate(MediaLedger())
     assert result.output is not None and "plan_context" not in result.output
+
+
+def test_brand_slots_follow_the_company_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """주인공·배경은 문장에 박지 않고 요청 회사 [brand]에서 채운다. 책방·고양이를 박지 않는다."""
+    travel = tmp_path / "travel"
+    travel.mkdir()
+    (travel / "tenant.toml").write_text(
+        'name = "하늘여행"\n[brand]\n'
+        'character_en = "a friendly original cartoon suitcase mascot"\n'
+        'setting_en = "a bright seaside travel agency"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AX_TENANTS_DIR", str(tmp_path))
+    monkeypatch.setenv("AX_TENANT", "travel")
+    prompt = _base()
+    assert "suitcase mascot walking through a bright seaside travel agency" in prompt
+    assert "cat" not in prompt and "book" not in prompt
+    monkeypatch.setenv("AX_TENANT", "no-such-company")  # 설정이 없으면 중립 기본값
+    neutral = _base()
+    assert "original illustrated characters" in neutral and "bookstore" not in neutral
