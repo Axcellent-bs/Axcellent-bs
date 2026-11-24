@@ -60,6 +60,7 @@ from ax_contracts.schemas.planning import (
 from ax_workflow.hr_link import AgentCaller
 from ax_workflow.models import IdeaOption, Proposal
 from planning_agent import video_plan
+from planning_agent.video_plan import company_info
 
 TIMEOUT_SECONDS = 60.0  # promo_concepts는 LLM을 써서 느리다 (하루 캐시가 있으면 빠름)
 WRITE_TIMEOUT_SECONDS = 30.0
@@ -122,7 +123,8 @@ def number_warnings(
 
 # ---------------------------------------------------------------- 기획 판단 초안
 
-WRITE_PROMPT = """너는 고객사(온라인 서점) 사내 기획 담당 AI다.
+WRITE_PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업종·소개는 데이터의 company에 있다
+(비어 있으면 업종을 짐작하지 않고 어느 업종에도 맞는 말로 쓴다).
 데이터분석이 보낸 인사이트 한 건과 데이터 근거(facts)를 보고 기획 제안을 쓴다.
 
 규칙:
@@ -173,6 +175,7 @@ class ProposalWriter:
 
     async def draft(self, inp: ReceiveInsightInput, context_id: str) -> ProposalDraft | None:
         data = {
+            "company": company_info(),
             "title": inp.title,
             "summary": inp.summary,
             "facts": [f.model_dump() for f in inp.facts],
@@ -199,6 +202,7 @@ class ProposalWriter:
     ) -> ProposalDraft | None:
         """사람이 고른 방향으로 할 일·이유·목표를 다시 쓴다 (후보·숫자는 받은 값만)."""
         data = {
+            "company": company_info(),
             "title": p.title,
             "summary": p.insight,
             "facts": [{"label": f.label, "value": f.value, "source": f.source} for f in p.facts],
@@ -229,9 +233,9 @@ class ProposalWriter:
 
 ANGLE_HINT = {
     "ride_trend": (
-        "지금 뜨는 후보(candidates) 중 하나에 캣북스 책을 얹어 올라탄다. 후보 이름만 쓴다"
+        "지금 뜨는 후보(candidates) 중 하나에 우리 상품·브랜드를 얹어 올라탄다. 후보 이름만 쓴다"
     ),
-    "own_trend": "캣북스가 자체로 시작해 퍼뜨릴 기획을 쓴다",
+    "own_trend": "우리 회사가 자체로 시작해 퍼뜨릴 기획을 쓴다",
     "with_product": "연결된 우리 상품(products)을 앞에 세운다",
 }
 
