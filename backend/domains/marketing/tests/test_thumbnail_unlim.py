@@ -34,6 +34,14 @@ T = _load("creative_thumbnails_helpers_unlim", "test_creative_thumbnails.py")
 env = T.env
 
 
+@pytest.fixture(autouse=True)
+def _unlim_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """11/24: 기본은 크레딧(IMAGE_USE_UNLIM=False).
+
+    이 파일은 무제한 설정일 때 썸네일 규칙을 본다."""
+    monkeypatch.setattr(cm, "IMAGE_USE_UNLIM", True)
+
+
 def _batches(env: dict[str, Any]) -> list[dict[str, Any]]:
     return [a["requests"][0]["params"] for n, a in env["hf"].tools if n == "generate_image_batch"]
 

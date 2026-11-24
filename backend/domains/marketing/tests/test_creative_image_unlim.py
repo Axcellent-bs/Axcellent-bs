@@ -35,6 +35,15 @@ M = _load("creative_render_mcp_helpers_unlim", "test_creative_render_mcp.py")
 env = M.env  # 캣북스만 회사 계정 연결
 
 
+@pytest.fixture(autouse=True)
+def _unlim_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """11/24: 기본은 크레딧(IMAGE_USE_UNLIM=False, 이 계정은 무제한 불가).
+
+    이 파일은 무제한 설정일 때의 규칙(무제한만·불가면 멈춤·크레딧 재시도 없음)을 본다.
+    회사 설정(hf-settings)이 무제한을 켜면 이 길이다."""
+    monkeypatch.setattr(cm, "IMAGE_USE_UNLIM", True)
+
+
 def _generated(env: dict[str, Any]) -> list[dict[str, Any]]:
     return [args["requests"][0]["params"] for name, args in env["hf"].tools
             if name == "generate_image_batch"]  # fmt: skip

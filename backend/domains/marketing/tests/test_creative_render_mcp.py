@@ -241,18 +241,20 @@ def test_connected_company_makes_the_sheet_with_its_own_account(
     ]
     params = dict(hf.tools)["generate_image_batch"]["requests"][0]["params"]
     # 11/24: 의뢰 영상의 그림은 무제한으로만 (creative_mcp.IMAGE_USE_UNLIM). 영상은 그대로 크레딧
-    assert params["model"] == "nano_banana_pro" and params["use_unlim"] is True
+    # 11/24 운영: 이 계정은 무제한 불가 → 그림도 크레딧(IMAGE_USE_UNLIM=False). 무제한 설정은
+    # test_creative_image_unlim.py
+    assert params["model"] == "nano_banana_pro" and params["use_unlim"] is False
     assert params["medias"] == [{"value": "media-1", "role": "image_references"}]
     assert "Avoid: blurry" in params["prompt"]
     assert hf.put_auth == [None]  # 업로드 PUT에는 토큰을 보내지 않는다
     action, gate_params = env["gate"].calls[0]
     assert action == "generate_media" and gate_params["media_kind"] == "image"
     assert gate_params["provider"] == "higgsfield_mcp" and gate_params["ai_generated"] is True
-    # 11/24: 그림은 무제한으로 만들어 기록·요약도 "무제한"
-    # (영상은 아래 테스트에서 구독 크레딧 그대로)
-    assert gate_params["billing"] == "unlim"
-    assert gate_params["credits_estimate"] == 2.0 and "Higgsfield 무제한" in gate_params["summary"]
-    assert "구독 크레딧" not in gate_params["summary"]
+    # 11/24: 그림은 크레딧(무제한 불가 계정)이라 기록·요약도 구독 크레딧
+    # (무제한 설정일 때 "Higgsfield 무제한"은 test_thumbnail_unlim.py)
+    assert gate_params["billing"] == "company_subscription"
+    assert gate_params["credits_estimate"] == 2.0 and "구독 크레딧" in gate_params["summary"]
+    assert "무제한" not in gate_params["summary"]
     for value in (REFRESH, ACCESS):
         assert value not in caplog.text and value not in json.dumps(part)
 
