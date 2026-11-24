@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ax_agent_template import company_files
+from ax_agent_template import company_scope as request_scope
 from finance_agent import company_folder
 
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
@@ -45,7 +46,8 @@ CREATE TABLE IF NOT EXISTS finance_chat_threads (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   removed_at TEXT,
-  removed_by TEXT
+  removed_by TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'catbooks'
 )
 """
 # 숨김 처리(소프트 삭제): 행은 지우지 않고 removed_at·removed_by만 적는다.
@@ -72,7 +74,22 @@ class ChatStore:
             for col in _REMOVED_COLUMNS:
                 if col not in have:
                     self._db.execute(f"ALTER TABLE finance_chat_threads ADD COLUMN {col} TEXT")
+            if "tenant_id" not in have:  # 옛 줄은 캣북스(회사별 전에는 캣북스뿐이었다)
+                self._db.execute(
+                    "ALTER TABLE finance_chat_threads"
+                    " ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'catbooks'"
+                )
             self._db.commit()
+
+    @staticmethod
+    def _mine() -> tuple[str, tuple[str, ...]]:
+        """요청 회사의 대화만 보는 조건(11/24 회사 격리: 다른 회사에 같은 이름이 있어도 안 섞이게).
+
+        요청 밖(스스로 도는 정리 루틴)이면 회사를 보지 않는다."""
+        company = request_scope.active()
+        if company is None:
+            return "1 = 1", ()
+        return "tenant_id = ?", (request_scope.scope_id(company),)
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict[str, Any]]:
         with self._lock:
@@ -95,16 +112,19 @@ class ChatStore:
         }
 
     def get(self, thread_id: str) -> dict[str, Any] | None:
+        where, args = self._mine()
         rows = self._rows(
-            "SELECT * FROM finance_chat_threads WHERE id = ? AND removed_at IS NULL", (thread_id,)
+            f"SELECT * FROM finance_chat_threads WHERE id = ? AND removed_at IS NULL AND {where}",
+            (thread_id, *args),
         )
         return self._view(rows[0]) if rows else None
 
     def list_all(self, limit: int = 100) -> list[dict[str, Any]]:
+        where, args = self._mine()
         rows = self._rows(
-            "SELECT * FROM finance_chat_threads WHERE removed_at IS NULL"
+            f"SELECT * FROM finance_chat_threads WHERE removed_at IS NULL AND {where}"
             " ORDER BY updated_at DESC, seq DESC LIMIT ?",
-            (limit,),
+            (*args, limit),
         )
         return [self._view(r) for r in rows]
 
@@ -118,9 +138,17 @@ class ChatStore:
             thread_id = f"finchat-{seq}"
             self._db.execute(
                 "INSERT INTO finance_chat_threads"
-                "(id, seq, title, status, who, summary, messages, created_at, updated_at)"
-                " VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?)",
-                (thread_id, seq, title, who, now, now),
+                "(id, seq, title, status, who, summary, messages, created_at, updated_at,"
+                " tenant_id) VALUES (?, ?, ?, 'talking', ?, '', '[]', ?, ?, ?)",
+                (
+                    thread_id,
+                    seq,
+                    title,
+                    who,
+                    now,
+                    now,
+                    request_scope.scope_id(request_scope.active()),
+                ),
             )
             self._db.commit()
         return self.get(thread_id) or {}
@@ -213,10 +241,11 @@ class ChatStore:
         답하는 중이어도 숨긴다. 뒤늦은 답은 `_update`가 `get`으로 못 찾아 무시한다.
         """
         with self._lock:
+            where, args = self._mine()
             cur = self._db.execute(
                 "UPDATE finance_chat_threads SET removed_at = ?, removed_by = ?"
-                " WHERE id = ? AND removed_at IS NULL",
-                (self.clock().isoformat(), by, thread_id),
+                f" WHERE id = ? AND removed_at IS NULL AND {where}",
+                (self.clock().isoformat(), by, thread_id, *args),
             )
             self._db.commit()
             return cur.rowcount > 0
