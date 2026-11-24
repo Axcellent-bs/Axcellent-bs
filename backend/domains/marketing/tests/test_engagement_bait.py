@@ -13,7 +13,13 @@ PROP_22_CONCEPT = "이십대가 웃으며 공유할 책 읽는 일상 밈"
 
 @pytest.mark.parametrize(
     "text",
-    ["공유할 책 일상 밈", "좋아요가 많은 릴스 형식", "댓글 반응이 좋았던 주제", PROP_22_CONCEPT],
+    [
+        "공유할 책 일상 밈",
+        "좋아요가 많은 릴스 형식",
+        "댓글 반응이 좋았던 주제",
+        PROP_22_CONCEPT,
+        "공유하고 싶은 책 읽는 일상",  # "하고"는 요구·조건 표현이 아니다
+    ],
 )
 def test_description_sentences_pass(text: str) -> None:
     assert not sns.has_engagement_bait(text)
@@ -24,7 +30,9 @@ def test_description_sentences_pass(text: str) -> None:
     "text",
     [
         "좋아요 누르면 추첨",
-        "공유하고 댓글 남기면 증정",
+        "공유하고 댓글 남기면 증정",  # "하고"를 빼도 "증정"으로 막힌다
+        "팔로우하고 응모하세요",
+        "팔로우해야 응모",
         "팔로우 부탁해요",
         "댓글로 알려 주세요",  # 혜택 없는 요청도 지금 규칙처럼 막는다
         "리그램 해 주시면 선물",
