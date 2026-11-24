@@ -42,6 +42,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from ax_agent_template.ad_words import words_from
 from ax_agent_template.tenant import (
     ig_radar_accounts,
     ig_radar_auto_accounts,
@@ -119,6 +120,9 @@ class IgConfig:
     # 조회 천만 이상 모음 기준 ([instagram] radar_mega_views)
     min_followers: int = 50_000
     mega_views: int = 10_000_000
+    # 11/24 회사가 더한 욕설·성인 표현 ([instagram] blocked_words).
+    # 기본 목록은 ax_agent_template.ad_words
+    blocked_words: tuple[str, ...] = ()
 
     def kind_of(self, account: str) -> str:
         """레이더 계정 종류: meme(밈·크리에이터) · benchmark(그 밖)."""
@@ -192,6 +196,7 @@ def load_config(env: Mapping[str, str]) -> IgConfig:
             memo_add_enabled=bool(raw.get("memo_add_enabled", False)),
             min_followers=max(0, int(raw.get("radar_min_followers", base.min_followers))),
             mega_views=max(1, int(raw.get("radar_mega_views", base.mega_views))),
+            blocked_words=words_from(raw),
             radar_batch_size=max(1, int(raw.get("radar_batch_size", base.radar_batch_size))),
             radar_batch_interval_min=max(
                 0, int(raw.get("radar_batch_interval_min", base.radar_batch_interval_min))

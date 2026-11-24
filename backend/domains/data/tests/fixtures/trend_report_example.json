@@ -126,7 +126,8 @@
           "account_kind": null,
           "audience_ages": [],
           "audience_genders": [],
-          "topic": null
+          "topic": null,
+          "ad_excluded": null
         }
       ],
       "memes": [

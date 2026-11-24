@@ -1813,6 +1813,8 @@ export interface MegaViewItem {
   audience_ages: AgeBand[];
   audience_genders: AudienceGender[];
   topic: string | null;
+  /** 계정·제목에 욕설·성인 표현 → "광고 근거 제외: 표현" (옛 서버에는 없음) */
+  ad_excluded?: string | null;
 }
 export interface MegaViews {
   status: "known" | "unknown";
@@ -1824,6 +1826,8 @@ export interface MegaViews {
   items: MegaViewItem[];
 }
 export interface InstagramRadarPost {
+  /** 계정 이름·캡션 앞부분에 욕설·성인 표현 → "광고 근거 제외: 표현" (옛 서버에는 없음) */
+  ad_excluded?: string | null;
   account_kind?: RadarKind | null;
   audience_ages?: AgeBand[];
   audience_genders?: AudienceGender[];
@@ -2207,6 +2211,8 @@ export interface MemeShortsVideo {
   big_channel: boolean;
   video_url: string | null;
   thumbnail_url: string | null;
+  /** 채널 이름·제목에 욕설·성인 표현 → "광고 근거 제외: 표현" (옛 서버에는 없음) */
+  ad_excluded?: string | null;
 }
 export interface MemeShortsSearch {
   status: "known" | "unknown" | "not_set";

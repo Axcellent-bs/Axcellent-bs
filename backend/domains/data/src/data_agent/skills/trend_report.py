@@ -700,6 +700,32 @@ def content_section(posts: Sequence[InstagramRadarPost], read_any: bool, stored_
     return out, limits
 
 
+def mark_ad_excluded(section: TrendContentSection, extra: Sequence[str] = ()) -> list[str]:
+    """11/24: 계정 이름·캡션 앞부분(유튜브는 채널 이름·제목)에 욕설·성인 표현이 있으면
+    `ad_excluded`("광고 근거 제외: 표현")를 단다. 원자료 표에는 남고, 근거 목록(evidence_catalog)·
+    기획 facts에서는 빠진다. 한계 문장(계정 이름만, 단어는 쓰지 않음)을 돌려준다."""
+    from ax_agent_template.ad_words import mark
+
+    hit: list[str] = []
+    for p in section.posts:
+        p.ad_excluded = p.ad_excluded or mark((p.account, p.caption_excerpt), extra)
+        if p.ad_excluded:
+            hit.append(p.account)
+    for v in section.mega:
+        v.ad_excluded = v.ad_excluded or mark((v.account, v.title), extra)
+        if v.ad_excluded:
+            hit.append(v.account)
+    for s in section.shorts:
+        s.ad_excluded = s.ad_excluded or mark((s.channel_title, s.title), extra)
+        if s.ad_excluded:
+            hit.append(s.channel_title or s.video_id)
+    names = list(dict.fromkeys(hit))
+    if not names:
+        return []
+    return [f"욕설·성인 표현이 있어 광고 근거에서 뺀 계정: {', '.join(names[:5])}"
+            + (f" 외 {len(names) - 5}곳" if len(names) > 5 else "")]  # fmt: skip
+
+
 # ---------------------------------------------------------------- 4. 경쟁사
 
 
@@ -885,7 +911,10 @@ def evidence_catalog(report: TrendReport) -> Catalog:
             f" 터진 게시물 {h.burst_posts}개",
             f"{h.tag}를 쓰는 계정이 지난주보다 {more}{burst}",
             short_of(f"{h.tag} {h.accounts}곳 사용"))  # fmt: skip
+    # 11/24: 욕설·성인 표현 계정(ad_excluded)은 근거로 쓰지 않는다 (행 번호는 원자료 표 그대로)
     for n, p in enumerate(s.content.posts, start=1):
+        if p.ad_excluded:
+            continue
         metric = "조회수" if p.metric == "view_count" else "좋아요"
         extra = f" · {p.standout}" if p.standout else ""
         # 추천 LLM에 넘기는 말(word)에는 캡션을 넣지 않는다(외부 글. 11/20 콘티에 경쟁사 캡션의
@@ -900,13 +929,17 @@ def evidence_catalog(report: TrendReport) -> Catalog:
             f"{who_p}의 {_fmt_word(p)}가 평소보다 크게 뜸",
             short_of(f"{p.account} {_fmt_word(p)} {metric} ×{p.ratio:g}"))  # fmt: skip
     for n, v in enumerate(s.content.mega, start=1):  # 11/24 조회 천만 이상 (우선 근거)
-        where = "인스타" if v.platform == "instagram" else "유튜브"
+        if v.ad_excluded:
+            continue
+        where ="인스타" if v.platform == "instagram" else "유튜브"
         out[f"mega:{n}"] = (
             f"{where} {v.account}: 조회 {v.views:,}회 (최근 30일 안 게시)",
             f"{where} {v.account}의 영상이 조회 천만을 넘음",
             short_of(f"{v.account} 조회 {v.views // 10_000:,}만"))  # fmt: skip
     for n, v in enumerate(s.content.shorts, start=1):  # 11/24 쇼츠 검색 근거 (제목은 안 넘김)
-        ratio = f" · 구독자 대비 {v.views_per_subscriber:g}배" if v.views_per_subscriber else ""
+        if v.ad_excluded:
+            continue
+        ratio =f" · 구독자 대비 {v.views_per_subscriber:g}배" if v.views_per_subscriber else ""
         views = f" · 조회 {v.views:,}" if v.views is not None else ""
         many = "구독자보다 훨씬 많이" if (v.views_per_subscriber or 0) >= 1 else "많이"
         out[f"shorts:{n}"] = (
@@ -1413,6 +1446,10 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
             first = meme_source_posts(radar)
         section, more = content_section(posts, bool(ig.media), stored, why_none, len(ig.media),
                                         meme_first=first, audience=audience)  # fmt: skip
+        # 11/24: 실존 인물·사건 분류(#1671) 뒤 같은 단계에서 욕설·성인 표현 계정을 근거에서 뺀다
+        from data_agent.skills.instagram import load_config as ig_config
+
+        more.extend(mark_ad_excluded(section, ig_config(deps.env).blocked_words))
         report.sections.content = section
         limits.extend(more)
 
