@@ -1445,7 +1445,7 @@ async def character_sheet_prompt(request: AgentRequest) -> AgentResult:
             output={"message": refused.message},
         )
     out = out.model_copy(update={"record_id": _record_sheet(out, request.untrusted)})
-    if out.record_id and kind in REFERENCE_KINDS:
+    if out.record_id and out.kind in REFERENCE_KINDS:  # 그림인데 실사면 real_photo로 바뀐다
         # 11/24 가상 인물·일러스트: 시트 그림을 만들지 않고(크레딧 0) 올린 원본을 시트 그림 자리에
         _save_original(request, out.record_id)
     elif out.record_id:  # Higgsfield로 이미지 시트 그림(키·모델이 없으면 기록에 이유만)
