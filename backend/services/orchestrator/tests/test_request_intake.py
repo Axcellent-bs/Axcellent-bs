@@ -50,6 +50,7 @@ async def test_request_is_recorded_with_plan_and_customer_gets_a_receipt() -> No
     assert row["status"] == "classified"
     assert row["task"] == "promo_video"
     assert [s["step_id"] for s in row["plan"]] == [
+        "character",  # 11/24: 회사 캐릭터 답을 먼저 받는다
         "trend",
         "insight",
         "plan",

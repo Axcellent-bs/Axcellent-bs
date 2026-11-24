@@ -127,6 +127,12 @@ export const RESTART_UNCONFIRMED = "restart_unconfirmed";
 export const isRestartStuck = (s: Pick<WorkRequestStep, "status" | "reason_code">) =>
   s.status === "waiting_human" && s.reason_code === RESTART_UNCONFIRMED;
 
+/** 11/24 홍보 영상 회사 캐릭터 답 대기 (총괄 request_runner.CHARACTER_WAIT). 승인·거절이 아니라 캐릭터 답으로만 닫힌다 */
+export const CHARACTER_WAIT = "character_wait";
+export const CHARACTER_WAIT_CHIP: Tone = { label: "답 대기", tone: "bg-amber-50 text-amber-800" };
+export const isCharacterWait = (s: Pick<WorkRequestStep, "status" | "reason_code">) =>
+  s.status === "waiting_human" && s.reason_code === CHARACTER_WAIT;
+
 /** 사람이 승인·거절할 수 있는 단계 (사람 확인 단계, 상태를 바꾸는 단계의 승인 대기, 11/24 재시작으로 멈춘 단계). 부서 대기는 아니다 */
 export const canDecide = (s: WorkRequestStep) =>
   s.status === "waiting_human" && (s.reason_code === "human_check" || s.reason_code === "needs_approval" || s.reason_code === RESTART_UNCONFIRMED);

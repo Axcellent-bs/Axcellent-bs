@@ -89,6 +89,11 @@ VIDEO_REJECTED = "video_rejected"
 VIDEO_APPROVAL = "video_approval"
 VIDEO_WAIT_NOTE = "영상 승인 대기"
 VIDEO_REJECT_NOTE = "사람이 영상 생성을 거절함"
+# 11/24 홍보 영상: 회사 캐릭터 답 대기. 의뢰 상태는 사람 확인 대기와 같은 `waiting`이고, 이 단계는
+# `decide`(승인·거절)가 아니라 캐릭터 답(`set_brand_character`)으로만 닫는다
+CHARACTER_WAIT = "character_wait"
+CHARACTER_WAIT_NOTE = "캐릭터 답 대기"
+PLAN_STARTED = ("running", "waiting_async", "completed")  # 기획이 이미 캐릭터 없이 받은 상태
 CATBOOKS = "catbooks"
 CREATIVE_RECORD = re.compile(r"CR-[0-9a-f]{12}")  # 마케팅 제작 기록 번호
 Notifier = Callable[[str, str], None]
@@ -244,6 +249,19 @@ class RequestRunner:
         rid = row["request_id"]
         spec = next(s for s in row["plan"] if s["step_id"] == step_id)
         stamp = now().isoformat
+        if spec.get("kind") == "human" and spec.get("skill") == request_tasks.CHARACTER_SKILL:
+            current = self._requests.get(rid) or row
+            if current["steps"][step_id]["status"] != "pending":
+                return  # 시작하기 전에 이미 답이 왔다 (set_brand_character가 닫았다)
+            self._update(
+                rid,
+                step_id,
+                status="waiting_human",
+                reason_code=CHARACTER_WAIT,
+                note=CHARACTER_WAIT_NOTE,
+                started_at=stamp(),
+            )
+            return
         if spec.get("kind") == "human":
             self._update(
                 rid,
@@ -741,23 +759,61 @@ class RequestRunner:
         """홍보 영상 의뢰에 쓸 회사 대표 캐릭터를 정한다.
 
         돌려주는 값: ok · missing · invalid(번호 모양이 아님) · not_video · started.
-        영상 준비 단계를 시작하기 전까지만 받는다(그 뒤면 `started`). 질문 때문에 의뢰를 멈추지
-        않는다: 사람 확인 전까지 답하면 반영되고, 답이 없으면 캐릭터 없이 진행한다."""
+        자세한 규칙은 `answer_brand_character`."""
+        return self.answer_brand_character(request_id, record_id, by)[0]
+
+    def answer_brand_character(
+        self, request_id: str, record_id: str | None, by: str | None = None
+    ) -> tuple[str, bool]:
+        """회사 캐릭터 답을 받는다. (결과, plan_outdated).
+
+        - 캐릭터 단계(11/24)가 기다리는 중이면 답(CR-… 또는 None=없어요)을 적고 단계를 완료로
+          닫은 뒤 다음 단계(데이터분석)를 시작한다. 답이 없으면 기다린다(자동으로 넘기지 않는다).
+        - 답한 뒤에도 영상 준비 단계를 시작하기 전까지는 다시 바꿀 수 있다(그 뒤면 `started`).
+          기획이 이미 시작됐거나 끝난 뒤 바꾸면 plan_outdated=True(기획서는 예전 캐릭터 기준).
+        - 캐릭터 단계가 없는 옛 의뢰는 지금처럼 적기만 한다.
+        """
         if record_id is not None and not CREATIVE_RECORD.fullmatch(record_id):
-            return "invalid"
+            return "invalid", False
         row = self._requests.get(request_id)
         if row is None:
-            return "missing"
+            return "missing", False
         key = request_tasks.BRAND_CHARACTER_KEY
         prepare = next((p for p in row["plan"] if key in (p.get("row_input") or [])), None)
         if prepare is None:
-            return "not_video"
+            return "not_video", False
         step = row["steps"].get(prepare["step_id"]) or {}
         closed = row["status"] not in OPEN_STATES or bool(row.get("stopped_at"))
         if closed or step.get("status") != "pending":
-            return "started"
+            return "started", False
+        outdated = any(
+            p.get("dept") == "planning"
+            and (row["steps"].get(p["step_id"]) or {}).get("status") in PLAN_STARTED
+            for p in row["plan"]
+        )
         self._requests.set_brand_character(request_id, record_id, by)
-        return "ok"
+        said = f"캐릭터 {record_id}로 할게요." if record_id else "캐릭터 없이 할게요."
+        char = next(
+            (p for p in row["plan"] if p.get("skill") == request_tasks.CHARACTER_SKILL), None
+        )
+        char_step = (row["steps"].get(char["step_id"]) or {}) if char else {}
+        if char is not None and char_step.get("status") in ("pending", "waiting_human"):
+            who = f" ({by})" if by else ""
+            self._update(
+                request_id,
+                char["step_id"],
+                status="completed",
+                note=f"{said[:-1]}{who}",
+                started_at=char_step.get("started_at") or now().isoformat(),
+                finished_at=now().isoformat(),
+            )
+            nxt = next((p for p in row["plan"] if char["step_id"] in (p.get("after") or [])), None)
+            dept = request_tasks.dept_label(nxt.get("dept") if nxt else None)
+            self._tell(row, f"{said} {dept}에 시켰어요.")
+            self.start(request_id)
+        else:
+            self._tell(row, said)
+        return "ok", outdated
 
     def held_videos(self, review_id: str | None = None) -> list[tuple[str, str, str]]:
         """영상 승인 대기 단계: (의뢰, 단계, review_id). `review_id`를 주면 그것만."""
@@ -814,7 +870,11 @@ class RequestRunner:
         if row is None:
             return
         states = [s["status"] for s in row["steps"].values()]
-        if any(s in ("held", "waiting_human") for s in states):
+        waits = [s for s in row["steps"].values() if s["status"] in ("held", "waiting_human")]
+        if waits and all(s.get("reason_code") == CHARACTER_WAIT for s in waits):
+            # 캐릭터 답 대기: 접수 안내가 이미 물었다 (같은 waiting 상태, 문장만 다르다)
+            self._requests.set_status(rid, "waiting", "회사 캐릭터 답을 기다린다")
+        elif waits:
             self._requests.set_status(rid, "waiting", "승인이나 사람 확인을 기다린다")
             self._tell(row, "확인이 필요한 단계가 있어 담당자의 확인을 기다리고 있어요.")
         elif "waiting_async" in states:  # 부서가 긴 작업을 하는 중: 알림이 오면 이어 간다

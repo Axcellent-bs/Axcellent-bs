@@ -57,7 +57,8 @@ def test_promo_video_steps_that_take_department_results_are_not_gated() -> None:
     promo = request_tasks.BY_NAME["promo_video"]
     gated = {s.step_id for s in promo.steps if s.human_gate}
     assert gated == set()  # 기획 단계(A)·영상 제작(B)은 부서의 안전 관문이 등급대로 처리한다
-    assert [s.step_id for s in promo.steps if s.kind == "human"] == ["confirm"]
+    # 11/24: 캐릭터 답(사람 단계)이 맨 앞에 더해졌다. 승인 관문(human_gate)은 여전히 없다
+    assert [s.step_id for s in promo.steps if s.kind == "human"] == ["character", "confirm"]
 
 
 @pytest.mark.asyncio
@@ -118,10 +119,15 @@ async def test_a_request_that_has_not_started_is_rebuilt_from_the_current_task_l
         {"trend_report_create": entry("data", "trend_report_create")},
         {"trend_report_create": result(TaskStatus.WORKING, task_id="tsk_1")},
     )
-    await RequestRunner(reqs, lambda: fake).run(rid)
+    runner = RequestRunner(reqs, lambda: fake)
+    await runner.run(rid)
     row = reqs.get(rid)
     now_ids = [s.step_id for s in request_tasks.BY_NAME["promo_video"].steps]
     assert [s["step_id"] for s in row["plan"]] == now_ids  # 인사이트 단계가 생겼다
+    assert fake.calls == []  # 지금 계획이라 회사 캐릭터 답부터 기다린다 (11/24)
+    assert runner.set_brand_character(rid, None) == "ok"
+    await runner.wait_idle()
+    row = reqs.get(rid)
     sent = fake.calls[0].input
     assert sent["caller"] == "orchestrator"  # 긴 작업으로 불러 보고서를 기다린다
     assert row["steps"]["trend"]["status"] == "waiting_async"
@@ -147,7 +153,7 @@ def test_rerun_with_the_same_task_rebuilds_the_plan_from_scratch() -> None:
     runner.start = lambda _rid: None  # 실행은 이 시험의 관심이 아니다
     assert runner.rerun(rid, "promo_video", "준하") == "ok"
     row = reqs.get(rid)
-    assert [s["step_id"] for s in row["plan"]][1] == "insight"
+    assert [s["step_id"] for s in row["plan"]][2] == "insight"  # 11/24: 캐릭터 단계가 맨 앞
     assert fake.calls == []
 
 

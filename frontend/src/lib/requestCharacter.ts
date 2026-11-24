@@ -18,7 +18,9 @@ export const CHARACTER_NOTE = "캐릭터를 쓰면 영상을 만들기 전에 �
 export const RIGHTS_LABEL = "우리 회사가 쓸 권리가 있는 그림이에요";
 export const RIGHTS_HINT = "(체크해야 올릴 수 있어요)";
 export const UPLOAD_HINT = "PNG·JPG 한 장 · 사람 실사 사진은 그림체 캐릭터로 바꿔요";
-export const SPACE_NOTE = "올린 이미지는 이 회사 공간에만 저장하고 이미지 시트(CR-…)를 만들어요. 다른 회사에는 보이지 않아요. 답하지 않으면 지금처럼 캐릭터 없이 진행해요.";
+// 11/24: 홍보 영상은 캐릭터 답을 받아야 데이터분석이 시작된다 ("답하지 않으면 캐릭터 없이"를 뺐다)
+export const SPACE_NOTE = "올린 이미지는 이 회사 공간에만 저장하고 이미지 시트(CR-…)를 만들어요. 다른 회사에는 보이지 않아요. 답해야 다음 단계가 시작돼요. 영상 초안 준비 전까지는 바꿀 수 있어요.";
+export const PLAN_OUTDATED_LINE = "기획서는 예전 캐릭터 기준이에요";
 export const VIDEO_WAIT_LABEL = "영상 승인 대기";
 
 export type CharacterRow = Pick<WorkRequestRow, "plan" | "steps" | "status"> & {
@@ -26,8 +28,34 @@ export type CharacterRow = Pick<WorkRequestRow, "plan" | "steps" | "status"> & {
   task?: string | null;
   /** 사람이 고른 대표 캐릭터(CR-…). null = 캐릭터 없이, 칸이 없으면 아직 답하지 않음 */
   brand_character_record_id?: string | null;
+  /** 11/24 캐릭터를 마지막으로 정한 때 (서버 기록) */
+  brand_character_at?: string | null;
   stopped_at?: string | null;
 };
+
+// ---- 11/24 캐릭터 답을 먼저 받는다 (총괄 promo_video 맨 앞 사람 단계 character)
+export const CHARACTER_SKILL = "brand_character";
+const PLAN_STARTED: readonly string[] = ["running", "waiting_async", "completed"];
+
+/** 캐릭터 단계(새 계획)가 있고 아직 답을 기다리나 (답 전에는 데이터분석이 시작되지 않는다) */
+export function characterPending(r: CharacterRow): boolean {
+  const step = r.plan.find((p) => p.skill === CHARACTER_SKILL);
+  if (!step || r.stopped_at || !isOpenRequest(r)) return false;
+  const status = r.steps[step.step_id]?.status ?? "pending";
+  return status === "pending" || status === "waiting_human";
+}
+
+/** 기획이 시작된 뒤 캐릭터를 바꿨나 (서버 응답 plan_outdated와 같은 규칙: 기획 단계 시작 시각보다 나중에 정함) */
+export function planOutdated(r: CharacterRow): boolean {
+  const at = Date.parse(r.brand_character_at ?? "");
+  if (!Number.isFinite(at)) return false;
+  return r.plan.some((p) => {
+    const s = r.steps[p.step_id];
+    if (p.dept !== "planning" || !s || !PLAN_STARTED.includes(s.status)) return false;
+    const started = Date.parse(s.started_at ?? "");
+    return Number.isFinite(started) && at > started;
+  });
+}
 
 export interface SavedCharacter {
   record_id: string;
@@ -91,7 +119,9 @@ export function chatCharacterLine(r: CharacterRow, name?: string | null): { text
 /** 사람 확인 단계 [영상 초안 준비 진행] 위 안내: 이 단계 다음이 영상 준비이고 캐릭터를 정하지 않았다. 막지는 않는다 */
 export function unansweredNotice(r: CharacterRow, stepId: string): string | null {
   if (!chatAskShown(r)) return null;
-  const i = r.plan.findIndex((p) => p.step_id === stepId);
+  // 11/24 새 계획은 캐릭터 답 전에는 사람 확인까지 가지 않는다 ("캐릭터 없이 만들어요"는 옛 기록에만)
+  if (r.plan.some((p) => p.skill === CHARACTER_SKILL)) return null;
+  const i =r.plan.findIndex((p) => p.step_id === stepId);
   const next = r.plan.find((p) => p.after.includes(stepId)) ?? (i >= 0 ? r.plan[i + 1] : undefined);
   return next?.skill === PREPARE_SKILL ? UNANSWERED_NOTICE : null;
 }

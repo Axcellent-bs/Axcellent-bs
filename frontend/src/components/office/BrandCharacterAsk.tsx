@@ -4,8 +4,8 @@ import { listBrandCharacters, markBrandCharacter, type BrandCharacter } from "@/
 import { thumbSrc } from "@/lib/creativeRecords";
 import { orchestrator } from "@/lib/orchestrator";
 import {
-  CHARACTER_NOTE, CHARACTER_QUESTION, RIGHTS_HINT, RIGHTS_LABEL, SPACE_NOTE, UPLOAD_HINT,
-  askMode, canUpload, chatCharacterLine, isPromoVideo, savedLine, type CharacterRow,
+  CHARACTER_NOTE, CHARACTER_QUESTION, PLAN_OUTDATED_LINE, RIGHTS_HINT, RIGHTS_LABEL, SPACE_NOTE, UPLOAD_HINT,
+  askMode, canUpload, chatCharacterLine, isPromoVideo, planOutdated, savedLine, type CharacterRow,
 } from "@/lib/requestCharacter";
 import { refreshWorkRequests } from "@/components/office/useWorkRequests";
 
@@ -13,7 +13,7 @@ import { refreshWorkRequests } from "@/components/office/useWorkRequests";
 // - 저장된 대표 캐릭터가 있으면 먼저: [이 캐릭터로 만들기][다른 이미지 올리기][캐릭터 없이]
 // - 없으면 [있어요][없어요]. [있어요]·[다른 이미지 올리기]는 올리기 칸 + 권리 체크(체크해야 올리기 버튼이 켜진다)
 //   올리면 마케팅 1:1과 같은 함수(makeCharacterSheet)로 이미지 시트(CR)를 만들고 대표 캐릭터로 표시한 뒤 의뢰에 적는다
-// - 질문 때문에 의뢰를 멈추지 않는다. 영상 준비가 시작되면 고른 값만 보인다(서버도 409)
+// - 11/24: 홍보 영상(새 계획)은 이 답을 받아야 데이터분석이 시작된다(총괄 character 단계). 영상 준비가 시작되면 고른 값만 보인다(서버도 409)
 // - 대표 캐릭터 목록은 로그인한 회사의 것만 온다. 한 화면의 카드 여러 개가 1분에 한 번만 읽는다
 // - 11/24 variant="chat": 대화방 의뢰 진행 카드 맨 위. 홍보 영상(promo_video) 의뢰만, 정하면 한 줄
 //   ("회사 캐릭터: 이름(CR-…) · 바꾸기" / "캐릭터 없이 진행"), 영상 준비가 시작되면 [바꾸기] 없이 한 줄만.
@@ -105,6 +105,10 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
           {line.text}
           {line.canChange && <> · <button type="button" className="text-xs text-brand-700 underline" disabled={busy} onClick={() => setChange(true)}>바꾸기</button></>}
         </p>
+      )}
+      {/* 11/24 시안 ②: 기획이 시작된 뒤 바꿨으면 한 줄 (서버 plan_outdated와 같은 규칙) */}
+      {(mode === "closed" || mode === "chosen" || mode === "none") && planOutdated(row) && (
+        <p className="text-xs text-amber-800">{PLAN_OUTDATED_LINE}</p>
       )}
       {!chat && (mode === "closed" || mode === "chosen" || mode === "none") && (
         <>

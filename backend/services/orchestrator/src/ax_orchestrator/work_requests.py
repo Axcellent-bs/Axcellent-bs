@@ -253,6 +253,8 @@ class WorkRequests:
         값은 기록 번호뿐이다. 영상 준비 단계가 이 값을 마케팅 입력으로 넘긴다 (11/23)."""
         row = self._row(request_id)
         row["brand_character_record_id"] = record_id
+        # 11/24: 언제 정했는지(화면이 기획 시작 시각과 견줘 "기획서는 예전 캐릭터 기준"을 띄운다)
+        row["brand_character_at"] = now().isoformat()
         what = f"회사 캐릭터 {record_id}로 만들기" if record_id else "캐릭터 없이 만들기"
         row["log"].append({"at": now().isoformat(), "message": f"{what} ({by or '사람'})"})
         self._save(row)

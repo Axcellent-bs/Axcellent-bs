@@ -100,6 +100,10 @@ async def started(task: str = "trend_report"):
     fake = Fake(promo_entries(), {"trend_report_create": [working()]})
     r = runner(reqs, fake)
     await r.run(rid)
+    if task == "promo_video":  # 11/24: 회사 캐릭터 답(없어요)을 받아야 데이터분석이 시작된다
+        assert fake.calls == []
+        assert r.set_brand_character(rid, None) == "ok"
+        await r.wait_idle()
     return reqs, rid, fake, r, f"ctx_{rid}"
 
 

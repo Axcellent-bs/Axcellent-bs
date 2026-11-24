@@ -262,10 +262,11 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
         <span className="chip bg-ink-100 text-[11px] tabular-nums text-ink-500">{row.request_id}</span>
         {stale !== null && <span className="chip bg-ink-100 text-[11px] text-ink-500" title={`${STALE_HOURS}시간 넘게 바뀌지 않아 AI 오피스 자리 상태에는 쓰지 않아요`}>오래 멈춤 · {stale}시간</span>}
       </p>
+      {/* 11/24 홍보 영상 의뢰: 회사 캐릭터 질문을 카드 맨 위에 펼친 채로 (답해야 데이터분석이 시작된다.
+          고객 의뢰 넘김 카드와 같은 상태) */}
+      <BrandCharacterAsk row={row} variant="chat" />
       {/* 11/23 의뢰 정리 메뉴 (고객 의뢰 넘김 카드와 같은 함수). 삭제한 의뢰는 위에서 한 줄로 접는다 */}
       <RequestActions row={row} title={requestTitle(row, tasks)} />
-      {/* 11/24 홍보 영상 의뢰: 회사 캐릭터 질문을 단계 목록 위에 (고객 의뢰 넘김 카드와 같은 상태) */}
-      <BrandCharacterAsk row={row} variant="chat" />
       <ol className="space-y-2">
         {rows.map((s, i) => {
           const report = s.skill === "trend_report_create" ? reportIdOfRequest(row, s.stepId) : null;
