@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from ax_agent_template import companies as company_list
 from ax_agent_template import company_connection as cc
 from ax_agent_template import human_auth
-from ax_dashboard_api import accounts
+from ax_dashboard_api import accounts, connection_keys
 from ax_dashboard_api.main import app
 
 BASE = "/api/dashboard/auth"
@@ -35,6 +35,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv(accounts.BOOTSTRAP_ENV, f"{BOOT_EMAIL}:{BOOT_PW}")
     accounts.reset_failures_for_tests()
     human_auth.reset_revoked_for_tests()
+    connection_keys.reset_public_limits_for_tests()
     c = TestClient(app)
     c.headers.pop("authorization")  # conftest의 공용 토큰을 빼고 시작
     return c
@@ -360,3 +361,73 @@ def test_admin_unlinks_only_own_members_and_they_lose_the_company(client, tmp_pa
     # 일반회원은 끊을 수 없다
     res = _unlink(client, again, rows["s@example.com"]["id"])
     assert res.status_code == 403
+
+
+def test_check_public_answers_old_keys_like_unknown_keys(client) -> None:
+    """로그인 없이 예전 키(회사 정보 없음)의 회사 정보를 내주지 않는다."""
+    op = _op(client)
+    plain = _issue(client, op)
+    old = _check(client, plain)
+    unknown = _check(client, "AXC-0000-0000-0000")
+    assert old == unknown and old["ok"] is False
+    assert "company" not in old or old.get("company") is None
+
+
+def test_signup_refuses_bad_input_and_never_returns_the_hash(client, tmp_path) -> None:
+    op = _op(client)
+    key = _issue(client, op, company_name="누비투어", company_id="nubi")
+    short = client.post(
+        "/api/dashboard/connection-keys/signup",
+        json={"key": key, "name": "누비관리", "email": "n@example.com", "password": "short"},
+    )
+    assert short.status_code == 422
+    assert _check(client, key)["signup"] is True  # 짧은 비밀번호는 키를 쓰지 않는다
+    assert _account(client, op, "다른사람", "taken@example.com", role="operator").status_code == 200
+    taken = _signup(client, key, email="taken@example.com")
+    assert taken.status_code == 409 and taken.json()["error"]["code"] == "EMAIL_TAKEN"
+    assert _check(client, key)["signup"] is True  # 계정을 못 만들면 키 표시를 되돌린다
+    res = _signup(client, key)
+    assert res.status_code == 200, res.text
+    assert "password_hash" not in json.dumps(res.json())
+    assert "authorization" not in {k.lower() for k in client.headers}  # 토큰 없이 돈다
+
+
+def test_signup_with_revoked_or_other_company_key_fails(client) -> None:
+    op = _op(client)
+    key = _issue(client, op, company_name="누비투어", company_id="nubi")
+    rows = client.get("/api/dashboard/connection-keys", headers=_bearer(op)).json()["data"]["keys"]
+    key_id = next(k["id"] for k in rows if k.get("for_company") == "nubi")
+    res = client.post(
+        "/api/dashboard/connection-keys/revoke", json={"id": key_id}, headers=_bearer(op)
+    )
+    assert res.status_code == 200, res.text
+    revoked = _signup(client, key)
+    assert revoked.status_code == 422 and revoked.json()["error"]["code"] == "KEY_REVOKED"
+
+
+def test_only_one_signup_wins_when_two_arrive_together(client) -> None:
+    import threading
+
+    op = _op(client)
+    key = _issue(client, op, company_name="누비투어", company_id="nubi")
+    codes: list[int] = []
+
+    def go(i: int) -> None:
+        codes.append(_signup(client, key, name=f"관리{i}", email=f"n{i}@example.com").status_code)
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(3)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert sorted(codes).count(200) == 1 and all(c in (200, 409) for c in codes)
+
+
+def test_public_key_paths_are_rate_limited(client, monkeypatch) -> None:
+    monkeypatch.setattr(connection_keys, "PUBLIC_MAX_PER_KEY", 2)
+    for _ in range(2):
+        _check(client, "AXC-1111-1111-1111")
+    res = client.post(
+        "/api/dashboard/connection-keys/check-public", json={"key": "AXC-1111-1111-1111"}
+    )
+    assert res.status_code == 429 and res.json()["error"]["code"] == "TOO_MANY_TRIES"

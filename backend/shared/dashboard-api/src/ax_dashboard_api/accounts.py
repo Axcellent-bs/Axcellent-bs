@@ -176,14 +176,20 @@ def _write(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def _new_row(
-    name: str, email: str, role: str, password: str, company_id: str | None = None
+    name: str,
+    email: str,
+    role: str,
+    password: str,
+    company_id: str | None = None,
+    *,
+    password_hash: str | None = None,
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "id": "acc-" + secrets.token_hex(6),
         "name": name,
         "email": _norm_email(email),
         "role": role,
-        "password_hash": hash_password(password),
+        "password_hash": password_hash or hash_password(password),
         "created_at": _now(),
     }
     if role in CUSTOMER_ROLES:
@@ -527,6 +533,11 @@ def _raise_if_locked(email: str, now: float) -> None:
         )
 
 
+def check_new_password(password: str) -> None:
+    """새 비밀번호 길이 검사(키 가입이 잠금 전에 부른다)."""
+    _check_new_password(password)
+
+
 def _check_new_password(password: str) -> None:
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ApiError(
@@ -658,6 +669,9 @@ def create_first_admin(
     if not EMAIL_RE.match(email):
         raise ApiError(422, "EMAIL_INVALID", "이메일 형식이 아니에요")
     _check_new_password(password)
+    hashed = hash_password(
+        password
+    )  # 잠금 밖에서 계산한다(요청이 몰려도 계정 파일 잠금을 오래 쥐지 않게)
     path = _editable_path()
     with _file_lock:
         rows = _bootstrap(path, _read(path))
@@ -669,7 +683,7 @@ def create_first_admin(
                 "COMPANY_HAS_ADMIN",
                 "이 회사에는 관리자가 있어요. 그 관리자에게 계정을 받아요",
             )
-        row = _new_row(name.strip(), email, "admin", password, company_id)
+        row = _new_row(name.strip(), email, "admin", password, company_id, password_hash=hashed)
         if company_id not in _company_ids(row):  # 회사 목록에 없는 회사(읽을 때 버려진다)
             raise ApiError(409, "UNKNOWN_COMPANY", "등록되지 않은 회사예요")
         if _name_taken(rows, row["name"], _company_ids(row)):

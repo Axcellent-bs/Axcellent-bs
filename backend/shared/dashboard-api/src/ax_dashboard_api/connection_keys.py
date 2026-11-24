@@ -35,11 +35,13 @@ import os
 import re
 import secrets
 import threading
+import time
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, Field, field_validator
 
 from ax_agent_template import companies as company_list
@@ -78,6 +80,37 @@ class IssueIn(BaseModel):
     industry: str = Field("", max_length=80)
     site_url: str = Field("", max_length=300)
     company_id: str = Field("", max_length=64)
+
+
+# 로그인 전 경로(check-public·signup) 속도 제한. 서버 하나(워커 1개)라 프로세스 안 기억으로 센다.
+# 운영 nginx도 IP당 limit_req를 건다(재헌 리뷰 11/24). 여기서는 IP와 키 두 기준으로 막는다.
+PUBLIC_WINDOW_SECONDS = 60.0
+PUBLIC_MAX_PER_IP = 10
+PUBLIC_MAX_PER_KEY = 5
+_public_hits: dict[str, deque[float]] = {}
+_public_lock = threading.Lock()
+_public_clock = time.monotonic  # 시험에서 바꿔 끼운다
+
+
+def reset_public_limits_for_tests() -> None:
+    with _public_lock:
+        _public_hits.clear()
+
+
+def _limit_public(request: Request, key: str) -> None:
+    """로그인 전 키 경로를 IP·키마다 분당 몇 번으로 막는다. 넘으면 429."""
+    ip = (request.client.host if request.client else "") or "unknown"
+    now = _public_clock()
+    buckets = [(f"ip:{ip}", PUBLIC_MAX_PER_IP), (f"key:{_norm(key)}", PUBLIC_MAX_PER_KEY)]
+    with _public_lock:
+        for name, limit in buckets:
+            hits = _public_hits.setdefault(name, deque())
+            while hits and now - hits[0] > PUBLIC_WINDOW_SECONDS:
+                hits.popleft()
+            if len(hits) >= limit:
+                raise ApiError(429, "TOO_MANY_TRIES", "너무 자주 시도했어요. 1분 뒤 다시 해 주세요")
+        for name, _limit in buckets:
+            _public_hits[name].append(now)
 
 
 class SignupIn(BaseModel):
@@ -282,12 +315,15 @@ def _find(data: dict[str, Any], key: str) -> dict[str, Any] | None:
     return next((k for k in data["keys"] if secrets.compare_digest(k["key"], want)), None)
 
 
+_UNKNOWN_KEY = "AXcellent에서 발급한 키가 아니에요. 키를 다시 확인해 주세요."
+
+
 def _why_not(
     data: dict[str, Any], found: dict[str, Any] | None, cid: str | None = None
 ) -> tuple[str, str] | None:
     """키를 이 회사(cid, 기본은 세션 회사)가 쓸 수 없는 이유. 쓸 수 있으면 None."""
     if found is None:
-        return "KEY_UNKNOWN", "AXcellent에서 발급한 키가 아니에요. 키를 다시 확인해 주세요."
+        return "KEY_UNKNOWN", _UNKNOWN_KEY
     if found["status"] == "revoked":
         return "KEY_REVOKED", "폐기된 키예요. AXcellent에 새 키를 요청해 주세요."
     cid = cid or _cid()
@@ -399,8 +435,13 @@ def check(body: KeyIn, authorization: str | None = Header(None)) -> dict:
 
 
 @signup_router.post("/check-public")
-def check_public(body: KeyIn) -> dict:
-    """로그인 전 키 확인(/setup 첫 단계). 회사 전용 키만 가입 가능 여부를 알려 준다."""
+def check_public(body: KeyIn, request: Request) -> dict:
+    """로그인 전 키 확인(/setup 첫 단계). 회사 전용 키만 가입 가능 여부를 알려 준다.
+
+    회사 전용 키가 아니면(예전 키·없는 키) 모두 같은 "모르는 키" 응답이다. 로그인 없이 예전 키의
+    회사 정보(미리 채울 값)를 내주지 않는다(재헌 리뷰 11/24).
+    """
+    _limit_public(request, body.key)
     return ok(_check(body.key, None))
 
 
@@ -411,6 +452,8 @@ def _check(key: str, authorization: str | None) -> dict[str, Any]:
         company_scope.scope_id(found["for_company"]) if found and found.get("for_company") else None
     )
     session = _session_cid(authorization)
+    if session is None and not bound:
+        return {"ok": False, "reason": _UNKNOWN_KEY}
     if bound and session is None:
         # 로그인 전: 그 회사 전용 키. 첫 관리자 가입이 되는지만 본다(연결은 가입·로그인 뒤)
         problem = _why_not(data, found, bound)
@@ -451,8 +494,15 @@ def _signup_problem(found: dict[str, Any], bound: str) -> tuple[str, str] | None
 
 
 @signup_router.post("/signup")
-def signup(body: SignupIn) -> dict:
-    """회사 전용 키로 그 회사의 첫 관리자 가입(로그인 전). 성공하면 로그인 세션을 준다."""
+def signup(body: SignupIn, request: Request) -> dict:
+    """회사 전용 키로 그 회사의 첫 관리자 가입(로그인 전). 성공하면 로그인 세션을 준다.
+
+    순서(재헌 리뷰 11/24): 키 파일에 "가입에 씀"을 먼저 적고 잠금을 푼 뒤 계정을 만든다.
+    비밀번호 해시는 잠금 밖에서 계산한다(요청이 몰려도 키 파일 잠금을 오래 쥐지 않게).
+    계정을 못 만들면 키 표시를 되돌린다.
+    """
+    _limit_public(request, body.key)
+    accounts.check_new_password(body.password)
     with _file_lock:
         data = _load()
         found = _find(data, body.key)
@@ -465,11 +515,32 @@ def signup(body: SignupIn) -> dict:
         problem = _why_not(data, found, bound) or _signup_problem(found, bound)
         if problem:
             raise ApiError(409 if problem[0] != "KEY_REVOKED" else 422, problem[0], problem[1])
-        account, login = accounts.create_first_admin(body.name, body.email, body.password, bound)
+        key_id = found["id"]
         found["signup_at"] = _now()
-        found["signup_account"] = account["id"]
         _save(data)
+    try:
+        account, login = accounts.create_first_admin(body.name, body.email, body.password, bound)
+    except Exception:
+        _undo_signup_mark(key_id)
+        raise
+    with _file_lock:
+        data = _load()
+        row = next((k for k in data["keys"] if k["id"] == key_id), None)
+        if row is not None:
+            row["signup_account"] = account["id"]
+            _save(data)
     return ok(login)
+
+
+def _undo_signup_mark(key_id: str, extra: tuple[str, ...] = ()) -> None:
+    """계정 쪽이 실패하면 키 줄의 "가입·옮기기에 씀" 표시를 지운다(다시 시도할 수 있게)."""
+    with _file_lock:
+        data = _load()
+        row = next((k for k in data["keys"] if k["id"] == key_id), None)
+        if row is not None:
+            for name in ("signup_at", "signup_account", *extra):
+                row.pop(name, None)
+            _save(data)
 
 
 @router.post("/connect", dependencies=ADMIN_ONLY)
@@ -532,11 +603,17 @@ def move(body: KeyIn, authorization: str | None = Header(None)) -> dict:
         problem = _why_not(data, found, new) or _signup_problem(found, new)
         if problem:
             raise ApiError(409 if problem[0] != "KEY_REVOKED" else 422, problem[0], problem[1])
-        ids, login = accounts.move_company(human.account_id, old, new)
+        key_id = found["id"]
+        # 키에 먼저 적고(가입과 같은 순서) 계정을 옮긴다. 옮기기가 실패하면 되돌린다
         found["signup_at"] = _now()
         found["signup_account"] = human.account_id
         found["moved_from"] = old
         _save(data)
+    try:
+        ids, login = accounts.move_company(human.account_id, old, new)
+    except Exception:
+        _undo_signup_mark(key_id, ("moved_from",))
+        raise
     return ok({**login, "moved_accounts": len(ids), "from_company": old})
 
 
