@@ -209,9 +209,12 @@ def test_video_params_send_the_original_or_the_storyboard(
         batch = dict(e["hf"].tools)["generate_video_batch"]["requests"][0]["params"]
         assert batch["model"] == model and batch["medias"][0]["role"] == role
         # 영상 참조로 올린 파일: 가상 인물 원본(시트 그림 자리) 또는 스토리보드 그림
-        board = rr.asset_path(rid, "board_image", "catbooks").read_bytes()
-        assert sent[-1] == (JPEG if role == "image_references" else board)
-        assert board != JPEG
+        if role == "image_references":  # 11/25 원본이 참조라 스토리보드 그림은 만들지 않는다
+            assert "board_image" not in e["store"].get_render(rid)
+            assert sent[-1] == JPEG
+        else:
+            board = rr.asset_path(rid, "board_image", "catbooks").read_bytes()
+            assert sent[-1] == board and board != JPEG
     finally:
         gen.close()
 
