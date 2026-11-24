@@ -1,6 +1,6 @@
 """데이터분석 AI 직접 대화 평가 정의(`eval/data_chat/`)의 약속.
 
-- 묶음 고르기(질문 20개), 답 숫자 ⊆ facts(날짜·시각·쉼표·배수·% 통과, 바깥 숫자는 고정 문장)
+- 묶음 고르기(질문 22개), 답 숫자 ⊆ facts(날짜·시각·쉼표·배수·% 통과, 바깥 숫자는 고정 문장)
 - 상태 변경 명령은 LLM 없이 거절, 질문은 통과
 - 저장 결과가 없으면 계산·LLM·YouTube 0회
 - 재료 4,000자·지난 대화 6개, 하루 30회·80,000토큰(먼저 닿는 쪽), 80% 넘어도 허용·100%에서 멈춤,
@@ -43,8 +43,9 @@ score = _load("score")
 
 def test_answers_come_from_the_rules() -> None:
     cases = make.cases()
-    assert sum(c["kind"] == "pick" for c in cases) == 20
+    assert sum(c["kind"] == "pick" for c in cases) == 22  # 11/24 인스타 질문 2개 더함
     by = {c["name"]: c for c in cases}
+    assert by["pick_21"]["expected"] == ["instagram"]  # "인스타 인기"는 YouTube 감지를 안 잡는다
     assert by["pick_08"]["expected"] == ["collect"]  # "새 숏츠 추적"은 감지가 아니라 수집 상태
     assert by["pick_09"]["expected"] == ["performance"]  # "기획에 보냈어?"는 성과(보내기 상태)
     assert by["number_percent_rate"]["expected"] == "keep"

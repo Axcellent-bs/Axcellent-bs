@@ -1,7 +1,7 @@
 """데이터분석 AI 직접 대화 채점기: 케이스 정답(`make_cases`)과 실행 결과를 비교.
 
 지표 (평가 정의 PR에서는 관찰만, 관문은 코드 PR에서 켠다):
-- `data_chat.bundle_accuracy`: 질문 20개의 고른 묶음이 정답과 같은 비율
+- `data_chat.bundle_accuracy`: 질문 22개의 고른 묶음이 정답과 같은 비율
 - `data_chat.number_check_accuracy`: 답 숫자 ⊆ facts 검사(통과·고정 문장)가 정답과 같은 비율
 - `data_chat.action_accuracy`: 명령은 거절하고 LLM 0회, 질문은 거절하지 않은 비율
 - `data_chat.no_compute_rate`: 저장 결과가 없을 때 고정 문장이고 계산·LLM·YouTube 호출 0회인 비율
