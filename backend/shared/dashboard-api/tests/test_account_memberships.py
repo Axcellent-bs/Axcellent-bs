@@ -58,7 +58,8 @@ def _login(client: TestClient, email: str = BOOT_EMAIL, pw: str = BOOT_PW) -> di
 
 def _make(client: TestClient, op: str, role: str, email: str) -> dict:
     pw = f"{role}-pass-1234"
-    body = {"name": role, "email": email, "role": role, "password": pw}
+    # 이름은 이메일마다 다르게(같은 회사 안 이름 중복은 막혀요, #1562)
+    body = {"name": email.split("@")[0], "email": email, "role": role, "password": pw}
     assert client.post(BASE + "/accounts", json=body, headers=_bearer(op)).status_code == 200
     return _login(client, email, pw)
 

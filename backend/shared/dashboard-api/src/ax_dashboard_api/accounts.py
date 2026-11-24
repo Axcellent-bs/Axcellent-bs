@@ -213,12 +213,69 @@ def _bootstrap(path: Path, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [row]
 
 
+def _name_key(name: str) -> str:
+    """이름 비교 키: 앞뒤 공백·대소문자·연속 공백 차이는 같은 이름으로 본다."""
+    return " ".join(name.split()).casefold()
+
+
+def _company_ids(row: dict[str, Any]) -> set[str]:
+    return {m.company_id for m in memberships_of(row)}
+
+
+def _name_taken(
+    rows: list[dict[str, Any]], name: str, companies: set[str], *, except_id: str | None = None
+) -> bool:
+    """같은 회사 안에 같은 이름의 다른 계정이 있나 (#1562).
+
+    대화 본인 확인이 계정 이름으로 돼 있어서, 같은 회사에 이름이 같은 계정이 둘이면 서로의
+    AI 대화를 읽을 수 있다. 회사가 다르면 대화도 회사별이라 같은 이름이어도 된다.
+    """
+    key = _name_key(name)
+    return any(
+        r.get("id") != except_id
+        and _name_key(str(r.get("name") or "")) == key
+        and companies & _company_ids(r)
+        for r in rows
+    )
+
+
+_warned_duplicate_names = False
+
+
+def _warn_duplicate_names(rows: list[dict[str, Any]]) -> None:
+    """예전 계정 파일에 같은 회사 안 같은 이름이 있으면 시작 때 한 번 경고한다.
+
+    이름 값은 로그에 남기지 않는다.
+    """
+    global _warned_duplicate_names
+    if _warned_duplicate_names:
+        return
+    _warned_duplicate_names = True
+    seen: dict[tuple[str, str], str] = {}
+    pairs = 0
+    for r in rows:
+        for cid in _company_ids(r):
+            k = (cid, _name_key(str(r.get("name") or "")))
+            if k in seen:
+                pairs += 1
+            else:
+                seen[k] = str(r.get("id"))
+    if pairs:
+        logger.warning(
+            "같은 회사 안에 이름이 같은 계정이 %d쌍 있어요. 대화 본인 확인이 섞일 수 있으니 "
+            "계정 관리에서 이름을 바꿔 주세요 (#1562)",
+            pairs,
+        )
+
+
 def load_accounts() -> list[dict[str, Any]]:
     path = _path()
     if path is None:
         return []
     with _file_lock:
-        return _bootstrap(path, _read(path))
+        rows = _bootstrap(path, _read(path))
+    _warn_duplicate_names(rows)
+    return rows
 
 
 def secret_tenants_of(row: dict[str, Any]) -> list[str]:
@@ -556,6 +613,8 @@ def create_account(body: AccountIn, authorization: str | None = Header(None)) ->
         if any(r.get("email") == email for r in rows):
             raise ApiError(409, "EMAIL_TAKEN", "이미 있는 이메일이에요")
         row = _new_row(body.name.strip(), email, body.role, body.password, human.company_id)
+        if _name_taken(rows, row["name"], _company_ids(row)):
+            raise ApiError(409, "NAME_TAKEN", "같은 회사에 이름이 같은 계정이 있어요")
         rows.append(row)
         _write(path, rows)
     logger.info("계정을 만들었다: %s(%s) by %s", email, body.role, human.name)
@@ -726,6 +785,8 @@ def update_account(
             name = patch["name"].strip()
             if not name:
                 raise ApiError(422, "NAME_EMPTY", "이름을 입력해 주세요")
+            if _name_taken(rows, name, _company_ids(row), except_id=account_id):
+                raise ApiError(409, "NAME_TAKEN", "같은 회사에 이름이 같은 계정이 있어요")
             row["name"] = name
         if "dept" in patch:
             dept = patch["dept"].strip()
