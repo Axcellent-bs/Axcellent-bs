@@ -1,5 +1,7 @@
-"""병행 비교 (설계 6절, 3-1b): 원본 경로(`sales.db`, `sales_sql.tally`)와 집계 경로(`aggregates.db`)가
-같은 기간에 같은 숫자를 내는지 기준일마다 남긴다. 3-3(원본 저장 끄기)은 며칠 연속 "다름 0"이 조건이다.
+"""병행 비교 (설계 6절, 3-1b).
+
+원본 경로(`sales.db`, `sales_sql.tally`)와 집계 경로(`aggregates.db`)가 같은 기간에 같은 숫자를
+내는지 기준일마다 남긴다. 3-3(원본 저장 끄기)은 며칠 연속 "다름 0"이 조건이다.
 
 같은 정의로 비교한다: 기간은 기준일 24시까지 꽉 찬 7·30일(원본도 그 기간으로 다시 센다).
 - 매출 분석: 매출·주문 수·쿠폰 주문 수·분류별 매출·유입 경로별 매출·상품별 주문 수 (일별 행 합)
@@ -38,7 +40,9 @@ class CompareResult:
 
     def line(self) -> str:
         d = self.as_of
-        return f"[aggregate] 병행 비교 {d.month}월 {d.day}일: 같음 {self.same} · 다름 {self.different}"
+        return (
+            f"[aggregate] 병행 비교 {d.month}월 {d.day}일: 같음 {self.same} · 다름 {self.different}"
+        )
 
 
 def _diff(name: str, want: object, got: object, out: list[str]) -> None:
@@ -89,7 +93,9 @@ def compare_day(
     return result
 
 
-def _row(tenant_id: str, as_of: date, target: str, diffs: list[str], now: datetime) -> AggCompareRow:
+def _row(
+    tenant_id: str, as_of: date, target: str, diffs: list[str], now: datetime
+) -> AggCompareRow:
     return AggCompareRow(tenant_id=tenant_id, as_of=as_of, target=target, same=not diffs,
                          diffs=diffs, compared_at=now)  # fmt: skip
 

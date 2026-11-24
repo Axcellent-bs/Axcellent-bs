@@ -461,7 +461,9 @@ class AggregateStore:
         """병행 비교 결과를 그 기준일만 바꿔 넣는다 (설계 6.3)."""
         a = as_of.isoformat()
         with self._tx() as conn:
-            conn.execute("DELETE FROM agg_compare WHERE tenant_id = ? AND as_of = ?", (tenant_id, a))
+            conn.execute(
+                "DELETE FROM agg_compare WHERE tenant_id = ? AND as_of = ?", (tenant_id, a)
+            )
             conn.executemany(
                 "INSERT INTO agg_compare (tenant_id, as_of, target, same, diffs, compared_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",

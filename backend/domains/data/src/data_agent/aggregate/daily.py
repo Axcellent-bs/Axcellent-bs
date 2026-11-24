@@ -63,7 +63,8 @@ def changed_days(sales: SalesStore, tenant_id: str, since: str | None, as_of: da
 
 
 def expand_old(days: list[date], keep_from: date, first: date | None) -> list[date]:
-    """13개월보다 오래된 날짜는 그 달의 모든 날로 (달 행을 다시 합칠 수 있게). 첫 주문 날 앞은 뺀다."""
+    """13개월보다 오래된 날짜는 그 달의 모든 날로 (달 행을 다시 합칠 수 있게).
+    첫 주문 날 앞은 뺀다."""
     out: set[date] = set()
     for d in days:
         if d >= keep_from:
@@ -102,10 +103,15 @@ def run_daily(  # noqa: PLR0913 - 두 저장소·회사·카탈로그·시각
         _, first, _ = sales.order_span(tenant_id)
         keep_from, drop_before = retention_bounds(as_of)
         first_day = kst_day(first) if first else None
-        days = expand_old(changed_days(sales, tenant_id, since, as_of), keep_from, first_day)
+        if since is None and first_day is not None:  # 처음이면 첫 주문 날부터 전부
+            days = [first_day + timedelta(days=i) for i in range((as_of - first_day).days + 1)]
+        else:
+            days = expand_old(changed_days(sales, tenant_id, since, as_of), keep_from, first_day)
         for d in days:
-            rows, quality = build_day(sales, tenant_id, d, cfg, run.run_id, now,
-                                      source_cursor=run.source_cursor, with_current=d == as_of)  # fmt: skip
+            rows, quality = build_day(
+                sales, tenant_id, d, cfg, run.run_id, now,
+                source_cursor=run.source_cursor, with_current=d == as_of,
+            )  # fmt: skip
             agg.replace_day(tenant_id, d, rows, quality)
         merged, dropped = agg.roll_up(tenant_id, keep_from, drop_before)
         counts: dict[str, int] = {"days": len(days), "rolled_up_daily_rows": merged,
