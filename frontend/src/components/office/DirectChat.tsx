@@ -15,7 +15,8 @@ import { READER_AREAS } from "@/demo/members";
 import { useSession, type Account } from "@/demo/session";
 import { humanizePlanIds } from "@/lib/format"
 import { ACCEPT, makeCharacterSheet, shrinkImage } from "@/lib/characterSheet"
-import { NEW_THREAD_NOTE, commandHint, isClearCommand } from "@/lib/roomCleanup"
+import { NEW_THREAD_CONFIRM, NEW_THREAD_NOTE, commandHint, isClearCommand, newThreadNeedsConfirm } from "@/lib/roomCleanup"
+import { InlineConfirm } from "@/components/InlineConfirm"
 
 // AI 대화방의 직접 대화. 사람이 부서 AI 하나를 골라 바로 말을 건다.
 // 사람 말을 바로 받는 창구: 개발 AI(dashboard-api /api/dashboard/dev-chat), 인사 AI(/api/hr/chat), 기획 AI(dashboard-api /api/dashboard/planning-chat), 마케팅 AI(dashboard-api /api/dashboard/marketing-chat), 재무 AI(dashboard-api /api/dashboard/finance-chat), 총괄 AI(dashboard-api /api/dashboard/orchestrator-chat), 인프라 AI(dashboard-api /api/dashboard/infra-chat). 나머지 AI는 창구가 생길 때까지 "준비 중"으로 둔다.
@@ -141,6 +142,10 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
   const [text, setText] = useState("");
   // 11/23 /clear로 새 대화를 시작했나 (새 대화 위 "새 대화를 시작했어요" 한 줄). 지난 대화를 열면 끈다
   const [freshStart, setFreshStart] = useState(false);
+  // 11/24 [새 대화] 확인 상자 (버튼 아래, confirm() 쓰지 않음)
+  const [askNew, setAskNew] = useState(false);
+  // 11/24 [대화 끝내기] 확인도 화면 안 상자(InlineConfirm)
+  const [askFinish, setAskFinish] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   // 마케팅 1:1만: 올릴 캐릭터 이미지(보내면 먼저 이미지 시트를 만들고 그 기록 번호를 말과 함께 보낸다)
   const [picked, setPicked] = useState<{ media_type: string; data_base64: string; preview: string; thumb_base64: string } | null>(null);
@@ -232,9 +237,8 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
     // 이전 대화는 "내 지난 대화"에 그대로 남는다
     if (said === undefined && isClearCommand(text)) {
       if (sending) return;
-      reset();
+      startNew();
       setText("");
-      setFreshStart(true);
       return;
     }
     const image = said === undefined ? picked : null;
@@ -267,14 +271,15 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
   };
   const reset = () => { setThread(null); saveThreadId(tkey, null); setError(null); };
+  // 새 대화 시작: /clear와 [새 대화] 확인 상자가 같이 쓴다 (이전 대화는 "내 지난 대화"에 남는다)
+  function startNew() { reset(); setFreshStart(true); setAskNew(false); }
   const restart = () => {
-    if (readOnly) return reset();
-    if (!window.confirm("새 대화를 시작할까요? 지금 대화는 '내 지난 대화'에서 다시 열 수 있어요.")) return;
-    reset();
+    if (!newThreadNeedsConfirm(readOnly)) return reset();
+    setAskNew(true);
   };
   const finish = async () => {
+    setAskFinish(false);
     if (!thread || !api.close || sending || closing) return;
-    if (!window.confirm("이 대화를 끝낼까요? 끝내면 요약이 남고, 이어서 말할 수 없어요.")) return;
     setClosing(true);
     setError(null);
     try {
@@ -320,6 +325,18 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
             <h3 className="text-xs font-semibold text-ink-700">내 지난 대화</h3>
             <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={restart} disabled={!!sending || !thread}>새 대화</button>
           </div>
+          {askNew && thread && (
+            <div role="alertdialog" aria-label={NEW_THREAD_CONFIRM.head} className="mt-1.5 w-full min-w-0 space-y-1.5">
+              <div className="w-full min-w-0 rounded-xl border border-ink-100 bg-ink-50 px-3 py-2 text-[12.5px] text-ink-700">
+                <b className="block text-ink-900">{NEW_THREAD_CONFIRM.head}</b>
+                <p>{NEW_THREAD_CONFIRM.body}</p>
+              </div>
+              <span className="flex w-full flex-wrap gap-1.5">
+                <button type="button" className="btn-primary px-2.5 py-1 text-xs" disabled={!!sending} onClick={startNew}>새 대화</button>
+                <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => setAskNew(false)}>취소</button>
+              </span>
+            </div>
+          )}
           {mine.length === 0 ? <p className="mt-2 text-xs text-ink-500">아직 없어요.</p> : (
             <ul className="mt-2 space-y-1">
               {mine.map((t) => (
@@ -430,7 +447,11 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
             <button className="btn-primary" disabled={(!text.trim() && !picked) || !!sending || prep || !!locked || (isAnswering(thread) && !isClearCommand(text))}>보내기</button>
             {commandHint(text, true) && <p role="status" className="w-full rounded-lg bg-brand-50 px-2 py-1 text-xs text-brand-800">{commandHint(text, true)}</p>}
             {api.close && thread && (
-              <button type="button" className="btn-ghost" onClick={finish} disabled={!!sending || closing || isAnswering(thread)}>{closing ? "끝내는 중…" : "대화 끝내기"}</button>
+              <button type="button" className="btn-ghost" onClick={() => setAskFinish(true)} disabled={!!sending || closing || isAnswering(thread)}>{closing ? "끝내는 중…" : "대화 끝내기"}</button>
+            )}
+            {askFinish && api.close && thread && (
+              <InlineConfirm message="이 대화를 끝낼까요? 끝내면 요약이 남고, 이어서 말할 수 없어요. 되돌릴 수 없어요." confirmLabel="대화 끝내기" danger
+                busy={!!sending || closing} onConfirm={() => void finish()} onCancel={() => setAskFinish(false)} />
             )}
           </form>
           )

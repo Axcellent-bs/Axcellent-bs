@@ -305,7 +305,7 @@ def prepare_video_draft(
     text = _plan_text(plan)
     if contains_pii(text, templates_path):
         return _fail(request, "pii_in_plan")
-    if any(phrase in text for phrase in sns.FORBIDDEN_PHRASES):
+    if sns.has_engagement_bait(text):
         return _fail(request, "forbidden_phrase")
     if sns.has_forbidden_claim(text):
         return _fail(request, "forbidden_claim")

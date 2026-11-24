@@ -9,6 +9,7 @@ import { Linked, Ref, go, idText, reviewOf, toPath } from '@/components/planning
 import { CONFIRMED_BY } from '@/components/planning-common/flow'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { Markdown } from '@/components/planning-common/markdown'
+import { InlineConfirm } from '@/components/InlineConfirm'
 import { PROPOSAL_ORIGIN, handoffFailed, handoffRetrying, proposalReady, type Proposal } from '@/lib/proposals'
 import { TEMPLATES, TEMPLATE_NAME, templateOf, type Section } from '@/lib/specTemplate'
 import { notionApi, previewFill, previewSuggest, useAllReleaseChecks, useReleaseChecks, type NotionHit, type ReleaseCheck } from '@/lib/planning'
@@ -472,10 +473,14 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
   }, [dirty])
   const set = (patch: Partial<Draft>) => setDraft({ ...cur, ...patch })
   const startEdit = () => { setDraft(draftOf(spec)); setAnswerFound('') }
+  // 11/24 확인은 화면 안 상자(InlineConfirm): 취소·삭제 버튼 묶음 바로 아래
+  const [askDiscard, setAskDiscard] = useState(false)
+  const [askDel, setAskDel] = useState(false)
   const cancel = () => {
-    if (dirty && !window.confirm('고친 내용을 버릴까요?')) return
-    setDraft(null); setAnswerFound('')
+    if (dirty) { setAskDiscard(true); return }
+    discard()
   }
+  const discard = () => { setAskDiscard(false); setDraft(null); setAnswerFound('') }
   const saveAll = () => {
     if (!draft) return
     const patch: Record<string, unknown> = {}
@@ -590,7 +595,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
 
   const deletable = !locked && !s.tasks.some((t) => t.spec === spec.id)
   const removeSpec = () => {
-    if (!window.confirm(`${idText(spec.id)} "${spec.title}" 기획서를 지울까요? 요청은 남고 접수 상태로 돌아가요.`)) return
+    setAskDel(false)
     d({ type: 'deleteSpec', spec: spec.id })
     toast.show(`${idText(spec.id)} 삭제`)
     go(toPath('work/specs'))
@@ -686,11 +691,13 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
             <>
               <Button size="small" variant="primary" onClick={startEdit}>수정</Button>
               <Button size="small" onClick={() => { setHistoryOpen(!historyOpen) }} aria-pressed={historyOpen}>수정 이력</Button>
-              <Button size="small" onClick={removeSpec} disabled={!deletable} title={deletable ? '기획서 초안 지우기' : '확정됐거나 작업이 나간 기획서는 지울 수 없어요'}>삭제</Button>
+              <Button size="small" onClick={() => setAskDel(true)} disabled={!deletable} title={deletable ? '기획서 초안 지우기' : '확정됐거나 작업이 나간 기획서는 지울 수 없어요'}>삭제</Button>
               <Button size="small" onClick={printDoc} title="기획서 본문만 인쇄해요 (PDF로 저장 가능)">PDF로 저장</Button>
             </>
           )}
         </div>
+        {editing && askDiscard && <InlineConfirm danger confirmLabel="버리기" message="고친 내용을 버릴까요? 되돌릴 수 없어요." onConfirm={discard} onCancel={() => setAskDiscard(false)} />}
+        {!editing && askDel && deletable && <InlineConfirm danger confirmLabel="지우기" message={`${idText(spec.id)} "${spec.title}" 기획서를 지울까요? 요청은 남고 접수 상태로 돌아가요. 되돌릴 수 없어요.`} onConfirm={removeSpec} onCancel={() => setAskDel(false)} />}
         {editing
           ? <input className="doc-title-input" value={cur.title} onChange={(e) => set({ title: e.target.value })} aria-label="기획서 제목" />
           : <h1 className="doc-title-static">{spec.title}</h1>}

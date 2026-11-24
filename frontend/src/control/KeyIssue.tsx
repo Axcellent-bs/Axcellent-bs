@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { InlineNote } from '@/components/InlineConfirm'
 import { issueKey, revokeKey, useCompany, useKeys, type IssuedKey, type KeyStatus } from '@/demo/company'
 
 // 연결 키 발급 (AXcellent 운영팀). 키에는 회사 정보가 없고 연결 권한만 있다. 누구에게 보냈는지는 운영팀 메모로만 남긴다.
@@ -17,10 +18,13 @@ export default function KeyIssue() {
   const [memo, setMemo] = useState('')
   const [fresh, setFresh] = useState<IssuedKey | null>(null)
   const [copied, setCopied] = useState(false)
+  const [issueError, setIssueError] = useState<string | null>(null) // 실패는 alert 대신 칸 아래 한 줄(InlineNote)
+  const [revokeError, setRevokeError] = useState<{ id: string; text: string } | null>(null)
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    void issueKey(memo.trim()).then(setFresh).catch((x: Error) => window.alert(x.message))
+    setIssueError(null)
+    void issueKey(memo.trim()).then(setFresh).catch((x: Error) => setIssueError(x.message))
     setCopied(false)
     setMemo('')
   }
@@ -47,6 +51,7 @@ export default function KeyIssue() {
           <input className="field" placeholder="메모 (선택) · 예: 베이커리 체인 도입 문의, 담당 김○○ — 키에는 안 들어가요" value={memo} onChange={(e) => setMemo(e.target.value)} aria-label="메모" />
           <button className="btn-primary px-5">발급</button>
         </form>
+        {issueError && <InlineNote error text={issueError} />}
         {fresh && (
           <div className="mt-4 flex flex-wrap items-center gap-3 border border-dashed border-brand-500 bg-brand-50 px-5 py-4">
             <span className="text-sm text-brand-700">새 연결 키</span>
@@ -89,8 +94,12 @@ export default function KeyIssue() {
                 </td>
                 <td className="px-5 py-3 text-right">
                   {k.status !== 'revoked' && (
-                    <button type="button" className="btn-quiet px-2.5 py-1 text-xs" onClick={() => { void revokeKey(k.id).catch((x: Error) => window.alert(x.message)) }}>폐기</button>
+                    <button type="button" className="btn-quiet px-2.5 py-1 text-xs" onClick={() => {
+                      setRevokeError(null)
+                      void revokeKey(k.id).catch((x: Error) => setRevokeError({ id: k.id, text: x.message }))
+                    }}>폐기</button>
                   )}
+                  {revokeError?.id === k.id && <InlineNote error text={revokeError.text} />}
                 </td>
               </tr>
             ))}

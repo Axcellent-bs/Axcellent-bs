@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { speaker } from "@/lib/agentChat";
 import { orchestrator } from "@/lib/orchestrator";
-import { VIDEO_WAIT_LABEL, videoApproval } from "@/lib/requestCharacter";
+import { VIDEO_WAIT_LABEL, unansweredNotice, videoApproval } from "@/lib/requestCharacter";
+import { BrandCharacterAsk } from "@/components/office/BrandCharacterAsk";
 import { RequestCreative } from "@/components/office/RequestCreative";
 import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestVideoLink } from "@/lib/requestVideoView";
@@ -262,6 +263,8 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
       </p>
       {/* 11/23 의뢰 정리 메뉴 (고객 의뢰 넘김 카드와 같은 함수). 삭제한 의뢰는 위에서 한 줄로 접는다 */}
       <RequestActions row={row} title={requestTitle(row, tasks)} />
+      {/* 11/24 홍보 영상 의뢰: 회사 캐릭터 질문을 단계 목록 위에 (고객 의뢰 넘김 카드와 같은 상태) */}
+      <BrandCharacterAsk row={row} variant="chat" />
       <ol className="space-y-2">
         {rows.map((s, i) => {
           const report = s.skill === "trend_report_create" ? reportIdOfRequest(row, s.stepId) : null;
@@ -287,6 +290,9 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                 {isInsight && plan && <PlanCell card={plan} />}
                 {isInsight && proposal && !plan && (
                   <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(planDocPath({ id: proposal, request: row.request_id }))}>기획 제안 열기</button>
+                )}
+                {s.decide && !decided.has(s.stepId) && unansweredNotice(row, s.stepId) && (
+                  <p className="mt-1 text-xs text-amber-800">{unansweredNotice(row, s.stepId)}</p>
                 )}
                 {s.decide && !decided.has(s.stepId) && (
                   <span className="mt-1 flex flex-wrap gap-1.5">

@@ -14,6 +14,7 @@ import { Ref, idText, repoPrHref, toPath } from '@/components/planning-common/li
 import { humanizePlanIds } from '@/lib/format'
 import { recoveryOf, type RecoveryAction } from '@/lib/codingRecovery'
 import { Link } from '@/lib/nav'
+import { InlineConfirm } from '@/components/InlineConfirm'
 
 const api = devTaskApi(DEV_API)
 const actions = planningApi(DEV_API)
@@ -161,9 +162,10 @@ export function ReturnButton({ task }: { task: Task }) {
 export function DiscardButton({ task }: { task: Task }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
+  const [ask, setAsk] = useState(false) // 11/24 확인은 화면 안 상자(InlineConfirm)
   if (!canDiscard(task)) return null
   const discard = async () => {
-    if (!window.confirm(`${idText(task.id)} 작업을 폐기할까요? 다시 돌릴 수 없어요.`)) return
+    setAsk(false)
     setBusy(true)
     try {
       await api.discard(task.id)
@@ -174,16 +176,22 @@ export function DiscardButton({ task }: { task: Task }) {
       setBusy(false)
     }
   }
-  return <Button size="small" onClick={discard} disabled={busy}>{busy ? '폐기하는 중…' : '폐기'}</Button>
+  return (
+    <>
+      <Button size="small" onClick={() => setAsk(true)} disabled={busy}>{busy ? '폐기하는 중…' : '폐기'}</Button>
+      {ask && <InlineConfirm message={`${idText(task.id)} 작업을 폐기할까요? 다시 돌릴 수 없어요.`} confirmLabel="폐기" danger busy={busy} onConfirm={() => void discard()} onCancel={() => setAsk(false)} />}
+    </>
+  )
 }
 
 /** 작업 중단 버튼. 열린 PR은 서버가 닫고 브랜치를 지운다 */
 export function CancelButton({ taskId, status }: { taskId: string; status?: CodingStatus }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
+  const [ask, setAsk] = useState(false) // 11/24 확인은 화면 안 상자(InlineConfirm)
   if (!canCancel(status)) return null
   const cancel = async () => {
-    if (!window.confirm(`${idText(taskId)} 작업을 중단할까요? 열린 PR은 닫고 브랜치를 지워요.`)) return
+    setAsk(false)
     setBusy(true)
     try {
       await api.cancel(taskId)
@@ -194,7 +202,12 @@ export function CancelButton({ taskId, status }: { taskId: string; status?: Codi
       setBusy(false)
     }
   }
-  return <Button size="small" onClick={cancel} disabled={busy}>{busy ? '중단하는 중…' : '작업 중단'}</Button>
+  return (
+    <>
+      <Button size="small" onClick={() => setAsk(true)} disabled={busy}>{busy ? '중단하는 중…' : '작업 중단'}</Button>
+      {ask && <InlineConfirm message={`${idText(taskId)} 작업을 중단할까요? 열린 PR은 닫고 브랜치를 지워요. 되돌릴 수 없어요.`} confirmLabel="중단" danger busy={busy} onConfirm={() => void cancel()} onCancel={() => setAsk(false)} />}
+    </>
+  )
 }
 
 /** 중단한 작업 재개 버튼. 레포의 최신 코드를 다시 읽고 처음부터 돈다 */
@@ -277,6 +290,8 @@ export function CodingStep({ task, on, prs }: { task: Task; on?: boolean; prs?: 
   const [note, setNote] = useState('')
   // 관문이 머지 등을 보류함: 안전 확인 탭에서 사람이 승인해야 한다 (내부 문장 대신 안내 + 링크)
   const [held, setHeld] = useState(false)
+  // 11/24 확인은 화면 안 상자(InlineConfirm): 지금 묻는 중인 동작
+  const [ask, setAsk] = useState<'merge' | 'subscription' | 'skip' | 'textOk' | 'covered' | null>(null)
   const account = useSession().account?.id ?? null // 세션을 읽는 중이면 null (보내지 않는다)
   const c = task.coding
   const lim = useCodingLimits()
@@ -317,9 +332,8 @@ export function CodingStep({ task, on, prs }: { task: Task; on?: boolean; prs?: 
     if (note.trim() && await act(() => api.revise(task.id, note.trim()), `${c.pr} 추가 지시 보냄`)) setNote('')
   }
   const merge = () => {
-    if (prId && window.confirm(`${idText(prId)}를 머지할까요? 자동 머지 기준 밖이라 사람이 머지한 것으로 기록돼요.`)) {
-      void act(() => actions.action({ type: 'mergePr', pr: prId }), `${prId} 머지`)
-    }
+    setAsk(null)
+    if (prId) void act(() => actions.action({ type: 'mergePr', pr: prId }), `${prId} 머지`)
   }
   const files = c.files ?? []
   const add = files.reduce((n, x) => n + (x.additions || 0), 0)
@@ -348,31 +362,27 @@ export function CodingStep({ task, on, prs }: { task: Task; on?: boolean; prs?: 
   // 회사 설정이 서버 AI만이어도 된다 (예산을 다 쓰면 새 작업도 내 Claude로 간다)
   const toMine = !mine && !prOpen && !task.discarded && STUCK.concat('canceled').includes(c.status)
   const toSubscription = () => {
-    if (window.confirm(`${idText(task.id)}를 내 Claude 대기열로 넘길까요? 개발자 본인 Claude가 가져가 코딩해요.`)) {
-      void act(() => api.toSubscription(task.id), `${task.id} 내 Claude로 넘김`)
-    }
+    setAsk(null)
+    void act(() => api.toSubscription(task.id), `${task.id} 내 Claude로 넘김`)
   }
   // 앞 작업 순서를 기다림 (같은 파일·파일 고르는 중). 앞 작업이 사람 확인으로 멈추면 끝없이 기다리므로 사람이 건너뛴다
   const queueWait = !mine && c.status === 'queued' && !!c.waitingFor?.length && !c.skipQueue
   const skipQueue = () => {
-    if (window.confirm(`${idText(task.id)}를 앞 작업(${(c.waitingFor ?? []).join(', ')})을 기다리지 않고 지금 진행할까요?\n앞 작업과 같은 파일을 고치면 PR이 충돌할 수 있어요.`)) {
-      void act(() => api.skipQueue(task.id), `${task.id} 지금 진행`)
-    }
+    setAsk(null)
+    void act(() => api.skipQueue(task.id), `${task.id} 지금 진행`)
   }
   // 작업 글 경고: 사람이 글을 보고 확인해야 내 Claude가 가져간다 (에이전트는 스스로 확인 못 함)
   const warns = c.textWarnings ?? []
   const textHeld = c.mode === 'subscription' && c.status === 'queued' && warns.length > 0 && !c.textOkBy
   const textOk = () => {
-    if (window.confirm(`${idText(task.id)} 작업 글을 확인했나요? 경고: ${warns.join(', ')}`)) {
-      void act(() => api.textOk(task.id), `${task.id} 작업 글 확인함`)
-    }
+    setAsk(null)
+    void act(() => api.textOk(task.id), `${task.id} 작업 글 확인함`)
   }
   // 바뀐 내용이 없어 멈춤: 앞 작업이 이미 반영했으면 사람이 PR 없이 완료로 닫는다
   const noChange = !c.pr && (c.status === 'failed' || c.status === 'waiting_human') && (c.error ?? '').includes('바뀐 내용이 없음')
   const closeCovered = () => {
-    if (window.confirm(`${idText(task.id)}를 앞 작업이 이미 반영한 것으로 닫을까요? PR 없이 완료돼요.`)) {
-      void act(() => api.closeCovered(task.id), `${task.id} 이미 반영됨으로 닫음`)
-    }
+    setAsk(null)
+    void act(() => api.closeCovered(task.id), `${task.id} 이미 반영됨으로 닫음`)
   }
   // 실행 관문이 PR 열기를 보류함 (보호 경로·한도 등): 사람이 승인하면 같은 코드로 PR을 연다
   const heldPr = c.status === 'waiting_human' && !c.pr && (!!c.holdKey || (c.error ?? '').includes('generate_pr를 허락하지 않음 (held)') || (c.error ?? '').includes('안전 점검에서 PR 열기 보류'))
@@ -451,20 +461,25 @@ export function CodingStep({ task, on, prs }: { task: Task; on?: boolean; prs?: 
         </form>
       )}
       <span className="tags">
-        {mergeable && <Button size="small" variant="primary" onClick={merge} disabled={busy}>머지</Button>}
-        {queueWait && <Button size="small" onClick={skipQueue} disabled={busy}>지금 진행</Button>}
+        {mergeable && <Button size="small" variant="primary" onClick={() => { if (prId) setAsk('merge') }} disabled={busy}>머지</Button>}
+        {queueWait && <Button size="small" onClick={() => setAsk('skip')} disabled={busy}>지금 진행</Button>}
         {heldPr && <Button size="small" variant="primary" onClick={() => void approveHold()} disabled={busy}>{busy ? '보내는 중…' : '승인하고 PR 열기'}</Button>}
         {(STUCK.includes(c.status) || c.status === 'canceled' || c.status === 'returned') && !waitingPr && !task.discarded && can('retry') && <Button size="small" onClick={retry} disabled={busy}>{busy ? '보내는 중…' : c.returnedTo ? '개발에 다시 맡기기' : c.status === 'canceled' ? '재개' : c.mergeConflict ? '최신 코드 기준으로 다시 작성' : '다시 시도'}</Button>}
-        {textHeld && <Button size="small" onClick={textOk} disabled={busy}>작업 글 확인함</Button>}
+        {textHeld && <Button size="small" onClick={() => setAsk('textOk')} disabled={busy}>작업 글 확인함</Button>}
         {unclaimed && <Button size="small" onClick={() => void toAgent()} disabled={busy}>서버 AI로 넘기기</Button>}
-        {toMine && <Button size="small" onClick={toSubscription} disabled={busy}>내 Claude로 넘기기</Button>}
-        {noChange && can('covered') && <Button size="small" onClick={closeCovered} disabled={busy}>이미 반영됨으로 닫기</Button>}
+        {toMine && <Button size="small" onClick={() => setAsk('subscription')} disabled={busy}>내 Claude로 넘기기</Button>}
+        {noChange && can('covered') && <Button size="small" onClick={() => setAsk('covered')} disabled={busy}>이미 반영됨으로 닫기</Button>}
         {stuck && can('chat') && <Button size="small" onClick={() => void toChat()} disabled={busy}>AI 대화로 넘기기</Button>}
         <CancelButton taskId={task.id} status={c.status} />
         <DiscardButton task={task} />
         <ReturnButton task={task} />
         {task.discarded && <Tag>폐기됨{task.discardedBy ? ` · ${task.discardedBy}` : ''}</Tag>}
       </span>
+      {ask === 'merge' && prId && <InlineConfirm message={`${idText(prId)}를 머지할까요? 자동 머지 기준 밖이라 사람이 머지한 것으로 기록돼요. 되돌릴 수 없어요.`} confirmLabel="머지" danger busy={busy} onConfirm={merge} onCancel={() => setAsk(null)} />}
+      {ask === 'skip' && <InlineConfirm message={`${idText(task.id)}를 앞 작업(${(c.waitingFor ?? []).join(', ')})을 기다리지 않고 지금 진행할까요?\n앞 작업과 같은 파일을 고치면 PR이 충돌할 수 있어요.`} confirmLabel="지금 진행" busy={busy} onConfirm={skipQueue} onCancel={() => setAsk(null)} />}
+      {ask === 'subscription' && <InlineConfirm message={`${idText(task.id)}를 내 Claude 대기열로 넘길까요? 개발자 본인 Claude가 가져가 코딩해요.`} confirmLabel="넘기기" busy={busy} onConfirm={toSubscription} onCancel={() => setAsk(null)} />}
+      {ask === 'textOk' && <InlineConfirm message={`${idText(task.id)} 작업 글을 확인했나요? 경고: ${warns.join(', ')}`} confirmLabel="확인했어요" busy={busy} onConfirm={textOk} onCancel={() => setAsk(null)} />}
+      {ask === 'covered' && <InlineConfirm message={`${idText(task.id)}를 앞 작업이 이미 반영한 것으로 닫을까요? PR 없이 완료돼요. 되돌릴 수 없어요.`} confirmLabel="닫기" danger busy={busy} onConfirm={closeCovered} onCancel={() => setAsk(null)} />}
       {stuck && can('pick') && <PickFiles task={task} onDone={() => undefined} />}
     </Step>
   )

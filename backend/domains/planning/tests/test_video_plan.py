@@ -49,18 +49,22 @@ def _mock(out) -> MockLLMClient:
     return MockLLMClient(responses={vp._PlanOut: out})
 
 
+# 상품 홍보(product) 방향: 11/24 전 기본 흐름. 아래 시험 몇 개는 이 흐름을 그대로 본다
+PRODUCT = (vp.PRODUCT, vp.END_CARD)
+
+
 # ---------------------------------------------------------------- 규칙 제작안
 
 
 def test_rule_plan_follows_doc_timing_and_is_deterministic() -> None:
-    plan = vp.rule_plan(_prop())
+    plan = vp.rule_plan(_prop(), PRODUCT)
     assert plan.written_by == "rule" and plan.duration_s == 30 and plan.aspect == "9:16"
     assert [(s.start_s, s.end_s) for s in plan.scenes] == [(0, 5), (5, 12), (12, 23), (23, 30)]
     assert plan.scenes[0].caption == "가을 밤 10분 독서 숏츠"
     assert "밤의 도서관" in plan.scenes[2].visual and "밤의 도서관" in plan.scenes[2].prompt
     assert all(vp.prompt_problems(s.prompt) == [] for s in plan.scenes)
     assert "warm and product focused" in plan.scenes[0].prompt  # 고른 방향 → 분위기
-    assert plan == vp.rule_plan(_prop())
+    assert plan == vp.rule_plan(_prop(), PRODUCT)
 
 
 def test_duration_from_format_text() -> None:
@@ -103,7 +107,7 @@ def test_context_is_not_text() -> None:
 
 def test_llm_plan_keeps_code_timing_and_data_block() -> None:
     llm = _mock(_llm_out())
-    plan = asyncio.run(vp.write(llm, _prop(), "ctx"))
+    plan = asyncio.run(vp.write(llm, _prop(), "ctx", PRODUCT))
     assert plan.written_by == "llm" and plan.concept == "밤 10분 독서 습관"
     assert [(s.start_s, s.end_s) for s in plan.scenes] == [(0, 5), (5, 12), (12, 23), (23, 30)]
     assert plan.style == vp.style() and plan.negative == vp.NEGATIVE  # 11/22: 회사 [brand]로
@@ -112,7 +116,7 @@ def test_llm_plan_keeps_code_timing_and_data_block() -> None:
 
 
 def test_llm_scene_count_spreads_evenly() -> None:
-    plan = asyncio.run(vp.write(_mock(_llm_out(n=5)), _prop(), "ctx"))
+    plan = asyncio.run(vp.write(_mock(_llm_out(n=5)), _prop(), "ctx", PRODUCT))
     assert [(s.start_s, s.end_s) for s in plan.scenes] == [
         (0, 6), (6, 12), (12, 18), (18, 24), (24, 30),
     ]  # fmt: skip
@@ -138,7 +142,7 @@ def test_llm_failure_falls_back_to_rule() -> None:
 
 
 def test_markdown_shows_scenes_and_prompts() -> None:
-    md = vp.markdown(vp.rule_plan(_prop()))
+    md = vp.markdown(vp.rule_plan(_prop(), PRODUCT))
     assert md.startswith("## 영상 제작안 (30초 · 9:16 · 규칙 초안)")
     assert "| 1 | 0~5초 |" in md and "공통 금지: No text" in md
 
@@ -366,3 +370,82 @@ def test_no_length_in_request_keeps_planning_format() -> None:
         asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp)).output
     )
     assert out.video_plan is not None and out.video_plan.duration_s == 15
+
+
+# ---------------------------------------------------------------- 마케팅이 막는 말 (11/24 재현 님)
+
+
+def test_text_problems_matches_what_marketing_blocks() -> None:
+    assert vp.text_problems("이십대가 웃으며 공유할 책 읽는 일상 밈") == ["engagement_word"]
+    assert vp.text_problems("댓글 달면 선물") == ["engagement_word"]
+    assert vp.text_problems("최 고 의 책") == ["claim_word"]  # 띄어써도 걸린다
+    assert vp.text_problems("주말에 소설 한 권 읽는 일상") == []
+
+
+def test_llm_plan_with_engagement_word_falls_back_to_rule_plan() -> None:
+    out = _llm_out()
+    out.concept = "이십대가 웃으며 공유할 책 읽는 일상 밈"  # PROP-22 사례
+    assert vp.reject_reason(_prop(), out) == "marketing_word"
+    plan = vp._from_llm(_prop(), out, 30, vp.tenant.brand())
+    assert plan is None
+
+
+def test_rule_plan_skips_proposal_text_marketing_blocks() -> None:
+    p = _prop(idea="좋아요 누르고 팔로우하면 책 선물", title="공유하고 싶은 최고의 책")
+    plan = vp.rule_plan(p, PRODUCT)
+    assert vp.text_problems(f"{plan.concept} {plan.script}") == []
+    assert plan.concept == vp.PLAIN_CONCEPT
+    assert plan.scenes[0].caption == "" and plan.scenes[1].caption == ""
+    ok = vp.rule_plan(_prop(), PRODUCT)  # 걸리는 말이 없으면 지금 그대로
+    assert ok.concept == _prop().idea and ok.scenes[0].caption == _prop().title
+
+
+def test_prompt_tells_llm_not_to_use_engagement_words() -> None:
+    assert "좋아요·팔로우·공유·댓글" in vp.PROMPT
+
+
+# ----------------------------------------- 재미 먼저, 브랜드는 끝에 (11/24 재현 님)
+
+
+def test_default_direction_is_fun_first_with_end_card() -> None:
+    assert vp.promo_of(_prop()) == (vp.FUN_FIRST, vp.END_CARD)  # 데이터 칸이 없으면
+
+
+def test_fun_timings_hook_two_seconds_and_short_end_card() -> None:
+    assert vp.fun_timings(15, 4) == [(0, 2), (2, 7), (7, 12), (12, 15)]
+    assert vp.fun_timings(30, 4) == [(0, 2), (2, 14), (14, 27), (27, 30)]
+    assert vp.fun_timings(15, 3) == [(0, 2), (2, 12), (12, 15)]
+
+
+def test_fun_rule_plan_keeps_product_out_of_body_and_brand_at_end() -> None:
+    p = _prop(format="숏폼 15초", idea="밤의 도서관을 소개하는 숏츠")
+    plan = vp.rule_plan(p)
+    assert [(s.start_s, s.end_s) for s in plan.scenes] == [(0, 2), (2, 7), (7, 12), (12, 15)]
+    body = " ".join(f"{s.visual} {s.prompt}" for s in plan.scenes[:3])
+    assert "밤의 도서관" not in body  # 본론에 상품을 앞세우지 않는다
+    assert "엔드 카드" in plan.scenes[-1].visual
+    assert not plan.concept.startswith("밤의 도서관")
+    assert all(vp.prompt_problems(s.prompt) == [] for s in plan.scenes)
+    assert vp.text_problems(f"{plan.concept} {plan.script}") == []
+
+
+def test_fun_rule_plan_prop_shows_product_briefly() -> None:
+    plan = vp.rule_plan(_prop(), (vp.FUN_FIRST, vp.PROP))
+    assert "밤의 도서관" in plan.scenes[2].visual and "small prop" in plan.scenes[2].prompt
+    assert "엔드 카드" not in plan.scenes[-1].visual
+
+
+def test_llm_concept_starting_with_product_is_rejected_in_fun_first() -> None:
+    out = _llm_out()
+    out.concept = "밤의 도서관으로 보는 가을 밤 독서"
+    assert vp.reject_reason(_prop(), out, vp.FUN_FIRST) == "concept_starts_with_product"
+    assert vp.reject_reason(_prop(), out, vp.PRODUCT) is None  # 상품 홍보면 그대로
+
+
+def test_llm_fun_first_prompt_and_timing() -> None:
+    llm = _mock(_llm_out())
+    plan = asyncio.run(vp.write(llm, _prop(format="숏폼 15초"), "ctx"))
+    assert [(s.start_s, s.end_s) for s in plan.scenes] == [(0, 2), (2, 7), (7, 12), (12, 15)]
+    sent = str(llm.calls[-1])
+    assert "재미 먼저, 브랜드는 끝에" in sent and "엔드 카드" in sent
+    assert "상품 홍보" not in sent

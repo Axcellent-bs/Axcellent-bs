@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from '@/lib/nav'
+import { InlineConfirm } from '@/components/InlineConfirm'
 import { DEV_API, codingSettingsApi, vcsApi, type CodingSetting, type CodingSettings, type VcsAuth, type VcsConnection, type VcsInventory, type VcsTestResult } from '@/lib/planning'
 import { UsageBar } from '@/components/dev/coding'
 import { NotionConnect } from '@/components/planning/notion'
@@ -339,8 +340,9 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
     }
   }
 
+  const [asking, setAsking] = useState<string | null>(null) // 삭제 확인 중인 연결 id. 확인은 화면 안 상자(InlineConfirm)
   const remove = async (c: VcsConnection) => {
-    if (!window.confirm(`${c.repo} 연결을 지울까요?`)) return
+    setAsking(null)
     setError(null)
     try {
       setList(await api.remove(c.id))
@@ -530,10 +532,14 @@ export function ToolConnectionsPanel({ title, onClose }: { title?: string; onClo
                       <div className="ml-auto flex gap-1.5">
                         <button type="button" className="btn-ghost" onClick={() => runTest(c.id)} disabled={!!testing || offline}>연결 확인</button>
                         <button type="button" className="btn-ghost" onClick={() => { setForm(repoFormOf(c)); setError(null) }}>수정</button>
-                        <button type="button" className="btn-quiet" onClick={() => remove(c)}>삭제</button>
+                        <button type="button" className="btn-quiet" onClick={() => setAsking(c.id)}>삭제</button>
                       </div>
                     )}
                   </div>
+                  {canEdit && asking === c.id && (
+                    <InlineConfirm danger confirmLabel="지우기" message={`${c.repo} 연결을 지울까요? 되돌릴 수 없어요.`}
+                      onConfirm={() => void remove(c)} onCancel={() => setAsking(null)} />
+                  )}
                   <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                     <div><dt className="text-xs text-ink-500">병합 대상 브랜치</dt><dd className="mt-0.5">{c.base_branch || '—'}</dd></div>
                     <div><dt className="text-xs text-ink-500">API 주소</dt><dd className="mt-0.5 truncate text-xs leading-5">{c.base_url || '기본 주소'}</dd></div>

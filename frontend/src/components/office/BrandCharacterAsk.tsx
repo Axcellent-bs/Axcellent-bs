@@ -5,7 +5,7 @@ import { thumbSrc } from "@/lib/creativeRecords";
 import { orchestrator } from "@/lib/orchestrator";
 import {
   CHARACTER_NOTE, CHARACTER_QUESTION, RIGHTS_HINT, RIGHTS_LABEL, SPACE_NOTE, UPLOAD_HINT,
-  askMode, canUpload, savedLine, type CharacterRow,
+  askMode, canUpload, chatCharacterLine, isPromoVideo, savedLine, type CharacterRow,
 } from "@/lib/requestCharacter";
 import { refreshWorkRequests } from "@/components/office/useWorkRequests";
 
@@ -15,6 +15,9 @@ import { refreshWorkRequests } from "@/components/office/useWorkRequests";
 //   올리면 마케팅 1:1과 같은 함수(makeCharacterSheet)로 이미지 시트(CR)를 만들고 대표 캐릭터로 표시한 뒤 의뢰에 적는다
 // - 질문 때문에 의뢰를 멈추지 않는다. 영상 준비가 시작되면 고른 값만 보인다(서버도 409)
 // - 대표 캐릭터 목록은 로그인한 회사의 것만 온다. 한 화면의 카드 여러 개가 1분에 한 번만 읽는다
+// - 11/24 variant="chat": 대화방 의뢰 진행 카드 맨 위. 홍보 영상(promo_video) 의뢰만, 정하면 한 줄
+//   ("회사 캐릭터: 이름(CR-…) · 바꾸기" / "캐릭터 없이 진행"), 영상 준비가 시작되면 [바꾸기] 없이 한 줄만.
+//   고객 의뢰 넘김 카드와 같은 함수·같은 API·같은 의뢰 기록을 본다
 
 let cache: { at: number; list: Promise<BrandCharacter[]> } | null = null;
 function loadSaved(force = false): Promise<BrandCharacter[]> {
@@ -28,7 +31,8 @@ function loadSaved(force = false): Promise<BrandCharacter[]> {
 
 const errText = (e: unknown) => (e instanceof Error && e.message ? e.message : "처리하지 못했어요");
 
-export function BrandCharacterAsk({ row }: { row: CharacterRow & { request_id: string } }) {
+export function BrandCharacterAsk({ row, variant = "handoff" }: { row: CharacterRow & { request_id: string }; variant?: "handoff" | "chat" }) {
+  const chat = variant === "chat";
   const [saved, setSaved] = useState<BrandCharacter[] | null>(null);
   const [upload, setUpload] = useState(false);
   const [change, setChange] = useState(false);
@@ -48,7 +52,9 @@ export function BrandCharacterAsk({ row }: { row: CharacterRow & { request_id: s
 
   // 홍보 영상이 아니거나, 답하지 않은 채 영상 준비가 시작됐으면(캐릭터 없이 진행) 아무것도 두지 않는다
   if (mode === "hidden" || (mode === "closed" && row.brand_character_record_id === undefined)) return null;
+  if (chat && !isPromoVideo(row)) return null;
   const chosen = saved?.find((c) => c.record_id === row.brand_character_record_id);
+  const line = chat ? chatCharacterLine(row, chosen?.name) : null;
   const def = saved?.find((c) => c.is_default) ?? saved?.[0];
 
   const pick = (recordId: string | null) => {
@@ -93,8 +99,14 @@ export function BrandCharacterAsk({ row }: { row: CharacterRow & { request_id: s
   };
 
   return (
-    <section aria-label="회사 캐릭터" className="mt-2 space-y-2 rounded-xl bg-ink-50 px-3 py-2.5 text-[13px]">
-      {(mode === "closed" || mode === "chosen" || mode === "none") && (
+    <section aria-label="회사 캐릭터" className={`${chat ? "" : "mt-2 "}space-y-2 rounded-xl bg-ink-50 px-3 py-2.5 text-[13px]`}>
+      {chat && line && (mode === "closed" || mode === "chosen" || mode === "none") && (
+        <p className="text-ink-900">
+          {line.text}
+          {line.canChange && <> · <button type="button" className="text-xs text-brand-700 underline" disabled={busy} onClick={() => setChange(true)}>바꾸기</button></>}
+        </p>
+      )}
+      {!chat && (mode === "closed" || mode === "chosen" || mode === "none") && (
         <>
           <p className="flex flex-wrap items-center gap-1.5">
             <b className="font-medium text-ink-900">회사 캐릭터</b>

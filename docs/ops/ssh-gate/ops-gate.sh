@@ -22,12 +22,12 @@ set -Eeuo pipefail
 IFS=$' \t\n'
 export LC_ALL=C
 
-readonly GATE_VERSION="0.4.0"
-readonly ALL_ACTIONS=(status lock unlock nginx-restore nginx-add-location nginx-approve-location gateway-allow-propose gateway-allow-approve gateway-allow-restore deploy-bundle restart-backend rollback-bundle record-pr autodeploy-pause autodeploy-resume)
+readonly GATE_VERSION="0.5.0"
+readonly ALL_ACTIONS=(status lock unlock nginx-restore nginx-add-location nginx-approve-location gateway-allow-propose gateway-allow-approve gateway-allow-restore deploy-bundle restart-backend rollback-bundle record-pr autodeploy-pause autodeploy-resume rollback-code uv-sync)
 # 기본 계정(_default)에 열 수 없는 동작. 정책 _default 에 들어 있으면 정책 로드가 실패한다(전체 거부).
-readonly NOT_FOR_DEFAULT=(autodeploy-pause autodeploy-resume gateway-allow-propose gateway-allow-approve gateway-allow-restore)
+readonly NOT_FOR_DEFAULT=(autodeploy-pause autodeploy-resume gateway-allow-propose gateway-allow-approve gateway-allow-restore rollback-code uv-sync)
 # 실행 전에 팀 채널 알림을 올렸다고 확인(--announced)해야 하는 동작
-readonly NEED_ANNOUNCE=(nginx-restore nginx-approve-location gateway-allow-approve gateway-allow-restore deploy-bundle restart-backend rollback-bundle)
+readonly NEED_ANNOUNCE=(nginx-restore nginx-approve-location gateway-allow-approve gateway-allow-restore deploy-bundle restart-backend rollback-bundle rollback-code uv-sync)
 
 # 끝 코드
 readonly RC_FAIL=1 RC_USAGE=2 RC_PERM=3 RC_LOCKED=4 RC_CONFIG=5
@@ -239,6 +239,7 @@ load_policy() {
   validate_gateway_allow
   validate_autodeploy
   validate_restart
+  validate_uv_sync
 }
 
 # [restart] backup_keep: 없으면 백업을 지우지 않는다. 있으면 2 이상 정수만(이번 세트와 직전 세트는 늘 남겨야 한다).
@@ -248,6 +249,25 @@ validate_restart() {
   if [[ ! "${v}" =~ ^[1-9][0-9]{0,8}$ ]] || (( v < 2 )); then
     deny "policy-value" "${RC_CONFIG}" "정책 restart.backup_keep 은 2 이상의 정수여야 한다(없애면 정리 안 함)"
   fi
+}
+
+# [uv_sync]: uv-sync 동작이 쓰는 값. 구역이 없으면 uv-sync 만 실패한다(다른 동작은 영향 없음).
+# 모르는 키가 있거나 숫자 값이 틀리면 정책 로드 실패(전체 거부)다. 경로 값 검사는 쓸 때 한다.
+validate_uv_sync() {
+  local k v
+  for k in "${!POLICY[@]}"; do
+    [[ "${k}" == uv_sync.* ]] || continue
+    case "${k}" in
+      uv_sync.uv_bin | uv_sync.project_dir) ;;
+      uv_sync.timeout_seconds)
+        v="${POLICY[${k}]}"
+        if [[ ! "${v}" =~ ^[1-9][0-9]{0,4}$ ]]; then
+          deny "policy-value" "${RC_CONFIG}" "정책 uv_sync.timeout_seconds 는 1 이상의 정수여야 한다"
+        fi
+        ;;
+      *) deny "policy-value" "${RC_CONFIG}" "정책 [uv_sync] 에 알 수 없는 키가 있다(전체 거부)" ;;
+    esac
+  done
 }
 
 # [gateway_allow]: 게이트웨이 허용 목록. 모르는 키가 있으면 정책 로드 실패(전체 거부)다. 값 검사는 쓸 때 한다.
@@ -389,6 +409,8 @@ action_format() {
     deploy-bundle) REPLY="deploy-bundle <SHA>" ;;
     restart-backend) REPLY="restart-backend <SHA> --ack-data-loss" ;;
     rollback-bundle) REPLY="rollback-bundle <SHA>" ;;
+    rollback-code) REPLY="rollback-code <SHA>" ;;
+    uv-sync) REPLY="uv-sync <SHA>" ;;
     record-pr) REPLY="record-pr <참조: 백업폴더명 또는 SHA> <PR번호>" ;;
     autodeploy-pause) REPLY="autodeploy-pause <사유> [재개시각 YYYY-MM-DDTHH:MM]" ;;
     autodeploy-resume) REPLY="autodeploy-resume" ;;
@@ -412,6 +434,8 @@ action_note() {
     deploy-bundle) REPLY="번들 배포. 지금 서버 코드보다 앞선 커밋만" ;;
     restart-backend) REPLY="서비스 재시작. 서버 레포 HEAD 가 그 SHA 여야 한다" ;;
     rollback-bundle) REPLY="번들을 그 SHA 배포 직전으로 되돌린다" ;;
+    rollback-code) REPLY="서버 코드(레포 HEAD)를 그 SHA 를 deploy-bundle 하기 직전 HEAD 로만 되돌린다. 재시작은 하지 않는다" ;;
+    uv-sync) REPLY="서버 레포 HEAD 가 그 SHA 일 때만 uv sync --frozen 을 실행한다. 재시작은 하지 않는다" ;;
     record-pr) REPLY="감사 로그에 PR 번호를 남긴다" ;;
     autodeploy-pause) REPLY="자동 배포를 재개시각까지 멈춘다(정지 표시 파일만 쓴다). 사유는 영어·숫자·_.,- 만" ;;
     autodeploy-resume) REPLY="자동 배포를 지금 재개한다" ;;
@@ -577,7 +601,7 @@ validate_args() {
       [[ "${ARGS[0]}" =~ ${RE_FOLDER} && "${ARGS[0]}" != *..* ]] || deny "bad-ref" "${RC_USAGE}" "참조는 백업 폴더명이나 SHA"
       [[ "${ARGS[1]}" =~ ${RE_PR} ]] || deny "bad-pr" "${RC_USAGE}" "PR 번호는 숫자"
       ;;
-    deploy-bundle | rollback-bundle)
+    deploy-bundle | rollback-bundle | rollback-code | uv-sync)
       (( n == 1 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_SHA} ]] || deny "bad-sha" "${RC_USAGE}" "SHA 는 16진수 소문자 7~40자"
       ;;
@@ -602,6 +626,8 @@ notice_text() {
   [[ "${label}" =~ ${RE_LABEL} ]] || label="server"
   case "${ACTION}" in
     deploy-bundle) undo="rollback-bundle ${ARGS[0]}" ;;
+    rollback-code) undo="deploy-bundle ${ARGS[0]}(앞으로 감기. 재시작 전이면 서비스는 그대로다)" ;;
+    uv-sync) undo="되돌릴 수 없음(.venv 는 되돌리지 않는다). 이전 환경은 rollback-code ${ARGS[0]:0:8} 뒤 uv-sync <직전 SHA>" ;;
     rollback-bundle) undo="서버의 www-*.bak-before-rollback-<실행 시각>.tgz 백업(서버 책임자에게 요청)" ;;
     restart-backend) undo="되돌릴 수 없음(메모리에만 있는 상태 소실). 파일 백업은 *bak-before-${ARGS[0]:0:8}" ;;
     nginx-restore) undo="nginx-restore pre-gate-restore-<실행 시각>(실행하면 폴더명이 출력됨)" ;;
@@ -2204,6 +2230,93 @@ do_rollback_bundle() {
   fi
 }
 
+# rollback-code <SHA>: 운영 트리(레포 HEAD)를 deploy-bundle 이 남긴 "그 SHA 배포 직전 HEAD" 로만 옮긴다.
+#  - 옮길 곳은 기록 파일(deploy-prev-head.bak-before-<SHA8>)의 값뿐이다. 임의 SHA 는 받지 않는다. 기록이 없으면 거부.
+#  - 지금 HEAD 가 그 SHA(배포된 커밋)일 때만 옮긴다. 이미 직전 HEAD 면 할 일 없이 끝낸다(다시 쳐도 안전).
+#  - 코드만 옮긴다. 재시작·번들 복원·uv sync 는 하지 않는다(restart-backend / rollback-bundle / uv-sync 가 한다).
+do_rollback_code() {
+  local prevfile prev="" head out
+  require_paths repo backup_dir
+  resolve_sha "${ARGS[0]}"
+  prevfile="${P_backup_dir}/deploy-prev-head.bak-before-${FULL_SHA:0:8}"
+  [[ -f "${prevfile}" && ! -L "${prevfile}" ]] ||
+    step_fail "prev-head-not-found" "${RC_FAIL}" "그 SHA 를 배포하기 직전 HEAD 기록이 없다. 게이트로는 되돌릴 수 없다(서버 책임자에게 알린다)"
+  IFS= read -r prev < "${prevfile}" || true
+  [[ "${prev}" =~ ${RE_SHA_FULL} ]] ||
+    step_fail "prev-head-bad" "${RC_FAIL}" "직전 HEAD 기록의 내용이 40자 SHA 가 아니다. 되돌리지 않는다"
+  as_deploy git -C "${P_repo}" rev-parse --verify --quiet "${prev}^{commit}" > /dev/null ||
+    step_fail "prev-head-unknown" "${RC_FAIL}" "직전 HEAD(${prev:0:8}) 커밋이 서버 레포에 없다"
+  # 직전 HEAD 는 그 SHA 로 앞으로 감기 전의 HEAD 라서 늘 그 SHA 의 조상이다. 아니면 기록이 이상한 것이다.
+  as_deploy git -C "${P_repo}" merge-base --is-ancestor "${prev}" "${FULL_SHA}" ||
+    step_fail "prev-head-not-ancestor" "${RC_FAIL}" "직전 HEAD(${prev:0:8})가 그 SHA 의 조상이 아니다. 기록이 맞지 않아 되돌리지 않는다"
+  head="$(as_deploy git -C "${P_repo}" rev-parse HEAD)" || step_fail "git-head" "${RC_FAIL}" "레포 HEAD 를 볼 수 없다"
+  [[ "${head}" =~ ${RE_SHA_FULL} ]] || step_fail "git-head" "${RC_FAIL}" "레포 HEAD 를 볼 수 없다"
+  NOTE="to:${prev:0:8}"
+  if [[ "${head}" == "${prev}" ]]; then
+    say "서버 코드가 이미 직전 HEAD(${prev:0:8})다. 할 일 없음"
+    return 0
+  fi
+  [[ "${head}" == "${FULL_SHA}" ]] ||
+    step_fail "head-not-deployed" "${RC_FAIL}" "지금 서버 코드(${head:0:8})가 그 SHA(${FULL_SHA:0:8})가 아니다. 그 SHA 가 배포된 상태에서만 되돌린다"
+  out="$(as_deploy git -C "${P_repo}" status --porcelain)" || step_fail "git-status" "${RC_FAIL}" "레포 상태를 볼 수 없다"
+  [[ -z "${out}" ]] || step_fail "repo-dirty" "${RC_FAIL}" "서버 레포에 로컬 변경이 있다"
+  say "서버 코드를 ${head:0:8} 에서 직전 HEAD ${prev:0:8} 로 되돌린다(재시작하지 않는다)"
+  if (( ! DRY )); then
+    audit "rollback-code:${head:0:8}->${prev:0:8}"
+  fi
+  run as_deploy git -C "${P_repo}" checkout --quiet --detach "${prev}" ||
+    step_fail "checkout-failed" "${RC_FAIL}" "git checkout 이 실패했다. 서버 코드 상태를 확인한다"
+  if (( ! DRY )); then
+    head="$(as_deploy git -C "${P_repo}" rev-parse HEAD)" || head=""
+    [[ "${head}" == "${prev}" ]] ||
+      step_fail "head-after-rollback" "${RC_FAIL}" "되돌린 뒤 서버 레포 HEAD 가 직전 HEAD 가 아니다"
+  fi
+  say "서버 코드를 ${prev:0:8} 로 되돌렸다. 서비스는 그대로다. 이어서: restart-backend ${prev:0:8} --ack-data-loss --announced (의존성이 바뀐 커밋이었다면 먼저 uv-sync ${prev:0:8})"
+}
+
+# uv-sync <SHA>: 서버 레포 HEAD 가 그 SHA 일 때만 정책의 uv 로 uv sync --frozen 을 한다.
+#  - 실행은 배포 계정으로, 정책 [uv_sync] project_dir(레포 안 폴더)에서. 출력은 root 전용 기록 파일로만 간다.
+#  - 실패(끝 코드 비0, 시간 초과 포함)하면 끝 코드 1 과 감사 로그 result=fail:uv-sync-failed. 재시작은 하지 않는다.
+do_uv_sync() {
+  local head uv dir timeout log rc=0 out
+  require_paths repo backup_dir
+  uv="${POLICY[uv_sync.uv_bin]-}"
+  dir="${POLICY[uv_sync.project_dir]-}"
+  path_ok "${uv}" || step_fail "config-path" "${RC_CONFIG}" "정책 [uv_sync] uv_bin 이 없거나 경로가 아니다(설치 때 채워야 한다)"
+  path_ok "${dir}" || step_fail "config-path" "${RC_CONFIG}" "정책 [uv_sync] project_dir 이 없거나 경로가 아니다(설치 때 채워야 한다)"
+  [[ "${dir}" == "${P_repo}" || "${dir}" == "${P_repo}/"* ]] ||
+    step_fail "config-path" "${RC_CONFIG}" "정책 [uv_sync] project_dir 은 paths.repo 안의 폴더여야 한다"
+  policy_uint uv_sync.timeout_seconds 600
+  timeout="${REPLY}"
+  resolve_sha "${ARGS[0]}"
+  head="$(as_deploy git -C "${P_repo}" rev-parse HEAD)" || step_fail "git-head" "${RC_FAIL}" "레포 HEAD 를 볼 수 없다"
+  [[ "${head}" == "${FULL_SHA}" ]] ||
+    step_fail "head-mismatch" "${RC_FAIL}" "서버 레포 HEAD(${head:0:8})가 그 SHA(${FULL_SHA:0:8})가 아니다. uv sync 하지 않았다. 먼저 deploy-bundle 이나 rollback-code 로 코드를 맞춘다"
+  if (( ! DRY )); then
+    [[ -x "${uv}" && ! -d "${uv}" ]] || step_fail "config-path" "${RC_CONFIG}" "정책 [uv_sync] uv_bin 을 실행할 수 없다"
+    [[ -d "${dir}" && -f "${dir}/uv.lock" ]] ||
+      step_fail "config-path" "${RC_CONFIG}" "정책 [uv_sync] project_dir 이 폴더가 아니거나 안에 uv.lock 이 없다"
+  fi
+  say "uv sync --frozen: HEAD ${FULL_SHA:0:8}, 최대 ${timeout}초(출력은 서버의 root 전용 기록 파일로만 간다)"
+  if (( DRY )); then
+    run timeout --kill-after=10 "${timeout}" runuser -u "${DEPLOY_USER}" -- "${uv}" --directory "${dir}" sync --frozen
+    return 0
+  fi
+  stamp_now
+  log="${P_backup_dir}/deploy-uv-sync-${FULL_SHA:0:8}-${REPLY}.log"
+  timeout --kill-after=10 "${timeout}" runuser -u "${DEPLOY_USER}" -- "${uv}" --directory "${dir}" sync --frozen > "${log}" 2>&1 || rc=$?
+  if (( rc != 0 )); then
+    if (( rc == 124 )); then
+      step_fail "uv-sync-failed" "${RC_FAIL}" "uv sync 가 ${timeout}초 안에 끝나지 않아 멈췄다(기록: ${log##*/}). 재시작하지 않았다"
+    fi
+    step_fail "uv-sync-failed" "${RC_FAIL}" "uv sync 가 끝 코드 ${rc} 로 끝났다(기록: ${log##*/}). 재시작하지 않았다"
+  fi
+  out="$(as_deploy git -C "${P_repo}" rev-parse HEAD)" || out=""
+  [[ "${out}" == "${FULL_SHA}" ]] ||
+    step_fail "head-after-uv-sync" "${RC_FAIL}" "uv sync 뒤 서버 레포 HEAD 가 바뀌었다"
+  say "uv sync 끝(기록: ${log##*/}). 재시작은 하지 않았다"
+}
+
 BACKUP_DEST=""
 backup_dest() { # 원본경로 [확장자] → BACKUP_DEST. 같은 이름이 있으면 시각을 덧붙인다.
   local src="$1" ext="${2:-}" dest
@@ -2605,6 +2718,8 @@ root_main() {
       deploy-bundle) do_deploy_bundle ;;
       restart-backend) do_restart_backend ;;
       rollback-bundle) do_rollback_bundle ;;
+      rollback-code) do_rollback_code ;;
+      uv-sync) do_uv_sync ;;
       autodeploy-pause) do_autodeploy_pause ;;
       autodeploy-resume) do_autodeploy_resume ;;
     esac

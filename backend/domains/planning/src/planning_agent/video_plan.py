@@ -193,6 +193,41 @@ def duration_of(p: Proposal) -> int:
     return DEFAULT_SECONDS
 
 
+# 홍보 방향 (11/24 재현 님 "재미 먼저, 브랜드는 끝에").
+# 데이터가 insight에 promo_style(fun_first|product)·
+# brand_exposure(end_card|prop|caption)를 실어 보낸다. 칸이 없으면 fun_first·end_card.
+# product = 의뢰가 상품을 직접 말함("책 소개"·"신간 홍보") → 예전 규칙(상품을 본론에서 보여 줌)
+FUN_FIRST, PRODUCT = "fun_first", "product"
+END_CARD, PROP, CAPTION = "end_card", "prop", "caption"
+HOOK_SECONDS = 2  # 장면 1(0~2초) 훅
+
+
+def promo_of(p: Proposal) -> tuple[str, str]:
+    """제안의 홍보 방향 (promo_style, brand_exposure). 모르는 값·없는 칸은 fun_first·end_card."""
+    style_ = getattr(p, "promo_style", None)
+    exposure = getattr(p, "brand_exposure", None)
+    return (
+        style_ if style_ in (FUN_FIRST, PRODUCT) else FUN_FIRST,
+        exposure if exposure in (END_CARD, PROP, CAPTION) else END_CARD,
+    )
+
+
+def fun_timings(duration: int, n: int) -> list[tuple[int, int]]:
+    """재미 먼저: 장면 1은 0~2초 훅, 마지막 장면은 3초(15초 미만 2초), 본론은 그 사이를 고르게."""
+    last = duration - (3 if duration >= 15 else 2)
+    mid = n - 2
+    cuts = [0, HOOK_SECONDS]
+    cuts += [round(HOOK_SECONDS + (last - HOOK_SECONDS) * i / mid) for i in range(1, mid)]
+    cuts += [last, duration]
+    return [(cuts[i], cuts[i + 1]) for i in range(n)]
+
+
+def starts_with_product(text: str, products: list[str]) -> bool:
+    """콘셉트가 상품 이름으로 시작하나 (앞 따옴표·괄호는 무시)."""
+    head = text.lstrip(" '\"‘’“”「」『』《》<>[]()")
+    return any(n.strip() and head.startswith(n.strip()) for n in products)
+
+
 def timings(duration: int, n: int) -> list[tuple[int, int]]:
     """장면 n개의 (시작, 끝) 초. 4장면은 문서 예시 비율(훅 짧게, 본론 길게), 그 밖은 고르게."""
     if n == RULE_SCENES:
@@ -209,6 +244,41 @@ def _theme(p: Proposal) -> str:
     if "real_person" in problems:  # 실존 인물·연예인 주제는 이름 대신 팬 문화 소품 (11/22)
         return FAN_THEME
     return "everyday life" if problems else theme
+
+
+# 마케팅 "영상 초안 준비"가 콘셉트·대본에서 막는 말 (11/24 재현 님: PROP-22 콘셉트의 "공유"로 실패).
+# 마케팅 sns.FORBIDDEN_PHRASES·FORBIDDEN_CLAIM_PATTERNS와 같은 값 (도메인끼리 import 안 해 옮김).
+# 참여 유도(좋아요·팔로우·공유·댓글하면 혜택)와 성과 과장 표현. 과장은 공백을 뺀 글에서 찾는다
+ENGAGEMENT_WORDS = ("좋아요", "팔로우", "공유", "댓글")
+CLAIM_PATTERNS = (
+    r"인건비(를|가|은|는)?절감",
+    r"직원(을|이|은|는)?(모두|전부)?대체",
+    r"에이전트(가|는|들이)?(더|훨씬)?빨라",
+    r"최고",
+    r"무조건",
+    r"획기적",
+    r"압도적",
+    r"혁신적",
+)
+
+
+def text_problems(text: str) -> list[str]:
+    """마케팅이 받지 않는 말이 들어 있나: engagement_word·claim_word (없으면 빈 목록)."""
+    out = []
+    if any(w in text for w in ENGAGEMENT_WORDS):
+        out.append("engagement_word")
+    squeezed = re.sub(r"\s+", "", text)
+    if any(re.search(pat, squeezed) for pat in CLAIM_PATTERNS):
+        out.append("claim_word")
+    return out
+
+
+def _pick(*texts: str) -> str:
+    """마케팅이 받는 첫 문장 (모두 걸리면 마지막 것). 규칙 제작안이 제안 글을 그대로 쓸 때."""
+    for t in texts:
+        if not text_problems(t):
+            return t
+    return texts[-1]
 
 
 def _short(text: str, n: int) -> str:
@@ -234,10 +304,20 @@ def media_hints(p: Proposal) -> VideoMediaHints:
     )
 
 
-def rule_plan(p: Proposal) -> VideoPlan:
+OPEN_VISUAL = "시선을 끄는 장면으로 시작한다 (주인공: {})"
+AGAIN_VISUAL = "핵심 장면을 한 번 더 크게 보여 준다"
+PLAIN_CONCEPT = "주인공이 일상 속 재미있는 순간을 보여 주는 짧은 홍보 영상"
+
+
+def rule_plan(p: Proposal, promo: tuple[str, str] | None = None) -> VideoPlan:
     """LLM 없이 쓰는 제작안. 같은 제안·같은 회사 설정이면 같은 결과.
 
-    주인공·배경은 회사 [brand](tenant.brand()). 11/22 전에는 고양이 마스코트·책방 고정이었다."""
+    주인공·배경은 회사 [brand](tenant.brand()). 11/22 전에는 고양이 마스코트·책방 고정이었다.
+    홍보 방향(promo, 없으면 promo_of)이 product면 상품을 본론에서 보여 주는 예전 흐름,
+    아니면 재미 먼저(fun_rule_plan)."""
+    style_, exposure = promo or promo_of(p)
+    if style_ == FUN_FIRST:
+        return fun_rule_plan(p, exposure)
     d = duration_of(p)
     b = tenant.brand()
     who, where, who_ko = b["character_en"], b["setting_en"], b["character_ko"]
@@ -246,22 +326,22 @@ def rule_plan(p: Proposal) -> VideoPlan:
     product = _CLEAN.sub(" ", p.products[0]).strip()[:40] if p.products else ""
     beats = [
         (
-            f"'{theme}' 장면으로 시선을 끈다 (주인공: {who_ko})",
-            _short(p.title, 60),
+            _pick(f"'{theme}' 장면으로 시선을 끈다 (주인공: {who_ko})", OPEN_VISUAL.format(who_ko)),
+            _pick(_short(p.title, 60), ""),
             f"Opening hook in {where}: {who} noticing something surprising and turning toward "
             f"the camera with curious expressions, {tone} mood, themed around {theme}",
         ),
         (
             "공감 가는 일상 장면으로 기획의 핵심을 보여 준다",
-            _short(p.idea, 60),
+            _pick(_short(p.idea, 60), ""),
             f"A relatable everyday moment about {theme} acted out by {who} with playful "
             f"gestures in {where}, {tone} mood",
         ),
         (
-            f"연결 상품 '{p.products[0]}'을 자연스럽게 보여 준다"
+            _pick(f"연결 상품 '{p.products[0]}'을 자연스럽게 보여 준다", AGAIN_VISUAL)
             if p.products
-            else "핵심 장면을 한 번 더 크게 보여 준다",
-            _short(p.products[0], 60) if p.products else "",
+            else AGAIN_VISUAL,
+            _pick(_short(p.products[0], 60), "") if p.products else "",
             f"Close-up of {who} happily presenting {product}, delighted expressions, {where}"
             if product
             else f"The key moment about {theme} repeated by {who} in a bigger, funnier way",
@@ -279,8 +359,78 @@ def rule_plan(p: Proposal) -> VideoPlan:
         )
     ]
     script = " → ".join(f"{s.start_s}~{s.end_s}초 {s.visual}" for s in scenes)
+    concept = _pick(_short(p.idea, 200), _short(p.title, 200), PLAIN_CONCEPT)
     return VideoPlan(
-        concept=_short(p.idea, 200), duration_s=d, script=_short(script, 800), scenes=scenes,
+        concept=concept, duration_s=d, script=_short(script, 800), scenes=scenes,
+        style=style(b), negative=NEGATIVE, written_by="rule", media_hints=media_hints(p),
+    )  # fmt: skip
+
+
+FUN_CONCEPT = "대상이 좋아하는 소재로 첫 1초부터 웃기고 끝에 채널을 알리는 짧은 영상"
+
+
+def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
+    """재미 먼저, 브랜드는 끝에 (11/24 재현 님).
+
+    훅 0~2초 → 본론 2장면(대상이 좋아하는 소재) → 마무리. 본론에는 상품을 앞세우지 않는다.
+    end_card: 마무리는 채널 이름 엔드 카드(자막에 회사 이름).
+    prop: 본론 둘째 장면에 상품이 소품으로 잠깐.
+    caption: 화면엔 안 넣고 마무리 자막에만 회사 이름."""
+    d = duration_of(p)
+    b = tenant.brand()
+    who, where, who_ko = b["character_en"], b["setting_en"], b["character_ko"]
+    theme = _theme(p)
+    tone = TONE.get(p.angle or "", "warm and friendly")
+    product = _CLEAN.sub(" ", p.products[0]).strip()[:40] if p.products else ""
+    company = _company()["name"]
+    prop = exposure == PROP and product
+    beats = [
+        (
+            _pick(
+                f"첫 1초 반전: '{theme}' 순간에 {who_ko}가 깜짝 놀라 돌아본다",
+                OPEN_VISUAL.format(who_ko),
+            ),
+            _pick(_short(p.title, 60), ""),
+            f"Opening hook in {where}: {who} suddenly freezing, then doing a surprised double take "
+            f"toward the camera in the very first second, {tone} mood, themed around {theme}",
+        ),
+        (
+            _pick(f"대상이 좋아하는 소재 '{theme}'로 공감 가는 순간을 보여 준다", AGAIN_VISUAL),
+            _pick(_short(p.idea, 60), ""),
+            f"A relatable, funny everyday moment about {theme} acted out by {who} with playful "
+            f"gestures in {where}, {tone} mood",
+        ),
+        (
+            AGAIN_VISUAL + (_pick(f" ('{p.products[0]}'은 소품으로 잠깐)", "") if prop else ""),
+            "",
+            f"The key moment about {theme} repeated by {who} in a bigger, funnier way, {where}"
+            + (f", {product} visible briefly as a small prop in the background" if prop else ""),
+        ),
+        (
+            "마무리: 채널 이름 엔드 카드"
+            if exposure == END_CARD
+            else f"마무리: {who_ko}가 손을 흔들며 끝낸다",
+            _pick(company, ""),
+            f"Simple calm background in {where} with soft light and empty space in the center"
+            if exposure == END_CARD
+            else f"Closing shot: {who} waving at the camera in {where}, warm inviting ending",
+        ),
+    ]
+    scenes = [
+        VideoScene(n=i, start_s=start, end_s=end, visual=v, caption=c, prompt=pr)
+        for i, ((start, end), (v, c, pr)) in enumerate(
+            zip(fun_timings(d, RULE_SCENES), beats, strict=True), start=1
+        )
+    ]
+    script = " → ".join(f"{s.start_s}~{s.end_s}초 {s.visual}" for s in scenes)
+    ideas = [
+        t
+        for t in (_short(p.idea, 200), _short(p.title, 200))
+        if not starts_with_product(t, p.products)
+    ]
+    concept = _pick(*ideas, FUN_CONCEPT)
+    return VideoPlan(
+        concept=concept, duration_s=d, script=_short(script, 800), scenes=scenes,
         style=style(b), negative=NEGATIVE, written_by="rule", media_hints=media_hints(p),
     )  # fmt: skip
 
@@ -309,8 +459,38 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
 - 주제가 실존 인물·연예인·팬덤이면 이름·얼굴·음원 대신 팬 문화의 소품·분위기(응원봉, 포토카드,
   무대 조명, 팬 굿즈처럼 꾸민 상품)로 표현한다
 - 근거(facts)에 없는 숫자를 지어내지 않는다. 과장 광고 표현(최고·1위·보장)을 쓰지 않는다
+- concept·script·caption에 "좋아요·팔로우·공유·댓글"이라는 말을 쓰지 않는다 (참여하면 혜택 같은
+  참여 유도 게시는 마케팅이 받지 않는다). 최고·무조건·획기적·압도적·혁신적도 쓰지 않는다
 - 방향: {angle}
-"""
+{direction}"""
+
+DIRECTION = {
+    FUN_FIRST: (
+        '- 재미 먼저, 브랜드는 끝에 (보는 사람이 "이 재밌는 영상 만든 채널 어디지?" 하게):\n'
+        "  - 장면 1(0~2초)은 훅이다. 첫 1초에 반전·질문·소리 중 하나를 넣는다\n"
+        "  - 본론은 대상(audience)이 좋아하는 형식·소재(topic·facts·shorts_format·"
+        "content_category)로 만든다. 회사 상품·업종을 본론 소재로 쓰지 않아도 된다\n"
+        "  - concept 문장을 상품 이름으로 시작하지 않는다\n"
+    ),
+    PRODUCT: "- 상품 홍보: 연결 상품(products)을 본론에서 자연스럽게 보여 준다\n",
+}
+EXPOSURE = {
+    END_CARD: (
+        "  - 회사 이름·상품은 마지막 장면(마지막 2~3초)에만 둔다. 마지막 장면은 채널 이름을 얹을 "
+        '엔드 카드다: visual은 "채널 이름 엔드 카드", caption은 company.name, prompt는 가운데가 '
+        "비어 있는 단순한 배경 화면\n"
+    ),
+    PROP: (
+        "  - 회사 상품은 본론 장면 하나에 소품으로 잠깐만 보인다. "
+        "상품을 설명하거나 앞세우지 않는다\n"
+    ),
+    CAPTION: "  - 회사 이름·상품은 화면에 넣지 않고 마지막 장면 caption에만 쓴다\n",
+}
+
+
+def direction(style_: str, exposure: str) -> str:
+    """프롬프트의 홍보 방향 줄. product면 브랜드 노출 규칙을 붙이지 않는다."""
+    return DIRECTION[style_] + (EXPOSURE[exposure] if style_ == FUN_FIRST else "")
 
 
 class _SceneOut(BaseModel):
@@ -367,7 +547,7 @@ def has_real_name(p: Proposal, got: _PlanOut) -> bool:
     return any(name in t for name in names for t in folded)
 
 
-def reject_reason(p: Proposal, got: _PlanOut) -> str | None:
+def reject_reason(p: Proposal, got: _PlanOut, style_: str = PRODUCT) -> str | None:
     """LLM 제작안을 버리는 이유 코드 (쓸 수 있으면 None). 이름 같은 값은 담지 않는다."""
     if not MIN_SCENES <= len(got.scenes) <= MAX_SCENES:
         return "scene_count"
@@ -375,16 +555,23 @@ def reject_reason(p: Proposal, got: _PlanOut) -> str | None:
         return "prompt_rule"
     if has_real_name(p, got):
         return "real_name_in_scene"
+    if text_problems(f"{got.concept} {got.script}"):  # 마케팅이 초안 준비를 거절하는 말
+        return "marketing_word"
+    if style_ == FUN_FIRST and starts_with_product(got.concept, p.products):
+        return "concept_starts_with_product"
     return None
 
 
-def _from_llm(p: Proposal, got: _PlanOut, d: int, b: dict[str, str]) -> VideoPlan | None:
+def _from_llm(
+    p: Proposal, got: _PlanOut, d: int, b: dict[str, str], style_: str = PRODUCT
+) -> VideoPlan | None:
     """LLM 답을 계약 모양으로. 장면 수·프롬프트 규칙·실존 이름에 걸리면 None (이유 코드만 로그)."""
-    reason = reject_reason(p, got)
+    reason = reject_reason(p, got, style_)
     if reason:
         log.info("LLM 영상 제작안 대신 규칙 제작안: %s", reason)
         return None
     n = len(got.scenes)
+    cuts = fun_timings(d, n) if style_ == FUN_FIRST else timings(d, n)
     try:
         scenes = [
             VideoScene(
@@ -395,9 +582,7 @@ def _from_llm(p: Proposal, got: _PlanOut, d: int, b: dict[str, str]) -> VideoPla
                 caption=_short(s.caption, 60),
                 prompt=_short(s.prompt, 800),
             )  # fmt: skip
-            for i, ((start, end), s) in enumerate(
-                zip(timings(d, n), got.scenes, strict=True), start=1
-            )
+            for i, ((start, end), s) in enumerate(zip(cuts, got.scenes, strict=True), start=1)
         ]
         return VideoPlan(
             concept=_short(got.concept, 200), duration_s=d, script=_short(got.script, 800),
@@ -408,10 +593,13 @@ def _from_llm(p: Proposal, got: _PlanOut, d: int, b: dict[str, str]) -> VideoPla
         return None
 
 
-async def write(llm: LLMClient | None, p: Proposal, context_id: str) -> VideoPlan:
-    """LLM 제작안, 없거나 실패·규칙 위반이면 규칙 제작안."""
+async def write(
+    llm: LLMClient | None, p: Proposal, context_id: str, promo: tuple[str, str] | None = None
+) -> VideoPlan:
+    """LLM 제작안, 없거나 실패·규칙 위반이면 규칙 제작안. promo: 홍보 방향(없으면 promo_of)."""
+    promo = promo or promo_of(p)
     if llm is None:
-        return rule_plan(p)
+        return rule_plan(p, promo)
     d = duration_of(p)
     b = tenant.brand()
     data = {
@@ -427,9 +615,11 @@ async def write(llm: LLMClient | None, p: Proposal, context_id: str) -> VideoPla
         "content_category": p.content_category or "",
         "shorts_format": p.shorts_format or "",
     }
+    style_, exposure = promo
     prompt = PROMPT.format(
         n=RULE_SCENES, d=d, angle=ANGLE_TEXT.get(p.angle or "", "정하지 않음"),
         character_ko=b["character_ko"], setting_ko=b["setting_ko"],
+        direction=direction(style_, exposure),
     )  # fmt: skip
     try:
         got = await asyncio.wait_for(
@@ -437,8 +627,8 @@ async def write(llm: LLMClient | None, p: Proposal, context_id: str) -> VideoPla
             TIMEOUT_SECONDS,
         )
     except Exception:  # noqa: BLE001 - 규칙 제작안으로 대신
-        return rule_plan(p)
-    return _from_llm(p, got, d, b) or rule_plan(p)
+        return rule_plan(p, promo)
+    return _from_llm(p, got, d, b, style_) or rule_plan(p, promo)
 
 
 def markdown(v: VideoPlan) -> str:
