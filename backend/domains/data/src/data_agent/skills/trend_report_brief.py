@@ -33,16 +33,25 @@ PRESET_DIR = Path(__file__).resolve().parents[1] / "report_presets"
 MAX_ACCOUNTS = 45  # 의뢰 하나에 부르는 인스타 계정 상한 (인스타 호출 상한)
 MAX_KEYWORDS = 5  # 네이버 검색어 트렌드 한 요청 5그룹, 쇼핑인사이트 키워드마다 1번
 MAX_COMPETITORS = 10
-AGE_BANDS = ("10", "20", "30", "40", "50")
+# 11/24: "60" = 60대 이상 (60대·70대·80대·시니어). 네이버 검색어 트렌드도 60세 이상이 한 칸이다
+AGE_BANDS = ("10", "20", "30", "40", "50", "60")
 # 사람 나이 구간 → 네이버 검색어 트렌드 연령 코드 (1: 0~12, 2: 13~18, 3: 19~24, 4: 25~29,
 # 5: 30~34, 6: 35~39, 7: 40~44, 8: 45~49, 9: 50~54, 10: 55~59, 11: 60~)
 SEARCH_AGE_CODES: dict[str, tuple[str, ...]] = {
     "10": ("2",), "20": ("3", "4"), "30": ("5", "6"), "40": ("7", "8"), "50": ("9", "10"),
+    "60": ("11",),
 }  # fmt: skip
 SEARCH_AGE_NOTES = {
     "10": "10대는 13~18세 칸만 씀 (0~12세 칸은 뺌)",
     "20": "20대는 네이버 19~24세 칸을 써서 19세가 섞임",
+    "60": "60대 이상은 네이버 60세 이상 한 칸 (70대·80대를 따로 나누지 않음)",
 }
+_SENIOR = {"60", "70", "80", "90", "시니어", "노년", "어르신"}
+
+
+def senior(age: str) -> str:
+    """70대·80대·시니어는 60대 이상("60") 한 칸으로 (11/24)."""
+    return "60" if age in _SENIOR else age
 SHOPPING_GROUPS = ("10", "20", "30", "40", "50", "60")  # 쇼핑인사이트 응답 group
 _ACCOUNT = re.compile(r"^[a-z0-9._]{1,30}$")
 GENDER_WORD = {"f": "여성", "m": "남성"}
@@ -70,7 +79,7 @@ def shopping_groups(ages: Sequence[str]) -> list[str]:
 
 
 def ages_word(ages: Sequence[str]) -> str:
-    return "·".join(f"{a}대" for a in ages)
+    return "·".join("60대 이상" if a == "60" else f"{a}대" for a in ages)
 
 
 # ---------------------------------------------------------------- 프리셋
@@ -174,7 +183,8 @@ _PROMPT = (
     "- product: 무엇을 알리려는지 (제품·브랜드만, 짧게)\n"
     "- goal: 목적 (예: 브랜드 인지도·판매·출시), 적혀 있지 않으면 빈 칸\n"
     "- gender: 타깃 성별 f 또는 m, 적혀 있지 않으면 빈 칸\n"
-    "- ages: 타깃 나이 구간을 10·20·30·40·50 중에서 (예: 20대 후반~30대 → 20, 30)\n"
+    "- ages: 타깃 나이 구간을 10·20·30·40·50·60 중에서 (예: 20대 후반~30대 → 20, 30)."
+    " 60은 60대 이상(70대·시니어 포함)\n"
     "- format: 콘텐츠 형식·길이 (예: 인스타 릴스 30초)\n"
     "- competitors: 의뢰문에 적힌 경쟁사 인스타그램 아이디만 (@ 없이). 브랜드 이름만 있으면 비움\n"
     "- keywords: 검색해 볼 키워드 다섯 개 이하\n"
@@ -230,7 +240,7 @@ def _short(text: str, limit: int) -> str | None:
 
 def sanitize(raw: _Extracted) -> Extracted:
     """LLM 답에서 형식에 맞는 값만 (나이 구간·성별·인스타 아이디 모양·길이)."""
-    ages = [a.strip().rstrip("대") for a in raw.ages]
+    ages = [senior(a.strip().rstrip("대").removesuffix(" 이상").strip()) for a in raw.ages]
     keywords = [k for k in (_short(x, 30) for x in raw.keywords) if k]
     theme, mode = theme_of(raw.theme, raw.theme_mode)
     return Extracted(

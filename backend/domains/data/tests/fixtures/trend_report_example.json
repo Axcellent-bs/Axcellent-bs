@@ -118,12 +118,26 @@
           "caption_excerpt": "리필 해 보셨어요? #클린뷰티",
           "thumbnail_url": "https://scontent-ssn1-1.cdninstagram.com/v/t51.2885-15/thumb.jpg",
           "media_type": "VIDEO",
-          "standout": "첫 줄이 질문 · 평소 10%"
+          "standout": "첫 줄이 질문 · 평소 10%",
+          "source_kind": "benchmark",
+          "followers": null,
+          "comments": null,
+          "follower_engagement": null,
+          "account_kind": null,
+          "audience_ages": [],
+          "audience_genders": [],
+          "topic": null
         }
       ],
       "memes": [
         {"name": "#오늘의루틴", "description": "아침 루틴을 빠르게 보여 주는 영상이 몰림", "ad_material": "ok"}
-      ]
+      ],
+      "audience_line": null,
+      "audience_label": null,
+      "audience_widened": false,
+      "audience_thin": false,
+      "shorts": [],
+      "mega": []
     },
     "competitors": {
       "status": "known",

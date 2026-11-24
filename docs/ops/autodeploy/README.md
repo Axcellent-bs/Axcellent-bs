@@ -59,3 +59,17 @@ CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-aut
 ## 시험
 
 `--dry-run` 은 상태·화면을 바꾸지 않고(fetch 만) 대상 커밋, 변경 영역, CI 상태, 정지 연결을 출력한다. 시험용 환경 변수: `AX_STATE_DIR AX_SRC AX_DEPLOY_SH AX_WEB_ROOT_90 AX_WEB_ROOT_91 AX_URL_90 AX_URL_91 AX_PROMO_ROOT AX_URL_PROMO(off 가능) AX_LOG_FILE AX_BUILD_LOG AX_SUDO AX_PAUSE_FILE AX_GATE_BIN`.
+
+## 백엔드 단계 (dry-run, 초안)
+
+설계: `docs/superpowers/specs/2026-11-24-backend-autodeploy-design.md`. 환경 변수 `AX_BACKEND_STAGE`(또는 `/etc/ax-autodeploy/env` 의 같은 키)로 켠다.
+
+- `off`(기본): 아무것도 안 한다. 기존 프론트·홍보 동작과 같다.
+- `dry-run`: 배포·재시작·슬랙 전송 없이 판정만 하고 로그(`backend-dry-run: ...`)와 공지 문안(`backend-notice-draft ...`)만 남긴다.
+- `on`: 미구현(게이트에 `rollback-code`·`uv-sync` 동작이 생길 때까지). 지정하면 `미구현: 게이트 의존` 오류로 끝 코드 1.
+
+판정 순서: 정지 표시(기존) → 이전 배포 흔적(`backend-in-progress`)·배포 금지 잠금(`/etc/ax-gate/deploy.lock`) → 운영 트리 HEAD..dev 최신에 `backend/` 변경 → 조건 1(check-runs 중 `ci`·`backend` 만 completed+success) → 조건 4(범위 안 커밋의 PR 라벨 `manual-deploy`·`## 배포 메모`; PR 을 못 찾으면 보류) → 조건 5(`TZ=Asia/Seoul` 9~22시, dev 최신 커밋 10분 조용, 마지막 재시작 30분 간격). API 실패·해석 실패는 `skip-cycle`(이번 주기 건너뜀, 상태 기록 없음). 판정 로그는 바뀔 때만, 공지 문안은 SHA·종류(would-deploy/hold-memo)마다 한 번만 만든다(상태 파일 `backend-verdict`, `backend-notified`).
+
+필요한 서버 파일: 읽기 전용 토큰 `/etc/ax-autodeploy/gh-readonly-token`(Checks·Pull requests 읽기; 없으면 백엔드는 `ci-off` 로 보류). 슬랙 웹훅 파일(`AX_SLACK_WEBHOOK_FILE`)은 dry-run 에서 읽지 않는다. `AX_MEMO_REQUIRED_SINCE=YYYY-MM-DD`(PR 템플릿 도입일)을 주면 그날 이후 머지된 PR 의 '섹션 없음'도 메모로 본다(비우면 섹션 없음은 메모 없음).
+
+시험: `python -m unittest discover -s docs/ops/autodeploy/tests -v` (임시 git 저장소와 가짜 API 응답을 쓴다, 서버·네트워크 불필요).

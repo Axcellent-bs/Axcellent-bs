@@ -1,12 +1,14 @@
+import { useState } from "react";
 import { ErrorBox, Panel, Waiting } from "@/components/finance/bits";
 import { when } from "@/components/data/Sources";
 import { useSkill } from "@/components/data/useSkill";
 import { AD, times } from "@/components/data/TrendMemes";
 import { safeLink } from "@/lib/safeLink";
+import { ageLabels, genderLabels } from "@/lib/radarMeta";
 import { Thumb } from "@/components/data/VideoExplorer";
 import { IgWhyFacts } from "@/components/data/IgWhyFacts";
 import { dataAi, type InstagramRadarGroup, type InstagramRadarOutput, type InstagramRadarPost } from "@/lib/data";
-import { type GridItem, gridItems, kindLabel, showGrid, thumbSrc } from "@/lib/igRadarGrid";
+import { type GridFilter, type GridItem, type GridSort, engagementLabel, gridView, kindLabel, showChips, showGrid, thumbSrc } from "@/lib/igRadarGrid";
 
 // 트렌드 1 감지 "인스타" 칩의 인스타 레이더 (instagram_radar, Business Discovery). 서버가 미리 계산한 결과를 읽기만 한다.
 // - 맨 위: "갑자기 뜬 게시물" 썸네일 그리드 (모든 묶음 대표 게시물, media_id 중복 제거, 배수 순 최대 12개).
@@ -37,6 +39,8 @@ export function PostCard({ post: p, rank, adMaterial, domId }: { post: Instagram
   const link = safeLink(p.permalink);
   const kind = kindLabel(p);
   const ad = adMaterial ? AD[adMaterial] : null;
+  const engagement = engagementLabel(p);
+  const layers = [...ageLabels(p.audience_ages), ...genderLabels(p.audience_genders)];
   const body = (
     <>
       <Thumb src={thumbSrc(p.thumbnail_url)} alt={p.caption_excerpt ?? `${p.account} 게시물`} wide={false} rank={rank} tall>
@@ -47,8 +51,10 @@ export function PostCard({ post: p, rank, adMaterial, domId }: { post: Instagram
       <span className="truncate text-xs text-ink-700">
         {METRIC[p.metric]} {COMPACT.format(p.value)}{ago(p.posted_at) && <span className="text-ink-500"> · {ago(p.posted_at)}</span>}
       </span>
+      {engagement && <span className="text-xs text-ink-700"><span className="chip mr-1 text-[11px]">밈</span>{engagement}</span>}
       {p.standout && <span className="text-xs font-medium text-emerald-700">{p.standout}</span>}
-      {ad && <span><span className={`chip text-[11px] ${ad.tone}`}>광고 재료 {ad.label}</span></span>}
+      {layers.length > 0 && <span className="flex flex-wrap gap-1">{layers.map((c) => <span key={c} className="chip text-[11px]">{c}</span>)}</span>}
+      {ad &&<span><span className={`chip text-[11px] ${ad.tone}`}>광고 재료 {ad.label}</span></span>}
     </>
   );
   const cls = "flex flex-col gap-1 rounded-lg";
@@ -63,15 +69,46 @@ export function PostCard({ post: p, rank, adMaterial, domId }: { post: Instagram
   );
 }
 
+const FILTERS: { key: GridFilter; label: string }[] = [
+  { key: "all", label: "전체" },
+  { key: "benchmark", label: "벤치마크" },
+  { key: "meme", label: "밈·크리에이터" },
+];
+const SORTS: { key: GridSort; label: string }[] = [
+  { key: "ratio", label: "평소 대비 배수" },
+  { key: "engagement", label: "팔로워 대비 반응" },
+];
+const btn = (on: boolean) =>
+  `rounded-md px-2.5 py-1 text-xs ring-1 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${on ? "bg-brand-50 font-bold text-brand-700 ring-brand-500" : "text-ink-500 ring-ink-100 hover:bg-ink-50"}`;
+
 function PostGrid({ out }: { out: InstagramRadarOutput }) {
+  const [filter, setFilter] = useState<GridFilter>("all");
+  const [sort, setSort] = useState<GridSort>("ratio");
   if (!showGrid(out)) return null;
-  const items = gridItems(out.groups);
+  const chips = showChips(out);
+  const f = chips ? filter : "all";
+  const items = gridView(out.groups, out.meme_posts, f, sort);
+  const order = f === "meme" && sort === "engagement" ? "팔로워 대비 반응 순" : "평소 대비 배수 순";
   return (
     <section aria-label="갑자기 뜬 게시물">
-      <h3 className="mb-1.5 text-sm font-semibold text-ink-900">갑자기 뜬 게시물 <small className="font-normal text-ink-500">평소 대비 배수 순 · {n(items.length)}개</small></h3>
-      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {items.map((item: GridItem, i) => <PostCard key={item.post.media_id} post={item.post} adMaterial={item.group.ad_material} rank={i + 1} />)}
-      </ul>
+      <h3 className="mb-1.5 text-sm font-semibold text-ink-900">갑자기 뜬 게시물 <small className="font-normal text-ink-500">{order} · {n(items.length)}개</small></h3>
+      {chips && (
+        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <div role="group" aria-label="계정 종류" className="flex gap-1">
+            {FILTERS.map((x) => <button key={x.key} type="button" aria-pressed={f === x.key} onClick={() => setFilter(x.key)} className={btn(f === x.key)}>{x.label}</button>)}
+          </div>
+          {f === "meme" && (
+            <div role="group" aria-label="정렬" className="flex gap-1">
+              {SORTS.map((x) => <button key={x.key} type="button" aria-pressed={sort === x.key} onClick={() => setSort(x.key)} className={btn(sort === x.key)}>{x.label}</button>)}
+            </div>
+          )}
+        </div>
+      )}
+      {items.length === 0 ? <p className="text-xs text-ink-500">이 종류에서는 갑자기 뜬 게시물이 없어요.</p> : (
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {items.map((item: GridItem, i) => <PostCard key={item.post.media_id} post={item.post} adMaterial={item.group?.ad_material} rank={i + 1} />)}
+        </ul>
+      )}
     </section>
   );
 }
@@ -160,7 +197,7 @@ export function InstagramRadar() {
   // 계정 수는 서버가 셌을 때만 (모르면 0이라고 쓰지 않는다)
   const counted = out && (out.status === "known" || out.accounts_total > 0);
   const hint = counted
-    ? `벤치마크 계정 ${n(out.accounts_total)}곳 중 평소보다 크게 터진 게시물 묶음 · 오늘 읽은 계정 ${n(out.accounts_read)}곳${out.generated_at ? ` · 계산 ${when(out.generated_at)}` : ""}`
+    ? `${(out.meme_accounts_total ?? 0) > 0 ? `계정 ${n(out.accounts_total)}곳(벤치마크 ${n(out.accounts_total - (out.meme_accounts_total ?? 0))}곳 + 밈·크리에이터 ${n(out.meme_accounts_total ?? 0)}곳)` : `벤치마크 계정 ${n(out.accounts_total)}곳`} 중 평소보다 크게 터진 게시물 묶음 · 오늘 읽은 계정 ${n(out.accounts_read)}곳${out.generated_at ? ` · 계산 ${when(out.generated_at)}` : ""}`
     : "벤치마크 계정 중 평소보다 크게 터진 게시물 묶음";
   return (
     <Panel id="data-trend-ig-radar" title="인스타 레이더" hint={hint}

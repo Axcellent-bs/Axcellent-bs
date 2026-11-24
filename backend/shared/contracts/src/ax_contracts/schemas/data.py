@@ -4047,6 +4047,37 @@ class TrendMeme(AxModel):
     judged_by: Literal["share", "count"] = "count"
 
 
+class MemeShortsVideo(AxModel):
+    """밈 키워드 쇼츠 검색 결과 하나 (search.list 최근 7일·short·KR·조회수 순 → videos·channels)."""
+
+    video_id: str = Field(min_length=1)
+    keyword: str  # 이 영상을 찾은 회사 밈 키워드 (여러 키워드면 처음 것)
+    title: str | None = None  # untrusted: 화면에는 텍스트로만
+    channel_id: str | None = None
+    channel_title: str | None = None
+    published_at: UtcDatetime | None = None
+    views: int | None = Field(default=None, ge=0)
+    subscribers: int | None = Field(default=None, ge=0)  # 숨김·모르면 None
+    views_per_subscriber: float | None = Field(default=None, ge=0)  # 조회 ÷ 구독자
+    big_channel: bool = False  # 구독자 10만 이상 (따로 표시)
+    video_url: str | None = None
+    thumbnail_url: str | None = None
+
+
+class MemeShortsSearch(AxModel):
+    # known = 오늘(또는 마지막) 검색 저장분, unknown = 검색 못 함(이유), not_set = 키워드 없음
+    status: Literal["known", "unknown", "not_set"] = "not_set"
+    reason: str | None = None
+    day: dt.date | None = None  # 검색한 날 (한국)
+    keywords: list[str] = Field(default_factory=list)  # 회사 밈 키워드 (최대 10개)
+    searched: list[str] = Field(default_factory=list)  # 실제로 검색한 키워드
+    limits: list[str] = Field(default_factory=list)  # 건너뛴 키워드·이유 (쿼터 30% 등)
+    units: int = Field(default=0, ge=0)  # 그 검색이 쓴 YouTube 단위
+    items: list[MemeShortsVideo] = Field(default_factory=list)  # 구독자 대비 조회 배수 순
+    removed: list[MemeSkipped] = Field(default_factory=list)  # 실존 인물·사건 분류로 뺀 영상
+    searched_at: UtcDatetime | None = None
+
+
 class MemeSkipped(AxModel):
     """유행에서 뺀 단위와 이유."""
 
@@ -4089,6 +4120,10 @@ class TrendMemesOutput(AxModel):
     limits: list[str] = Field(default_factory=list)
     generated_at: UtcDatetime | None = None
     summary: str = ""
+    # 11/24 밈 소스: 회사 밈 키워드로 찾은 쇼츠 (하루 1번 수집 저장분). 키워드가 없으면 not_set
+    shorts_search: MemeShortsSearch | None = None
+    # 11/24 조회 1,000만 이상 (레이더 릴스·쇼츠 검색 저장분, 평소 대비 배수와 상관없이)
+    mega_views: MegaViews | None = None
 
 
 # ---------- keyword_trend (검색 트렌드 · 도서 분야, 11/18) ----------
@@ -4311,6 +4346,9 @@ class InstagramRadarInput(AxModel):
     pass
 
 
+IgSourceKind = Literal["benchmark", "meme"]
+
+
 class InstagramRadarPost(AxModel):
     """터진 게시물 하나 (계정 이름·게시 링크·지표, 캡션 일부는 untrusted 텍스트)."""
 
@@ -4330,6 +4368,41 @@ class InstagramRadarPost(AxModel):
     media_type: str | None = None  # IMAGE · VIDEO · CAROUSEL_ALBUM
     # 계정 평소와 가장 크게 다른 점 한 줄 (코드 템플릿, LLM 없음). 다른 점이 없으면 None
     standout: str | None = None
+    # 11/24 밈 소스: 레이더 계정 종류 (benchmark = 기업·경쟁사 계정, meme = 밈·크리에이터 계정)
+    source_kind: IgSourceKind = "benchmark"
+    # 팔로워 대비 반응 = (좋아요 + 댓글) ÷ 팔로워 (business_discovery followers_count, 같은 호출).
+    # 팔로워·좋아요를 모르면 None (0으로 채우지 않음)
+    followers: int | None = Field(default=None, ge=0)
+    comments: int | None = Field(default=None, ge=0)
+    follower_engagement: float | None = Field(default=None, ge=0)
+    # 11/24 대상층: 계정 메타 (RadarAccountMeta). 메타가 없으면 kind는 source_kind로, 층은 빈 목록
+    account_kind: RadarKind | None = None
+    audience_ages: list[AgeBand] = Field(default_factory=list)
+    audience_genders: list[AudienceGender] = Field(default_factory=list)
+    topic: str | None = None
+
+
+# ---------- 11/24 레이더 계정 메타 (대상층) ----------
+# 인스타 공식 API는 다른 계정의 팔로워 나이·성별을 주지 않는다. 계정마다 "주로 보는 층" 태그를 두고
+# 의뢰 대상층에 맞는 계정의 게시물만 재료로 쓴다. 태그는 AI가 먼저 달고(ai) 사람이 고친다(human)
+# industry = 업종·경쟁, creator = 크리에이터·인플루언서, meme = 밈·코미디, brand = 기타 브랜드
+RadarKind = Literal["industry", "creator", "meme", "brand"]
+AgeBand = Literal["10s", "20s", "30s", "40s", "50s", "60plus"]
+AudienceGender = Literal["male", "female", "all"]
+
+
+class RadarAccountMeta(AxModel):
+    account: str
+    kind: RadarKind = "industry"
+    ages: list[AgeBand] = Field(default_factory=list)
+    genders: list[AudienceGender] = Field(default_factory=list)
+    topic: str | None = Field(default=None, max_length=20)
+    # None = 메타 없음(옛 목록: kind는 source_kind로)
+    tag_source: Literal["ai", "human"] | None = None
+    followers: int | None = Field(default=None, ge=0)
+    # 판정에서 뺀 이유 (creator·meme 계정이 팔로워 하한보다 작을 때:
+    # "팔로워 5만 미만이라 제외 (N명)")
+    excluded_reason: str | None = None
 
 
 class InstagramRadarGroup(AxModel):
@@ -4363,6 +4436,43 @@ class InstagramRadarOutput(AxModel):
     limits: list[str] = Field(default_factory=list)
     sources: list[InstagramSource] = Field(default_factory=list)
     generated_at: UtcDatetime | None = None
+    # 11/24 밈 소스: accounts_total 중 밈·크리에이터 계정 수, 그 계정들의 뜬 게시물
+    # (묶음과 상관없이 평소 대비 배수 순, 최대 12개. 밈 계정은 같은 해시태그로 잘 안 묶인다)
+    meme_accounts_total: int = Field(default=0, ge=0)
+    meme_posts: list[InstagramRadarPost] = Field(default_factory=list)
+    # 11/24 대상층: 계정마다 메타(팔로워·제외 이유 포함), industry가 아닌 계정의 뜬 게시물
+    # (묶음과 상관없이 배수 순, 최대 40개. 보고서가 의뢰 대상층으로 고른다), 팔로워 하한
+    accounts_meta: list[RadarAccountMeta] = Field(default_factory=list)
+    audience_posts: list[InstagramRadarPost] = Field(default_factory=list)
+    min_followers: int | None = Field(default=None, ge=0)
+
+
+# ---------- 11/24 조회 1,000만 이상 모음 (인스타 레이더 릴스 + 유튜브 쇼츠 검색) ----------
+
+
+class MegaViewItem(AxModel):
+    platform: Literal["instagram", "youtube"]
+    account: str  # 인스타 계정 · 유튜브 채널 이름
+    item_id: str  # 인스타 media_id · 유튜브 video_id
+    views: int = Field(ge=0)
+    posted_at: UtcDatetime | None = None
+    link: str | None = None
+    thumbnail_url: str | None = None
+    title: str | None = None  # 유튜브 제목만 (untrusted). 인스타 캡션은 넣지 않는다
+    # 계정 층 태그 (인스타 레이더 계정 메타. 유튜브는 없음)
+    account_kind: RadarKind | None = None
+    audience_ages: list[AgeBand] = Field(default_factory=list)
+    audience_genders: list[AudienceGender] = Field(default_factory=list)
+    topic: str | None = None
+
+
+class MegaViews(AxModel):
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = None
+    instagram_min: int = Field(default=10_000_000, ge=0)  # [instagram] radar_mega_views
+    youtube_min: int = Field(default=10_000_000, ge=0)  # [youtube] shorts_mega_views
+    days: int = Field(default=30, ge=1)  # 최근 며칠 안 게시만
+    items: list[MegaViewItem] = Field(default_factory=list)  # 조회수 순
 
 
 MemoKind = Literal["audio", "format", "hashtag", "other"]
@@ -4549,6 +4659,16 @@ class TrendContentSection(AxModel):
     reason: str | None = None
     posts: list[InstagramRadarPost] = Field(default_factory=list)  # 썸네일·standout 포함
     memes: list[TrendReportMeme] = Field(default_factory=list)
+    # 11/24 대상층: 섹션 머리 한 줄("대상층(20대 남성)에 맞는 계정 N곳 중 뜬 게시물 M개"),
+    # 대상층 말, 맞는 계정이 5곳 미만이라 전체로 넓혔는지, 인스타 표본이 적은 층인지(3곳 미만)
+    audience_line: str | None = None
+    audience_label: str | None = None
+    audience_widened: bool = False
+    audience_thin: bool = False
+    # 쇼츠 검색 근거 (대상층·밈·유행 의뢰일 때만, 실존 인물·사건 분류 뒤),
+    # 조회 천만 이상 (대상층 우선)
+    shorts: list[MemeShortsVideo] = Field(default_factory=list)
+    mega: list[MegaViewItem] = Field(default_factory=list)
 
 
 class TrendCompetitorTrait(AxModel):

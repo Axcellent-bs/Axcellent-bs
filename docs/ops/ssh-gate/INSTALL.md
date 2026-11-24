@@ -279,6 +279,8 @@ SHA·배포(먼저 `--dry-run`으로)
 - [ ] 지금 서버 HEAD보다 이전 커밋으로 `deploy-bundle <이전 SHA> --dry-run` → "앞선 커밋이 아니다"로 거부
 - [ ] 여유 있는 시간에 `deploy-bundle <SHA> --announced` 실제 1회: 번들 백업, 직전 배포 해시 기록, 번들 점검 통과
 - [ ] `rollback-bundle <SHA> --announced` 실제 1회: 번들이 이전 것으로 돌아오는지
+- [ ] (v0.5.0, 정책에 `rollback-code`를 적은 뒤) `rollback-code <방금 배포한 SHA> --dry-run`: 직전 HEAD와 `git checkout --detach` 한 줄이 맞는지, 기록 없는 SHA·HEAD가 다른 SHA는 거부되는지. 실제 1회는 여유 있는 시간에 `--announced`로 하고 `restart-backend`는 따로 한다
+- [ ] (v0.5.0, 정책 `[uv_sync]`를 채운 뒤) `uv-sync <서버 HEAD SHA> --dry-run`: 한 줄이 맞는지. 실제 1회: 끝 코드 0과 기록 파일 확인, 일부러 틀린 SHA는 `head-mismatch`로 거부
 
 nginx
 
@@ -345,5 +347,6 @@ sudo rm -r /etc/ax-gate                                  # 정책과 남아 있�
 - 게이트 스크립트를 바꿀 때(새 버전 올리기): 레포 PR → 머지 → 지금 설치된 두 파일을 사본으로 떠 두고(`sudo cp -a /usr/local/sbin/ax-gate /usr/local/sbin/ax-gate.bak-<날짜>`, 검증기도 같게) → 1단계의 `install` 두 줄을 다시 실행 → `help`·`status`와 `--dry-run` 한두 개로 확인한다. 이상하면 사본으로 되돌린다. 서버의 사본을 직접 고치지 않는다. 서버 사본이 레포와 다르게 고쳐져 있었다면 그 차이를 먼저 레포 PR로 올린 뒤에 새 버전을 올린다(덮어쓰면 그 수정이 사라진다).
 - 새 버전에 정책 항목이 추가됐다면 그 PR 본문의 "설치·정책 수정" 칸을 따른다. 정책을 먼저 바꿀지 스크립트를 먼저 올릴지는 PR마다 적혀 있다.
 - 접수 규칙(`README.md`)과 요청 양식(`REQUEST-TEMPLATE.md`)을 팀에 알리는 것, `ANNOUNCE.md`를 보내는 것은 서버 책임자가 한다.
-- 코드(레포)를 이전 커밋으로 되돌리는 것은 게이트에 없다. `rollback-bundle`이 알려 주는 직전 배포 해시를 보고 서버 책임자가 직접 한다.
+- 코드(레포)를 이전 커밋으로 되돌리는 것은 v0.5.0의 `rollback-code <SHA>`가 한다(`deploy-bundle`이 남긴 직전 HEAD로만). 그 기록이 없던 옛 배포는 게이트로 되돌릴 수 없고 서버 책임자가 직접 한다.
+- v0.5.0 정책 변경: ① `[uv_sync]` 구역 추가(`uv_bin`·`project_dir`, 선택 `timeout_seconds`. `policy.example.toml`의 주석 참고. 모르는 키가 있으면 정책 전체가 거부된다) ② `rollback-code`·`uv-sync`를 쓸 계정 줄에 직접 추가(`_default`에는 불가). 구버전 게이트는 `[uv_sync]` 구역과 모르는 동작 이름을 검사하지 않고 무시하므로 정책을 먼저 바꿔도 깨지지 않지만, 스크립트를 먼저 올리고 정책을 나중에 바꾸는 쪽이 안전하다(새 동작이 정책 없이 열리지 않는다).
 - 서버의 파일 권한 점검(개인 계정이 늘어난 만큼 다른 계정이 읽을 수 있는 파일을 줄일지)은 게이트 설치와 별도의 결정이다.

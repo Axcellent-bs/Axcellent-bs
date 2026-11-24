@@ -80,7 +80,9 @@ def rules_version() -> str:
 
 def data_stamp(env: Mapping[str, str], board_stamp: str, now: datetime | None = None) -> str:
     """데이터 시점 도장. 스냅샷 시각은 인덱스(collected_at)로 바로 찾는다."""
-    from data_agent import llm_settings
+    from ax_agent_template.tenant import ig_radar_meta_file, yt_meme_keywords_file
+    from data_agent import instagram_store as st
+    from data_agent import llm_settings, meme_shorts
     from data_agent.skills import shorts_stats, topic_category
     from data_agent.skills import trend_candidates as cand_mod
     from data_agent.youtube_store import DB_ENV as YT_ENV
@@ -106,6 +108,11 @@ def data_stamp(env: Mapping[str, str], board_stamp: str, now: datetime | None = 
         # 숏츠 다시 조회·오늘 검색 저장분 (shorts_stats 응답 칸)
         _max_at(shorts, "SELECT MAX(at) || COUNT(*) FROM views"),
         _max_at(shorts, "SELECT MAX(day) || COUNT(*) FROM searched_videos"),
+        # 11/24 밈 키워드 쇼츠 검색 저장분 (trend_memes "쇼츠 검색" 칸)
+        _max_at(env.get(meme_shorts.DB_ENV) or str(meme_shorts.DEFAULT_DB),
+                "SELECT MAX(at) || COUNT(*) FROM runs"),  # fmt: skip
+        # 11/24 대상층·천만: 레이더 바퀴 (trend_memes 조회 천만 이상 칸)
+        _max_at(st.path_of(env, st.RADAR_ENV), "SELECT MAX(completed_at) FROM radar_cycles"),
         board_stamp,
         now.astimezone(KST).date().isoformat(),
         _file_digest(
@@ -113,6 +120,9 @@ def data_stamp(env: Mapping[str, str], board_stamp: str, now: datetime | None = 
                 env.get("DATA_TREND_CONFIG"),
                 env.get("DATA_TENANT_CONFIG"),
                 env.get("DATA_YOUTUBE_CONFIG"),
+                str(p) if (p := yt_meme_keywords_file()) else None,  # 화면 저장 밈 키워드
+                # 11/24 레이더 계정 메타 (사람이 태그를 고치면 레이더·보고서 재료가 바뀐다)
+                str(m) if (m := ig_radar_meta_file(company_scope.active())) else None,
             ]
         ),  # fmt: skip
         # 이 프로세스가 LLM·YouTube를 쓸 수 있는지 (값은 안 본다).

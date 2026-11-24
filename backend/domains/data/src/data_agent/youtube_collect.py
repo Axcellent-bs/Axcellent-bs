@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import IO
 
 from ax_agent_template.tenant import setting as tenant_setting
-from data_agent import collector_lock, keyword_pool, shorts_backfill, youtube_quota
+from data_agent import collector_lock, keyword_pool, meme_shorts, shorts_backfill, youtube_quota
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat, YouTubeConnector
 from data_agent.stage_timing import install_sqlite_timer
@@ -366,11 +366,19 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
             await shorts_backfill.run(env)
             # 검색 트렌드 키워드 풀 (한국 날짜 하루 1번, 이미 채웠으면 건너뜀. 실패해도 계속)
             await keyword_pool.run(env)
+            # 밈 키워드 쇼츠 검색 (11/24, 한국 날짜 하루 1번·남은 키워드만, 쿼터 30% 넘으면 다음
+            # 회차로. 키워드가 없으면 아무것도 안 함. 실패해도 계속)
+            await meme_shorts.run(env)
             # 인스타 (이 루프 회차마다, run_all.sh는 1시간마다): 인기 오디오는 한국 날짜 하루 1번,
             # 레이더는 회차마다 한 묶음(50곳, 커서 이어받기). 토큰이 없으면 한 줄만. 실패해도 계속
             from data_agent.skills import instagram
 
             await instagram.run(env)
+            # 11/24 레이더 계정 대상층 AI 태그 (하루 1번, 태그 없는 새 계정만, 팔로워 수 갱신.
+            # 사람이 고친 태그는 덮지 않는다. 실패해도 계속)
+            from data_agent import radar_tags
+
+            await radar_tags.run(env)
             if result.saved and precompute_after:
                 # 새 스냅샷 직후 감지 탭 결과를 미리 계산해 저장 (화면은 읽기만).
                 # 실패해도 수집은 계속

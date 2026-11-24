@@ -1,5 +1,6 @@
 """영수증 분석과 환불·교환 요청 분석: 코드가 사실을 뽑고 주문·규칙으로 대조·계산한다."""
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -237,9 +238,30 @@ def test_the_receipt_original_and_personal_data_never_leave_the_analysis(
     _fresh: InquiryStore,
 ) -> None:
     out = call("analyze_receipt", {"inquiry_id": inquiry(_fresh)}, {"receipt_text": RECEIPT})
-    text = str(out)
-    for leaked in ("4111", "010-1234", "CATBOOKS 영수증", "카드"):
-        assert leaked not in text
+    assert _leaks(out) == []
+
+
+# 결과 전체(meta·output·evidence 모두)를 글로 바꿔 찾는다.
+# 다만 시각(meta.deadline 등, 마이크로초까지)은 영수증과 상관없는 숫자라 찾기 전에 지운다.
+# 마이크로초에 4111이 들어가면 우연히 실패했다(11/24 #1671 CI)
+LEAKED = ("4111", "010-1234", "CATBOOKS 영수증", "카드")
+_ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
+
+
+def _leaks(result: dict[str, Any]) -> list[str]:
+    text = _ISO_TIME.sub("<시각>", str(result))
+    return [s for s in LEAKED if s in text]
+
+
+def test_leak_check_ignores_timestamps_but_still_catches_leaks() -> None:
+    # 시각의 마이크로초에 4111이 있어도 통과한다
+    meta = {"deadline": "2026-11-24T04:24:59.841116Z", "at": "2026-11-24 13:41:11.4111+09:00"}
+    assert _leaks({"meta": meta, "output": {"facts": {"total": 33000}}}) == []
+    # 시각 밖(본문·근거)에 남으면 그대로 잡는다
+    assert _leaks({"meta": meta, "output": {"card": "4111-****"}}) == ["4111"]
+    assert _leaks({"meta": meta, "output": {"memo": "카드 결제"}}) == ["카드"]
+    assert _leaks({"meta": meta, "evidence": {"note": "010-1234-5678"}}) == ["010-1234"]
+    assert _leaks({"meta": meta, "output": "CATBOOKS 영수증"}) == ["CATBOOKS 영수증"]
 
 
 def test_the_check_result_is_kept_in_the_inquiry_activity_without_the_original(

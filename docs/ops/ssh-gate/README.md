@@ -23,6 +23,8 @@
 | 화면 번들 수동 배포(자동 배포가 막혔을 때) | 된다 | `deploy-bundle <SHA>` |
 | 백엔드 재시작 | 된다(권한자) | `restart-backend <SHA> --ack-data-loss`. 서버 HEAD가 그 SHA가 아니면 먼저 `deploy-bundle <SHA>` |
 | 번들 되돌리기 | 된다(권한자) | `rollback-bundle <SHA>` |
+| 서버 코드(레포 HEAD)를 직전 배포로 되돌리기 | 된다(정책에 그 권한이 적힌 권한자·자동 배포 계정) | `rollback-code <SHA>`. 기록된 직전 HEAD로만. 재시작은 `restart-backend`가 한다 |
+| 의존성 맞추기 | 된다(정책에 그 권한이 적힌 권한자·자동 배포 계정) | `uv-sync <SHA>`. 서버 HEAD가 그 SHA일 때만 `uv sync --frozen` |
 | 시연 전 게이트 배포 잠금 | 된다(권한자) | `lock <사유> [해제시각]` / `unlock` |
 | 자동 배포 잠깐 멈추기·다시 켜기 | 된다(정책에 그 권한이 적힌 권한자) | `autodeploy-pause <사유> [재개시각]` / `autodeploy-resume` |
 | 새 쓰기 경로(POST 등) 열기: 정책의 대상 파일, 허용 접두 안, 정책의 블록 모양 | 된다(권한자, 두 사람) | `nginx-add-location` → `nginx-approve-location` |
@@ -98,6 +100,8 @@
 | `deploy-bundle <SHA>` | 번들 배포(배포 스크립트를 배포 계정으로 실행). 지금 서버 코드보다 **앞선** 커밋만. 번들 백업, 직전 배포 해시 기록, 번들 점검 | 필수 |
 | `restart-backend <SHA> --ack-data-loss` | 정책의 파일들을 백업한 뒤 서비스 재시작, health가 전부 뜰 때까지 폴링 | 필수 |
 | `rollback-bundle <SHA>` | 그 SHA를 배포하기 직전의 번들 백업으로 되돌림. 코드(레포)는 그대로 | 필수 |
+| `rollback-code <SHA>` | 서버 레포 HEAD를 `deploy-bundle <SHA>`가 남긴 직전 HEAD(`deploy-prev-head.bak-before-<SHA 8자>`)로만 옮긴다(`git checkout --detach`, 배포 계정으로). 기록이 없거나 내용이 40자 SHA가 아니거나 그 SHA의 조상이 아니면 거부. 지금 HEAD가 그 SHA일 때만 옮기고, 레포에 로컬 변경이 있으면 거부. 이미 직전 HEAD면 할 일 없이 끝난다. 번들·서비스·의존성은 건드리지 않는다 | 필수 |
+| `uv-sync <SHA>` | 서버 레포 HEAD가 그 SHA일 때만 정책 `[uv_sync]`의 `uv_bin`으로 `uv --directory <project_dir> sync --frozen`을 배포 계정으로 실행(최대 `timeout_seconds`, 기본 600초). 출력은 백업 폴더의 root 전용 기록 `deploy-uv-sync-<SHA 8자>-<시각>.log`로만 가고 화면에는 안 나온다. 실패·시간 초과는 끝 코드 1, 감사 로그 `result=fail:uv-sync-failed`. 재시작은 하지 않는다 | 필수 |
 | `gateway-allow-propose <skill>` | 게이트웨이 허용 목록에 skill 추가 **제안**. 검증(이름 형식·중복·카드에 있음·카드 `grade`가 `read`·요청자)만 하고 승인 대기 파일을 만든다. 카드는 정책 `card_repo`의 `expected_card_sha` 커밋 내용(`git cat-file`)으로 읽고, HEAD가 그 SHA가 아니면 거부한다(두 값은 필수). 허용 목록은 안 바뀐다 | |
 | `gateway-allow-approve <skill> <확인값>` | 제안자와 **다른** 권한자가 승인하면 그때 재검증 → 백업 → 임시 파일 + `mv` 교체 → 정책의 반영 명령 실행. 실패하면 복구하고 다시 반영한다. 같은 사람은 `[self_approve]` 계정만 | 필수 |
 | `gateway-allow-restore <백업폴더명>` | 허용 목록을 `gwa-...` 백업으로 되돌리고 반영한다(복원 전 상태도 백업). 백업 폴더·파일·체크섬 파일이 root 소유이고 체크섬이 맞아야 하며(없으면 거부), 복원될 목록이 형식 검사를 통과해야 한다 | 필수 |
@@ -134,7 +138,10 @@
 - 배포 스크립트에 넘기는 환경변수는 게이트가 정책 값으로 고정한다: `<ref_env>=<SHA>`, `[deploy] env`의 항목들, 두 번째 번들에는 `env_b`의 항목들. 요청하는 사람은 하나도 바꿀 수 없다.
 - 배포 스크립트가 "앞으로 감기(ff) 병합"만 하는 서버에서는 이전 커밋을 주면 아무 일도 하지 않고 지금 코드를 다시 빌드한다. 그래서 게이트는 지금 서버 HEAD보다 앞선 커밋만 받고, 배포 뒤 HEAD가 그 커밋인지 확인한다. **`deploy-bundle`은 코드 롤백에 쓸 수 없다.**
 - 백업 이름 `*bak-before-<커밋 8자>`의 해시는 배포 **대상** 커밋이다. 게이트는 번들 백업과 함께 **직전 배포 해시**를 파일과 감사 로그(`result=prev-head:<해시>`)에 남긴다.
-- `rollback-bundle <SHA>`는 그 백업을 풀어 번들 폴더만 되돌리고, 기록해 둔 직전 배포 해시를 알려 준다. 레포 체크아웃을 되돌리는 것은 게이트에 없다.
+- `rollback-bundle <SHA>`는 그 백업을 풀어 번들 폴더만 되돌리고, 기록해 둔 직전 배포 해시를 알려 준다. 레포 체크아웃은 건드리지 않는다.
+- 코드 되돌림은 `rollback-code <SHA>`가 한다. 옮길 곳은 `deploy-bundle`이 남긴 직전 HEAD 기록뿐이라 임의 SHA는 줄 수 없다. 결과는 detached HEAD이고, 다음 `deploy-bundle`은 앞선 커밋으로 다시 앞으로 감기를 한다. 되돌림 순서(백엔드 자동 배포 설계 5.1절): `rollback-bundle <새 SHA>` → `rollback-code <새 SHA>` → (의존성이 바뀐 커밋이었다면) `uv-sync <직전 SHA>` → `restart-backend <직전 SHA> --ack-data-loss`. 감사 로그에는 `result=rollback-code:<이전 8자>-><직전 8자>`가 남는다.
+- `uv-sync`는 `.venv`를 바꾸고 되돌리지 않는다(설계 5.3절 한계). `uv.lock`·`pyproject.toml`이 바뀐 커밋은 `deploy-bundle` 뒤, `restart-backend` 앞에 `uv-sync <SHA>`를 한다. 정책 `[uv_sync]`(`uv_bin`, `project_dir`은 `paths.repo` 안의 폴더·안에 `uv.lock`, 선택 `timeout_seconds`)가 없으면 이 동작만 실패한다.
+- `rollback-code`·`uv-sync`는 `[permissions]`의 `_default`에 둘 수 없다(정책 로드 실패). 권한자·자동 배포 계정 줄에만 직접 적는다.
 - 번들 점검: 정책의 표시 문자열(`required_strings`)이 번들에 있어야 하고, 정책이 지정한 env 파일들(`secret_env_files`)의 값(12자 이상)이 번들에 들어 있으면 실패한다. 배포 스크립트가 일부러 번들에 넣는 값은 정책 `bundle_allowed_env_names`에 변수 이름을 적어 예외로 둔다.
 - sqlite 파일 백업은 파이썬 `sqlite3` 모듈의 backup API로 한다(sqlite3 명령이 없는 서버도 있다).
 - `restart-backend`의 폴더 백업은 결과물이 둘로 나뉜다: `<이름>.bak-before-<커밋 8자>.tgz`(sqlite 파일 `*.db`·`*.db-wal`·`*.db-shm`을 뺀 나머지)와 `<이름>.bak-before-<커밋 8자>-sqlite/`(700 폴더, 폴더 바로 아래 `*.db`를 backup API로 뜬 사본). 쓰는 중인 sqlite 파일을 tar가 읽다 실패하는 것을 막기 위해서다. 되돌릴 때는 둘 다 필요하다. 다만 정책 `backup_sqlite`에 적은 파일은 별도 파일(`<이름>.bak-before-<커밋 8자>`)로만 저장되고 `-sqlite/` 폴더에는 들어가지 않는다(같은 파일을 두 번 저장하지 않는다. `--dry-run`에도 `중복 건너뜀: <이름>` 한 줄이 나온다).
@@ -179,7 +186,7 @@ autodeploy-resume                               # 먼저 끝났으면
 | 단계 | 누구 | 동작 |
 | --- | --- | --- |
 | 모두 | 개인 계정이 있는 팀원 전부 | `status`, `deploy-bundle`, `record-pr` |
-| 권한자 | 정책에 적힌 소수 | 위 + `nginx-restore`, `nginx-add-location`, `nginx-approve-location`, `restart-backend`, `rollback-bundle`, `lock`, `unlock` |
+| 권한자 | 정책에 적힌 소수 | 위 + `nginx-restore`, `nginx-add-location`, `nginx-approve-location`, `restart-backend`, `rollback-bundle`, `lock`, `unlock` (`rollback-code`·`uv-sync`는 필요한 계정 줄에 직접 더한다) |
 
 이렇게 나눈 이유
 
@@ -365,7 +372,7 @@ nginx 설정을 바꾼 사람(승인자 또는 복원한 사람)이 한다.
 - 개인 계정이 셸을 얻지 못한다는 전제 위에 있다. 서버의 파일 권한이 느슨하면 그 전제가 깨졌을 때 읽히는 범위가 넓어진다. 파일 권한 점검은 설치와 별도로 한다.
 - **계정·키·IP 관리 부담**: 사람마다 계정·키 줄·그룹·방화벽 출처·`from=`이 있어, 사람이나 PC 주소가 바뀔 때마다 서버 책임자가 손봐야 한다. 주소가 바뀌면 그 사람은 고쳐질 때까지 못 들어온다.
 - 사유(lock)와 명령에 한글을 쓸 수 없다(영어·숫자·`_.,-`). 주입 검사를 단순하게 유지하려는 선택이다.
-- `rollback-bundle`은 번들 폴더만 되돌린다. 코드와 서비스는 그대로다.
+- `rollback-bundle`은 번들 폴더만 되돌린다. 코드와 서비스는 그대로다. 코드는 `rollback-code`, 서비스는 `restart-backend`.
 - `restart-backend`로 지워지는 메모리 상태는 게이트가 막지 못한다. `--ack-data-loss`로 알고 한다는 확인만 받는다.
 - 실행 중 중복 방지(실행 잠금)는 게이트끼리만 막는다.
 - 번들에서 비밀값이 발견되면 게이트는 실패를 알리고 `rollback-bundle`을 권할 뿐 자동으로 되돌리지 않는다.

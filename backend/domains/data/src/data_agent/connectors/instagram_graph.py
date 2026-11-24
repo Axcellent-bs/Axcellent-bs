@@ -64,6 +64,8 @@ HOST = "https://graph.facebook.com"
 TIMEOUT_SECONDS = 15.0
 NO_KEY = "키 등록 후 가능"
 OWNER_NAME = "owner_name"  # business_media가 게시물마다 붙이는 계정 표시 이름 (API 필드 아님)
+OWNER_FOLLOWERS = "owner_followers"  # 같은 방식으로 붙이는 계정 팔로워 수 (11/24, API 필드 아님)
+OWNER_BIO = "owner_bio"  # 계정 소개 앞 300자 (11/24 대상층 AI 태그용, untrusted, API 필드 아님)
 # 앱 검수 전에는 레이더·해시태그도 권한 오류가 날 수 있다 (Meta 메시지 원문은 넣지 않는다)
 PERMISSION_NOTE = "권한 필요(앱 검수·비즈니스 인증 필요할 수 있음)"
 # 데이터 토큰은 읽기 권한만 (instagram_basic·pages_show_list·pages_read_engagement, 필요하면
@@ -217,9 +219,11 @@ class InstagramGraph:
         """프로페셔널 계정 하나의 최근 미디어 (limit개). 개인 계정·나이 제한 계정은 오류."""
         n = max(1, min(50, limit))
         media = f"media.limit({n}){{{','.join(MEDIA_FIELDS)}}}"
-        # name(계정 표시 이름)은 같은 호출에서 받는다 (호출 수 그대로).
-        # 게시물마다 OWNER_NAME으로 붙인다
-        fields = f"business_discovery.username({username}){{username,{media},name}}"
+        # name(계정 표시 이름)·followers_count(팔로워, 11/24 밈 소스의 팔로워 대비 반응)는 같은
+        # 호출에서 받는다 (호출 수 그대로). 게시물마다 OWNER_NAME·OWNER_FOLLOWERS로 붙인다
+        # 11/24 대상층 AI 태그: biography(계정 소개, untrusted)도 같은 호출에서 (호출 수 그대로)
+        fields = (f"business_discovery.username({username})"
+                  f"{{username,{media},name,followers_count,biography}}")  # fmt: skip
         payload = await self._get(self.user_id, {"fields": fields})
         bd = payload.get("business_discovery") if isinstance(payload, dict) else None
         media = (bd or {}).get("media") if isinstance(bd, dict) else None
@@ -228,10 +232,18 @@ class InstagramGraph:
             # 나이 제한 계정 등은 데이터가 비어 온다 → 이 계정만 "데이터 없음"
             raise IgError("NO_DATA", "데이터 없음 (나이 제한 등으로 계정 데이터를 주지 않음)")
         name = bd.get("name") if isinstance(bd, dict) else None
+        followers = bd.get("followers_count") if isinstance(bd, dict) else None
         out = [m for m in data if isinstance(m, dict) and m.get("id")]
         if isinstance(name, str) and name.strip():
             for m in out:
                 m[OWNER_NAME] = name.strip()[:60]
+        if isinstance(followers, int) and not isinstance(followers, bool) and followers >= 0:
+            for m in out:
+                m[OWNER_FOLLOWERS] = followers
+        bio = bd.get("biography") if isinstance(bd, dict) else None
+        if isinstance(bio, str) and bio.strip():
+            for m in out:
+                m[OWNER_BIO] = bio.strip()[:300]
         return out
 
     # ------------------------------------------------------------ 해시태그
