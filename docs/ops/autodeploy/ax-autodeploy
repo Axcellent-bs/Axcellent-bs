@@ -5,9 +5,12 @@
 #
 # 하는 일:  flock -> 정지 표시 확인 -> git fetch origin dev -> 기준 ref 이후 frontend/·docs/promo 변경 판단
 #           -> (CI 확인) -> 빌드 전용 트리에서 /opt/axcellent/deploy.sh 재사용 -> 토큰 검사 -> 기준 ref 갱신
-# 하지 않는 일: 백엔드·nginx·.env·서비스 재시작, 운영 트리(/opt/axcellent/Axcellent-bs) 변경, 비밀값 출력.
+# 하지 않는 일: nginx·.env 변경, 비밀값 출력, 운영 트리·서비스는 게이트(ax-gate)로만(백엔드 단계 on 일 때) 바꾼다.
 # 백엔드 단계(AX_BACKEND_STAGE=off|dry-run|on, 기본 off): dry-run 은 "지금이면 배포했을 것/보류 사유"를 로그와 공지 문안으로만
-#           만든다(배포·재시작·슬랙 전송 없음). on 은 게이트에 rollback-code·uv-sync 가 생길 때까지 미구현으로 막혀 있다.
+#           만든다(배포·재시작·슬랙 전송 없음). on 은 같은 판정을 통과하면 게이트(ax-gate 0.5.0)로 실제 배포한다:
+#           공지 -> deploy-bundle -> (uv.lock·pyproject.toml 변경이면 uv-sync) -> restart-backend, 실패하면
+#           rollback-bundle -> rollback-code -> (uv-sync 직전) -> (restart 단계 실패였으면 restart-backend 직전 SHA).
+#           잘못된 단계 값은 off 로 보고 프론트·홍보 단계는 그대로 돈다.
 #           설계: docs/superpowers/specs/2026-11-24-backend-autodeploy-design.md
 #
 # 사용:  ax-autodeploy [--dry-run]     (--dry-run: 아무것도 바꾸지 않고 무엇을 할지만 출력)
@@ -17,7 +20,7 @@ IFS=$' \t\n'
 export LC_ALL=C.UTF-8 2>/dev/null || export LC_ALL=C
 
 # ---- 설정(환경 변수로 바꿀 수 있다. 시험은 임시 경로로 한다) --------------------------------------
-CONF_FILE="${AX_AUTODEPLOY_CONF:-/etc/ax-autodeploy/env}"   # 선택. root 소유 KEY=값 파일(AX_PAUSE_FILE, AX_MAX_FILES 만 읽는다)
+CONF_FILE="${AX_AUTODEPLOY_CONF:-/etc/ax-autodeploy/env}"   # 선택. root 소유 KEY=값 파일(AX_PAUSE_FILE, AX_MAX_FILES, AX_BACKEND_STAGE, AX_ALLOW_HOURS, AX_MEMO_REQUIRED_SINCE, AX_BACKEND_*_SEC 만 읽는다)
 GITHUB_REPO="${AX_GITHUB_REPO:-Axcellent-bs/Axcellent-bs}"
 BRANCH="${AX_BRANCH:-dev}"
 PROD_REPO="${AX_PROD_REPO:-/opt/axcellent/Axcellent-bs}"     # 운영 트리: backend/.env 의 값을 읽기만 한다
@@ -47,10 +50,14 @@ BACKEND_STAGE="${AX_BACKEND_STAGE:-off}"
 DEPLOY_LOCK_FILE="${AX_DEPLOY_LOCK_FILE:-/etc/ax-gate/deploy.lock}"        # 게이트 배포 금지 잠금(있으면 잠김)
 WEBHOOK_FILE="${AX_SLACK_WEBHOOK_FILE:-/etc/ax-autodeploy/slack-webhook}"  # root 600. dry-run 에서는 읽지 않는다
 BE_QUIET_SEC="${AX_BACKEND_QUIET_SEC:-600}"        # dev 최신 커밋이 이만큼 조용해야 한다(10분)
-BE_MIN_GAP_SEC="${AX_BACKEND_MIN_GAP_SEC:-1800}"   # 재시작 사이 최소 간격(30분)
+BE_MIN_GAP_SEC="${AX_BACKEND_MIN_GAP_SEC:-3600}"   # 재시작 사이 최소 간격(60분)
+BE_DEFER_MAX_SEC="${AX_BACKEND_DEFER_MAX_SEC:-14400}"  # 미루기 상한(4시간). 넘기면 알림만 한다(강제 재시작 없음)
 BE_TZ="${AX_BACKEND_TZ:-Asia/Seoul}"               # 시각 기준. 서버 시계(CST)로 직접 비교하지 않는다. 시험용으로만 바꾼다
-BE_HOUR_FROM="${AX_BACKEND_HOUR_FROM:-9}"          # KST 시각 [from, to)
-BE_HOUR_TO="${AX_BACKEND_HOUR_TO:-22}"
+ALLOW_HOURS="${AX_ALLOW_HOURS:-0-24}"              # 배포 허용 시각(KST) "시작-끝", [시작, 끝). 기본은 24시간. 요일 제한은 없다
+BUSY_URLS="${AX_BUSY_URLS:-}"                      # 선택. 공백으로 나눈 조회 주소: 대기·진행 건이 있으면(또는 조회 실패) 재시작을 미룬다
+GATE_SUDO="${AX_GATE_SUDO-sudo -n -u axautodeploy}" # 게이트 호출 앞머리(시험은 빈 값)
+GATE_EXEC="${AX_GATE_EXEC:-/usr/local/sbin/ax-gate}"
+GATE_TIMEOUT="${AX_GATE_TIMEOUT:-420}"             # 게이트 동작 하나의 제한 시간(초)
 BE_MAX_COMMITS="${AX_BACKEND_MAX_COMMITS:-50}"     # 범위 안 커밋이 더 많으면 판정 불가로 보류
 MEMO_LABEL="${AX_MEMO_LABEL:-manual-deploy}"
 MEMO_REQUIRED_SINCE="${AX_MEMO_REQUIRED_SINCE:-}"  # 비어 있으면 '섹션 없음'을 메모 없음으로 본다(템플릿 도입 전). 값은 YYYY-MM-DD(UTC 머지일 이후는 섹션 필수)
@@ -65,6 +72,8 @@ BE_VERDICT_FILE="${STATE_DIR}/backend-verdict"           # "<sha> <판정키>" �
 BE_NOTIFIED_FILE="${STATE_DIR}/backend-notified"         # "<sha> <종류>" 공지 문안을 이미 만든 기록(SHA마다 한 번)
 BE_LAST_RESTART_FILE="${STATE_DIR}/backend-last-restart" # 마지막 백엔드 재시작 epoch(실제 배포 단계가 쓴다. dry-run 은 읽기만)
 BE_INPROGRESS_FILE="${STATE_DIR}/backend-in-progress"    # 있으면 이전 배포가 중간에 죽은 것: 아무것도 안 하고 사람을 부른다
+BE_SKIPPED_FILE="${STATE_DIR}/backend-skipped-ref"       # 백엔드 배포가 1회 실패한 커밋: 새 커밋이 올 때까지 다시 시도하지 않는다
+BE_DEFER_FILE="${STATE_DIR}/backend-defer-since"         # "<운영 HEAD> <처음 미룬 epoch>": 미루기 상한 계산
 
 DRY=0
 case "${1:-}" in
@@ -98,6 +107,11 @@ load_conf() {
       AX_PAUSE_FILE) [[ -n "${AX_PAUSE_FILE:-}" ]] || PAUSE_FILE="${v}" ;;
       AX_MAX_FILES) [[ "${v}" =~ ^[0-9]{1,6}$ ]] && MAX_FILES="${v}" ;;
       AX_BACKEND_STAGE) [[ -n "${AX_BACKEND_STAGE:-}" ]] || BACKEND_STAGE="${v}" ;;
+      AX_ALLOW_HOURS) [[ "${v}" =~ ^[0-9]{1,2}-[0-9]{1,2}$ && -z "${AX_ALLOW_HOURS:-}" ]] && ALLOW_HOURS="${v}" ;;
+      AX_MEMO_REQUIRED_SINCE) [[ "${v}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ && -z "${AX_MEMO_REQUIRED_SINCE:-}" ]] && MEMO_REQUIRED_SINCE="${v}" ;;
+      AX_BACKEND_MIN_GAP_SEC) [[ "${v}" =~ ^[0-9]{1,7}$ && -z "${AX_BACKEND_MIN_GAP_SEC:-}" ]] && BE_MIN_GAP_SEC="${v}" ;;
+      AX_BACKEND_QUIET_SEC) [[ "${v}" =~ ^[0-9]{1,7}$ && -z "${AX_BACKEND_QUIET_SEC:-}" ]] && BE_QUIET_SEC="${v}" ;;
+      AX_BACKEND_DEFER_MAX_SEC) [[ "${v}" =~ ^[0-9]{1,7}$ && -z "${AX_BACKEND_DEFER_MAX_SEC:-}" ]] && BE_DEFER_MAX_SEC="${v}" ;;
     esac
   done < "${CONF_FILE}"
   return 0
@@ -105,13 +119,11 @@ load_conf() {
 load_conf
 
 case "${BACKEND_STAGE}" in
-  off|dry-run) ;;
-  on)
-    log "error: AX_BACKEND_STAGE=on 은 미구현: 게이트 의존(rollback-code·uv-sync 동작이 게이트에 생길 때까지 막아 둠). off 또는 dry-run 만 쓸 수 있다"
-    exit 1 ;;
+  off|dry-run|on) ;;
   *)
-    log "error: AX_BACKEND_STAGE=${BACKEND_STAGE//[^A-Za-z0-9._-]/?} 는 알 수 없는 값(off|dry-run)"
-    exit 1 ;;
+    # 잘못된 값이 프론트·홍보 단계를 막으면 안 된다: 백엔드 단계만 끄고 계속한다
+    log "error: AX_BACKEND_STAGE=${BACKEND_STAGE//[^A-Za-z0-9._-]/?} 는 알 수 없는 값(off|dry-run|on): 백엔드 단계는 off 로 보고 프론트·홍보 단계만 돈다"
+    BACKEND_STAGE=off ;;
 esac
 
 # ---- 중복 실행 방지 -------------------------------------------------------------------------------
@@ -161,50 +173,196 @@ fi
 TARGET="$(git_src rev-parse --verify "origin/${BRANCH}^{commit}")"
 git_src cat-file -e "${LAST}^{commit}" 2>/dev/null || { log "error: 기준 ref ${LAST:0:8} 가 저장소에 없다(수동 확인 필요)"; exit 1; }
 
-# ---- 백엔드 단계(dry-run: 판정·문안만. 배포·재시작·슬랙 전송은 하지 않는다) --------------------------
-# 설계 3~9절. 기준은 last-deployed-ref 가 아니라 운영 트리의 실제 HEAD. 확인할 수 없으면(API 오류·판정 불가) 이번 주기를 건너뛴다.
-# 항상 0 으로 끝난다(프론트·홍보 단계를 막지 않는다).
+# ---- 백엔드 단계(dry-run: 판정·문안만 / on: 같은 판정을 통과하면 게이트로 실제 배포) ----------------
+# 설계 3~9절. 기준은 last-deployed-ref 가 아니라 운영 트리의 실제 HEAD. 확인할 수 없으면(API 오류·판정 불가·공지 실패) 이번 주기를 건너뛴다.
+# on 이 아니면 항상 0 으로 끝난다(프론트·홍보 단계를 막지 않는다). on 의 배포 결과는 반환 코드로 알린다: 10 배포 완료, 11 실패 후 되돌림 완료, 12 되돌림도 실패.
 BE_TOK=""
+BE_NOW=""
+MODE="off"        # off | dry-run(--dry-run 플래그 포함) | on
+BE_TAG="backend"
+advance_ref() { # 기준 ref 갱신(배포가 필요 없었거나, 배포가 검증까지 끝났을 때만)
+  [[ ${DRY} == 1 ]] && return 0
+  printf '%s\n' "$1" > "${LAST_REF_FILE}.tmp" && mv -f "${LAST_REF_FILE}.tmp" "${LAST_REF_FILE}"
+  rm -f "${FAIL_FILE}" "${SKIP_FILE}"
+}
 be_gh_get() { # $1=저장소 기준 API 경로. 성공하면 본문을 출력
   curl -fsS --max-time 30 -H "Authorization: Bearer ${BE_TOK}" -H 'Accept: application/vnd.github+json' \
     "https://api.github.com/repos/${GITHUB_REPO}/$1" 2>/dev/null
 }
 
-# 판정 기록. $1=종류(would-deploy|hold-memo|wait) $2=판정 키 $3=사유 $4=공지 문안(선택, 종류가 would-deploy·hold-memo 일 때)
-# 로그는 판정이 바뀔 때만 남기고, 공지 문안은 SHA·종류마다 한 번만 만든다. 문안은 로그에만 적는다(전송 안 함).
-be_note() {
-  local kind="$1" key="$2" reason="$3" draft="${4:-}" prev="" line
-  [[ -r "${BE_VERDICT_FILE}" ]] && prev="$(cat "${BE_VERDICT_FILE}" 2>/dev/null || true)"
-  if [[ ${DRY} == 1 || "${prev}" != "${TARGET} ${key}" ]]; then
-    log "backend-dry-run: ${key} ${PROD_HEAD:0:8}..${TARGET:0:8} ${reason}"
-  fi
-  [[ ${DRY} == 1 ]] || printf '%s %s\n' "${TARGET}" "${key}" > "${BE_VERDICT_FILE}" 2>/dev/null || true
-  [[ -n "${draft}" ]] || return 0
-  if [[ ${DRY} == 0 ]] && grep -qxF "${TARGET} ${kind}" "${BE_NOTIFIED_FILE}" 2>/dev/null; then return 0; fi
-  while IFS= read -r line; do log "backend-notice-draft(${kind}, 전송 안 함): ${line}"; done <<< "${draft}"
-  [[ ${DRY} == 1 ]] || printf '%s %s\n' "${TARGET}" "${kind}" >> "${BE_NOTIFIED_FILE}" 2>/dev/null || true
-  return 0
-}
-
-# 슬랙 전송 자리 표시. dry-run 에서는 호출하지 않는다(on 단계가 구현될 때 쓴다). 웹훅 주소는 파일에서만 읽고 출력하지 않는다.
-be_announce() { # $1=문안. 0=올림, 1=못 올림(그러면 배포하지 않는다)
-  [[ ${BACKEND_STAGE} == on && -r "${WEBHOOK_FILE}" ]] || return 1
+# 슬랙 전송. 웹훅 주소는 파일에서만 읽고 출력하지 않는다. 0=올림, 1=못 올림(on 에서만 보낸다. dry-run·--dry-run 은 읽지도 않는다)
+be_announce() { # $1=문안
+  [[ ${MODE} == on && -r "${WEBHOOK_FILE}" ]] || return 1
   local url; url="$(tr -d ' \r\n' < "${WEBHOOK_FILE}")"
   [[ -n "${url}" ]] || return 1
   printf '%s' "$1" | "${PYTHON}" -I -c 'import json,sys;print(json.dumps({"text":sys.stdin.read()}))' \
     | curl -fsS --max-time 20 -H 'Content-Type: application/json' --data-binary @- "${url}" >/dev/null 2>&1
 }
+# 배포 흐름 중간 공지(끝·실패·되돌림). 못 올려도 흐름은 계속한다(되돌림은 멈추면 안 된다).
+be_alert() {
+  be_announce "$1" || log "${BE_TAG}: notice-failed 슬랙 공지를 못 올림(웹훅 파일·네트워크 확인)"
+}
+# 같은 SHA·종류의 공지는 한 번만. 0=이미 올렸거나 지금 올림, 1=못 올림
+be_announce_once() { # $1=종류 $2=문안
+  grep -qxF "${TARGET} $1" "${BE_NOTIFIED_FILE}" 2>/dev/null && return 0
+  be_announce "$2" || return 1
+  printf '%s %s\n' "${TARGET}" "$1" >> "${BE_NOTIFIED_FILE}" 2>/dev/null || true
+  return 0
+}
+
+# 판정 기록. $1=종류(would-deploy|hold-memo|defer-cap|wait) $2=판정 키 $3=사유 $4=공지 문안(선택)
+# 로그는 판정이 바뀔 때만 남기고, 공지는 SHA·종류마다 한 번만 한다(dry-run 은 문안을 로그에만 적고 전송하지 않는다).
+be_note() {
+  local kind="$1" key="$2" reason="$3" draft="${4:-}" prev="" line
+  [[ -r "${BE_VERDICT_FILE}" ]] && prev="$(cat "${BE_VERDICT_FILE}" 2>/dev/null || true)"
+  if [[ ${DRY} == 1 || "${prev}" != "${TARGET} ${key}" ]]; then
+    log "${BE_TAG}: ${key} ${PROD_HEAD:0:8}..${TARGET:0:8} ${reason}"
+  fi
+  [[ ${DRY} == 1 ]] || printf '%s %s\n' "${TARGET}" "${key}" > "${BE_VERDICT_FILE}" 2>/dev/null || true
+  [[ -n "${draft}" ]] || return 0
+  if [[ ${DRY} == 0 ]] && grep -qxF "${TARGET} ${kind}" "${BE_NOTIFIED_FILE}" 2>/dev/null; then return 0; fi
+  if [[ ${MODE} == on ]]; then
+    if be_announce "${draft}"; then
+      log "${BE_TAG}: notice-sent(${kind}) 슬랙 공지를 올림"
+      printf '%s %s\n' "${TARGET}" "${kind}" >> "${BE_NOTIFIED_FILE}" 2>/dev/null || true
+    else
+      log "${BE_TAG}: notice-failed(${kind}) 슬랙 공지를 못 올림(다음 주기에 다시)"
+    fi
+    return 0
+  fi
+  while IFS= read -r line; do log "backend-notice-draft(${kind}, 전송 안 함): ${line}"; done <<< "${draft}"
+  [[ ${DRY} == 1 ]] || printf '%s %s\n' "${TARGET}" "${kind}" >> "${BE_NOTIFIED_FILE}" 2>/dev/null || true
+  return 0
+}
+
+# 미루는 사유(조용한 구간·최소 간격·대기 건). 처음 미룬 때부터 상한(기본 4시간)을 넘기면 알림만 한다(강제 재시작 없음).
+be_defer() { # $1=판정 키 $2=사유
+  local p="" e="" since="${BE_NOW}"
+  if [[ ${MODE} == on ]]; then
+    if read -r p e < "${BE_DEFER_FILE}" 2>/dev/null && [[ "${p}" == "${PROD_HEAD}" && "${e}" =~ ^[0-9]+$ ]]; then since="${e}"
+    else printf '%s %s\n' "${PROD_HEAD}" "${BE_NOW}" > "${BE_DEFER_FILE}" 2>/dev/null || true; fi
+    if (( BE_NOW - since >= BE_DEFER_MAX_SEC )); then
+      be_note defer-cap "$1" "$2 (미룬 지 $(( (BE_NOW - since) / 60 ))분, 상한 $(( BE_DEFER_MAX_SEC / 60 ))분 넘김: 강제로 재시작하지 않는다)" \
+"[tencent] 자동 배포가 $(( BE_DEFER_MAX_SEC / 3600 ))시간 넘게 미뤄지고 있습니다(${2}). 대상 ${TARGET:0:8}. 강제로 재시작하지 않으니 사람이 정해 주세요."
+      return 0
+    fi
+  fi
+  be_note wait "$1" "$2"
+}
+
+# 대기·진행 건 조회(AX_BUSY_URLS 가 있을 때만). 0=한가함, 1=대기·진행 건이 있거나 조회 실패(미룬다)
+be_busy() {
+  local u body res
+  for u in ${BUSY_URLS}; do
+    if ! body="$(curl -fsS --max-time 10 "${u}" 2>/dev/null)"; then BUSY_WHY="조회 실패(${u%%\?*})"; return 1; fi
+    res="$(printf '%s' "${body}" | "${PYTHON}" -I -c '
+import json,sys
+d=json.load(sys.stdin)
+if isinstance(d,dict):
+    for k in ("items","reviews","incidents","pending"):
+        if isinstance(d.get(k),list): d=d[k]; break
+    else: d=d.get("count",d.get("busy",0))
+print(len(d) if isinstance(d,list) else int(d))' 2>/dev/null || echo bad)"
+    if [[ ! "${res}" =~ ^[0-9]+$ ]]; then BUSY_WHY="조회 응답 해석 실패(${u%%\?*})"; return 1; fi
+    if (( res > 0 )); then BUSY_WHY="대기·진행 ${res}건(${u%%\?*})"; return 1; fi
+  done
+  return 0
+}
+
+# 게이트 호출: sudo -n -u axautodeploy env SSH_ORIGINAL_COMMAND="<동작> <SHA> --announced" /usr/local/sbin/ax-gate axautodeploy
+GATE_RC=0
+gate() { # $@ = 동작 문자열 조각. 끝 코드는 GATE_RC 에도 남긴다. 출력은 빌드 로그로(비밀값 없음)
+  local cmd="$*"
+  log "${BE_TAG}: gate ${cmd}"
+  GATE_RC=0
+  # shellcheck disable=SC2086
+  timeout "${GATE_TIMEOUT}" ${GATE_SUDO} env SSH_ORIGINAL_COMMAND="${cmd}" "${GATE_EXEC}" axautodeploy >> "${BUILD_LOG}" 2>&1 || GATE_RC=$?
+  return "${GATE_RC}"
+}
+
+# 실제 배포(on). 공지 -> deploy-bundle -> [uv-sync] -> restart-backend, 실패하면 되돌림(설계 5절).
+# 반환: 0=이번 주기 건너뜀(상태 변화 없음), 10=배포 완료, 11=실패 후 되돌림 완료, 12=되돌림도 실패(자동 배포 멈춤)
+be_deploy() { # $1=포함 PR 목록 $2=backend 파일 수 $3=uv sync 필요(0|1)
+  local prs="$1" nfiles="$2" uv_need="$3" stage="" t0="${SECONDS}" cur rb_ok=1 uv_txt="" restarted=0
+  if (( uv_need )); then uv_txt=" (uv.lock·pyproject.toml 변경: uv sync 포함)"; fi
+  if ! be_announce_once announce \
+"[tencent] 자동 배포: 백엔드 ${PROD_HEAD:0:8} → ${TARGET:0:8} 를 곧 배포하고 재시작합니다.
+포함 PR: ${prs} (backend ${nfiles}개 파일) / CI: ci·backend 통과${uv_txt}
+재시작하면 메모리에만 있는 상태(승인 대기·진행 중 작업)가 지워집니다.
+되돌리는 방법: 실패하면 자동으로 ${PROD_HEAD:0:8} 로 되돌립니다. 멈추려면 autodeploy-pause."; then
+    be_note wait announce-failed "배포 전 슬랙 공지를 못 올려 배포하지 않음(공지 없이 --announced 를 쓰지 않는다. 다음 주기에 다시)"
+    return 0
+  fi
+  printf '%s\n' "deploy ${PROD_HEAD} ${TARGET}" > "${BE_INPROGRESS_FILE}"
+  if ! gate deploy-bundle "${TARGET}" --announced; then
+    if (( GATE_RC == 4 )); then   # 게이트가 바쁨·배포 금지 잠금: 아무것도 바뀌지 않았다
+      rm -f "${BE_INPROGRESS_FILE}"
+      log "${BE_TAG}: gate-busy deploy-bundle 이 잠금·사용 중으로 거부됨(이번 주기 건너뜀)"; return 0
+    fi
+    stage="deploy-bundle"
+  elif (( uv_need )) && ! gate uv-sync "${TARGET}" --announced; then
+    stage="uv-sync"
+  elif gate restart-backend "${TARGET}" --ack-data-loss --announced; then
+    stage=""; restarted=1
+  else
+    stage="restart-backend"; restarted=1
+  fi
+
+  if [[ -z "${stage}" ]]; then
+    printf '%s\n' "${BE_NOW}" > "${BE_LAST_RESTART_FILE}"
+    rm -f "${BE_INPROGRESS_FILE}" "${BE_DEFER_FILE}"
+    log "${BE_TAG}: deployed ${PROD_HEAD:0:8}->${TARGET:0:8} ($(( SECONDS - t0 ))초)"
+    be_alert "[tencent] 자동 배포 끝: 백엔드 ${TARGET:0:8}, 게이트 health 통과 (약 $(( SECONDS - t0 ))초)."
+    return 10
+  fi
+
+  # ---- 되돌림: rollback-bundle -> rollback-code -> (uv-sync 직전) -> (재시작 단계 실패였으면 restart-backend 직전) ----
+  log "${BE_TAG}: FAIL ${stage}(rc=${GATE_RC}) ${TARGET:0:8} -> ${PROD_HEAD:0:8} 로 되돌림 시작"
+  printf '%s\n' "rollback ${PROD_HEAD} ${TARGET} ${stage}" > "${BE_INPROGRESS_FILE}"
+  printf '%s\n' "${TARGET}" > "${BE_SKIPPED_FILE}"   # 백엔드는 1회 실패로 건너뛴다(새 커밋이 올 때까지)
+  gate rollback-bundle "${TARGET}" --announced || rb_ok=0
+  gate rollback-code "${TARGET}" --announced || true
+  cur="$(git -C "${PROD_REPO}" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || true)"
+  if [[ "${cur}" != "${PROD_HEAD}" ]]; then rb_ok=0; fi   # 코드가 직전으로 돌아오지 않았으면 실패(deploy-bundle 이 코드를 안 옮겼다면 이미 같다)
+  if (( rb_ok && uv_need )) && [[ "${stage}" != deploy-bundle ]]; then gate uv-sync "${PROD_HEAD}" --announced || rb_ok=0; fi
+  if (( rb_ok )) && [[ "${stage}" == restart-backend ]]; then gate restart-backend "${PROD_HEAD}" --ack-data-loss --announced || rb_ok=0; fi
+  if (( restarted && rb_ok )); then printf '%s\n' "${BE_NOW}" > "${BE_LAST_RESTART_FILE}"; fi
+  if (( rb_ok )); then
+    rm -f "${BE_INPROGRESS_FILE}" "${BE_DEFER_FILE}"
+    log "${BE_TAG}: rolled-back ${stage} 실패 -> ${PROD_HEAD:0:8} 복구(${TARGET:0:8} 는 새 커밋이 올 때까지 다시 시도하지 않음)"
+    be_alert "[tencent] 자동 배포 실패 → ${PROD_HEAD:0:8} 로 되돌렸습니다.
+실패 지점: ${stage}. ${TARGET:0:8} 는 새 커밋이 올 때까지 다시 시도하지 않습니다."
+    return 11
+  fi
+  log "${BE_TAG}: ROLLBACK-FAILED ${stage} -> 자동 배포 멈춤(${BE_INPROGRESS_FILE} 를 사람이 확인하고 지울 때까지 아무것도 안 함)"
+  printf '%s\n' "halted ${PROD_HEAD} ${TARGET} ${stage}" > "${BE_INPROGRESS_FILE}"
+  be_alert "[tencent] 자동 배포 실패, 되돌림도 실패했습니다. 자동 배포를 멈췄습니다. 서버 확인이 필요합니다. (대상 ${TARGET:0:8}, 실패 지점 ${stage})"
+  return 12
+}
 
 backend_stage() {
-  [[ "${BACKEND_STAGE}" == "dry-run" ]] || return 0
-  local PROD_HEAD n f now hour gap age last c uv_note=""
-  # 1) 중간에 죽은 배포 흔적·배포 금지 잠금(정지 표시는 위에서 이미 확인했다)
+  case "${BACKEND_STAGE}" in
+    dry-run) MODE=dry-run; BE_TAG=backend-dry-run ;;
+    on) if [[ ${DRY} == 1 ]]; then MODE=dry-run; BE_TAG=backend-dry-run; else MODE=on; BE_TAG=backend; fi ;;
+    *) return 0 ;;
+  esac
+  local PROD_HEAD n f hour gap age last c uv_need=0 uv_note="" BUSY_WHY="" h_from h_to hold_tag=""
+  BE_NOW="${AX_BACKEND_NOW:-$(date +%s)}"
+  # 1) 중간에 죽은 배포 흔적·배포 금지 잠금·정지 표시(헬퍼가 멈춤으로 판정한 경우는 위에서 이미 건너뛰었다)
   PROD_HEAD="$(git -C "${PROD_REPO}" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || true)"
   if [[ ! "${PROD_HEAD}" =~ ^[0-9a-f]{40}$ ]]; then
-    log "backend-dry-run: skip-cycle 운영 트리 ${PROD_REPO} 의 HEAD 를 못 읽음(이번 주기 건너뜀)"; return 0
+    log "${BE_TAG}: skip-cycle 운영 트리 ${PROD_REPO} 의 HEAD 를 못 읽음(이번 주기 건너뜀)"; return 0
   fi
   if [[ -e "${BE_INPROGRESS_FILE}" ]]; then
-    be_note wait in-progress-file "backend-in-progress 가 남아 있음(이전 배포가 중간에 죽음): 아무것도 하지 않고 사람 확인이 필요하다"; return 0
+    be_note wait in-progress-file "backend-in-progress 가 남아 있음(이전 배포가 중간에 죽었거나 되돌림 실패): 아무것도 하지 않고 사람 확인이 필요하다"; return 0
+  fi
+  if [[ ${MODE} == on ]]; then
+    if [[ -z "${PAUSE_FILE}" ]]; then
+      be_note wait pause-not-connected "AX_PAUSE_FILE 미설정: 정지 표시를 볼 수 없어 on 에서는 배포하지 않는다"; return 0
+    fi
+    if [[ -e "${PAUSE_FILE}" && ! -x "${GATE_BIN}" ]]; then
+      be_note wait paused-no-helper "정지 표시 파일이 있고 판정 헬퍼(${GATE_BIN})가 없어 멈춘 것으로 본다"; return 0
+    fi
   fi
   if [[ -e "${DEPLOY_LOCK_FILE}" ]]; then
     be_note wait deploy-lock "배포 금지 잠금(${DEPLOY_LOCK_FILE}) 걸려 있음"; return 0
@@ -223,10 +381,13 @@ backend_stage() {
     return 0
   fi
   for f in "${BE_FILES[@]}"; do
-    case "${f}" in backend/uv.lock|backend/pyproject.toml|backend/*/pyproject.toml|backend/*/*/pyproject.toml) uv_note=" [uv sync 필요: 게이트 미구현]" ;; esac
+    case "${f}" in backend/uv.lock|backend/*pyproject.toml) uv_need=1; uv_note=" [uv sync 단계 포함]" ;; esac
   done
+  if [[ -f "${BE_SKIPPED_FILE}" && "$(tr -d ' \r\n' < "${BE_SKIPPED_FILE}")" == "${TARGET}" ]]; then
+    be_note wait skipped-ref "이전 자동 배포가 이 커밋에서 실패해 건너뜀(새 커밋을 기다림)"; return 0
+  fi
 
-  # 3) 조건 1: check-runs 중 ci·backend 만 completed+success
+  # 3) 조건 1: check-runs 중 ci·backend 는 completed+success. data-eval 은 진행 중·실패면 보류, 취소·없음이면 대기
   if [[ ! -r "${CI_TOKEN_FILE}" ]]; then
     be_note wait ci-off "읽기 전용 토큰 파일 없음: 백엔드는 확인 없이 배포하지 않는다"; return 0
   fi
@@ -234,27 +395,38 @@ backend_stage() {
   if [[ -z "${BE_TOK}" ]]; then be_note wait ci-off "토큰 파일이 비어 있음"; return 0; fi
   local body verdict
   if ! body="$(be_gh_get "commits/${TARGET}/check-runs?per_page=100")"; then
-    BE_TOK=""; log "backend-dry-run: skip-cycle check-runs API 실패(${TARGET:0:8}; 이번 주기 건너뜀)"; return 0
+    BE_TOK=""; log "${BE_TAG}: skip-cycle check-runs API 실패(${TARGET:0:8}; 이번 주기 건너뜀)"; return 0
   fi
   verdict="$(printf '%s' "${body}" | "${PYTHON}" -I -c '
 import json,sys
-need=("ci","backend")
 runs=json.load(sys.stdin).get("check_runs",[])
-fail=[];pend=[]
-for nm in need:
+fail=[];hold=[];pend=[]
+def latest(nm):
     rs=[r for r in runs if r.get("name")==nm]
-    if not rs: pend.append(nm+"(없음)"); continue
-    r=max(rs,key=lambda x:x.get("id",0))
-    if r.get("status")!="completed": pend.append(nm+"(진행 중)")
+    return max(rs,key=lambda x:x.get("id",0)) if rs else None
+for nm in ("ci","backend"):
+    r=latest(nm)
+    if r is None: pend.append(nm+"(없음)")
+    elif r.get("status")!="completed": pend.append(nm+"(진행 중)")
     elif r.get("conclusion")=="success": pass
     elif r.get("conclusion") in ("failure","timed_out","action_required"): fail.append(nm)
     else: pend.append(nm+"("+str(r.get("conclusion"))+")")
-print("fail:"+",".join(fail) if fail else ("pending:"+",".join(pend) if pend else "ok"))' 2>/dev/null || echo "parse-error")"
+r=latest("data-eval")
+if r is None: pend.append("data-eval(없음)")
+elif r.get("status")!="completed": hold.append("data-eval(진행 중)")
+elif r.get("conclusion") in ("success","skipped","neutral"): pass
+elif r.get("conclusion") in ("failure","timed_out","action_required"): fail.append("data-eval")
+else: pend.append("data-eval("+str(r.get("conclusion"))+")")
+if fail: print("fail:"+",".join(fail))
+elif hold: print("hold:"+",".join(hold))
+elif pend: print("pending:"+",".join(pend))
+else: print("ok")' 2>/dev/null || echo "parse-error")"
   case "${verdict}" in
     ok) ;;
     fail:*) BE_TOK=""; be_note wait ci-fail "CI 실패 ${verdict#fail:} (${TARGET:0:8})"; return 0 ;;
+    hold:*) BE_TOK=""; be_note wait ci-hold "CI 보류 ${verdict#hold:} (${TARGET:0:8})"; return 0 ;;
     pending:*) BE_TOK=""; be_note wait ci-pending "CI 대기 ${verdict#pending:} (${TARGET:0:8})"; return 0 ;;
-    *) BE_TOK=""; log "backend-dry-run: skip-cycle check-runs 해석 실패(이번 주기 건너뜀)"; return 0 ;;
+    *) BE_TOK=""; log "${BE_TAG}: skip-cycle check-runs 해석 실패(이번 주기 건너뜀)"; return 0 ;;
   esac
 
   # 4) 조건 4: 범위 안 커밋마다 PR 을 찾아 라벨·'## 배포 메모' 를 본다(PR 을 못 찾거나 API 실패면 보류)
@@ -267,7 +439,7 @@ print("fail:"+",".join(fail) if fail else ("pending:"+",".join(pend) if pend els
   for c in "${COMMITS[@]}"; do
     if ! be_gh_get "commits/${c}/pulls?per_page=30" > "${pr_dir}/${c}.json"; then
       BE_TOK=""; rm -rf "${pr_dir}"
-      log "backend-dry-run: skip-cycle PR 조회 API 실패(${c:0:8}; 보류, 이번 주기 건너뜀)"; return 0
+      log "${BE_TAG}: skip-cycle PR 조회 API 실패(${c:0:8}; 보류, 이번 주기 건너뜀)"; return 0
     fi
   done
   BE_TOK=""
@@ -307,43 +479,70 @@ for fn in sorted(os.listdir(d)):
 print("memo|"+"; ".join(memo) if memo else ("nopr|"+",".join(nopr) if nopr else "ok|"+" ".join(prs)))
 ' "${MEMO_LABEL}" "${MEMO_REQUIRED_SINCE}" "${pr_dir}" 2>/dev/null || echo error)"
   rm -rf "${pr_dir}"
+  [[ ${MODE} == dry-run ]] && hold_tag="(dry-run)"
   case "${pr_res}" in
     memo\|*)
       be_note hold-memo memo "배포 메모 판정: ${pr_res#memo|}" \
-"[tencent] 자동 배포 보류(dry-run): ${pr_res#memo|}. 손으로 배포해 주세요. 대상 ${TARGET:0:8}.${uv_note}"
+"[tencent] 자동 배포 보류${hold_tag}: ${pr_res#memo|}. 손으로 배포해 주세요. 대상 ${TARGET:0:8}.${uv_note}"
       return 0 ;;
     nopr\|*) be_note wait no-pr "PR 을 못 찾은 커밋 ${pr_res#nopr|}: 판정 불가라 보류"; return 0 ;;
     ok\|*) ;;
-    *) log "backend-dry-run: skip-cycle PR 응답 해석 실패(이번 주기 건너뜀)"; return 0 ;;
+    *) log "${BE_TAG}: skip-cycle PR 응답 해석 실패(이번 주기 건너뜀)"; return 0 ;;
   esac
 
-  # 5) 조건 5: KST 9~22시, dev 최신 커밋 10분 조용, 마지막 재시작과 30분 간격
-  now="${AX_BACKEND_NOW:-$(date +%s)}"
-  hour="$(TZ="${BE_TZ}" date -d "@${now}" +%H 2>/dev/null || true)"
-  if [[ ! "${hour}" =~ ^[0-9]{2}$ ]]; then log "backend-dry-run: skip-cycle 시각을 못 구함(이번 주기 건너뜀)"; return 0; fi
-  if (( 10#${hour} < BE_HOUR_FROM || 10#${hour} >= BE_HOUR_TO )); then
-    be_note wait outside-hours "KST ${hour}시는 배포 시간(${BE_HOUR_FROM}~${BE_HOUR_TO}시) 밖"; return 0
+  # 5) 조건 5: 허용 시각(AX_ALLOW_HOURS, 기본 24시간. 요일 제한 없음), dev 최신 커밋 조용한 구간, 최소 간격, 대기 건
+  hour="$(TZ="${BE_TZ}" date -d "@${BE_NOW}" +%H 2>/dev/null || true)"
+  if [[ ! "${hour}" =~ ^[0-9]{2}$ ]]; then log "${BE_TAG}: skip-cycle 시각을 못 구함(이번 주기 건너뜀)"; return 0; fi
+  if [[ ! "${ALLOW_HOURS}" =~ ^([0-9]{1,2})-([0-9]{1,2})$ ]]; then
+    log "${BE_TAG}: skip-cycle AX_ALLOW_HOURS 형식 오류(시작-끝, 예 0-24; 이번 주기 건너뜀)"; return 0
+  fi
+  h_from="${BASH_REMATCH[1]}"; h_to="${BASH_REMATCH[2]}"
+  local in_hours=1
+  if (( 10#${h_from} < 10#${h_to} )); then
+    (( 10#${hour} >= 10#${h_from} && 10#${hour} < 10#${h_to} )) || in_hours=0
+  elif (( 10#${h_from} > 10#${h_to} )); then   # 밤을 넘기는 창(예 22-6)
+    (( 10#${hour} >= 10#${h_from} || 10#${hour} < 10#${h_to} )) || in_hours=0
+  else in_hours=0; fi
+  if (( ! in_hours )); then
+    be_note wait outside-hours "KST ${hour}시는 배포 허용 시각(${ALLOW_HOURS}) 밖"; return 0
   fi
   last="$(git_src log -1 --format=%ct "${TARGET}" 2>/dev/null || true)"
-  if [[ ! "${last}" =~ ^[0-9]+$ ]]; then log "backend-dry-run: skip-cycle 최신 커밋 시각을 못 읽음(이번 주기 건너뜀)"; return 0; fi
-  age=$(( now - last ))
+  if [[ ! "${last}" =~ ^[0-9]+$ ]]; then log "${BE_TAG}: skip-cycle 최신 커밋 시각을 못 읽음(이번 주기 건너뜀)"; return 0; fi
+  age=$(( BE_NOW - last ))
   if (( age < BE_QUIET_SEC )); then
-    be_note wait not-quiet "dev 최신 커밋이 ${age}초 전(조용해지려면 ${BE_QUIET_SEC}초 필요)"; return 0
+    be_defer not-quiet "dev 최신 커밋이 ${age}초 전(조용해지려면 ${BE_QUIET_SEC}초 필요)"; return 0
   fi
   if [[ -r "${BE_LAST_RESTART_FILE}" ]]; then
     gap="$(tr -d ' \r\n' < "${BE_LAST_RESTART_FILE}")"
-    if [[ "${gap}" =~ ^[0-9]+$ ]] && (( now - gap < BE_MIN_GAP_SEC )); then
-      be_note wait min-gap "마지막 재시작이 $(( now - gap ))초 전(최소 ${BE_MIN_GAP_SEC}초)"; return 0
+    if [[ "${gap}" =~ ^[0-9]+$ ]] && (( BE_NOW - gap < BE_MIN_GAP_SEC )); then
+      be_defer min-gap "마지막 재시작이 $(( BE_NOW - gap ))초 전(최소 ${BE_MIN_GAP_SEC}초)"; return 0
     fi
   fi
+  if [[ -n "${BUSY_URLS}" ]] && ! be_busy; then
+    be_defer busy "승인 대기·긴 작업 중: ${BUSY_WHY}"; return 0
+  fi
 
+  if [[ ${MODE} == on ]]; then
+    local rc=0
+    be_deploy "${pr_res#ok|}" "${n}" "${uv_need}" || rc=$?
+    return "${rc}"
+  fi
   be_note would-deploy would-deploy "지금이면 배포했을 것(backend ${n}개 파일, PR ${pr_res#ok|}, CI ci·backend 통과)${uv_note}" \
 "[tencent] 자동 배포(dry-run, 실제 배포 안 함): 백엔드 ${PROD_HEAD:0:8} → ${TARGET:0:8} 를 지금이면 배포하고 재시작했을 것입니다.
 포함 PR: ${pr_res#ok|} (backend ${n}개 파일) / CI: ci·backend 통과${uv_note}
 재시작하면 메모리에만 있는 상태(승인 대기·진행 중 작업)가 지워집니다."
   return 0
 }
-backend_stage || log "backend-dry-run: skip-cycle 내부 오류(rc=$?; 이번 주기 건너뜀)"
+be_rc=0
+backend_stage || be_rc=$?
+case "${be_rc}" in
+  0) ;;
+  10) # 배포 완료: deploy-bundle 이 프론트도 다시 빌드했으므로 이번 주기의 프론트 단계는 건너뛰고 기준만 갱신한다
+    advance_ref "${TARGET}"; heartbeat "backend-deployed ${TARGET:0:8}"; log "done: 백엔드 배포 완료, 기준 ref -> ${TARGET:0:8}"; exit 0 ;;
+  11) heartbeat "backend-rolled-back ${TARGET:0:8}"; exit 0 ;;   # 되돌림 완료. 프론트는 다음 주기부터 평소대로
+  12) heartbeat "backend-rollback-failed ${TARGET:0:8}"; exit 1 ;;
+  *) log "${BE_TAG}: skip-cycle 내부 오류(rc=${be_rc}; 이번 주기 건너뜀)" ;;
+esac
 
 if [[ "${TARGET}" == "${LAST}" ]]; then
   heartbeat "up-to-date ${TARGET:0:8}"
@@ -393,12 +592,6 @@ if (( BACKEND_N > 0 )); then
   log "backend-changed: manual deploy needed (backend/ 변경 ${BACKEND_N}개 ${LAST:0:8}..${TARGET:0:8}; 자동 배포는 프론트만 한다)"
 fi
 
-advance_ref() { # 기준 ref 갱신(배포가 필요 없었거나, 배포가 검증까지 끝났을 때만)
-  [[ ${DRY} == 1 ]] && return 0
-  printf '%s\n' "$1" > "${LAST_REF_FILE}.tmp" && mv -f "${LAST_REF_FILE}.tmp" "${LAST_REF_FILE}"
-  rm -f "${FAIL_FILE}" "${SKIP_FILE}"
-}
-
 DO_FE=0; DO_PROMO=0
 if (( ${#FE_FILES[@]} > 0 )); then DO_FE=1; fi
 if (( ${#PROMO_FILES[@]} > 0 )); then DO_PROMO=1; fi
@@ -422,7 +615,7 @@ ci_check() {
   body="$(curl -fsS --max-time 30 -H "Authorization: Bearer ${tok}" -H 'Accept: application/vnd.github+json' \
            "https://api.github.com/repos/${GITHUB_REPO}/commits/${TARGET}/check-runs?per_page=100" 2>/dev/null)" \
     || { CI_STATE="ci-check=api-error(${TARGET:0:8})"; return 2; }
-  verdict="$(printf '%s' "${body}" | python3 -I -c '
+  verdict="$(printf '%s' "${body}" | "${PYTHON}" -I -c '
 import json,sys
 d=json.load(sys.stdin); runs=d.get("check_runs",[])
 if not runs: print("none"); sys.exit()
