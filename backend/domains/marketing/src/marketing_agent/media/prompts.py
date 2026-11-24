@@ -1,7 +1,9 @@
 """프롬프트 만들기와 코드 검사. 자유 프롬프트는 받지 않는다.
 
 프롬프트 = `scene_templates.toml`의 고정 문장 + 화이트리스트 필드 치환
-(+ 영상 템플릿은 기획안의 구조화 필드를 정리해 끼우는 `plan_*` 선택 필드).
+(+ 영상 템플릿은 기획안의 구조화 필드를 정리해 끼우는 `plan_*` 선택 필드)
+(+ 회사 브랜드 자리 `{brand_character}`·`{brand_setting}`: 요청 회사 tenant.toml `[brand]`의
+character_en·setting_en. 공용 `tenant.brand()`가 금칙·길이 검사를 하고, 없으면 중립 기본값).
 필드 값에 개인정보·고객 원문 말투·글자 요청·실존 인물·브랜드가 있으면 거절한다.
 검사는 정규식과 금칙어 목록이고 LLM 판단에 맡기지 않는다.
 거절 결과에는 이유 코드와 필드 이름만 담고 입력 값은 되돌려주지 않는다(개인정보 재노출 방지).
@@ -17,12 +19,15 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from ax_agent_template import tenant
 from marketing_agent.media.base import MediaKind
 
 TEMPLATES_PATH = Path(__file__).with_name("scene_templates.toml")
 _FREE_WORD = re.compile(r"[A-Za-z0-9가-힣 ]+")
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 PLAN_SLOT = "plan_clause"  # 기획 데이터 자리. 템플릿 fields에는 없고 선택이다
+# 회사 브랜드 자리. 템플릿 fields에는 없고 요청 회사 설정에서 채운다(호출자가 넘기지 않는다)
+BRAND_SLOTS = {"brand_character": "character_en", "brand_setting": "setting_en"}
 _PLAN_STRIP = re.compile(r"[^A-Za-z0-9가-힣 ]+")
 # 영상 모델 프롬프트 길이 상한 (가장 짧은 공급자: runway gen4.5 promptText 1000자).
 # 넘으면 plan_scene_4 → 3 → 2 → 1 순서로 뺀다(render_prompt_detailed, 순서는 테스트로 고정)
@@ -87,7 +92,7 @@ def _load(path: Path) -> _Config:
     for template_id, item in raw.get("template", {}).items():
         sentence = item["sentence"]
         found = set(_PLACEHOLDER.findall(sentence))
-        used = found - {PLAN_SLOT}
+        used = found - {PLAN_SLOT} - set(BRAND_SLOTS)
         if used != set(item["fields"]) or not used <= set(fields):
             raise ValueError(f"템플릿 {template_id}의 자리표시자와 fields가 다르다")
         templates[template_id] = SceneTemplate(
@@ -270,6 +275,9 @@ def render_prompt_detailed(
         if name not in fields:
             raise PromptRejected("field_missing", name)
     values = {name: _check_value(config, name, fields[name]) for name in template.fields}
+    if any(f"{{{slot}}}" in template.sentence for slot in BRAND_SLOTS):
+        brand = tenant.brand()
+        values.update({slot: brand[key] for slot, key in BRAND_SLOTS.items()})
     dropped: list[str] = []
     while True:
         kept = {k: v for k, v in plan_in.items() if k not in dropped}
