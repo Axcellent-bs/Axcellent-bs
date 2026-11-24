@@ -214,7 +214,11 @@ const igHtml = igGroups.map((it) => `<div class="ig-group reveal"><header><h3>${
 const groupEmpty = (g) => `<article class="vpost vpost-empty reveal"><div class="vpost-media"><span>영상 준비 중</span></div><h3>${esc(g.title)} 칸</h3><p>영상이 올라오면 이 자리에 나옵니다.</p></article>`;
 const vgroupHtml = (PS.videoGroups || []).map((g) => `<div class="vgroup reveal"><header class="vgroup-h"><h3>${esc(g.title)}</h3>${(g.badges || []).length ? `<p class="badges">${g.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p>` : ""}</header><div class="vposts">${g.items && g.items.length ? g.items.map(postCard).join("") : groupEmpty(g)}</div></div>`).join("");
 
-const showPosts = PS.items.length > 0 || igGroups.length > 0 || PS.showEmpty === true;
+// 고객사 홍보 영상 칸: 칸 이름 → 고객사 이름(배지) → 영상(가로로 나란히). 영상이 있는 고객사만 보인다
+const cvGroups = ((PS.customerVideos && PS.customerVideos.groups) || []).filter((g) => g.items && g.items.length);
+const cvHtml = !cvGroups.length ? "" : `<div class="cvideos reveal"><header class="vgroup-h"><h3>${esc(PS.customerVideos.title)}</h3></header>${cvGroups.map((g) => `<div class="cv-group"><header class="cv-h"><h4>${esc(g.name)}</h4>${(g.badges || []).length ? `<p class="badges">${g.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p>` : ""}</header><div class="vposts vposts-two">${g.items.map(postCard).join("")}</div></div>`).join("")}</div>`;
+
+const showPosts = PS.items.length > 0 || igGroups.length > 0 || cvGroups.length > 0 || PS.showEmpty === true;
 const posts = !showPosts ? "" : `
 <section class="sec sec-light" id="posts">
   <div class="wrap">
@@ -223,6 +227,7 @@ const posts = !showPosts ? "" : `
     <p class="posts-lead reveal">${esc(PS.lead)}</p>
     ${brochureCard}
     ${PS.items.length || !igGroups.length ? `${has(PS.itemsTitle) && PS.items.length ? `<header class="vgroup-h reveal"><h3>${esc(PS.itemsTitle)}</h3></header>` : ""}${itemsBlock}` : ""}
+    ${cvHtml}
     ${igHtml}
     ${vgroupHtml}
     <p class="callout reveal">${esc(PS.note)}</p>
