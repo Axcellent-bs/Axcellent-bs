@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "@/lib/nav";
 import { shortDateTime } from "@/lib/format";
 import { actorText } from "@/lib/actor";
+import { InlineConfirm } from "@/components/InlineConfirm";
 import { finance, humanTokenSet, krw, plainText, signedKrw, type BankImport, type BankUnexplained, type BankOutflows } from "@/lib/finance";
 import { Chip, Empty, Panel, ResourceBody, Stat, TONE, useResource } from "./bits";
 import { PlanningAskLink } from "./PlanningRequests";
@@ -303,8 +304,11 @@ function BankImportsPanel({ tick, onChanged }: { tick: number; onChanged: () => 
   const [busy, setBusy] = useState(false);
   const inbox = (view.env?.meta as { inbox_enabled?: boolean } | undefined)?.inbox_enabled;
 
+  const [asking, setAsking] = useState<string | null>(null); // 빼기 확인 중인 기록 id. 확인은 화면 안 상자(InlineConfirm)
+
   async function remove(b: BankImport) {
-    if (!b.import_id || !window.confirm(`${b.file ?? "이 기록"}으로 더한 은행 거래 줄을 뺄까요? 기록은 남습니다.`)) return;
+    setAsking(null);
+    if (!b.import_id) return;
     setBusy(true);
     setProblem(null);
     try { await finance.removeBankImport(b.import_id, "화면에서 잘못 올린 은행 내역 빼기"); setOwn((n) => n + 1); onChanged(); }
@@ -323,7 +327,11 @@ function BankImportsPanel({ tick, onChanged }: { tick: number; onChanged: () => 
               <li key={`${b.import_id ?? b.file}-${b.at}-${b.status}`} className="flex flex-wrap items-center gap-2 break-all">
                 <span>{shortDateTime(b.at)} · {bankImportLine(b)}</span>
                 {b.status === "imported" && b.import_id && !b.removed && humanTokenSet && (
-                  <button type="button" className="btn-quiet py-0.5 text-sm" disabled={busy} onClick={() => void remove(b)}>이 내역 빼기</button>
+                  <button type="button" className="btn-quiet py-0.5 text-sm" disabled={busy} onClick={() => setAsking(b.import_id ?? null)}>이 내역 빼기</button>
+                )}
+                {asking !== null && asking === b.import_id && (
+                  <InlineConfirm confirmLabel="빼기" busy={busy} message={`${b.file ?? "이 기록"}으로 더한 은행 거래 줄을 뺄까요? 기록은 남습니다.`}
+                    onConfirm={() => void remove(b)} onCancel={() => setAsking(null)} />
                 )}
               </li>
             ))}

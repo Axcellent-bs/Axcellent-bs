@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Notice, SectionHead, StatusChip } from './parts'
 import { PreparingChip } from '@/components/Preparing'
+import { InlineConfirm } from '@/components/InlineConfirm'
 import {
   KEY_LABEL, budgetKo, canApprove, limitLineKo, parseLimitPercent, historyLineKo, keyHintKo, keyResultKo, parseBudget, percentKo, providerToSave, providerView,
   saveBlockReason, settingsBody, stateView, tokensKo, videoView, whenKo,
@@ -127,8 +128,9 @@ function CompanyModelCard({ a, status, blocked, onDone }: { a: CompanyAiAdmin; s
       return parts.join(' ')
     })
   }
+  const [asking, setAsking] = useState(false) // 키 지우기 확인은 화면 안 상자(InlineConfirm)
   const clear = () => {
-    if (!window.confirm(a.approval.needed ? '회사 AI 키 삭제를 요청할까요? 다른 관리자가 승인하면 지워져요.' : '회사 AI 키를 지울까요? 관리자가 한 명뿐이라 바로 지워져요.')) return
+    setAsking(false)
     void act.run(async () => keyResultKo(await deleteCompanyAiKey('LLM_API_KEY'), a.approval.admins))
   }
 
@@ -157,9 +159,14 @@ function CompanyModelCard({ a, status, blocked, onDone }: { a: CompanyAiAdmin; s
       )}
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-primary px-5" disabled={blocked || act.busy}>{act.busy ? '저장 중…' : '저장'}</button>
-        <button type="button" className="btn-ghost" onClick={clear} disabled={blocked || act.busy || !key.has_key}>키 지우기</button>
+        <button type="button" className="btn-ghost" onClick={() => setAsking(true)} disabled={blocked || act.busy || !key.has_key}>키 지우기</button>
         <span className="flex items-center gap-1.5 text-xs text-ink-500"><PreparingChip /> 저장 전 연결 시험(1토큰 호출)은 서버 준비 중이에요</span>
       </div>
+      {asking && (
+        <InlineConfirm danger={!a.approval.needed} confirmLabel={a.approval.needed ? '삭제 요청' : '지우기'} busy={act.busy}
+          message={a.approval.needed ? '회사 AI 키 삭제를 요청할까요? 다른 관리자가 승인하면 지워져요.' : '회사 AI 키를 지울까요? 관리자가 한 명뿐이라 바로 지워져요. 되돌릴 수 없어요.'}
+          onConfirm={clear} onCancel={() => setAsking(false)} />
+      )}
       <Result msg={act.msg} error={act.error} />
     </form>
   )
@@ -189,8 +196,9 @@ function CoderCard({ a, blocked, onDone }: { a: CompanyAiAdmin; blocked: boolean
       return parts.join(' ')
     })
   }
+  const [asking, setAsking] = useState(false) // 키 지우기 확인은 화면 안 상자(InlineConfirm)
   const clear = () => {
-    if (!window.confirm('코딩 에이전트 키를 지울까요?')) return
+    setAsking(false)
     void act.run(async () => keyResultKo(await deleteCompanyAiKey('DEV_CODER_LLM_API_KEY'), a.approval.admins))
   }
   return (
@@ -215,8 +223,12 @@ function CoderCard({ a, blocked, onDone }: { a: CompanyAiAdmin; blocked: boolean
       )}
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-primary px-5" disabled={blocked || act.busy}>{act.busy ? '저장 중…' : '저장'}</button>
-        {key.has_key && <button type="button" className="btn-ghost" onClick={clear} disabled={blocked || act.busy}>키 지우기</button>}
+        {key.has_key && <button type="button" className="btn-ghost" onClick={() => setAsking(true)} disabled={blocked || act.busy}>키 지우기</button>}
       </div>
+      {asking && (
+        <InlineConfirm danger confirmLabel="지우기" busy={act.busy} message="코딩 에이전트 키를 지울까요? 되돌릴 수 없어요."
+          onConfirm={clear} onCancel={() => setAsking(false)} />
+      )}
       <Result msg={act.msg} error={act.error} />
     </form>
   )
@@ -244,8 +256,9 @@ function VideoCard({ a, blocked, onDone }: { a: CompanyAiAdmin; blocked: boolean
       return parts.join(' ')
     })
   }
+  const [asking, setAsking] = useState(false) // 키 지우기 확인은 화면 안 상자(InlineConfirm)
   const clear = () => {
-    if (!window.confirm('영상 생성 키를 지울까요? 지우면 영상 생성이 꺼져요.')) return
+    setAsking(false)
     void act.run(async () => keyResultKo(await deleteCompanyAiKey('MARKETING_VIDEO_API_KEY'), a.approval.admins))
   }
   return (
@@ -265,8 +278,12 @@ function VideoCard({ a, blocked, onDone }: { a: CompanyAiAdmin; blocked: boolean
       </label>
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-primary px-5" disabled={blocked || act.busy}>{act.busy ? '저장 중…' : '저장'}</button>
-        <button type="button" className="btn-ghost" onClick={clear} disabled={blocked || act.busy || !key.has_key}>키 지우기</button>
+        <button type="button" className="btn-ghost" onClick={() => setAsking(true)} disabled={blocked || act.busy || !key.has_key}>키 지우기</button>
       </div>
+      {asking && (
+        <InlineConfirm danger confirmLabel="지우기" busy={act.busy} message="영상 생성 키를 지울까요? 지우면 영상 생성이 꺼져요. 되돌릴 수 없어요."
+          onConfirm={clear} onCancel={() => setAsking(false)} />
+      )}
       <Result msg={act.msg} error={act.error} />
     </form>
   )

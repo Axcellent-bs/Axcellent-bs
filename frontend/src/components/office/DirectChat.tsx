@@ -16,6 +16,7 @@ import { useSession, type Account } from "@/demo/session";
 import { humanizePlanIds } from "@/lib/format"
 import { ACCEPT, makeCharacterSheet, shrinkImage } from "@/lib/characterSheet"
 import { NEW_THREAD_CONFIRM, NEW_THREAD_NOTE, commandHint, isClearCommand, newThreadNeedsConfirm } from "@/lib/roomCleanup"
+import { InlineConfirm } from "@/components/InlineConfirm"
 
 // AI 대화방의 직접 대화. 사람이 부서 AI 하나를 골라 바로 말을 건다.
 // 사람 말을 바로 받는 창구: 개발 AI(dashboard-api /api/dashboard/dev-chat), 인사 AI(/api/hr/chat), 기획 AI(dashboard-api /api/dashboard/planning-chat), 마케팅 AI(dashboard-api /api/dashboard/marketing-chat), 재무 AI(dashboard-api /api/dashboard/finance-chat), 총괄 AI(dashboard-api /api/dashboard/orchestrator-chat), 인프라 AI(dashboard-api /api/dashboard/infra-chat). 나머지 AI는 창구가 생길 때까지 "준비 중"으로 둔다.
@@ -143,6 +144,8 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
   const [freshStart, setFreshStart] = useState(false);
   // 11/24 [새 대화] 확인 상자 (버튼 아래, confirm() 쓰지 않음)
   const [askNew, setAskNew] = useState(false);
+  // 11/24 [대화 끝내기] 확인도 화면 안 상자(InlineConfirm)
+  const [askFinish, setAskFinish] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   // 마케팅 1:1만: 올릴 캐릭터 이미지(보내면 먼저 이미지 시트를 만들고 그 기록 번호를 말과 함께 보낸다)
   const [picked, setPicked] = useState<{ media_type: string; data_base64: string; preview: string; thumb_base64: string } | null>(null);
@@ -275,8 +278,8 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
     setAskNew(true);
   };
   const finish = async () => {
+    setAskFinish(false);
     if (!thread || !api.close || sending || closing) return;
-    if (!window.confirm("이 대화를 끝낼까요? 끝내면 요약이 남고, 이어서 말할 수 없어요.")) return;
     setClosing(true);
     setError(null);
     try {
@@ -444,7 +447,11 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
             <button className="btn-primary" disabled={(!text.trim() && !picked) || !!sending || prep || !!locked || (isAnswering(thread) && !isClearCommand(text))}>보내기</button>
             {commandHint(text, true) && <p role="status" className="w-full rounded-lg bg-brand-50 px-2 py-1 text-xs text-brand-800">{commandHint(text, true)}</p>}
             {api.close && thread && (
-              <button type="button" className="btn-ghost" onClick={finish} disabled={!!sending || closing || isAnswering(thread)}>{closing ? "끝내는 중…" : "대화 끝내기"}</button>
+              <button type="button" className="btn-ghost" onClick={() => setAskFinish(true)} disabled={!!sending || closing || isAnswering(thread)}>{closing ? "끝내는 중…" : "대화 끝내기"}</button>
+            )}
+            {askFinish && api.close && thread && (
+              <InlineConfirm message="이 대화를 끝낼까요? 끝내면 요약이 남고, 이어서 말할 수 없어요. 되돌릴 수 없어요." confirmLabel="대화 끝내기" danger
+                busy={!!sending || closing} onConfirm={() => void finish()} onCancel={() => setAskFinish(false)} />
             )}
           </form>
           )

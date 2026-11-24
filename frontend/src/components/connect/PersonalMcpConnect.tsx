@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Notice, SectionHead, StatusChip } from './parts'
+import { InlineConfirm } from '@/components/InlineConfirm'
 import { DEV_API } from '@/lib/planning'
 import { DASHBOARD_API_URL } from '@/lib/env'
 import { errText } from '@/lib/companyAiApi'
@@ -81,8 +82,9 @@ function Form({ mine, onDone }: { mine: PersonalMcp; onDone: () => void }) {
     setError(null)
     try { setMsg(await f()) } catch (e) { setError(errText(e)) } finally { setBusy(false); onDone() }
   }
+  const [asking, setAsking] = useState<'reissue' | 'disconnect' | null>(null) // 확인은 화면 안 상자(InlineConfirm)
   const issue = (again: boolean) => {
-    if (again && !window.confirm('다시 발급할까요? 지금 토큰은 바로 쓸 수 없게 돼요. 내 AI 도구 설정의 토큰도 바꿔 넣어야 해요.')) return
+    setAsking(null)
     void run(async () => {
       const got = again ? await reissueMcpToken() : await issueMcpToken()
       setFresh(got.token)
@@ -90,7 +92,7 @@ function Form({ mine, onDone }: { mine: PersonalMcp; onDone: () => void }) {
     })
   }
   const disconnect = () => {
-    if (!window.confirm('연결을 끊을까요? 내 AI 도구의 MCP 연결이 바로 막혀요.')) return
+    setAsking(null)
     void run(async () => { await disconnectMcp(); setFresh(null); return '연결을 끊었어요.' })
   }
   const save = (e: FormEvent) => {
@@ -112,13 +114,21 @@ function Form({ mine, onDone }: { mine: PersonalMcp; onDone: () => void }) {
           <StatusChip tone={st.tone}>{st.label}</StatusChip>
           {mine.token.issued ? (
             <>
-              <button type="button" className="btn-ghost" onClick={() => issue(true)} disabled={off}>다시 발급</button>
-              <button type="button" className="btn-ghost" onClick={disconnect} disabled={off}>끊기</button>
+              <button type="button" className="btn-ghost" onClick={() => setAsking('reissue')} disabled={off}>다시 발급</button>
+              <button type="button" className="btn-ghost" onClick={() => setAsking('disconnect')} disabled={off}>끊기</button>
             </>
           ) : (
             <button type="button" className="btn-primary px-4" onClick={() => issue(false)} disabled={off}>연결 토큰 발급</button>
           )}
         </div>
+        {asking === 'reissue' && (
+          <InlineConfirm danger confirmLabel="다시 발급" busy={busy} message="다시 발급할까요? 지금 토큰은 바로 쓸 수 없게 돼요. 내 AI 도구 설정의 토큰도 바꿔 넣어야 해요. 되돌릴 수 없어요."
+            onConfirm={() => issue(true)} onCancel={() => setAsking(null)} />
+        )}
+        {asking === 'disconnect' && (
+          <InlineConfirm danger confirmLabel="연결 끊기" busy={busy} message="연결을 끊을까요? 내 AI 도구의 MCP 연결이 바로 막혀요. 되돌릴 수 없어요."
+            onConfirm={disconnect} onCancel={() => setAsking(null)} />
+        )}
         {fresh && (
           <div className="space-y-2">
             <p className="text-sm font-medium text-ink-900">지금 한 번만 보여요. 복사해서 아래 연결 방법의 <code className="mono">axm_…</code> 자리에 넣어 주세요.</p>

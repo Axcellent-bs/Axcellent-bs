@@ -6,6 +6,7 @@ import { Button, useToast } from '@dejafix/common-frontend'
 import { DEPT_NAME, type Action, type State as S } from '@/lib/planningData'
 import { PROPOSAL_SKILL_LABEL, PROPOSAL_STAGES, WRITTEN_BY_LABEL, handoffRetrying, proposalEnded, proposalOpen, proposalStage, judgmentKey, type IdeaOption, type Proposal, type ProposalFact } from '@/lib/proposals'
 import { Tag } from '@/components/planning-common/parts'
+import { InlineConfirm } from '@/components/InlineConfirm'
 import { LinkedLines, go, idText, toPath } from '@/components/planning-common/links'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { Markdown } from '@/components/planning-common/markdown'
@@ -26,10 +27,11 @@ const STATUS_TONE: Record<Proposal['status'], 'amber' | 'neutral' | 'green'> = {
 export function ProposalActions({ s, d, item }: P & { item?: string }) {
   const toast = useToast()
   const [reason, setReason] = useState<string | null>(null)
+  const [askDel, setAskDel] = useState(false) // 11/24 확인은 화면 안 상자(InlineConfirm)
   const p = item ? (s.proposals ?? []).find((x) => x.id === item) : undefined
   if (!p) return null
   const remove = () => {
-    if (!window.confirm(`${idText(p.id)} "${p.title}" 제안을 지울까요?${p.spec ? ` 기획안 ${p.spec}와 요청도 같이 지워져요.` : ''}`)) return
+    setAskDel(false)
     d({ type: 'deleteProposal', proposal: p.id }); toast.show(`${idText(p.id)} 삭제`); go(toPath('proposals'))
   }
   const reqSpec = s.requests.find((r) => r.id === p.request)?.spec
@@ -37,7 +39,17 @@ export function ProposalActions({ s, d, item }: P & { item?: string }) {
   const deletable = !p.handoff?.ok && !s.tasks.some((t) => t.spec === p.spec || (!!reqSpec && t.spec === reqSpec))
   // PDF로 저장: 제안 본문(1 인사이트 · 2 기획 판단 · 3 영상 제작안)만 인쇄 (lib/print.ts printDoc)
   const pdf = <Button onClick={printDoc}>PDF로 저장</Button>
-  if (!proposalOpen(p)) return <>{pdf}{deletable && <Button onClick={remove}>삭제</Button>}</>
+  if (!proposalOpen(p)) {
+    return (
+      <>
+        {pdf}{deletable && <Button onClick={() => setAskDel(true)}>삭제</Button>}
+        {deletable && askDel && (
+          <InlineConfirm danger confirmLabel="지우기" message={`${idText(p.id)} "${p.title}" 제안을 지울까요?${p.spec ? ` 기획안 ${p.spec}와 요청도 같이 지워져요.` : ''} 되돌릴 수 없어요.`}
+            onConfirm={remove} onCancel={() => setAskDel(false)} />
+        )}
+      </>
+    )
+  }
   const nextSpec = `SPEC-${Math.max(0, ...s.specs.map((x) => Number(x.id.split('-')[1]) || 0)) + 1}`
   if (reason !== null) {
     return (
@@ -210,9 +222,15 @@ function AngleChoice({ p, d, open }: { p: Proposal; d: Dispatch<Action>; open: b
   useEffect(() => { if (!pending) return; const t = setTimeout(() => setPending(false), 35000); return () => clearTimeout(t) }, [pending])
   if (p.options.length === 0) return null
   const chosen = p.options.find((o) => o.id === p.angle)
+  // 11/24 고친 글을 덮는 확인은 그 방향 버튼 아래 상자(InlineConfirm)
+  const [askOpt, setAskOpt] = useState<string | null>(null)
   const pick = (o: IdeaOption) => {
     if (o.id === p.angle && (p.contentCategory || !cat.trim())) return
-    if (p.writtenBy === 'human' && !window.confirm('고친 글을 새 방향 글로 바꿀까요?')) return
+    if (p.writtenBy === 'human') { setAskOpt(o.id); return }
+    run(o)
+  }
+  const run = (o: IdeaOption) => {
+    setAskOpt(null)
     setPending(true)
     const extra = !p.contentCategory && cat.trim() ? { category: cat.trim(), ...(fmt ? { format: fmt } : {}) } : {}
     d({ type: 'chooseAngle', proposal: p.id, angle: o.id, ...extra })
@@ -246,6 +264,10 @@ function AngleChoice({ p, d, open }: { p: Proposal; d: Dispatch<Action>; open: b
             <button type="button" className="pp-angle-btn" disabled={!open || !o.available || pending} aria-pressed={o.id === p.angle} onClick={() => pick(o)}>
               {o.label}{o.recommended && <span className="pp-angle-rec">추천</span>}
             </button>
+            {askOpt === o.id && (
+              <InlineConfirm danger confirmLabel="바꾸기" busy={pending} message="고친 글을 새 방향 글로 바꿀까요? 되돌릴 수 없어요."
+                onConfirm={() => run(o)} onCancel={() => setAskOpt(null)} />
+            )}
             <div className="pp-angle-note">
               {!o.available && o.blockedReason && <div className="muted small">고를 수 없음: {o.blockedReason}</div>}
               {o.refs.length > 0 && (

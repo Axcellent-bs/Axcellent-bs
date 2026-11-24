@@ -7,6 +7,7 @@ import { Linked, Ref, go, idText, toPath } from '@/components/planning-common/li
 import { Sec, Tag, rowNav } from '@/components/planning-common/parts'
 import { Pager, usePage } from '@/components/planning-common/pager'
 import { MdEditable } from '@/components/planning-common/markdown'
+import { InlineConfirm } from '@/components/InlineConfirm'
 
 // 문서 탭 첫 화면 = 문서 목록 (최근 것이 위). 줄을 누르면 그 문서를 열어 고친다
 export function Docs({ s, d, item }: { s: State; d: Dispatch<Action>; item?: string }) {
@@ -98,8 +99,10 @@ function Editor({ doc, d, s }: { doc: Doc; d: Dispatch<Action>; s: State }) {
   const todos = doc.blocks.filter((b) => b.kind === 'todo')
   // 글은 칸에서 벗어날 때 저장된다. "저장"은 지금 쓰던 칸을 바로 저장한다
   const saveNow = () => { (document.activeElement as HTMLElement | null)?.blur(); toast.show(`${idText(doc.id)} 저장됨`) }
+  // 11/24 확인은 화면 안 상자(InlineConfirm)
+  const [askDel, setAskDel] = useState(false)
   const remove = () => {
-    if (!window.confirm(`${idText(doc.id)} "${doc.title}" 문서를 지울까요? 되돌릴 수 없어요.`)) return
+    setAskDel(false)
     d({ type: 'deleteDoc', doc: doc.id })
     toast.show(`${idText(doc.id)} 삭제`)
     go(toPath('work/specs'))
@@ -108,8 +111,9 @@ function Editor({ doc, d, s }: { doc: Doc; d: Dispatch<Action>; s: State }) {
     <>
       <div className="doc-actions">
         <Button size="small" variant="primary" onClick={saveNow}>저장</Button>
-        <Button size="small" onClick={remove}>삭제</Button>
+        <Button size="small" onClick={() => setAskDel(true)}>삭제</Button>
       </div>
+      {askDel && <InlineConfirm danger confirmLabel="지우기" message={`${idText(doc.id)} "${doc.title}" 문서를 지울까요? 되돌릴 수 없어요.`} onConfirm={remove} onCancel={() => setAskDel(false)} />}
       <input
         key={`title-${doc.title}`}
         className="doc-title-input"
