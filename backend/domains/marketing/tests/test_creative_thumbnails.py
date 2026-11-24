@@ -282,7 +282,9 @@ def test_three_candidates_after_human_approval_with_ai_mark(env: dict[str, Any])
     action, params, key = env["gate"].calls[0]
     assert action == "generate_creative_thumbnails" and params["count"] == 3
     assert params["aspect_ratio"] == "9:16"  # Higgsfield 영상은 세로
-    assert params["billing"] == "company_subscription" and params["credits_estimate"] == 6.0
+    # 11/24: 썸네일도 무제한 (기록·요약 "무제한")
+    assert params["billing"] == "unlim" and params["credits_estimate"] == 6.0
+    assert "Higgsfield 무제한" in params["summary"]
     assert params["ai_generated"] is True and params["source_part"] == "video"
     # 같은 키로 다시 물어 승인되면 만든다
     env["gate"].status[ct.ACTION] = "executed"
@@ -382,7 +384,14 @@ def test_rejected_approval_makes_nothing_and_partial_failure_keeps_the_rest(
     assert state["errors"] == ["mcp_job_failed"]
 
 
-def test_credits_short_blocks_before_the_gate(env: dict[str, Any]) -> None:
+def test_credits_short_blocks_before_the_gate(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 11/24: 썸네일은 기본이 무제한이라 잔액을 보지 않는다.
+    # 크레딧으로 만드는 설정(나중에 회사 설정)이면 지금처럼 모자랄 때 관문 전에 멈춘다
+    from marketing_agent import creative_mcp
+
+    monkeypatch.setattr(creative_mcp, "IMAGE_USE_UNLIM", False)
     _with_video(env)
     env["hf"].credits = 5.0  # 한 장(2)은 되지만 세 장(6)은 모자란다
     with pytest.raises(ct.ThumbError) as err:

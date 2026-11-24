@@ -210,8 +210,23 @@ def _provider(via: str) -> str:
     return MCP_PROVIDER if via == MCP else PROVIDER
 
 
-def _billing_ko(via: str) -> str:
-    return "Higgsfield 회사 계정 구독 크레딧" if via == MCP else "Higgsfield"
+BILLING_SUBSCRIPTION = "company_subscription"  # 회사 계정 구독 크레딧 (영상)
+BILLING_UNLIM = "unlim"  # 회사 계정 무제한 (11/24, 그림: creative_mcp.image_unlim())
+
+
+def image_billing(via: str) -> str | None:
+    """그림 안전 기록의 billing.
+
+    회사 계정 길이고 무제한이면 unlim, 아니면 구독 크레딧. 키 길은 None."""
+    if via != MCP:
+        return None
+    return BILLING_UNLIM if _mcp.image_unlim() else BILLING_SUBSCRIPTION
+
+
+def _billing_ko(via: str, billing: str | None = None) -> str:
+    if via != MCP:
+        return "Higgsfield"
+    return "Higgsfield 무제한" if billing == BILLING_UNLIM else "Higgsfield 회사 계정 구독 크레딧"
 
 
 def _code(error: Exception) -> str:
@@ -459,6 +474,7 @@ async def _gate_image(
     if res.row is None or res.outcome != "reserved":
         return None, None, "in_progress"
     label = "이미지 시트" if part == "sheet_image" else "스토리보드"
+    billing = image_billing(via)  # 11/24: 무제한이면 unlim("Higgsfield 무제한")
     params = {
         "media_kind": "image",
         "resolution": "1024x1024",
@@ -469,10 +485,10 @@ async def _gate_image(
         "ai_generated": True,
         "usage_unit": expected.unit,
         "usage_amount": expected.amount,
-        "summary": f"{label} 그림 생성 1장 ({_billing_ko(via)}, AI 생성)",
+        "summary": f"{label} 그림 생성 1장 ({_billing_ko(via, billing)}, AI 생성)",
     }
-    if via == MCP:
-        params["billing"] = "company_subscription"
+    if billing:
+        params["billing"] = billing
         if credits is not None:
             params["credits_estimate"] = credits
     decision = await execute(
@@ -789,7 +805,7 @@ async def request_video(
         "summary": f"스토리보드 영상 {seconds}초 만들기: {title} ({_billing_ko(via)}, AI 생성)",
     }
     if via == MCP:
-        params["billing"] = "company_subscription"
+        params["billing"] = BILLING_SUBSCRIPTION  # 영상은 그대로 구독 크레딧(사람 승인 뒤)
         if credits is not None:
             params["credits_estimate"] = credits
     decision = await execute(
