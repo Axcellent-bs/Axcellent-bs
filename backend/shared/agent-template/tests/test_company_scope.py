@@ -128,8 +128,25 @@ def test_prompt_line_reads_name_and_industry_from_company_settings(
     monkeypatch.setenv("AX_COMPANIES_FILE", str(path))
     assert company_scope.prompt_line() == ""  # 요청 밖은 회사를 모른다
     with company_scope.using("nubitour"):
-        assert company_scope.prompt_line() == "이 회사: 누비투어 (업종: 여행)\n"
+        assert company_scope.prompt_line() == (
+            "이 회사: 누비투어 (업종: 여행). "
+            "파는 것은 '여행 상품', 고객이 사는 일은 '예약'(이)라고 부른다\n"
+        )
+        assert company_scope.terms().order == "예약"
     with company_scope.using("studyon"):  # 업종이 없으면 지어내지 않고, 줄바꿈은 지운다
         assert company_scope.prompt_line() == "이 회사: 스터디 온\n"
     with company_scope.using("catbooks"):  # 회사 목록에 없는 회사
         assert company_scope.prompt_line() == ""
+
+
+def test_industry_terms_follow_the_choice_or_words_in_free_text() -> None:
+    from ax_agent_template.industry_terms import DEFAULT, INDUSTRIES, terms_for
+
+    assert terms_for("여행사").order == "예약"
+    assert terms_for("온라인 여행 예약 플랫폼").item == "여행 상품"  # 자유 입력도 낱말로 맞춘다
+    assert terms_for("교육").item == "강의" and terms_for("에듀테크").order == "수강 신청"
+    assert terms_for("서점·출판").item == "책"
+    for unknown in ("", None, "기타", "온라인 쇼핑몰", "우주 항만"):
+        assert terms_for(unknown) == DEFAULT  # 모르면 지어내지 않고 기본 낱말
+    assert INDUSTRIES[-1] == "기타" and len(set(INDUSTRIES)) == len(INDUSTRIES)
+    assert company_scope.terms() == DEFAULT  # 요청 밖

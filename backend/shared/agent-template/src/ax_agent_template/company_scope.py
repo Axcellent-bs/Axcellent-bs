@@ -26,6 +26,8 @@ from contextlib import contextmanager
 from typing import Any
 
 from ax_agent_template.companies import canonical_company_id, get_company, is_company
+from ax_agent_template.industry_terms import DEFAULT as DEFAULT_TERMS
+from ax_agent_template.industry_terms import Terms, terms_for
 from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 
 CATBOOKS = TENANT_ID_CATBOOKS
@@ -119,7 +121,18 @@ def prompt_line() -> str:
     if not name:
         return ""
     industry = _prompt_text(company.industry)
-    return f"이 회사: {name}" + (f" (업종: {industry})" if industry else "") + "\n"
+    line = f"이 회사: {name}" + (f" (업종: {industry})" if industry else "")
+    words = terms_for(company.industry)
+    if words != DEFAULT_TERMS:  # 업종에 맞는 말이 따로 있으면 그 말로 답하게 알려 준다
+        line += f". 파는 것은 '{words.item}', 고객이 사는 일은 '{words.order}'(이)라고 부른다"
+    return line + "\n"
+
+
+def terms() -> Terms:
+    """지금 요청 회사의 업종 낱말(상품·주문을 부르는 말). 회사를 모르면 기본 낱말."""
+    cid = _ACTIVE.get()
+    company = get_company(cid) if cid else None
+    return terms_for(company.industry) if company else DEFAULT_TERMS
 
 
 def _warn_once(key: str, message: str, *args: object) -> None:
