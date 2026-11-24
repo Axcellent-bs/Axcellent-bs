@@ -103,6 +103,7 @@ def _row(values: tuple) -> AdMetricsRow:
 
 class AdMetricsStore:
     """`path`가 없으면 `MARKETING_AD_METRICS_DB`, 그것도 없으면 메모리."""
+    company_id = company_scope.RequestCompany()  # 요청 회사가 먼저(11/24)
 
     def __init__(self, path: str | None = None, company_id: str | None = None) -> None:
         self.path = path if path is not None else (os.getenv(DB_ENV, "").strip() or ":memory:")

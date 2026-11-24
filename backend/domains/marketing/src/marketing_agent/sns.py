@@ -371,6 +371,7 @@ class SnsStore:
 
     id가 내용 주소라 같은 초안을 다시 저장해도 같은 줄이다.
     """
+    company_id = company_scope.RequestCompany()  # 요청 회사가 먼저(11/24)
 
     def __init__(self, path: str | None = None, company_id: str | None = None) -> None:
         self.path = (
