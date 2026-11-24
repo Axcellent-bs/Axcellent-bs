@@ -271,13 +271,13 @@ def test_1_a_cannot_read_or_answer_b_inquiry(
 
 @pytest.mark.skip(
     reason=(
-        "dashboard-api에 보고서 경로가 없다. 화면이 data A2A(/a2a)를 공용 에이전트 토큰으로 바로 "
-        "부르고 사람 세션이 없다. data의 trend_report_get·list도 회사 칸 없이 report_id로만 찾는다 "
-        f"— 보고서를 세션 경로로 옮길 때(데이터 담당, {STAGE4}) 여기 시험을 채운다"
+        "dashboard-api에는 보고서 경로가 없다(화면이 data A2A를 바로 부르고 meta.tenant_id에 세션 "
+        "회사를 싣는다, #1700). 보고서 격리는 data 쪽 시험이 맡는다: "
+        "domains/data/tests/test_trend_report_isolation.py::test_a_cannot_read_b_reports"
     )
 )
 def test_2_a_cannot_read_b_reports() -> None:
-    raise AssertionError("경로가 생기면 채운다")
+    raise AssertionError("data 쪽 시험이 맡는다")
 
 
 # ---- 3. a 토큰으로 B 키 목록·키 값·키 바꾸기 → 404, B 키 이력에 줄 없음 ----
