@@ -205,12 +205,12 @@ CANNOT_COUNT = [
     (  # 예전 판매 서버: status를 모르고 실패 주문을 그대로 준다
         _data(ShopFailedOrdersResult(orders=[_row("PG_UNAVAILABLE")], collected_at=T1)),
         "UNSUPPORTED",
-        "판매 서버가 시간 초과 결제 조회를 지원하지 않음",
+        "사이트 서버가 시간 초과 결제 조회를 지원하지 않음",
     ),
     (  # 시간 초과 줄과 실패 줄이 섞여도 예전 서버로 본다
         _data(ShopFailedOrdersResult(orders=[_row("PG_TIMEOUT"), _row("PG_DECLINED", 2)])),
         "UNSUPPORTED",
-        "판매 서버가 시간 초과 결제 조회를 지원하지 않음",
+        "사이트 서버가 시간 초과 결제 조회를 지원하지 않음",
     ),
     (  # status 값을 거절 (FastAPI 422, 오류 코드 없음)
         httpx.Response(422, json={"detail": [{"loc": ["query", "status"]}]}),

@@ -70,7 +70,7 @@ _RESOLVED_CLAIM = r"정상(으로|화|적으로)|복구(되었|됐|완료|되어
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
 NOTICE_PROMPT = (
-    "You write one short customer notice in Korean for an online bookstore (캣북스). "
+    "You write one short customer notice in Korean for the customers of a company's website. "
     "Use only the facts in the data block. kind=incident_opened means a service is not working "
     "well right now; kind=incident_resolved means it is back to normal; kind=product_created "
     "means a new product was listed. Rules: polite 합니다체, 1-3 sentences, no emojis, no "

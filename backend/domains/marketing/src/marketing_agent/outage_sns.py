@@ -41,7 +41,7 @@ from pydantic import Field, ValidationError, model_validator
 
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
 from ax_contracts.schemas.common import AxModel, UtcDatetime
-from marketing_agent import sns
+from marketing_agent import company_scope, sns
 from marketing_agent.notice import _COMPONENT_LABEL as COMPONENT_LABEL
 from marketing_agent.notice import NoticeStore
 
@@ -160,11 +160,12 @@ class OutageSnsDraftList(AxModel):
 
 
 def build_body(data: DraftOutageSnsPostInput, notice_text: str | None, label: str) -> str:
-    """고정 문장으로 본문을 만든다. 숫자·고유명사는 들어가지 않는다."""
+    """고정 문장으로 본문을 만든다. 숫자·고유명사는 들어가지 않는다(회사 이름은 회사 목록에서)."""
+    name = company_scope.company_name()
     if data.trigger == "compensation":
-        lines = ["캣북스 보상 안내", "", APOLOGY_TEXT.format(label=label)]
+        lines = [f"{name} 보상 안내", "", APOLOGY_TEXT.format(label=label)]
     else:
-        lines = ["캣북스 사과 안내", "", notice_text or APOLOGY_TEXT.format(label=label)]
+        lines = [f"{name} 사과 안내", "", notice_text or APOLOGY_TEXT.format(label=label)]
     lines += ["", CAUSE_TEXT[data.cause_code].format(label=label)]
     lines.append(ACTION_TEXT[data.action_code] if data.recovered else NOT_RECOVERED_TEXT)
     if data.compensation_issued:

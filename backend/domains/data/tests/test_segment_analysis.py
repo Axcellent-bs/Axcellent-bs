@@ -202,7 +202,7 @@ def test_profile_rejects_unknown_attribute_and_target() -> None:
 @pytest.mark.parametrize(
     ("kwargs", "expected"),
     [
-        ({"customers_error": NO_CUSTOMERS_EXPORT}, "판매 서버에 고객 내보내기 없음"),
+        ({"customers_error": NO_CUSTOMERS_EXPORT}, "사이트 서버에 고객 내보내기 없음"),
         ({"with_customers": False}, "저장된 고객 기록이 없음"),
     ],
 )

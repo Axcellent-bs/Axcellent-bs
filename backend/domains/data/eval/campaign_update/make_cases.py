@@ -41,7 +41,7 @@ LOW_LABEL = "효과 확인 안 됨(표본 적음)"
 DIRECTION = {"more": "늘었음", "less": "줄었음", "no_effect": "같음"}
 CELLS = [
     ("attribution", "귀속 (쿠폰·링크로 온 주문)"),
-    ("products", "상품 (캠페인 대상 책)"),
+    ("products", "상품 (캠페인 대상 상품)"),
     ("coupons", "쿠폰"),
     ("store", "전체 매장"),
 ]

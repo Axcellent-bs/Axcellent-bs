@@ -509,7 +509,8 @@ def is_product_promotion(draft: SnsPostDraft) -> bool:
 
 
 def _coupon_body(facts: SnsCouponFacts) -> str:
-    lines = [f"캣북스 공개 쿠폰 안내: {facts.unit_value:,}원 쿠폰", "", "제약 사항"]
+    name = company_scope.company_name()
+    lines = [f"{name} 공개 쿠폰 안내: {facts.unit_value:,}원 쿠폰", "", "제약 사항"]
     lines += [f"- {CONSTRAINT_LABELS[c.code]}: {c.text}" for c in facts.constraints]
     return "\n".join(lines)
 

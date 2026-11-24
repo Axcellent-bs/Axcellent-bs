@@ -183,7 +183,7 @@ def test_no_videos_or_no_shop_say_why(tmp_path: Path) -> None:
     assert seen == []
     shopless, seen = _run(env, connector=None)
     assert seen == [] and shopless.sales is not None and shopless.sales.verdict is not None
-    assert shopless.sales.verdict.label == "측정 불가: 쇼핑몰 연결이 없음"
+    assert shopless.sales.verdict.label == "측정 불가: 회사 사이트 연결이 없음"
     assert shopless.sales.cells == [] and shopless.videos  # 영상 성과는 그대로
 
 

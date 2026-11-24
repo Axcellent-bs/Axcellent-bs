@@ -793,7 +793,7 @@ async def _products_effect(
 NO_TAGS = "유입 기록 없음"
 NO_SOURCE = "(출처 없음)"
 ATTRIBUTION_NOTE = (
-    "쇼핑몰 화면이 캠페인 링크 꼬리표(src_*)를 주문까지 넘긴 주문만 센다."
+    "회사 사이트 화면이 캠페인 링크 꼬리표(src_*)를 주문까지 넘긴 주문만 센다."
     " 꼬리표 없이 들어온 주문(직접 방문·꼬리표 유실)은 빠진다"
 )
 
@@ -824,7 +824,7 @@ async def _attribution(
     paid = [o for o in tagged if o.status == "paid"]
     if not paid:
         return unknown(f"{NO_TAGS}: 구간에 유입 표시가 있는 결제 완료 주문이 없음"
-                       " (쇼핑몰이 캠페인 링크 꼬리표를 주문에 넘기는지 확인)")  # fmt: skip
+                       " (회사 사이트가 캠페인 링크 꼬리표를 주문에 넘기는지 확인)")  # fmt: skip
     mine = [o for o in paid if o.src_campaign == data.campaign_id]
     rows: dict[str, CampaignSourceRow] = {}
     for o in mine:

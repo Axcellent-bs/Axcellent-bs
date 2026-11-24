@@ -277,7 +277,9 @@ class ShopApiConnector:
         )
         result = await self.failed_orders_raw(query)
         if any(order.reason != TIMEOUT_REASON for order in result.orders):
-            raise ShopUnavailable("UNSUPPORTED", "판매 서버가 시간 초과 결제 조회를 지원하지 않음")
+            raise ShopUnavailable(
+                "UNSUPPORTED", "사이트 서버가 시간 초과 결제 조회를 지원하지 않음"
+            )
         if result.truncated:
             raise ShopUnavailable(
                 "TRUNCATED", f"조회 한도 {FAILED_ORDERS_LIMIT}건에 걸려 잘려서 셀 수 없음"

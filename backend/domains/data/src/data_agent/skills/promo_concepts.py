@@ -453,7 +453,7 @@ def _prompt(config: PromoConfig, example: CatalogProduct | None) -> str:
         else "{}"
     )
     return (
-        "너는 온라인 서점의 광고·홍보 숏츠 기획자다. 데이터 블록의 재료(회사 상품, 인기 숏츠 형식,"
+        "너는 회사의 광고·홍보 숏츠 기획자다. 데이터 블록의 재료(회사 상품, 인기 숏츠 형식,"
         " 지금 인기 트렌드, 시즌·이벤트)만 써서"
         f" 숏츠 광고 {DRAFT} {config.concepts}개를 items에 써라.\n"
         "칸: title(제목), concept(컨셉 한 줄), borrowed_trend(재료 '트렌드N' 이름 그대로."
