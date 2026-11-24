@@ -273,7 +273,7 @@ export function MessengerLog({ items, talk, hold = {}, fresh, label, panes = 1 }
           </div>
           {it.safety && it.safety.length > 0 && <SafetyChip lines={it.safety} />}
           {/* 총괄에게 맡긴 고객 의뢰: 번호가 처음 나온 총괄 말풍선 아래 진행 카드 (useOfficeTalk withRequestCards) */}
-          {it.requestCard && <RequestProgressCard requestId={it.requestCard} />}
+          {it.requestCard && <RequestProgressCard key={it.requestCard} requestId={it.requestCard} />}
         </div>
       </li>,
     );

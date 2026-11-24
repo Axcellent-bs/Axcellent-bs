@@ -122,9 +122,14 @@ export const STEP_STATUS: Record<StepStatus, Tone> = {
   waiting_async: { label: "긴 작업 중", tone: "bg-sky-50 text-sky-800" },
 };
 
-/** 사람이 승인·거절할 수 있는 단계 (사람 확인 단계, 상태를 바꾸는 단계의 승인 대기). 부서 대기·재시작 확인은 아니다 */
+/** 서버 재시작 때 부서를 부르던 단계: 보냈는지 몰라 멈춤 (총괄 work_requests.RESTART_UNCONFIRMED) */
+export const RESTART_UNCONFIRMED = "restart_unconfirmed";
+export const isRestartStuck = (s: Pick<WorkRequestStep, "status" | "reason_code">) =>
+  s.status === "waiting_human" && s.reason_code === RESTART_UNCONFIRMED;
+
+/** 사람이 승인·거절할 수 있는 단계 (사람 확인 단계, 상태를 바꾸는 단계의 승인 대기, 11/24 재시작으로 멈춘 단계). 부서 대기는 아니다 */
 export const canDecide = (s: WorkRequestStep) =>
-  s.status === "waiting_human" && (s.reason_code === "human_check" || s.reason_code === "needs_approval");
+  s.status === "waiting_human" && (s.reason_code === "human_check" || s.reason_code === "needs_approval" || s.reason_code === RESTART_UNCONFIRMED);
 
 /** 다시 돌릴 수 있나: 부서가 일하는 중이거나 기다리는 단계가 있으면 안 된다.
  *  삭제로 멈춘 의뢰(stopped_at, 숨긴 목록에서 되돌린 의뢰 포함)도 안 된다 (서버 409, 의뢰문 수정으로 새로 접수) */
