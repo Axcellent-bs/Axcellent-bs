@@ -403,9 +403,13 @@ def company_categories() -> tuple[str, ...]:
 
 def category_of(p: Proposal, picked: str = "") -> str | None:
     """회사 분류 하나. 제안 글(제목·아이디어·인사이트·이유·주제·상품·설명)에 먼저 나온 분류,
-    없으면 LLM이 고른 값(목록에 있을 때만). 목록이 없거나 못 고르면 None(지어내지 않는다)."""
+    없으면 LLM이 고른 값(목록에 있고 제안에 상품이 있을 때만). 목록이 없거나 못 고르면
+    None(지어내지 않는다).
+
+    11/25 재현 님: 분류는 상품 영상일 때만. 솔루션 광고는 늘 비우고, 상품도 분류 언급도 없는
+    회사·채널 홍보에는 LLM이 목록에서 아무거나 골라도 버린다(마케팅이 그 분류 템플릿에 좁혀진다)."""
     cats = company_categories()
-    if not cats:
+    if not cats or purpose_of(p) == SOLUTION_AD:
         return None
     texts = [p.title, idea_of(p), p.insight, p.why, p.content_category or "", *p.products,
              p.body_md or ""]  # fmt: skip
@@ -414,6 +418,8 @@ def category_of(p: Proposal, picked: str = "") -> str | None:
         found = [(at, -len(c), c) for c in cats if (at := low.find(c.lower())) >= 0]
         if found:
             return min(found)[2]
+    if not p.products:
+        return None
     got = " ".join((picked or "").split())
     return got if got in cats else None
 
@@ -604,8 +610,9 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
   - camera_en: 샷 크기와 카메라 움직임 (영어, 120자 이내. 예: medium shot, slow push-in)
 - offer_ko: 혜택·이점 한 줄 (한국어, 60자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
 - cta_ko: 마지막 행동 문구 (한국어, 40자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
-- category: 데이터 블록 categories(회사 상품 분류) 중 이 영상에 가장 맞는 것 하나를 그대로.
-  목록이 비었거나 맞는 것이 없으면 빈 문자열 (목록에 없는 말을 만들지 않는다)
+- category: 데이터 블록 categories(회사 상품 분류) 중 이 영상이 보여 주는 상품에 맞는 것 하나를
+  그대로. 회사 전체·브랜드·채널 홍보처럼 특정 상품이 아니면 반드시 빈 문자열. 목록이 비었거나
+  맞는 것이 없어도 빈 문자열 (목록에 없는 말을 만들지 않는다)
 
 키프레임 규칙 (첫·끝 화면을 주고 사이 동작을 자세히 써야 영상이 덜 어색하다):
 - 장면 i의 end_frame과 장면 i+1의 start_frame은 같은 순간이다. 같은 인물·위치·소품으로 이어지게 쓴다
