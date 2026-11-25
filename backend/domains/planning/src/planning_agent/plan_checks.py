@@ -8,11 +8,14 @@
 - ending: 마지막 장면이 엔드카드만이 아니고 그 지시 낱말이 겹치나
 - setting·prop·action·look: 장면 visual·start_frame·end_frame(look은 prompt도)에 핵심 낱말이 있나
   (낱말 절반 이상)
+
+제작 가능성(feasibility): 인물 수·장면 안 동작 수·소품 수 상한 (아래 G 칸).
 """
 
 from __future__ import annotations
 
 import math
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -182,6 +185,110 @@ def strip_quotes(text: str, rules: list[dict[str, Any]]) -> str:
         if r.get("kind") == "quote" and r.get("text_ko"):
             text = text.replace(r["text_ko"], " ")
     return text
+
+
+# ---------------------------------------------------------------- 제작 가능성 (G, 11/26)
+# AI 영상(Flash 15초 한 번 생성)이 잘 못 만드는 것: 한 화면 인물 3명 이상, 장면 안 여러 동작,
+# 손으로 다루는 소품 여럿. 영상을 다시 만들면 크레딧이 다시 나가니 영상 전에 기획이 거른다.
+# 기준은 env(PLANNING_PLAN_*), 없으면 기본 상수
+PEOPLE_MAX_ENV, ACTIONS_MAX_ENV, PROPS_MAX_ENV = (
+    "PLANNING_PLAN_PEOPLE_MAX", "PLANNING_PLAN_ACTIONS_MAX", "PLANNING_PLAN_PROPS_MAX",
+)  # fmt: skip
+PEOPLE_MAX, ACTIONS_MAX, PROPS_MAX = 2, 1, 2
+# 장면 글에서 읽는 인물 수 (낱말 → 수). "여럿·무리·군중·친구들"은 3명 이상으로 본다
+PEOPLE_WORDS = (
+    ("둘이서", 2), ("두 명", 2), ("두 사람", 2), ("셋이서", 3), ("세 명", 3), ("세 사람", 3),
+    ("세 마리", 3), ("넷이서", 4), ("네 명", 4), ("네 마리", 4), ("다섯 명", 5), ("여러 명", 3),
+    ("여럿", 3), ("무리", 3), ("군중", 3), ("친구들", 3), ("관객들", 3),
+)  # fmt: skip
+_PEOPLE_NUM = re.compile(r"(\d+)\s*(?:명|마리)")
+ACTION_JOINS = (" then ", ", and ", " and then ", " while ")
+_KO_JOIN = re.compile(r"[가-힣]+하고\s+[가-힣]+")
+
+
+def _limit(env: str, default: int) -> int:
+    raw = os.getenv(env, "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 1 else default
+
+
+def limits() -> tuple[int, int, int]:
+    """(인물, 동작, 소품) 상한."""
+    return (_limit(PEOPLE_MAX_ENV, PEOPLE_MAX), _limit(ACTIONS_MAX_ENV, ACTIONS_MAX),
+            _limit(PROPS_MAX_ENV, PROPS_MAX))  # fmt: skip
+
+
+def people_in_text(text: str) -> int:
+    """장면 글에서 읽은 인물 수 (못 읽으면 0)."""
+    found = [n for w, n in PEOPLE_WORDS if w in (text or "")]
+    found += [int(m.group(1)) for m in _PEOPLE_NUM.finditer(text or "")]
+    return max(found, default=0)
+
+
+def action_count(action_en: str, visual: str) -> tuple[int, str]:
+    """(동작 수 추정, 걸린 글). 이음말이 없으면 (1, "")."""
+    low = f" {action_en or ''} ".lower()
+    joins = sum(low.count(j) for j in ACTION_JOINS)
+    if joins:
+        return 1 + joins, " ".join((action_en or "").split())[:60]
+    m = _KO_JOIN.search(visual or "")
+    if m:
+        return 2, m.group(0)
+    if "동시에" in (visual or ""):
+        return 2, "동시에"
+    return 1, ""
+
+
+def feasibility(scenes: Sequence[Any]) -> list[dict[str, Any]]:
+    """제작 검사 문제 {kind, scene, detail_ko} (엔드카드 장면은 보지 않는다).
+
+    scenes: LLM 장면(_SceneOut)처럼 visual·start_frame·end_frame·action_en·people·props를
+    가진 것."""
+    people_max, actions_max, props_max = limits()
+    out: list[dict[str, Any]] = []
+    for n, s in enumerate(scenes, start=1):
+
+        def get(k: str, default: Any = "", s: Any = s) -> Any:
+            return s.get(k, default) if isinstance(s, dict) else getattr(s, k, default)
+
+        visual = str(get("visual") or "")
+        if is_end_card(visual):
+            continue
+        text = " ".join(str(get(k) or "") for k in ("visual", "start_frame", "end_frame"))
+        said = get("people", 1)
+        said = said if isinstance(said, int) and not isinstance(said, bool) else 1
+        people = max(said, people_in_text(text))
+        if people > people_max:
+            out.append({"kind": "people", "scene": n,
+                        "detail_ko": f"인물 {people}명 (허용 {people_max}명)"})  # fmt: skip
+        count, joined = action_count(str(get("action_en") or ""), visual)
+        if count > actions_max:
+            detail = f'동작 {count}개 "{joined}" (허용 {actions_max}개)'
+            out.append({"kind": "actions", "scene": n, "detail_ko": detail})
+        props = [p for p in (get("props", None) or []) if str(p).strip()]
+        if len(props) > props_max:
+            out.append({"kind": "props", "scene": n,
+                        "detail_ko": f"소품 {len(props)}개 (허용 {props_max}개)"})  # fmt: skip
+    return out
+
+
+def problem_fix(p: dict[str, Any]) -> str:
+    """제작 검사 문제의 "고칠 점" 한 줄."""
+    tail = {
+        "people": "한 화면에 보이는 인물을 줄인다",
+        "actions": "그 장면 동작을 하나로 줄이거나 장면을 나눈다",
+        "props": "손으로 다루는 소품을 줄인다",
+    }.get(p["kind"], "고친다")
+    return f"제작 검사 장면 {p['scene']}: {p['detail_ko']} → {tail}"
+
+
+def rule_problem(r: dict[str, Any]) -> dict[str, Any]:
+    """못 지킨 의뢰 지시 → 검사 기록 문제 한 줄."""
+    detail = f"의뢰 지시({KIND_KO[r['kind']]}) '{r['text_ko'][:80]}' 못 지킴"
+    return {"kind": "request_rule", "scene": None, "detail_ko": detail}
 
 
 _SEGMENT = re.compile(r"\d{1,3}\s*[~∼-]\s*\d{1,3}\s*초")

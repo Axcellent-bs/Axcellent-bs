@@ -870,6 +870,32 @@ class RequestRule(AxModel):
     where: str = Field(default="", max_length=60)  # 지킨 곳 (예: "장면 4 자막", "장면 1~3")
 
 
+class CheckProblem(AxModel):
+    """제작안 검사에 걸린 것 하나 (11/26). scene: 장면 번호(제작안 전체면 None)."""
+
+    kind: Literal["people", "actions", "props", "request_rule", "duration", "refs", "text"]
+    scene: int | None = None
+    detail_ko: str = Field(min_length=1, max_length=160)
+
+
+class CheckAttempt(AxModel):
+    """검사 한 번 (11/26). attempt: 몇 번째 판(1 = 첫 초안, 2 = 다시 쓴 초안). by: 검사한 부서
+    (planning = 기획 자체 검사, marketing = 마케팅 확인)."""
+
+    attempt: int = Field(ge=1, le=9)
+    by: Literal["planning", "marketing"]
+    passed: bool
+    problems: list[CheckProblem] = Field(default_factory=list, max_length=20)
+
+
+class PlanAdjustment(AxModel):
+    """제작 검사 때문에 의뢰 지시를 줄인 것 (11/26, LLM이 이유를 쓴다)."""
+
+    rule_text_ko: str = Field(min_length=1, max_length=120)  # 의뢰 지시
+    changed_to_ko: str = Field(min_length=1, max_length=120)  # 바꾼 내용
+    why_ko: str = Field(min_length=1, max_length=160)  # 이유
+
+
 class VideoPlan(AxModel):
     """기획 → 마케팅 영상 제작안: 콘셉트·대본·장면별 스토리보드·영상 생성 프롬프트.
 
@@ -914,6 +940,10 @@ class VideoPlan(AxModel):
     # 아래는 예전 제작안은 없다. 의뢰문의 연출 지시와 지켰는지 (11/26).
     # 지시가 없는 의뢰·규칙 초안은 []
     request_rules: list[RequestRule] = Field(default_factory=list, max_length=6)
+    # 아래는 예전 제작안은 없다 (11/26). 제작 검사 기록(기획 자체 검사·마케팅 확인, 판마다 한 줄)과
+    # 제작 검사 때문에 의뢰와 달라진 점. 규칙 초안·예전 제작안은 []
+    check_log: list[CheckAttempt] = Field(default_factory=list, max_length=6)
+    adjustments: list[PlanAdjustment] = Field(default_factory=list, max_length=3)
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:
