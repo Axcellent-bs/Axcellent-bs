@@ -15,6 +15,7 @@ import { ApprovalDeadline, TimedOutRetry } from "./ApprovalDeadline";
 import { timedOut } from "@/lib/videoApprovalTime";
 import { framesOf, keyframesDone } from "@/lib/keyframes";
 import { videoSummaryLine } from "@/lib/creativeVideo";
+import { VideoQc } from "@/components/marketing/VideoQc";
 import { canAskVideo, usesOriginalReference } from "@/lib/videoAsk";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
@@ -178,7 +179,8 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   useEffect(() => { void load(); }, [load]);
 
   const render = rec?.render ?? {};
-  const pending = Object.values(render).some((p) => PENDING.has(p?.status ?? ""));
+  // render.qc(11/26 기술 검사)처럼 status가 없는 칸도 있다
+  const pending = Object.values(render).some((p) => PENDING.has((p as { status?: string } | undefined)?.status ?? ""));
   useEffect(() => {
     if (!pending) return;
     const t = window.setInterval(() => void load(), POLL_MS);
@@ -202,11 +204,12 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   const canAsk = keyframed
     ? inputReady && !["awaiting_approval", "running", "done"].includes(video?.status ?? "")
     : canAskVideo(render.board_image?.status, video?.status, rec?.sheet?.kind);
-  const ask = async () => {
+  // 11/26 기술 검사 확인 필요 → [영상 다시 만들기](사람 버튼, 같은 영상 요청 길 + regenerate)
+  const ask = async (regenerate = false) => {
     setAsking(true);
     setError(null);
     try {
-      await requestCreativeVideo(recordId);
+      await requestCreativeVideo(recordId, regenerate ? { regenerate: true } : undefined);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "영상 요청을 보내지 못했어요");
@@ -237,6 +240,9 @@ export function RenderPanel({ recordId }: { recordId: string }) {
         <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" onChanged={() => void load()} onError={setError}
           playPart={playPartFor("video", render, showOriginal)} version={overlayVersion} />
         {overlayControls("video")}
+        {video?.status === "done" && (
+          <VideoQc qc={render.qc} videoStatus={video.status} credits={video.summary?.credits_estimate} busy={asking} regenerate={video.regenerate} onRegenerate={() => void ask(true)} />
+        )}
         {video?.status === "awaiting_approval" && (
           <p className="text-xs text-ink-700"><ApprovalDeadline reviewId={video.review_id} className="mr-1" />사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>
         )}
