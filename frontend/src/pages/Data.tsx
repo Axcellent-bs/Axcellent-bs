@@ -1,12 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
-import { ActivityReport } from "@/components/data/ActivityReport";
-import { IncidentData } from "@/components/data/IncidentData";
-import { LearningKpi } from "@/components/data/LearningKpi";
-import { SalesAnalysis } from "@/components/data/SalesAnalysis";
-import { SegmentAnalysis } from "@/components/data/SegmentAnalysis";
-import { TrendScan } from "@/components/data/TrendScan";
-import { Chip, TONE, useResource } from "@/components/finance/bits";
+import { Chip, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { DATA_SERVER, ORCH_SERVER, dataAi, sortRecent } from "@/lib/data";
 import { orchestrator } from "@/lib/orchestrator";
 import { useCompany } from "@/demo/company";
@@ -22,6 +16,14 @@ import { useCompany } from "@/demo/company";
 // 실서버 연결 방법과 화면이 부르는 주소: frontend/README.md "데이터 분석 화면 확인 방법"
 
 const REFRESH_MS = 30_000;
+
+// 하위 화면은 연 화면 것만 받는다. 한 묶음에 다 넣으면 트렌드 화면도 장애·매출·고객 분석 코드를 같이 받아 늦어진다 (11/25 Lighthouse)
+const ActivityReport = lazy(() => import("@/components/data/ActivityReport").then((m) => ({ default: m.ActivityReport })));
+const IncidentData = lazy(() => import("@/components/data/IncidentData").then((m) => ({ default: m.IncidentData })));
+const LearningKpi = lazy(() => import("@/components/data/LearningKpi").then((m) => ({ default: m.LearningKpi })));
+const SalesAnalysis = lazy(() => import("@/components/data/SalesAnalysis").then((m) => ({ default: m.SalesAnalysis })));
+const SegmentAnalysis = lazy(() => import("@/components/data/SegmentAnalysis").then((m) => ({ default: m.SegmentAnalysis })));
+const TrendScan = lazy(() => import("@/components/data/TrendScan").then((m) => ({ default: m.TrendScan })));
 
 type Mode = "incident" | "ops" | "trend" | "sales" | "segments";
 const MODE_PATH: Record<Mode, string> = { incident: "/data", ops: "/data/ops", trend: "/data/trend", sales: "/data/sales", segments: "/data/segments" };
@@ -109,16 +111,18 @@ export default function DataPage() {
         </p>
       )}
 
-      {mode === "incident" && (
-        <div className="space-y-6 sm:space-y-8">
-          <IncidentData list={list} detail={detail} selected={selected} onSelect={openIncident} />
-          <ActivityReport tick={tick} />
-        </div>
-      )}
-      {mode === "ops" && <LearningKpi tick={tick} incidents={list.env?.data ?? null} />}
-      {mode === "sales" && <SalesAnalysis tick={tick} />}
-      {mode === "segments" && <SegmentAnalysis />}
-      {mode === "trend" && <TrendScan dataUp={dataUp} company={company?.name ?? null} />}
+      <Suspense fallback={<Waiting />}>
+        {mode === "incident" && (
+          <div className="space-y-6 sm:space-y-8">
+            <IncidentData list={list} detail={detail} selected={selected} onSelect={openIncident} />
+            <ActivityReport tick={tick} />
+          </div>
+        )}
+        {mode === "ops" && <LearningKpi tick={tick} incidents={list.env?.data ?? null} />}
+        {mode === "sales" && <SalesAnalysis tick={tick} />}
+        {mode === "segments" && <SegmentAnalysis />}
+        {mode === "trend" && <TrendScan dataUp={dataUp} company={company?.name ?? null} />}
+      </Suspense>
     </div>
   );
 }

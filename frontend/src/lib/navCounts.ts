@@ -1,10 +1,12 @@
 // 사이드바 숫자: 기획 AI 들어온 요청 수, 개발 AI 사람 확인 작업 수, 총괄 사람 승인 대기 수.
 // 화면을 열지 않아도 보이게 30초마다 각 서버 상태(GET /state)를 받아 센다. 서버가 꺼져 있으면 숫자를 지운다.
 import { useEffect, useSyncExternalStore } from 'react'
-import { apiBase, fromBackend, planningApi } from '@/lib/planning'
-import { incomingCount } from '@/components/planning/requests'
-import { taskRow } from '@/components/dev/board'
 import { orchestrator } from '@/lib/orchestrator'
+
+// 기획·개발 서버 읽기(lib/planning), 기획 요청 화면·개발 작업판 코드는 숫자를 셀 때만 불러온다.
+// 정적으로 가져오면 두 화면 코드·CSS가 모든 화면의 첫 묶음에 들어가 첫 화면이 늦어진다 (11/25 Lighthouse)
+const loadIncomingCount = () => import('@/components/planning/requests').then((m) => m.incomingCount)
+const loadTaskRow = () => import('@/components/dev/board').then((m) => m.taskRow)
 
 const POLL_MS = 30_000
 export const PLANNING_REQUESTS_HREF = '/planning/requests'
@@ -35,8 +37,10 @@ function set(href: string, n: number | undefined) {
 
 async function count(part: 'planning' | 'dev'): Promise<number | undefined> {
   try {
+    const { apiBase, fromBackend, planningApi } = await import('@/lib/planning')
     const s = fromBackend(await planningApi(apiBase(part)).state(), [])
-    if (part === 'planning') return incomingCount(s)
+    if (part === 'planning') return (await loadIncomingCount())(s)
+    const taskRow = await loadTaskRow()
     const stuck = s.tasks.map((t) => taskRow(s, t)).filter((r) => r.group === 'stuck')
     setAlerts(
       stuck.filter((r) => !r.t.discarded).map((r) => ({

@@ -9,6 +9,8 @@
   - 저장소(`SalesStore.cache_token`): 시험처럼 저장소를 바꿔 끼워도 섞이지 않게
   - 저장소 생성 id(`SalesStore.store_id`, 11/17): `sales_collect --reset`으로 새로 만든 저장소가
     옛 저장소와 같은 버전 번호를 다시 써도 옛 결과가 섞이지 않게 (미리 계산도 같은 키)
+- 집계 읽기(`DATA_SALES_READ=aggregate`, 3-2 ⑧)가 켜졌으면 키에 마지막으로 끝난 집계 계산 번호도
+  넣는다 (하루 계산이 새로 끝나면 어제 스냅샷으로 낸 결과가 섞이지 않게). 꺼졌으면 키는 그대로
 - 메모리 LRU, 최대 `MAX_ENTRIES`(256)개. 만든 지 `MAX_AGE`(30분)가 지난 항목은 다시 계산한다(수집이
   멈췄는데 예전 답을 계속 주지 않게)
 - 같은 키를 동시에 부르면 한 번만 계산하고 나머지는 그 결과를 받는다 (미리 계산과 화면 요청이
@@ -37,6 +39,7 @@ from pydantic import BaseModel
 
 from ax_contracts.schemas import Evidence
 from ax_contracts.schemas.data import SalesBasis
+from data_agent.aggregate import read_buyers
 from data_agent.sales_quality import KST
 from data_agent.sales_store import SalesStore
 
@@ -204,7 +207,7 @@ def cached[T](  # noqa: PLR0913 - 키 재료를 그대로 받는다
         skill, tenant_id, normalize(inputs), catalog_id, catalog_version,
         now.astimezone(KST).date().isoformat(), store.cache_token, store.store_id,
     )  # fmt: skip
-    key = (family, store.data_version(tenant_id))
+    key = (family, store.data_version(tenant_id), read_buyers.run_key(tenant_id))
     return (cache or CACHE).get_or_compute(key, compute, now, family, stale_ok=stale_ok)
 
 

@@ -1596,6 +1596,31 @@ async def marketing_creative_script_save(
     return ok(await marketing_client.creative_script_save_call(record_id, script, who))
 
 
+class OverlayCaptionBody(BaseModel):
+    no: int = Field(ge=1, le=12)  # 스토리보드 칸 번호
+    caption_ko: str = Field(default="", max_length=60)  # 비우면 그 칸은 자막 없음
+
+
+class CreativeOverlayBody(BaseModel):
+    captions: list[OverlayCaptionBody] = Field(min_length=1, max_length=12)
+
+
+@router.post("/marketing/creative-records/{record_id}/overlay")
+async def marketing_creative_overlay(
+    body: CreativeOverlayBody,
+    request: Request,
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """사람이 고친 자막으로 최신 영상에 자막·엔드카드를 다시 얹는다(`creative_overlay_redo`, read).
+
+    크레딧·안전 관문 없음. 결과는 기록의 `render.overlay`·`render.overlay_video`로 읽는다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    captions = [c.model_dump() for c in body.captions]
+    return ok(await marketing_client.creative_overlay_call(record_id, captions, who))
+
+
 class CreativeThumbnailsBody(BaseModel):
     # 후보가 이미 있으면 true일 때만 다시 만든다([다시 만들기])
     regenerate: bool = False
@@ -1697,7 +1722,7 @@ async def marketing_brand_character_unmark(
 @router.get("/marketing/creative-records/{record_id}/asset/{part}")
 async def marketing_creative_asset(
     record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
-    part: str = Path(pattern=r"^(sheet_image|board_image|video|final_video)$"),
+    part: str = Path(pattern=r"^(sheet_image|board_image|video|final_video|overlay_video)$"),
 ) -> FileResponse:
     """제작 기록의 Higgsfield 결과 파일(시트 그림·스토리보드 그림·영상).
 
@@ -1792,7 +1817,7 @@ class YoutubeDraftBody(BaseModel):
     description: str | None = Field(default=None, max_length=5000)
     tags: list[str] | None = Field(default=None, max_length=15)
     privacy: str | None = Field(default=None, pattern=r"^(private|unlisted|public)$")
-    part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+    part: str | None = Field(default=None, pattern=r"^(video|final_video|overlay_video)$")
     # 어느 캠페인(cmp_…) 영상인지(선택). ""면 연결을 푼다. 올린 뒤에도 바꿀 수 있다
     campaign_id: str | None = Field(default=None, pattern=_YOUTUBE_CAMPAIGN)
 
@@ -1894,7 +1919,7 @@ class InstagramDraftBody(BaseModel):
     regenerate: bool = False
     caption: str | None = Field(default=None, max_length=2200)
     hashtags: list[str] | None = Field(default=None, max_length=5)
-    part: str | None = Field(default=None, pattern=r"^(video|final_video)$")
+    part: str | None = Field(default=None, pattern=r"^(video|final_video|overlay_video)$")
 
 
 class RequestVideoInstagramDraftBody(BaseModel):

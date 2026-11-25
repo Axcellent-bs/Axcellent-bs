@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { Empty, Waiting } from "@/components/finance/bits";
+import { Empty } from "@/components/finance/bits";
 import type { SkillState } from "@/components/data/useSkill";
 import { CautionChip } from "@/components/data/ShortsCard";
 import { Sources, videoUrl, when } from "@/components/data/Sources";
@@ -70,19 +70,51 @@ function ago(iso: string | null): string | null {
 }
 
 /** 썸네일 칸 (https만, 깨지면 회색 칸). 인스타 레이더도 쓴다: `tall`이면 세로 9:16, `children`은 칸 위 표시 */
-export function Thumb({ src, alt, wide, rank, tall = false, children }: {
-  src: string | null; alt: string; wide: boolean; rank: number; tall?: boolean; children?: ReactNode;
+export function Thumb({ src, alt, wide, rank, tall = false, priority = false, children }: {
+  src: string | null; alt: string; wide: boolean; rank: number; tall?: boolean;
+  /** 첫 줄처럼 화면에 바로 보이는 칸: 늦게 받지 않고(lazy 아님) 1위는 먼저 받는다 (LCP 그림, 11/25 Lighthouse) */
+  priority?: boolean; children?: ReactNode;
 }) {
   const [broken, setBroken] = useState(false);
   const ok = !!src && /^https:\/\//.test(src) && !broken;
   const shape = tall ? "aspect-[9/16]" : wide ? "aspect-video" : "h-[284px]";
   return (
     <span className={`relative block w-full overflow-hidden rounded-lg bg-ink-200 ${shape}`}>
-      {ok && <img src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setBroken(true)}
+      {ok && <img src={src} alt={alt} loading={priority ? "eager" : "lazy"} fetchPriority={priority && rank === 1 ? "high" : "auto"}
+        decoding="async" referrerPolicy="no-referrer" onError={() => setBroken(true)}
         className="absolute inset-0 h-full w-full object-cover" />}
       <span className="absolute left-1.5 top-1.5 min-w-[20px] rounded bg-ink-900 px-1 py-0.5 text-center text-[11px] font-bold leading-none text-white">{rank}</span>
       {children}
     </span>
+  );
+}
+
+/** 한 줄 칸 수 (아래 목록 grid 5칸) */
+const FIRST_ROW = 5;
+
+/** 목록 grid 모양 (숏폼은 228px 칸 5개, 롱폼은 5등분). 받는 중 뼈대도 같은 모양을 써서 칸이 밀리지 않게 한다 */
+const gridStyle = (wide: boolean) => wide
+  ? { gridTemplateColumns: "repeat(5, minmax(0, 1fr))", columnGap: 24, rowGap: 18 }
+  : { gridTemplateColumns: "repeat(5, 228px)", justifyContent: "space-between", rowGap: 18 };
+
+/** 영상을 받는 동안: 카테고리 칩 줄 + 영상 칸 두 줄 크기의 회색 틀. 다 받은 뒤 아래 칸이 밀려 내려가지 않게 자리를 잡아 둔다 (CLS) */
+function ExplorerSkeleton({ wide }: { wide: boolean }) {
+  const bar = "animate-pulse rounded bg-ink-100 motion-reduce:animate-none";
+  return (
+    <div role="status" aria-live="polite" className="space-y-3">
+      <span className="sr-only">영상을 받는 중…</span>
+      <div aria-hidden className={`h-[34px] w-2/3 ${bar}`} />
+      <div aria-hidden className="grid" style={gridStyle(wide)}>
+        {Array.from({ length: FIRST_ROW * 2 }, (_, i) => (
+          <div key={i} className="flex flex-col gap-1">
+            <span className={`block w-full rounded-lg ${wide ? "aspect-video" : "h-[284px]"} ${bar}`} />
+            <span className={`mt-1 h-4 w-11/12 ${bar}`} />
+            <span className={`h-3 w-2/3 ${bar}`} />
+            <span className={`h-6 w-1/3 ${bar}`} />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -99,7 +131,7 @@ function VideoCard({ v, rank, wide }: { v: ExplorerVideo; rank: number; wide: bo
       <a href={safeLink(v.video_url) ?? videoUrl(v.video_id)} target="_blank" rel="noreferrer noopener"
         className="flex flex-col gap-1 rounded-lg transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
         aria-label={`${rank}위 ${title || v.video_id} · YouTube에서 보기`}>
-        <Thumb src={v.thumbnail_url} alt={title} wide={wide} rank={rank} />
+        <Thumb src={v.thumbnail_url} alt={title} wide={wide} rank={rank} priority={rank <= FIRST_ROW} />
         {title && <span className="mt-1 line-clamp-2 text-[13px] font-semibold leading-snug text-ink-900">{title}</span>}
         {(meta || v.before_period) && (
           <span className="truncate text-xs text-ink-500">
@@ -188,16 +220,14 @@ export function VideoExplorer() {
         </div>
       )}
 
-      {state.kind === "loading" ? <Waiting what="영상을 받는 중…" />
+      {state.kind === "loading" ? <ExplorerSkeleton wide={wide} />
         : state.kind === "failed" ? <Empty>영상을 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : out?.status === "unknown" ? <Empty>{out.reason ?? NO_REASON}</Empty>
         : !current ? <Empty>서버가 카테고리 칸(cells)을 주지 않았어요.</Empty> : (
           <>
             {current.videos.length > 0 && (
               <ol className="grid" aria-label={`${categoryName(current.category)} ${wide ? "롱폼" : "숏폼"} 영상`}
-                style={wide
-                  ? { gridTemplateColumns: "repeat(5, minmax(0, 1fr))", columnGap: 24, rowGap: 18 }
-                  : { gridTemplateColumns: "repeat(5, 228px)", justifyContent: "space-between", rowGap: 18 }}>
+                style={gridStyle(wide)}>
                 {current.videos.map((v, i) => <VideoCard key={v.video_id} v={v} rank={i + 1} wide={wide} />)}
               </ol>
             )}

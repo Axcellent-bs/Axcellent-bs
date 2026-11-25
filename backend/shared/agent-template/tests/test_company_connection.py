@@ -24,11 +24,17 @@ def conn_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return path
 
 
+_last_mtime: dict[Path, int] = {}
+
+
 def _write(path: Path, data: object) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
-    # 같은 크기로 다시 쓸 때도 바뀐 시각이 달라야 캐시가 풀린다
-    stat = path.stat()
-    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    # 같은 크기로 다시 쓸 때도 바뀐 시각이 달라야 캐시가 풀린다. 파일 시계 해상도(Windows 약 15ms)에
+    # 기대지 않고, 직전에 이 경로에 남긴 시각보다 1초 뒤로 직접 정한다.
+    previous = _last_mtime.get(path)
+    mtime_ns = path.stat().st_mtime_ns if previous is None else previous + 1_000_000_000
+    _last_mtime[path] = mtime_ns
+    os.utime(path, ns=(mtime_ns, mtime_ns))
 
 
 @pytest.mark.parametrize(

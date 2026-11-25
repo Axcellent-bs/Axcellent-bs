@@ -11,7 +11,8 @@
     <script>document.documentElement.dataset.theme='light'</script>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- 11/25 첫 화면 성능: JS를 받는 동안 보이는 자리표시(React가 그리면 통째로 바뀐다). 외부 CSS 없이 인라인만 -->
+    <div id="root"><div role="status" aria-live="polite" style="min-height:100vh;display:flex;align-items:center;justify-content:center;gap:12px;background:#f7f7f8;color:#55565b;font:500 15px/1.5 system-ui,-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',sans-serif"><strong style="color:#1b1c1f;font-size:18px;font-weight:600">AXcellent</strong><span>화면을 불러오는 중…</span></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
