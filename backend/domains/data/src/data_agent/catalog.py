@@ -50,12 +50,34 @@ def fallback_catalog(env: Mapping[str, str] | None = None) -> str:
     return given or default_company_id()
 
 
+def _company_catalog(company: str) -> str:
+    """캣북스가 아닌 회사의 카탈로그 이름: 그 회사 폴더 설정 → `catalogs/<회사>.toml` →
+    회사 ID 앞부분(`nubi-tour` → `nubi`). 설치 환경변수(캣북스 것)는 보지 않는다."""
+    own = tenant_setting(CATALOG_ENV)
+    if own:
+        return own
+    for name in (company, company.split("-")[0]):
+        if (CATALOG_DIR / f"{name}.toml").is_file():
+            return name
+    return company  # 파일이 없으면 아래에서 이유를 적어 알린다(다른 회사 것으로 갈음하지 않음)
+
+
 def current(env: Mapping[str, str] | None = None) -> MetricCatalog:
-    """지금 쓰는 카탈로그. `use_catalog`로 바꿔 끼웠으면 그것, 아니면 `DATA_TENANT_CATALOG`."""
+    """지금 쓰는 카탈로그. `use_catalog`로 바꿔 끼웠으면 그것, 아니면 `DATA_TENANT_CATALOG`.
+
+    캣북스가 아닌 회사의 요청이면 설치 환경변수(`DATA_TENANT_CATALOG`·`AX_TENANT`, 캣북스 것)를 보지
+    않고 그 회사 카탈로그를 쓴다(11/25: 누비투어 데이터 화면에 캣북스 서점 문구)."""
     if _override is not None:
         return _override
-    given = (os.environ if env is None else env).get(CATALOG_ENV)
-    key = (given or tenant_setting(CATALOG_ENV) or fallback_catalog(env)).strip()
+    from ax_agent_template.company_connection import company_of
+    from ax_agent_template.company_scope import CATBOOKS
+
+    company = company_of()
+    if company != CATBOOKS:
+        key = _company_catalog(company).strip()
+    else:
+        given = (os.environ if env is None else env).get(CATALOG_ENV)
+        key = (given or tenant_setting(CATALOG_ENV) or fallback_catalog(env)).strip()
     if key not in _loaded:
         try:
             _loaded[key] = load_catalog(key)

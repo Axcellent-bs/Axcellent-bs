@@ -48,7 +48,16 @@ class CompanyLlm:
 
 
 def company_id() -> str | None:
-    """지금 회사 id(정식). 회사 연결 전이면 None."""
+    """지금 회사 id(정식). 회사 연결 전이면 None.
+
+    캣북스가 아닌 회사의 요청이면 그 요청 회사(`company_scope.active()`)다. 회사 키는
+    dashboard-api가 세션 회사 ID로 저장하므로 읽을 때도 같은 ID여야 한다(11/25: 누비투어 연결의
+    tenant 값이 비어 키 저장소 기본 회사인 캣북스 유튜브·인스타 계정이 누비투어 화면에 보임)."""
+    from ax_agent_template import company_scope
+
+    active = company_scope.active()
+    if active and active != company_scope.CATBOOKS:
+        return canonical_company_id(active)
     return canonical_company_id(tenants.current())
 
 
