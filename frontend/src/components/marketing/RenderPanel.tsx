@@ -226,6 +226,11 @@ export function RenderPanel({ recordId }: { recordId: string }) {
           speed={video?.summary?.speed} onChanged={() => void load()} />
       )}
       <div className="space-y-2 border-t border-ink-100 pt-3">
+        {/* 11/25 모션 참조 영상: 올리면 승인 뒤 영상 모델이 그 동작·카메라 움직임만 따라 만든다 */}
+        <Picture recordId={recordId} part="motion_video" info={render.motion_video} label="모션 참조 영상 (선택)" onChanged={() => void load()} onError={setError} />
+        <p className="text-xs text-ink-500">따라 할 춤·동작 영상(MP4)을 올리면 영상을 만들 때 앞 10초의 동작과 카메라 움직임만 따라요. 배경·사람·글자는 따라 하지 않아요.</p>
+      </div>
+      <div className="space-y-2 border-t border-ink-100 pt-3">
         {summaryLine && <p className="text-xs text-ink-700" aria-label="영상 만들기 요약">{summaryLine}</p>}
         <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" onChanged={() => void load()} onError={setError}
           playPart={playPartFor("video", render, showOriginal)} version={overlayVersion} />

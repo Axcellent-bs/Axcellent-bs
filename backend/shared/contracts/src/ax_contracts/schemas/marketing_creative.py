@@ -88,7 +88,8 @@ class CreativeVideoRequestOutput(AxModel):
 
 CREATIVE_RECORD_ATTACH_SKILL = "creative_record_attach"
 # 사람이 직접 올릴 수 있는 칸: Higgsfield 칸 3개 + 완성 영상(다른 도구로 만든 최종본)
-CREATIVE_ATTACH_PARTS = ("sheet_image", "board_image", "video", "final_video")
+# 11/25 motion_video: 모션 참조 영상(영상 모델이 동작만 따른다, 추가)
+CREATIVE_ATTACH_PARTS = ("sheet_image", "board_image", "video", "final_video", "motion_video")
 
 
 class CreativeRecordAttachInput(AxModel):
@@ -98,7 +99,7 @@ class CreativeRecordAttachInput(AxModel):
     """
 
     record_id: str = Field(pattern=RECORD_ID_PATTERN)
-    part: str = Field(pattern=r"^(sheet_image|board_image|video|final_video)$")
+    part: str = Field(pattern=r"^(sheet_image|board_image|video|final_video|motion_video)$")
     asset: str = Field(pattern=r"^(sheet|board|video|final)\.(jpg|png|mp4)$")
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     size_bytes: int = Field(ge=1)

@@ -1839,7 +1839,7 @@ async def marketing_brand_character_unmark(
 async def marketing_creative_asset(
     record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
     part: str = Path(
-        pattern=r"^(sheet_image|board_image|video|final_video|overlay_video|keyframe_[0-9])$"
+        pattern=r"^(sheet_image|board_image|video|final_video|overlay_video|motion_video|keyframe_[0-9])$"
     ),
 ) -> FileResponse:
     """제작 기록의 Higgsfield 결과 파일(시트 그림·스토리보드 그림·영상·키프레임 그림).
@@ -1856,7 +1856,7 @@ async def marketing_creative_asset(
 async def marketing_creative_upload(
     request: Request,
     record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
-    part: str = Path(pattern=r"^(sheet_image|board_image|video|final_video)$"),
+    part: str = Path(pattern=r"^(sheet_image|board_image|video|final_video|motion_video)$"),
     name: str | None = Query(None, max_length=120),
 ) -> dict:
     """사람이 만든 그림·영상을 제작 기록에 올린다(`creative_record_attach`, A).

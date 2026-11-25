@@ -962,6 +962,7 @@ CREATIVE_FILES = {
     "video": ("video.mp4", "video/mp4"),
     "final_video": ("final.mp4", "video/mp4"),
     "overlay_video": ("overlay.mp4", "video/mp4"),  # 자막·엔드카드를 얹은 영상(읽기 전용)
+    "motion_video": ("motion.mp4", "video/mp4"),  # 11/25 모션 참조 영상(사람이 올림)
 }
 # 사람이 올린 PNG 그림은 PNG 그대로 둔다
 CREATIVE_ALT_FILES = {
@@ -974,6 +975,7 @@ UPLOAD_BASE = {
     "board_image": "board",
     "video": "video",
     "final_video": "final",
+    "motion_video": "motion",
 }
 
 
@@ -1233,7 +1235,7 @@ async def creative_upload(
     if not raw_root:
         raise ApiError(503, "STORAGE_NOT_CONFIGURED", "미디어 폴더가 설정되지 않았다")
     await creative_record_call(record_id)  # 없는 기록이면 404
-    kind = "video" if part in ("video", "final_video") else "image"
+    kind = "video" if part in ("video", "final_video", "motion_video") else "image"
     limit = UPLOAD_MAX_BYTES[kind]
     root = Path(raw_root).resolve()
     folder = (creative_root(root) / record_id).resolve()
