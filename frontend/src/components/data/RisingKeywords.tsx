@@ -5,7 +5,7 @@ import { safeLink } from "@/lib/safeLink";
 import type { KeywordTrendOutput, KeywordWindow, RisingKeyword, RisingLevel } from "@/lib/data";
 import type { TrendNavState } from "@/lib/chatCards";
 import {
-  RISING_BASIS, candidateChips, levelOf, pickFirst, requestFormForKeyword, sourceShort, sparkline, splitRising,
+  RISING_BASIS, candidateChips, fadedChip, levelOf, pickFirst, requestFormForKeyword, sourceShort, sparkline, splitRising,
 } from "@/lib/keywordTrendView";
 import { orbLayout } from "@/lib/wordOrb";
 
@@ -93,14 +93,16 @@ function KeywordCard({ r, rank, win }: { r: RisingKeyword; rank: number | null; 
     sp?.cafe_total != null ? `카페 ${compact(sp.cafe_total)}` : null,
   ].filter(Boolean).join(" · ");
   const ask = () => navigate("/data/trend#request", { state: { trendRequestFill: requestFormForKeyword(r.keyword) } satisfies TrendNavState });
-  const rising = levelOf(r) === "rising";
+  const faded = fadedChip(r);
+  const rising = levelOf(r) === "rising" && !faded;
   return (
     <li className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2.5 gap-y-1 rounded-xl px-3 py-2.5 ring-1 ring-ink-100 sm:grid-cols-[1.5rem_minmax(0,1fr)_8rem]">
       <span className="text-[15px] font-black leading-snug text-brand-700">{rank ?? ""}</span>
       <div className="min-w-0 space-y-0.5">
         <p className="flex flex-wrap items-center gap-1.5">
           <b className="break-keep text-[15px] text-ink-900">{r.keyword}</b>
-          {r.ratio !== null && <span className="text-[13px] font-black text-emerald-700">평소 {times(r.ratio)}</span>}
+          {r.ratio !== null && <span className={`text-[13px] font-black ${faded ? "text-ink-500" : "text-emerald-700"}`}>평소 {times(r.ratio)}</span>}
+          {faded && <span className={`chip text-[11px] ${TONE.warn}`} title="정점이 지나고 지금 값은 평소 범위 안이에요">{faded}</span>}
           {r.products !== null && r.products > 0 && (
             <span className={`chip text-[11px] ${TONE.ok}`} title={r.product_names.join(", ") || undefined}>우리 상품 {r.products}</span>
           )}

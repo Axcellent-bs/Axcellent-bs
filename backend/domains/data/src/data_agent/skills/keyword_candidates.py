@@ -144,9 +144,11 @@ def why_line(news: Sequence[Any], video_count: int | None, together: Sequence[st
     return None
 
 
-def sort_key(r: Any) -> tuple[int, float, int]:
-    """level(rising → warming → normal → unknown) → 배수 큰 순 → 월 검색량 큰 순."""
-    return (LEVEL_ORDER.get(r.level, 3), -(r.ratio or 0.0), -(r.monthly_volume or 0))
+def sort_key(r: Any) -> tuple[int, int, float, int]:
+    """level(rising → warming → normal → unknown) → 끝난 급상승(faded)은 같은 칸 뒤로 → 배수 큰 순
+    → 월 검색량 큰 순."""
+    faded = 1 if getattr(r, "faded", False) else 0
+    return (LEVEL_ORDER.get(r.level, 3), faded, -(r.ratio or 0.0), -(r.monthly_volume or 0))
 
 
 def volume_chunks(keywords: Sequence[str], volumes: Mapping[str, int | None],

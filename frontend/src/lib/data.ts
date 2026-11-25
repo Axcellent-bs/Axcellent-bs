@@ -546,6 +546,11 @@ export interface TrendEvidence {
   /** 평소 범위 띠 (예전 응답에는 없다) */
   band_low?: number | null;
   band_high?: number | null;
+  /** 정점 구간(z가 가장 큰 구간) 시작·끝 (11/26, 예전 응답에는 없다) */
+  peak_start?: string | null;
+  peak_end?: string | null;
+  /** 끝난 급상승: rising인데 정점이 며칠 전에 끝나고 지금 값은 평소 범위 안 */
+  faded?: boolean;
 }
 export interface TrendPoint { day: string; value: number }
 export interface TrendVerdict {
@@ -2321,6 +2326,9 @@ export interface RisingKeyword {
   candidate_sources?: KeywordCandidateSource[];
   /** 왜 오르나 한 줄 (뉴스·YouTube·연관어 근거, 코드가 만든 문장. 외부 글이라 글자로만) */
   why_line?: string | null;
+  /** 끝난 급상승 (11/26, 예전 응답에는 없다). 칩 "지난 급상승 · M/D 정점" */
+  faded?: boolean;
+  peak_end?: string | null;
 }
 export type RisingLevel = "rising" | "warming" | "normal" | "unknown";
 /** 후보를 어디서 골랐나: 새로 나타난 말 · 연관어 검색량 증가 · YouTube 인기 · Google 인기 · 회사 기본 키워드 · 검색량 상위 */

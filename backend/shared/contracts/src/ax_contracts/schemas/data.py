@@ -713,6 +713,12 @@ class TrendEvidence(AxModel):
     # 예전 응답은 없다
     band_low: float | None = Field(default=None, ge=0)
     band_high: float | None = Field(default=None, ge=0)
+    # 11/26 추가: z가 가장 큰 구간(정점)의 시작·끝 날짜와 끝난 급상승 여부. status는 그대로
+    # rising이고 faded면 결론·핵심 숫자·인사이트 근거에 쓰지 않는다 (정점 끝이 마지막 값 날보다
+    # 설정 일수(기본 2일) 넘게 앞이고 마지막 값이 band_high 이하). 예전 응답은 없다
+    peak_start: dt.date | None = None
+    peak_end: dt.date | None = None
+    faded: bool = False
 
 
 class TrendPoint(AxModel):
@@ -4214,6 +4220,9 @@ class RisingKeyword(AxModel):
         Literal["new", "related_up", "youtube", "google", "company", "pool"]
     ] = Field(default_factory=list)
     why_line: str | None = Field(default=None, max_length=160)  # 코드 문장 (뉴스·차트·연관어)
+    # 11/26 추가: 끝난 급상승 (trend_scan evidence.faded와 같은 판정). status·level·ratio는 그대로
+    faded: bool = False
+    peak_end: dt.date | None = None  # 정점 구간 끝 날짜 (판정 못 하면 None)
 
 
 class NewKeyword(AxModel):

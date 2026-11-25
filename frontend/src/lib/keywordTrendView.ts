@@ -22,11 +22,23 @@ const volume = (r: RisingKeyword) => r.monthly_volume ?? -1;
 
 /** 칸 나누기 (서버 순서 유지). 판정이 하나도 없으면 rest를 월 검색 큰 순으로 */
 export function splitRising(rows: RisingKeyword[]): RisingSplit {
-  const rising = rows.filter((r) => levelOf(r) === "rising");
+  const rising = fadedLast(rows.filter((r) => levelOf(r) === "rising"));
   const warming = rows.filter((r) => levelOf(r) === "warming");
   const rest = rows.filter((r) => { const l = levelOf(r); return l === "normal" || l === "unknown"; });
   const noJudgment = rows.length > 0 && rows.every((r) => levelOf(r) === "unknown");
   return { rising, warming, rest: noJudgment ? [...rest].sort((a, b) => volume(b) - volume(a)) : rest, noJudgment };
+}
+
+/** 끝난 급상승 칩 글자: "지난 급상승 · 11/19 정점" (정점 날짜를 모르면 "지난 급상승"). faded가 아니면 null */
+export function fadedChip(x: { faded?: boolean; peak_end?: string | null } | null | undefined): string | null {
+  if (!x?.faded) return null;
+  const m = /^\d{4}-(\d{2})-(\d{2})/.exec(x.peak_end ?? "");
+  return m ? `지난 급상승 · ${Number(m[1])}/${Number(m[2])} 정점` : "지난 급상승";
+}
+
+/** 같은 칸 안에서 끝난 급상승(faded)을 뒤로 (나머지 순서는 그대로). 서버가 이미 그렇게 주지만 예전 저장분용 */
+export function fadedLast<T extends { faded?: boolean }>(rows: T[]): T[] {
+  return [...rows.filter((r) => !r.faded), ...rows.filter((r) => r.faded)];
 }
 
 /** 고른 단어의 줄을 맨 앞으로 (나머지 순서는 그대로) */
@@ -81,7 +93,8 @@ export function judgedLine(out: Pick<KeywordTrendOutput, "judged_on" | "generate
 
 /** 종합 칩 "검색 급상승 1위": level rising 첫 줄. 직전 판정 재사용이면 "(MM-DD 판정)" */
 export function topRising(out: Pick<KeywordTrendOutput, "rising" | "stale_reason" | "judged_on">): { row: RisingKeyword; stale: string | null } | null {
-  const row = out.rising.find((r) => levelOf(r) === "rising");
+  // 끝난 급상승(faded)은 대표로 고르지 않는다 (모두 faded면 없음)
+  const row = out.rising.find((r) => levelOf(r) === "rising" && !r.faded);
   if (!row) return null;
   return { row, stale: out.stale_reason && out.judged_on ? `(${out.judged_on.slice(5)} 판정)` : null };
 }

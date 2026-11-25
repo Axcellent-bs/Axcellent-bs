@@ -575,6 +575,8 @@ def _row_item(c: kc.Candidate, row: PoolRow | None, judged: Mapping[str, Any] | 
     item.baseline = judged["baseline"]
     item.points = [v for _, v in points][-28:]
     item.level = kc.level(item.status, item.ratio, config.warming_ratio)  # type: ignore[assignment]
+    if item.status == "rising" and points:
+        item.peak_end, item.faded = faded_of(c.keyword, points, end)
     if item.status == "unknown":
         item.increase_reason = "판정 못 해 증가 추정 없음"
     elif item.monthly_volume is None:
@@ -586,6 +588,20 @@ def _row_item(c: kc.Candidate, row: PoolRow | None, judged: Mapping[str, Any] | 
         if inc is None:
             item.increase_reason = "비교할 지난 4주 값이 없음"
     return item
+
+
+def faded_of(keyword: str, points: Sequence[tuple[date, float]],
+             end: date) -> tuple[date | None, bool]:  # fmt: skip
+    """저장된 판정 값(points)으로 정점 끝 날짜·끝난 급상승 여부를 다시 계산한다 (같은 판정 함수·
+    같은 끝 날짜, 네이버를 다시 부르지 않음. 예전에 저장한 판정에도 붙는다)."""
+    from data_agent.connectors.naver_datalab import TrendSeries
+    from data_agent.skills.trend_scan import judge_series
+
+    ordered = sorted(points)
+    v = judge_series(TrendSeries(keyword, (keyword,), tuple(ordered)), ordered[0][0], end)
+    if v.status != "rising":
+        return v.evidence.peak_end, False
+    return v.evidence.peak_end, v.evidence.faded
 
 
 def _set_products(item: Any, linked: Mapping[str, list[str]], why: str | None) -> None:
@@ -648,7 +664,8 @@ async def _season(lab: Datalab, rows: Sequence[PoolRow], today: date, config: Se
 
 
 def _facts(out: KeywordTrendOutput) -> dict[str, int | float | str]:
-    up = [r for r in out.rising if r.status == "rising"]
+    # 끝난 급상승(faded)은 요약 숫자에 쓰지 않는다 (화면에는 "지난 급상승" 칩으로 남는다)
+    up = [r for r in out.rising if r.status == "rising" and not r.faded]
     facts: dict[str, int | float | str] = {
         "급상승 수": len(up),
         "판정한 키워드 수": len(out.rising),

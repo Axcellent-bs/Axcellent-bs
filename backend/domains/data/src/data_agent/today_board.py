@@ -132,7 +132,8 @@ class TodayBoard:
         _cid, st = self._roll()
         found = [st.verdicts[_key(n)] for n in names if n and _key(n) in st.verdicts]
         rising = [v for v in found if v.status == "rising"]
-        return (rising or found or [None])[0]
+        live = [v for v in rising if not v.evidence.faded]  # 끝난 급상승보다 지금 급상승을 먼저
+        return (live or rising or found or [None])[0]
 
     def record_pair(self, a: str, b: str) -> None:
         cid, st = self._roll()
@@ -142,11 +143,14 @@ class TodayBoard:
             self._save(cid, st, "pair", f"{pair[0]}\t{pair[1]}", f"{pair[0]}\t{pair[1]}")
 
     def rising_names(self) -> list[str]:
-        """오늘 급상승으로 판정된 그룹 이름 (기록 순서, 같은 판정은 한 번)."""
+        """오늘 급상승으로 판정된 그룹 이름 (기록 순서, 같은 판정은 한 번).
+
+        끝난 급상승(evidence.faded)은 빼낸다: 인사이트 브리프·홍보 콘셉트·trend_age 대상이 이
+        목록을 근거로 쓴다 (11/26, 정점이 며칠 전에 끝났는데 계속 급상승으로 쓰이던 것)."""
         _cid, st = self._roll()
         out: list[str] = []
         for v in st.verdicts.values():
-            if v.status == "rising" and v.group_name not in out:
+            if v.status == "rising" and not v.evidence.faded and v.group_name not in out:
                 out.append(v.group_name)
         return out
 

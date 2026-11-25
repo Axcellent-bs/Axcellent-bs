@@ -211,8 +211,8 @@ def score(topic: Topic, config: RecommendConfig) -> float:
 
 
 def rank_topics(topics: list[Topic], config: RecommendConfig, limit: int) -> list[Topic]:
-    """급상승만 남기고 점수 큰 순(같으면 z 큰 순 → 이름)으로 `limit`개."""
-    rising = [t for t in topics if t.verdict.status == "rising"]
+    """급상승만 남기고 점수 큰 순(같으면 z 큰 순 → 이름)으로 `limit`개. 끝난 급상승은 뺀다."""
+    rising = [t for t in topics if t.verdict.status == "rising" and not t.verdict.evidence.faded]
     rising.sort(key=lambda t: (-score(t, config), -(t.verdict.evidence.score or 0.0), t.keyword))
     return rising[:limit]
 
