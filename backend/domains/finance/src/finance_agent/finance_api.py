@@ -68,7 +68,7 @@ from typing import Any
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse, Response
 
-from ax_agent_template import call_agent
+from ax_agent_template import call_agent, company_scope
 from ax_agent_template.config import is_mock
 from ax_agent_template.execute import execute
 from ax_contracts.schemas import (
@@ -296,8 +296,15 @@ async def checklist_view(books: Any, d: Any = None, today: Any = None) -> dict[s
         settlements=weeks,
         batches=batches,
     )
-    close_alerts.mark_alerted(result, state().records.close_alerts, TENANT_ID_DEFAULT)
+    close_alerts.mark_alerted(result, state().records.close_alerts, _company())
     return result
+
+
+def _company() -> str:
+    """마감 알림 기록·받은 요청의 회사. 캣북스(요청 밖 포함)는 예전 값 그대로(`TENANT_ID_DEFAULT`):
+    이미 올린 알림 열쇠가 바뀌어 같은 알림을 다시 올리지 않게 한다. 다른 회사는 그 회사 id."""
+    cid = company_scope.scope_id(company_scope.active())
+    return TENANT_ID_DEFAULT if cid == company_scope.CATBOOKS else cid
 
 
 async def run_close_alerts(today: Any = None) -> list[dict[str, Any]]:
@@ -310,9 +317,7 @@ async def run_close_alerts(today: Any = None) -> list[dict[str, Any]]:
     first = today.replace(day=1)
     months = [first - timedelta(days=1), today]
     checklists = [await checklist_view(books, d, today) for d in months]
-    return await close_alerts.alert_overdue(
-        checklists, state().records.close_alerts, TENANT_ID_DEFAULT
-    )
+    return await close_alerts.alert_overdue(checklists, state().records.close_alerts, _company())
 
 
 async def outflows_view(books: Any) -> dict[str, Any]:

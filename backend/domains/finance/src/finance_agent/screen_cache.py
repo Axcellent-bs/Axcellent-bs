@@ -27,7 +27,9 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
+from ax_agent_template import company_scope
 from ax_agent_template.config import is_mock
+from ax_agent_template.server import _session_company
 from finance_agent import books as bk
 
 logger = logging.getLogger("ax.finance.screen_cache")
@@ -111,8 +113,10 @@ class ScreenCache:
             while self.pending:
                 key = next(iter(self.pending))
                 del self.pending[key]
+                company, _, path = key.partition("|")
                 try:
-                    await client.get(key, headers={REFRESH_HEADER: "refresh"}, timeout=120)
+                    with company_scope.using(company):  # 그 회사 화면으로 다시 만든다
+                        await client.get(path, headers={REFRESH_HEADER: "refresh"}, timeout=120)
                 except Exception as exc:  # 다음 요청이 다시 만든다
                     logger.warning("화면 응답을 다시 만들지 못함 %s: %s", key, type(exc).__name__)
 
@@ -132,7 +136,7 @@ async def prime() -> None:
     except Exception as exc:  # 다음 요청이 다시 모은다
         logger.warning("처음 장부를 모으지 못함: %s", type(exc).__name__)
         return
-    CACHE.schedule(list(FIRST_SCREENS))
+    CACHE.schedule([f"{bk.company()}|{p}" for p in FIRST_SCREENS])  # 요청 밖이라 캣북스
 
 
 def enabled() -> bool:
@@ -140,7 +144,7 @@ def enabled() -> bool:
 
 
 def _books_id() -> int | None:
-    cached = bk._live_cache
+    cached = bk.live_cache()  # 지금 요청 회사의 장부
     return id(cached[1]) if cached else None
 
 
@@ -152,8 +156,10 @@ def _records_fingerprint() -> str:
 
 
 def _key(request: Request) -> str:
+    """회사 + 경로 + 조회값. 회사가 들어 있어 한 회사 화면이 다른 회사에 나가지 않는다(11/25)."""
     query = sorted(request.query_params.multi_items())
-    return request.url.path + ("?" + "&".join(f"{k}={v}" for k, v in query) if query else "")
+    path = request.url.path + ("?" + "&".join(f"{k}={v}" for k, v in query) if query else "")
+    return f"{bk.company()}|{path}"
 
 
 def _reply(entry: Entry, state: str) -> Response:
@@ -195,6 +201,15 @@ def add_screen_cache(app: FastAPI) -> None:
 
     @app.middleware("http")
     async def screen_cache(request: Request, call_next: Any) -> Response:
+        # 이 미들웨어는 세션 회사를 거는 `SessionCompanyScope`보다 바깥이라 여기서 직접 건다
+        # (11/25: 걸지 않으면 열쇠가 늘 캣북스라 캣북스 화면이 다른 회사에 나갔다)
+        company = _session_company(request.scope.get("headers", []))
+        if company and company_scope.scope_id(company) != company_scope.CATBOOKS:
+            with company_scope.using(company):
+                return await _serve(request, call_next)
+        return await _serve(request, call_next)
+
+    async def _serve(request: Request, call_next: Any) -> Response:
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             if request.url.path == "/a2a" and enabled():
                 # A2A는 대화 읽기·보내기처럼 기록을 바꾸지 않는 요청이 대부분이다(대화방은 2초마다

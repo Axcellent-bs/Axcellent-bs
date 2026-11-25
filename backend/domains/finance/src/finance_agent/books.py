@@ -37,7 +37,7 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import company_connection, pinned_http
+from ax_agent_template import company_connection, company_scope, pinned_http
 from ax_agent_template.companies import canonical_company_id
 from ax_agent_template.config import agent_token, agent_url, is_mock
 from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
@@ -603,7 +603,8 @@ async def live_books(
     client = http_client or httpx.AsyncClient(transport=pinned_http.company_transport())
     unavailable: list[str] = []
     if store is None:
-        store = order_store() if http_client is None else OrderStore()
+        # 지금 요청 회사의 주문 모음 (11/25: 예전에는 늘 캣북스 모음이라 회사끼리 섞였다)
+        store = order_store(company_scope.active()) if http_client is None else OrderStore()
     async with store.lock:
         return await _live_books(client, http_client is None, store, full, unavailable)
 
@@ -704,15 +705,28 @@ def _norm_exec(raw: Any) -> dict[str, Any] | None:
     return normalize_execution(raw) if isinstance(raw, dict) else None
 
 
-_live_cache: tuple[float, Books] | None = None  # (모은 시각 monotonic, 장부)
+# 회사 ID → (모은 시각 monotonic, 장부).
+# 11/25 회사 분리: 한 회사 장부가 다른 회사 화면에 나오지 않게
+_live_caches: dict[str, tuple[float, Books]] = {}
 # 새 장부를 캐시에 넣은 뒤 부른다 (화면 응답 미리 만들기, `screen_cache.py`)
 ON_NEW_BOOKS: list[Callable[[], None]] = []
-_live_inflight: asyncio.Task[Books] | None = None
+_live_inflights: dict[str, asyncio.Task[Books]] = {}
+
+
+def company() -> str:
+    """지금 요청 회사(정식 id). 요청 밖이면 캣북스."""
+    return canonical_company_id(company_scope.active()) or TENANT_ID_CATBOOKS
+
+
+def live_cache(company_id: str | None = None) -> tuple[float, Books] | None:
+    """그 회사(없으면 지금 요청 회사)의 캐시된 장부."""
+    cid = (canonical_company_id(company_id) or TENANT_ID_CATBOOKS) if company_id else company()
+    return _live_caches.get(cid)
 
 
 def clear_live_cache() -> None:
-    global _live_cache, _live_inflight
-    _live_cache, _live_inflight = None, None
+    _live_caches.clear()
+    _live_inflights.clear()
     _STORES.clear()
 
 
@@ -735,13 +749,13 @@ async def off(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
 
 
 async def _collect_live(full: bool = False) -> Books:
-    global _live_cache
+    cid = company()  # 띄운 요청의 회사 (task가 contextvar를 잇는다)
     books = await (live_books(full=True) if full else live_books())
     if books.unavailable_core():
-        _live_cache = None
+        _live_caches.pop(cid, None)
     else:
         await off(warm, books)
-        _live_cache = (time.monotonic(), books)
+        _live_caches[cid] = (time.monotonic(), books)
         for hook in ON_NEW_BOOKS:
             try:
                 hook()
@@ -764,21 +778,22 @@ async def cached_live_books(fresh: bool = False) -> Books:
     `collected_at`에 나온다. 사람이 결정하는 일(`fresh=True`)은 주문 전체를 새로 읽은 장부를
     기다린다.
     """
-    global _live_inflight
+    cid = company()
     if fresh:
-        _live_inflight = asyncio.create_task(_collect_live(full=True))
-        _live_inflight.add_done_callback(_log_refresh_failure)
-        return await asyncio.shield(_live_inflight)
-    cached = _live_cache
+        task = _live_inflights[cid] = asyncio.create_task(_collect_live(full=True))
+        task.add_done_callback(_log_refresh_failure)
+        return await asyncio.shield(task)
+    cached = _live_caches.get(cid)
     age = time.monotonic() - cached[0] if cached else None
     if cached and age is not None and age < LIVE_CACHE_SECONDS:
         return cached[1]
-    if _live_inflight is None or _live_inflight.done():
-        _live_inflight = asyncio.create_task(_collect_live())
-        _live_inflight.add_done_callback(_log_refresh_failure)
+    task = _live_inflights.get(cid)
+    if task is None or task.done():
+        task = _live_inflights[cid] = asyncio.create_task(_collect_live())
+        task.add_done_callback(_log_refresh_failure)
     if cached and not fresh and age is not None and age < LIVE_STALE_SECONDS:
         return cached[1]
-    return await asyncio.shield(_live_inflight)
+    return await asyncio.shield(task)
 
 
 async def load_books(fresh: bool = False) -> Books:

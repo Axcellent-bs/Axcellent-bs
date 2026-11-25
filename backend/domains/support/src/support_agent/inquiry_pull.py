@@ -26,7 +26,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from ax_agent_template import config
+from ax_agent_template import company_scope, config
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from support_agent import claim_handlers, shop_client
@@ -89,10 +89,42 @@ def interval_seconds() -> float:
     return value if value > 0 else DEFAULT_SECONDS
 
 
-def status() -> dict[str, Any]:
-    """읽기 상태. `connected`는 마지막 시도가 성공했는지다 (한 번도 안 읽었으면 None)."""
+def pulled_company() -> str:
+    """이 설치가 문의함·클레임함을 읽는 회사(정식 id). `SUPPORT_INQUIRY_PULL_TENANT`, 없으면
+    캣북스."""
+    return company_scope.scope_id(os.getenv(ENV_TENANT, "").strip() or TENANT_ID_DEFAULT)
+
+
+def _other_company_status(company: str) -> dict[str, Any]:
+    """읽는 회사가 아닌 회사의 상태: 그 회사 문의함은 아직 읽지 않는다(숫자를 지어내지 않는다).
+
+    11/25 회사 분리: 예전에는 설치 회사(캣북스) 읽기 상태가 누비투어 화면에도 보였다."""
     from support_agent import shop_pull_more as more
 
+    blank = {k: (0 if isinstance(v, int) else None) for k, v in STATE.items()}
+    return {
+        **blank,
+        **dict.fromkeys(more.COUNTS, 0),
+        "enabled": False,
+        "read_only": shop_client.read_only(),
+        "read_only_reason": shop_client.read_only_reason(),
+        "interval_seconds": interval_seconds(),
+        "connected": None,
+        "company_id": company,
+        "not_pulled": True,  # 이 회사 문의함은 이 설치가 읽지 않는다
+    }
+
+
+def status() -> dict[str, Any]:
+    """읽기 상태. `connected`는 마지막 시도가 성공했는지다 (한 번도 안 읽었으면 None).
+
+    요청 회사가 읽는 회사가 아니면 빈 상태(`not_pulled`)를 돌려준다(다른 회사에 섞여 보이지
+    않게)."""
+    from support_agent import shop_pull_more as more
+
+    asked = company_scope.active()
+    if asked is not None and company_scope.scope_id(asked) != pulled_company():
+        return _other_company_status(company_scope.scope_id(asked))
     attempted = STATE["last_attempt_at"] is not None
     return {
         **STATE,

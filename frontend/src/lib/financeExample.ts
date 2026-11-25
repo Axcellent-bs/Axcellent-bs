@@ -6,18 +6,24 @@ import raw from "./financeExample.json";
 import type {
   ClosingReport, FinanceOverview, FinanceTodo, Reconciliation, Review, TeamBudget,
 } from "./finance";
+import { sessionCompanyId } from "./humanSession";
 
-const KEY = "axcellent-finance-example";
+// 회사마다 따로 켠다(11/25 회사 분리). 캣북스(또는 회사 없음)는 예전 키 그대로
+const BASE_KEY = "axcellent-finance-example";
+const keyOf = (): string => {
+  const id = sessionCompanyId();
+  return id && id !== "catbooks" && id !== "shop-demo" ? `${BASE_KEY}:${id}` : BASE_KEY;
+};
 const PERSON = "예시 사용자";
 
 /** 예시에 없는 자료를 달라고 할 때. 호출 쪽이 쉬운 안내로 바꿔 보여 준다 */
 export class ExampleMissing extends Error {}
 
 export function exampleOn(): boolean {
-  try { return localStorage.getItem(KEY) === "1"; } catch { return false; }
+  try { return localStorage.getItem(keyOf()) === "1"; } catch { return false; }
 }
 export function setExampleOn(on: boolean): void {
-  try { localStorage.setItem(KEY, on ? "1" : "0"); } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ }
+  try { localStorage.setItem(keyOf(), on ? "1" : "0"); } catch { /* 저장이 막혀도 이번 화면에서는 바뀐다 */ }
   reset();
 }
 
