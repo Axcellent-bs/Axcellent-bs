@@ -2,6 +2,7 @@ import { Fragment, Suspense, lazy, type ReactNode } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router'
 
 import { AdminShell } from '@/components/admin/AdminShell'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import LoginPage from '@/demo/LoginPage'
 import { ADMIN_HOME, canOpen, homeOf, useSession } from '@/demo/session'
 import { useCompany, useCompanyLoaded } from '@/demo/company'
@@ -115,6 +116,8 @@ if (typeof window !== 'undefined') preloadRoute(window.location.pathname, PRELOA
 
 export function App() {
   return (
+    // 로그인 전 화면 조각을 못 받으면 흰 화면 대신 "새 버전이 나왔어요" + [새로고침]
+    <ErrorBoundary title="화면을 그리지 못했습니다">
     <Suspense fallback={null}>
     <Routes>
       {/* 로그인 전에도 여는 메인: 서비스 제품군 카탈로그 */}
@@ -134,6 +137,7 @@ export function App() {
       <Route path="*" element={<Guarded><Pages /></Guarded>} />
     </Routes>
     </Suspense>
+    </ErrorBoundary>
   )
 }
 
@@ -159,6 +163,8 @@ function Guarded({ children }: { children: ReactNode }) {
 function Pages() {
   return (
       <AdminShell>
+        {/* 업무 화면 조각을 못 받으면(배포 뒤 옛 조각) 메뉴는 두고 이 자리에 "새 버전이 나왔어요" + [새로고침] */}
+        <ErrorBoundary title="이 화면을 그리지 못했습니다">
         <Suspense fallback={<PageLoading />}>
         <Routes>
           <Route path="/inquiry" element={<Dashboard />} />
@@ -214,6 +220,7 @@ function Pages() {
           <Route path="*" element={<ToHome />} />
         </Routes>
         </Suspense>
+        </ErrorBoundary>
       </AdminShell>
   )
 }
