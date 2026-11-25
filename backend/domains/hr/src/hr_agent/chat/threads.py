@@ -115,13 +115,20 @@ def remove(svc: Services, thread_id: str, by: str) -> bool:
     return changed > 0
 
 
+def _id_suffix() -> str:
+    """다른 회사 대화 번호 뒤에 회사를 붙인다(회사마다 파일이 따로라 번호가 겹치지 않게, 11/25).
+    캣북스는 예전 번호 그대로."""
+    cid = company_scope.scope_id(company_scope.active())
+    return "" if cid == company_scope.CATBOOKS else f"-{cid}"
+
+
 def create(svc: Services, title: str, who: str | None,
            room_id: str | None = None) -> dict[str, Any]:  # fmt: skip
     ensure(svc)
     row = svc.store.one("SELECT COALESCE(MAX(seq), 0) AS n FROM hr_chat_threads")
     seq = int(row["n"]) + 1 if row else 1
     now = svc.clock().isoformat()
-    thread_id = f"hrchat-{seq}"
+    thread_id = f"hrchat-{seq}" + _id_suffix()
     svc.store.execute(
         "INSERT INTO hr_chat_threads"
         "(id, seq, title, status, who, summary, messages, created_at, updated_at, room_id,"
