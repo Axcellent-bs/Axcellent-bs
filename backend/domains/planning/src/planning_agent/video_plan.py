@@ -438,12 +438,13 @@ def rule_plan(p: Proposal, promo: tuple[str, str] | None = None) -> VideoPlan:
             f"Closing shot: {who} waving at the camera in {where}, warm inviting ending",
         ),
     ]
-    scenes = [
+    made = [
         VideoScene(n=i, start_s=start, end_s=end, visual=v, caption=c, prompt=pr, start_frame=v)
         for i, ((start, end), (v, c, pr)) in enumerate(
             zip(timings(d, RULE_SCENES), beats, strict=True), start=1
         )
     ]
+    scenes = overlay_safe(made, _company()["name"])
     script = " → ".join(f"{s.start_s}~{s.end_s}초 {s.visual}" for s in scenes)
     concept = _pick(_short(idea_of(p), 200), subject_of(p), PLAIN_CONCEPT)
     return VideoPlan(
@@ -455,13 +456,31 @@ def rule_plan(p: Proposal, promo: tuple[str, str] | None = None) -> VideoPlan:
 FUN_CONCEPT = "대상이 좋아하는 소재로 첫 1초부터 웃기고 끝에 채널을 알리는 짧은 영상"
 
 
+def _bare(text: str) -> str:
+    return re.sub(r"[\s\W_]+", "", text or "").lower()
+
+
+def overlay_safe(scenes: list[VideoScene], company: str, cta: str = "") -> list[VideoScene]:
+    """마케팅 코드가 얹는 글과 겹치는 자막을 비운다 (11/25).
+
+    마케팅(creative_overlay)은 장면 자막을 화면 아래 22%에 얹고, 마지막 2초에는 같은 자리에
+    엔드카드(회사 이름 + cta_ko)를 얹는다. 그래서 마지막 장면 자막, 회사 이름·cta_ko와 같은
+    자막은 비운다."""
+    dup = {_bare(company), _bare(cta)} - {""}
+    last = len(scenes) - 1
+    return [
+        s.model_copy(update={"caption": ""}) if i == last or _bare(s.caption) in dup else s
+        for i, s in enumerate(scenes)
+    ]
+
+
 def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     """재미 먼저, 브랜드는 끝에 (11/24 재현 님).
 
     훅 0~2초 → 본론 2장면(대상이 좋아하는 소재) → 마무리. 본론에는 상품을 앞세우지 않는다.
-    end_card: 마무리는 채널 이름 엔드 카드(자막에 회사 이름).
+    end_card: 마무리는 채널 이름 엔드 카드(회사 이름은 마케팅 코드가 마지막 2초에 얹는다).
     prop: 본론 둘째 장면에 상품이 소품으로 잠깐.
-    caption: 화면엔 안 넣고 마무리 자막에만 회사 이름."""
+    caption: 화면엔 안 넣는다(회사 이름은 엔드카드로 얹는다). 마지막 장면 자막은 늘 비운다."""
     d = duration_of(p)
     b = tenant.brand()
     who, where, who_ko = b["character_en"], FREE_SETTING_EN, b["character_ko"]  # 배경 묶지 않음
@@ -496,18 +515,20 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
             "마무리: 채널 이름 엔드 카드"
             if exposure == END_CARD
             else f"마무리: {who_ko}가 손을 흔들며 끝낸다",
-            _pick(company, ""),
-            "Simple calm plain background with soft light and empty space in the center"
+            "",  # 회사 이름은 마케팅 코드가 마지막 2초 엔드카드로 얹는다
+            "Simple calm plain background with soft light and empty space in the center and "
+            "lower area"
             if exposure == END_CARD
             else f"Closing shot: {who} waving at the camera in {where}, warm inviting ending",
         ),
     ]
-    scenes = [
+    made = [
         VideoScene(n=i, start_s=start, end_s=end, visual=v, caption=c, prompt=pr, start_frame=v)
         for i, ((start, end), (v, c, pr)) in enumerate(
             zip(fun_timings(d, RULE_SCENES), beats, strict=True), start=1
         )
     ]
+    scenes = overlay_safe(made, company)
     script = " → ".join(f"{s.start_s}~{s.end_s}초 {s.visual}" for s in scenes)
     ideas = [
         t
@@ -558,6 +579,12 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
 - 영상 길이 {d}초, 장면 {n}개. 첫 장면은 3초 안에 시선을 끄는 훅, 마지막 장면은 마무리
 - 장면마다 의뢰 주제가 화면에 보이게 한다 (주제를 빼고 회사 상품만 보여 주지 않는다)
 - prompt에 글자·자막·제목·로고·간판을 그리라는 말을 쓰지 않는다 (자막은 caption에만)
+- 마케팅 코드가 영상에 따로 얹는 것: 장면 자막(caption), 마지막 2초 엔드카드(회사 이름 + cta_ko),
+  재생 배속, 배경음악. 그래서
+  - prompt·visual·start_frame·end_frame·action_en·camera_en에 자막·엔드카드 글·로고·배속
+    (빠르게·느리게·슬로모션·타임랩스)·배경음악 지시를 쓰지 않는다
+  - caption에 회사 이름이나 cta_ko를 되풀이하지 않는다. 마지막 장면 caption은 빈 문자열이다
+    (엔드카드와 같은 자리에 겹친다)
 - 실존 인물·유명인·실제 브랜드·다른 회사 이름, 주소·링크·숫자를 prompt에 쓰지 않는다
   (idol·celebrity·famous 같은 낱말도 prompt에 쓰지 않는다)
 - 주제가 실존 인물·연예인·팬덤이면 이름·얼굴·음원 대신 팬 문화의 소품·분위기(응원봉, 포토카드,
@@ -581,14 +608,17 @@ DIRECTION = {
 EXPOSURE = {
     END_CARD: (
         "  - 회사 이름·상품은 마지막 장면(마지막 2~3초)에만 둔다. 마지막 장면은 채널 이름을 얹을 "
-        '엔드 카드다: visual은 "채널 이름 엔드 카드", caption은 company.name, prompt는 가운데가 '
-        "비어 있는 단순한 배경 화면\n"
+        '엔드 카드다: visual은 "채널 이름 엔드 카드", caption은 빈 문자열(회사 이름은 코드가 '
+        "마지막 2초에 얹는다), prompt는 가운데와 화면 아래쪽이 비어 있는 단순한 배경 화면\n"
     ),
     PROP: (
         "  - 회사 상품은 본론 장면 하나에 소품으로 잠깐만 보인다. "
         "상품을 설명하거나 앞세우지 않는다\n"
     ),
-    CAPTION: "  - 회사 이름·상품은 화면에 넣지 않고 마지막 장면 caption에만 쓴다\n",
+    CAPTION: (
+        "  - 회사 이름·상품은 화면에 넣지 않는다. 회사 이름은 코드가 마지막 2초 엔드카드로 얹으니 "
+        "caption에도 쓰지 않는다\n"
+    ),
 }
 
 
@@ -607,14 +637,14 @@ PURPOSE_DIRECTION = {
         "- 광고 목적: 우리 솔루션·서비스 소개 광고 (광고는 광고답게). 장면 흐름은\n"
         "  문제(보는 사람이 겪는 불편) → 반전 → 해결 장면(솔루션을 쓰는 모습) → 행동 문구\n"
         "  - offer_ko는 솔루션이 주는 이점 한 줄, cta_ko는 마지막 행동 문구. 마지막 장면 caption은 "
-        "cta_ko와 같게\n"
+        "빈 문자열(cta_ko는 코드가 마지막 2초 엔드카드로 얹는다)\n"
         "  - 근거(facts)에 없는 숫자·성과를 쓰지 않는다\n"
     ),
     CLIENT_OFFER: (
         "- 광고 목적: 고객 혜택 광고 (광고는 광고답게). 장면 흐름은\n"
         "  혜택 먼저(첫 3초) → 혜택을 쓰는 장면 → 후기 한 줄 자막 → 행동 문구\n"
         "  - offer_ko는 혜택 한 줄이고 첫 장면 caption은 offer_ko와 같게. "
-        "cta_ko는 마지막 행동 문구이고 마지막 장면 caption은 cta_ko와 같게\n"
+        "cta_ko는 마지막 행동 문구이고 마지막 장면 caption은 빈 문자열(코드가 엔드카드로 얹는다)\n"
         "  - 할인율·가격·기간 같은 혜택 숫자는 데이터 블록에 있는 것만 쓴다\n"
         "  - 후기 자막은 근거(facts·insight)에 있는 고객 반응만 옮긴다. "
         "없으면 지어내지 않고 쓰는 모습을 설명하는 자막으로 쓴다\n"
@@ -775,6 +805,7 @@ def _from_llm(
             )  # fmt: skip
             for i, ((start, end), s) in enumerate(zip(cuts, got.scenes, strict=True), start=1)
         ]
+        scenes = overlay_safe(scenes, _company()["name"], got.cta_ko if ad else "")
         return VideoPlan(
             concept=_short(got.concept, 200), duration_s=d, script=_short(got.script, 800),
             scenes=scenes, style=style(b, fixed_setting=style_ != FUN_FIRST),
