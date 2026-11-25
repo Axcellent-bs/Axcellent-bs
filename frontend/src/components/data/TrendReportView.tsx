@@ -9,6 +9,7 @@ import { safeLink } from "@/lib/safeLink";
 import { printWithClass, usePrinting } from "@/lib/print";
 import { waitForImages } from "@/lib/printImages";
 import { COMPACT, METRIC, ago } from "@/components/data/InstagramRadar";
+import { TrendTopicEvidence } from "@/components/data/TrendTopicEvidence";
 import {
   dataAi, type InstagramRadarPost, type SectionStatus, type TrendReport, type TrendReportBeat, type TrendReportBrief, type TrendReportCompetitorRow,
   type TrendReportHandoffOutput, type TrendReportMaterial, type TrendReportSections, type TrendThemeSection,
@@ -654,6 +655,7 @@ export function TrendReportBody({ report, onRebuild, readOnly = false }: { repor
       </header>
 
       <Conclusion s={sec.recommendation} summaryReason={report.summary_reason} onJump={jump} />
+      <TrendTopicEvidence report={report} />
 
       <div className="flex flex-wrap items-center gap-2 pt-2">
         <h3 className="text-base font-bold text-ink-900">근거 데이터</h3>

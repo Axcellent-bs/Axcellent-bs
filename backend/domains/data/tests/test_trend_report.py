@@ -706,6 +706,7 @@ def test_frontend_questions_1380() -> None:
         "goal": None,  # v2 추가 (기본 None)
         "chat_thread_id": None,  # 11/19 대화 카드 추가 (기본 None)
         "theme": None, "theme_mode": None,  # 11/20 주제 추가 (기본 None)
+        "related_terms": None,  # 11/26 주제 확장어 추가 (기본 None)
     }  # fmt: skip
     assert TrendReportInput.model_validate({}).caller == "human"
 

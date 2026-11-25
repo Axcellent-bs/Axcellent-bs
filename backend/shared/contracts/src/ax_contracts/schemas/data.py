@@ -4575,6 +4575,8 @@ class TrendReportInput(AxModel):
     # 11/20 추가: 의뢰 주제와 쓰임 (대화 카드 칸 값으로 접수할 때 의뢰문을 다시 읽지 않아도 남게)
     theme: str | None = Field(default=None, max_length=30)
     theme_mode: ThemeMode | None = None
+    # 11/26 추가: 주제를 넓힌 검색어 (대화 카드가 의뢰문에서 뽑은 것을 그대로 넘긴다. 최대 6)
+    related_terms: list[str] | None = Field(default=None, max_length=6)
 
 
 class TrendReportCreated(AxModel):
@@ -4817,6 +4819,32 @@ class TrendReportCalls(AxModel):
     llm: int = Field(default=0, ge=0)
 
 
+# 11/26 추가: 의뢰 주제로 찾은 근거 표 (주제가 있는 의뢰만). kind = 어디서 온 근거인지
+TopicEvidenceKind = Literal[
+    "scan", "search", "shopping", "hashtag", "shorts", "content", "mega", "meme"
+]
+# 결론·핵심 숫자에서 뺀 이유: off_topic(의뢰 주제·확장어와 연결 낱말 없음) · notice_ad(브랜드
+# 공지·광고 게시물) · faded(끝난 급상승, 정점이 지나고 지금은 평소 수준)
+ExcludedReason = Literal["off_topic", "notice_ad", "faded"]
+
+
+class TrendTopicEvidenceRow(AxModel):
+    kind: TopicEvidenceKind
+    label: str  # "기말고사 검색"
+    value: str  # "상승 중" · "평소의 3.2배" · "12편" (코드가 만든 짧은 글)
+    source: str  # "감지 탭 · 네이버 데이터랩"
+    evidence_id: str | None = None  # 결론 근거 id ("scan:1"), 참고 행이면 None
+    reference: bool = False  # 참고로만 (결론 근거에 쓰지 않음: 끝난 급상승)
+    peak_end: dt.date | None = None  # 끝난 급상승이면 정점 끝 날짜 (칩 "지난 급상승 · M/D 정점")
+
+
+class TrendExcludedEvidence(AxModel):
+    label: str
+    value: str
+    reason: ExcludedReason
+    evidence_id: str | None = None  # 근거 목록에서 뺀 id ("content:2"). 없으면 처음부터 안 넣은 것
+
+
 class TrendLimitGroups(AxModel):
     """근거와 한계를 셋으로 (v2). limits는 그대로 채운다."""
 
@@ -4839,6 +4867,11 @@ class TrendReport(AxModel):
     limits: list[str] = Field(default_factory=list)  # 근거와 한계 문장
     calls: TrendReportCalls = Field(default_factory=TrendReportCalls)
     limit_groups: TrendLimitGroups = Field(default_factory=TrendLimitGroups)  # v2
+    # 11/26 추가: 주제를 넓힌 검색어(의뢰문에서, 최대 6) · 주제로 찾은 근거 표 · 결론·핵심 숫자에서
+    # 뺀 근거(이유 코드). 주제가 없는 의뢰는 모두 비어 있다. 예전 저장본도 비어 있다
+    related_terms: list[str] = Field(default_factory=list)
+    topic_evidence: list[TrendTopicEvidenceRow] = Field(default_factory=list)
+    excluded: list[TrendExcludedEvidence] = Field(default_factory=list)
 
 
 class TrendReportListItem(AxModel):
@@ -4933,6 +4966,8 @@ class TrendRequestCardBrief(AxModel):
     # 11/20 추가: 의뢰 주제와 쓰임 (없으면 None)
     theme: str | None = None
     theme_mode: ThemeMode | None = None
+    # 11/26 추가: 주제를 넓힌 검색어 (접수할 때 그대로 넘겨 의뢰문을 다시 읽지 않게)
+    related_terms: list[str] = Field(default_factory=list)
 
 
 class TrendRequestCard(AxModel):

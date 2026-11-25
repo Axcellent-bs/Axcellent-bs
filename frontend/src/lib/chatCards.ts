@@ -91,6 +91,8 @@ export function cardInput(card: TrendRequestCard, threadId: string | null): Tren
     chat_thread_id: threadId,
     // 칸 값으로 접수하면 서버가 의뢰문을 다시 읽지 않으니 주제도 같이 넘긴다 (#1540). 주제가 없으면 칸을 넣지 않는다(서버 기본 null)
     ...(b.theme?.trim() ? { theme: b.theme.trim(), theme_mode: b.theme_mode ?? "use" } : {}),
+    // 11/26: 주제 확장어도 같이 (예전 카드는 칸이 없어 서버가 의뢰문을 한 번 읽는다)
+    ...(b.theme?.trim() && b.related_terms ? { related_terms: [...b.related_terms].slice(0, 6) } : {}),
   };
 }
 
