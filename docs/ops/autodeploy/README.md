@@ -94,3 +94,57 @@ CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-aut
 서버에 필요한 것(서버 작업은 사람이): 게이트 0.5.0 + `axautodeploy` 계정(권한 6개: `status deploy-bundle restart-backend rollback-bundle rollback-code uv-sync`, `docs/ops/ssh-gate/INSTALL.md`), `/etc/ax-autodeploy/gh-readonly-token`(Checks·Pull requests 읽기), `/etc/ax-autodeploy/slack-webhook`(root 600), `/etc/ax-autodeploy/env` 에 `AX_BACKEND_STAGE=on`·`AX_PAUSE_FILE=<게이트 정책 pause_file>`, `ax-gate-autodeploy-paused`.
 
 시험: `python -m unittest discover -s docs/ops/autodeploy/tests -v` (임시 git 저장소, 가짜 게이트·가짜 GitHub API·가짜 Slack 웹훅을 쓴다. 서버·네트워크 불필요).
+
+## 정지 감시 (ax-autodeploy-watchdog) — 알림 전용
+
+`ax-autodeploy` 가 멈췄는데 아무도 모르는 일을 막는 감시 스크립트. **읽기만 하고 슬랙으로 알린다. 복구 동작은 아직 없다**(`--recover` 는 "아직 구현 안 됨, 알림 전용"으로 거절). 쓰는 파일은 알림 기록 `/var/lib/ax-autodeploy/watchdog-notified` 하나뿐(`--notify` 때만).
+
+- 스크립트: `ax-autodeploy-watchdog` (서버 `/usr/local/sbin/ax-autodeploy-watchdog`, root:root 755, 실행은 ubuntu)
+- 유닛 예시: `ax-autodeploy-watchdog.service`, `ax-autodeploy-watchdog.timer`(5분 주기)
+- 읽는 것: `/var/lib/ax-autodeploy/`(`last-run` mtime, `backend-verdict`, `backend-in-progress`, `lock`), `/etc/ax-autodeploy/env` 의 `AX_PAUSE_FILE` 과 그 정지 표시 파일, `/var/log/ax-autodeploy.log`, `systemctl is-active/show`(조회만)
+
+### 정지 유형
+
+| 유형 | 심각도 | 판정 | 조치 |
+|---|---|---|---|
+| `timer-inactive` | 2 심각 | 타이머가 active 가 아님 | 서버 책임자가 정지 사유 확인 후 타이머 켜기 |
+| `service-failed` | 1 경고 | 서비스가 failed | 로그 확인. 다음 주기에 성공하면 자연히 풀림 |
+| `service-start-limit` | 2 심각 | `Result=start-limit-hit` | 원인 제거 후 사람이 reset-failed |
+| `last-run-stale` | 1 경고(3배 넘으면 2) | `last-run` mtime 이 `AX_WD_STALE_S`(1200초) 이상 오래됨. last-run 줄(`날짜 시각 판정 SHA8`)이 아니라 mtime 을 쓴다 | 타이머·서비스·잠금 확인 |
+| `paused-approved` | 0 정상 | 정지 표시 파일의 `until_epoch` 가 아직 안 지남. 복구 대상 아님 | 없음 |
+| `pause-invalid` | 1 경고 | 정지 표시가 만료됐는데 남아 있거나 `until_epoch` 를 해석 못 함 | 재개 또는 파일 정리(게이트로) |
+| `backend-in-progress-stuck` | 2 심각 | `backend-in-progress` 가 남아 있는데 잠금이 풀렸거나 1500초 넘음(유예 120초). **사람 호출 전용, 자동 처리 안 함** | 사람이 되돌림 상태 확인 |
+| `long-wait` | 1 경고 | 같은 판정 `ci-pending`/`ci-hold` 가 `AX_WD_WAIT_S`(1800초) 이상 이어지고 대상 SHA·운영 HEAD 가 그대로. `backend-verdict` 는 매 주기 다시 써서 mtime 이 늘 새롭기 때문에, 판정이 바뀔 때만 남는 로그 줄의 시각으로 잰다 | CI 확인 |
+| `lock-held-long` | 2 심각 | flock 이 잡혀 있고 `lock` mtime 이 `TimeoutStartSec`(1500초) 보다 오래됨 | 멈춘 실행 확인 |
+| `ok` | 0 | 위에 해당 없음 | 없음 |
+
+여러 개가 겹치면 심각도 큰 것을 대표로 하고 나머지는 같이 적는다.
+
+### 사용법
+
+```bash
+ax-autodeploy-watchdog               # = --check: 한 줄 출력. 끝 코드 0 정상 / 1 경고 / 2 심각
+ax-autodeploy-watchdog --check --json
+ax-autodeploy-watchdog --notify      # 상태가 바뀔 때만 슬랙
+ax-autodeploy-watchdog --notify --heartbeat   # 위 + 정상일 때 하루 1회 하트비트 (유닛이 쓰는 형태)
+```
+
+알림 규칙: 상태가 바뀌면 바로 1회, 같은 이상 상태는 1시간(`AX_WD_REPEAT_S`)에 1회만 반복, 정상 복귀 때 복구 알림 1회, `--heartbeat` 는 정상이 이어질 때 하루 1회. 전송에 실패하면 기록을 갱신하지 않아 다음 주기에 다시 보낸다. 문구는 한국어, `[watchdog]` 접두. 웹훅 주소는 파일(`AX_WD_SLACK_HOOK`, 기본 `/etc/ax-autodeploy/slack-webhook`)에서만 읽고 어디에도 출력하지 않으며 curl 명령줄에도 싣지 않는다(표준 입력으로 전달).
+
+시험용 환경 변수: `AX_STATE_DIR AX_ENV_FILE AX_PAUSE_FILE AX_WD_NOW AX_WD_STALE_S AX_WD_WAIT_S AX_WD_LOG_FILE AX_WD_TIMER_STATE AX_WD_SERVICE_STATE AX_WD_SERVICE_RESULT AX_WD_LOCK_HELD AX_WD_SLACK_HOOK AX_WD_CURL AX_WD_NOTIFIED_FILE` 등(스크립트 머리 주석 참고). 단위 시험: `python -m unittest discover -s docs/ops/autodeploy/tests -p test_watchdog.py -v`.
+
+### 설치 (서버 책임자, sudo 필요)
+
+```bash
+sudo install -o root -g root -m 755 ax-autodeploy-watchdog /usr/local/sbin/ax-autodeploy-watchdog
+/usr/local/sbin/ax-autodeploy-watchdog --check            # 먼저 한 줄 확인(아무것도 안 바꾼다)
+sudo install -m 644 ax-autodeploy-watchdog.service ax-autodeploy-watchdog.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ax-autodeploy-watchdog.timer
+```
+
+`/etc/ax-autodeploy/slack-webhook` 은 자동 배포 공지가 이미 쓰는 파일(root:ubuntu 640)을 그대로 읽는다. 없으면 알림은 못 보내고 `--check` 출력만 된다.
+
+### 안전 범위
+
+감시는 상태를 읽고 알린다. 배포·`restart-backend`·`rollback`·`deploy-bundle`·`ax-gate` 를 부르지 않고, 파일을 지우거나 `systemctl` 을 바꾸지 않는다. 앞으로 복구 동작을 넣더라도 범위는 **자동 배포 프로세스를 되살리는 것**(예: 타이머 재시작)까지이고, 배포·백엔드 재시작·롤백은 게이트 규칙을 따른다. `backend-in-progress` 가 남은 경우는 사람만 처리한다. 참고: flock 점유 확인을 위해 `lock` 파일을 읽기 전용으로 열어 잠깐(밀리초) 잡았다 놓으므로, 같은 순간에 시작한 자동 배포 주기는 `busy` 로 한 번 건너뛸 수 있다.
