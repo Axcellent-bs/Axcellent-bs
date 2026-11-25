@@ -619,6 +619,12 @@ onHumanTokenChange(() => {
 });
 
 /** `raw`: 파일을 그대로 보낸다(JSON으로 바꾸지 않는다) */
+/** 로그인 세션 토큰을 회사 고르기용 머리(`X-AX-Session`)로. 세션이 없으면 빈 머리 */
+function sessionHeader(): Record<string, string> {
+  const token = sessionAuth().Authorization?.replace(/^Bearer /, "");
+  return token ? { "X-AX-Session": token } : {};
+}
+
 interface CallOptions { method?: "GET" | "POST"; body?: unknown; raw?: Blob; human?: boolean; live?: boolean }
 
 async function call(base: string, server: string, path: string, opts: CallOptions = {}): Promise<unknown> {
@@ -637,6 +643,9 @@ async function call(base: string, server: string, path: string, opts: CallOption
   else if (!opts.human && !(base === SAFETY_API_URL && tokenFree("safety", path))) Object.assign(headers, sessionAuth());
   // 재무 서버만: 공용 토큰이라 누가 했나를 화면 계정 이름으로 같이 보낸다 (안전 장치 서버는 이 머리를 받지 않는다)
   if (opts.human && base === FINANCE_AGENT_URL) Object.assign(headers, actorHeaders());
+  // 재무 서버만: 같은 출처 nginx는 읽기의 Authorization을 공용 토큰으로 바꿔 붙여 세션 회사가 사라진다.
+  // 로그인 세션을 X-AX-Session으로 같이 실어 서버가 그 회사 장부로 답하게 한다(11/25 회사 분리, 권한은 Authorization 그대로)
+  if (base === FINANCE_AGENT_URL) Object.assign(headers, sessionHeader());
   let res: Response;
   try {
     res = await fetch(`${base}${path}`, {
@@ -665,7 +674,7 @@ async function download(path: string, fallback: string): Promise<void> {
   if (exampleMode) throw new FinanceApiError("예시 데이터에서는 내려받지 않습니다. '실제 데이터'로 바꿔서 내려받으세요.", 0, "example_missing");
   let res: Response;
   try {
-    res = await fetch(`${FINANCE_AGENT_URL}${path}`, { cache: "no-store", headers: sessionAuth() });
+    res = await fetch(`${FINANCE_AGENT_URL}${path}`, { cache: "no-store", headers: { ...sessionAuth(), ...sessionHeader() } });
   } catch {
     throw new FinanceApiError(`${FINANCE_SERVER}에 연결하지 못했습니다. 서버가 켜져 있는지 확인하세요.`, 0, "unreachable");
   }

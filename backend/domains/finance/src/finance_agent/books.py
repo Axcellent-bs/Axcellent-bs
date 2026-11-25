@@ -397,10 +397,15 @@ def normalize_order(raw: dict[str, Any], categories: dict[str, str]) -> dict[str
             }
         )
     norm_payments = []
-    for p in payments:
+    for n, p in enumerate(payments):
         if not isinstance(p, dict):
             return None
-        norm_payments.append(p | {"created_at": fc.parse_dt(p.get("created_at")) or created})
+        # 변환기 사이트(누비투어 등)는 결제 번호가 없다: 주문 번호·순번으로 정해 둔다
+        # (11/25 실서버: 결제 번호 없는 결제가 PG 정산에서 KeyError → 재무 화면 500)
+        pid = p.get("payment_id") or f"{raw['order_id']}#pay{n + 1}"
+        norm_payments.append(
+            p | {"payment_id": pid, "created_at": fc.parse_dt(p.get("created_at")) or created}
+        )
     return {
         "order_id": raw["order_id"],
         "buyer_id": raw.get("buyer_id"),
