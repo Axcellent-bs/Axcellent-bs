@@ -154,6 +154,9 @@ def _confirm(c: TestClient, service: PlanningService, thread_id: str) -> str:
     r = c.post("/api/planning/dev-tasks", json=body)
     assert r.status_code == 200, r.text
     task_id = r.json()["data"]["task_id"]
+    # 서비스는 상태 복사본을 고쳐 바꿔 끼운다. 코딩이 도는 중에 원본을 고치면 그 바꿔 끼우기에
+    # 덮여 사라지므로(CPU를 나눠 쓰는 CI에서 드러남), 코딩이 멈춘 뒤에 잇는다
+    _settle(service, task_id)
     spec_id = _task(service, task_id).spec
     next(sp for sp in service.state.specs if sp.id == spec_id).request = rid
     return task_id
@@ -253,14 +256,19 @@ def test_planning_refusal_keeps_plan_for_retry(service: PlanningService, adapter
     assert last["kind"] == "error" and "gate_rejected" in last["text"] and last["plan"]
 
 
+DONE_CODING = ("merged", "waiting_human", "failed", "canceled")
+
+
 def _settle(service: PlanningService, task_id: str) -> str:
-    deadline = time.monotonic() + 5
+    # 끝나면 바로 돌아온다. 한도는 CI에서 CPU를 나눠 쓸 때도 넉넉하게
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        st = _task(service, task_id).coding.status
-        if st in ("merged", "waiting_human", "failed", "canceled"):
-            return st
+        coding = _task(service, task_id).coding
+        if coding is not None and coding.status in DONE_CODING:
+            return coding.status
         time.sleep(0.02)
-    return _task(service, task_id).coding.status
+    coding = _task(service, task_id).coding
+    return coding.status if coding is not None else "none"
 
 
 def test_confirmed_request_links_task_and_reports_status(service: PlanningService, adapter) -> None:

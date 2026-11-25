@@ -19,6 +19,7 @@ dev = [
     "ruff>=0.6",
     "import-linter>=2.1",
     "fakeredis>=2.23",
+    "pytest-xdist>=3.6",
 ]
 
 [tool.ruff]
@@ -31,7 +32,9 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 # 패키지마다 tests/test_smoke.py 이름이 겹쳐서 importlib 모드를 쓴다
-addopts = "--import-mode=importlib"
+# CPU 수만큼 나눠 돌린다(pytest-xdist). 같은 파일의 시험은 한 워커에서 돈다(파일 단위 준비를 한 번만).
+# 한 프로세스로 돌리려면 `-n 0`
+addopts = "--import-mode=importlib -n auto --dist loadfile"
 testpaths = [
     "shared",
     "domains",

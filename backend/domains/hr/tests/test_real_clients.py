@@ -216,7 +216,13 @@ async def test_planning_client_sends_a_contract_shaped_a2a_request(
 
 
 @pytest.mark.asyncio
-async def test_planning_errors_and_odd_replies_are_upstream_errors() -> None:
+async def test_planning_errors_and_odd_replies_are_upstream_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ax_agent_template import config as template_config
+
+    # 위 시험과 같다: 앞서 돈 시험이 남긴 이름에 기대지 않게 hr로 고정한다
+    monkeypatch.setattr(template_config, "_agent_name", "hr")
     fake = FakePlanning()
     http = httpx.AsyncClient(transport=httpx.MockTransport(fake.handler))
     planning = A2APlanningClient("http://planning.test", http_client=http)

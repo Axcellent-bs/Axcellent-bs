@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
+from ax_agent_template import config as template_config
 from ax_agent_template import events
 from ax_contracts.schemas import (
     AgentRequest,
@@ -67,6 +68,8 @@ class FakeGate:
 @pytest.fixture(autouse=True)
 def _env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AGENT_TEMPLATE_MOCK", "1")
+    # 안전 관문 조회가 에이전트 이름을 쓴다. 앞서 돈 시험이 남긴 이름에 기대지 않게 고정한다
+    monkeypatch.setattr(template_config, "_agent_name", "marketing")
     for name in (
         "MARKETING_SNS_PROVIDER",
         "MARKETING_SNS_PENDING_DB",
