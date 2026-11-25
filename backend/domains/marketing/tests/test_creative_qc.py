@@ -46,7 +46,8 @@ class FakeFfmpeg:
         if self.missing:
             raise qc.FfmpegMissing
         vf = args[args.index("-vf") + 1]
-        return 0, self.black if vf.startswith("blackdetect") else self.freeze
+        black = self.black if "blackdetect" in vf else ""
+        return 0, black + (self.freeze if "freezedetect" in vf else "")
 
 
 def test_black_ranges_warn_and_end_card_ignored(tmp_path: Path) -> None:
@@ -116,7 +117,38 @@ def test_inspect_records_checks_and_skips_same_sha(
     render["video"]["sha256"] = "b" * 64  # 영상이 바뀌면 다시
     env["store"].set_render(rid, render)
     qc.inspect(rid, None)
-    assert len(fake.calls) == calls + 2
+    assert len(fake.calls) == calls + 1  # 11/26 검은·멈춘 화면을 ffmpeg 한 번으로
+
+
+def test_black_and_freeze_in_one_ffmpeg_run(
+    env: dict[str, Any], monkeypatch  # noqa: ANN001, F811
+) -> None:
+    fake = FakeFfmpeg(black=BLACK_ERR, freeze=FREEZE_ERR)
+    _patch(monkeypatch, fake)
+    rid = _video_done(env)
+    got = qc.inspect(rid, None)
+    assert len(fake.calls) == 1
+    vf = fake.calls[0][fake.calls[0].index("-vf") + 1]
+    assert vf == f"{qc.BLACK_FILTER},{qc.FREEZE_FILTER}"
+    by = {c["id"]: c for c in got["checks"]}
+    assert by["black"]["status"] == "warn" and by["black"]["ranges"] == [[0.0, 0.8]]
+    assert by["freeze"]["status"] == "warn" and by["freeze"]["ranges"] == [[6.2, 8.4]]
+
+
+def test_one_parse_failure_keeps_the_other_result(
+    env: dict[str, Any], monkeypatch  # noqa: ANN001, F811
+) -> None:
+    _patch(monkeypatch, FakeFfmpeg(black=BLACK_ERR, freeze=FREEZE_ERR))
+
+    def broken(stderr, duration):  # noqa: ANN001, ANN202
+        raise ValueError("bad freeze line")
+
+    monkeypatch.setattr(qc, "freeze_ranges", broken)
+    rid = _video_done(env)
+    by = {c["id"]: c for c in qc.inspect(rid, None)["checks"]}
+    assert by["freeze"]["status"] == "error" and "읽지 못해" in by["freeze"]["detail_ko"]
+    assert by["black"]["status"] == "warn" and by["black"]["ranges"] == [[0.0, 0.8]]
+    assert by["duration"]["status"] == "pass"
 
 
 def test_ffmpeg_missing_is_error_but_flow_continues(
