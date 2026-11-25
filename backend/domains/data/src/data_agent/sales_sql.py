@@ -29,6 +29,8 @@ from data_agent.sales_clean import EXCLUDED_STATUSES, PAID, counts_as_revenue
 from data_agent.sales_store import SalesStore, StoredOrder, iso
 
 _EXCLUDED = ", ".join(f":x{i}" for i in range(len(EXCLUDED_STATUSES)))
+# 취소로 세는 주문 상태 (결제 실패·결제 대기는 취소가 아니다). 철자가 다른 회사도 받는다
+CANCELLED_STATUSES = ("cancelled", "canceled", "refunded_full")
 PAID_WHERE = (
     "o.tenant_id = :t AND o.created_at >= :s AND o.created_at < :e AND o.payment_status = :paid "
     f"AND LOWER(o.status) NOT IN ({_EXCLUDED})"
@@ -103,6 +105,11 @@ class Tally:
     # 찾는다: 기간과, 그 위에 다시 얹을 기간 안 환불 주문의 줄 (상품 id, 이름, 분류, 순서대로)
     window: tuple[datetime, datetime] | None = None
     refund_lines: list[tuple[str, str | None, str]] = field(default_factory=list)
+    # 취소·환불 (11/25, 회사 분리 최소안): 기간에 접수한 주문 중 취소된 주문 수,
+    # 기간에 일어난 환불 합.
+    # 원본에서 세지 못한 집계(예: 일별 집계 행만)면 None ("확인할 수 없음", 0으로 지어내지 않는다)
+    cancelled: int | None = None
+    refund_amount: int | None = None
 
 
 def _params(tenant_id: str, start: datetime, end: datetime) -> dict[str, object]:
@@ -273,6 +280,26 @@ def _odd_orders(store: SalesStore, conn: sqlite3.Connection, tenant_id: str) -> 
     return store._with_details(tenant_id, rows, conn)  # noqa: SLF001 - 같은 분석 연결
 
 
+def cancel_refund(conn: sqlite3.Connection, p: dict[str, object]) -> tuple[int, int]:
+    """(기간에 접수해 취소된 주문 수, 기간에 일어난 환불 합).
+
+    환불은 주문 상태와 상관없이 환불 시각으로 센다.
+    """
+    marks = ", ".join(f":c{i}" for i in range(len(CANCELLED_STATUSES)))
+    q = {**p, **{f"c{i}": v for i, v in enumerate(CANCELLED_STATUSES)}}
+    cancelled = conn.execute(
+        "SELECT COUNT(*) FROM sales_orders WHERE tenant_id = :t AND created_at >= :s "
+        f"AND created_at < :e AND LOWER(status) IN ({marks})",
+        q,
+    ).fetchone()[0]
+    refund = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM sales_refunds WHERE tenant_id = :t "
+        "AND refunded_at >= :s AND refunded_at < :e",
+        q,
+    ).fetchone()[0]
+    return int(cancelled), int(refund)
+
+
 def tally(store: SalesStore, tenant_id: str, start: datetime, end: datetime) -> tuple[Tally, int]:
     """[start, end) 집계와 그 기간에 접수한 주문 수(상태 무관, 품질 보고용)."""
     p = _params(tenant_id, start, end)
@@ -286,6 +313,7 @@ def tally(store: SalesStore, tenant_id: str, start: datetime, end: datetime) -> 
                 "SELECT COUNT(*) FROM sales_orders WHERE tenant_id = :t AND created_at >= :s "
                 "AND created_at < :e", p,
             ).fetchone()[0])  # fmt: skip
+            t.cancelled, t.refund_amount = cancel_refund(conn, p)
         finally:
             _drop(conn)
     refunded_any = store.orders_refunded(tenant_id, start, end)  # 기간 안 환불이 있는 주문 (드묾)

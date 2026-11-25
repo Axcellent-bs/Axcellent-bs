@@ -66,3 +66,14 @@ def test_status_values_come_from_the_rows() -> None:
 def test_negated_status_words_are_not_paid() -> None:
     found = propose.statuses(["unconfirmed", "incomplete", "not_paid", "unsettled"])
     assert set(found.values()) == {"pending_payment"}
+
+
+def test_refund_columns_are_picked_when_the_site_has_them() -> None:
+    """환불액·환불 시각 칸이 있으면 짝에 넣는다(취소·환불 KPI가 센다). 없으면 넣지 않는다."""
+    from ax_dashboard_api.site_adapter import propose as pr
+
+    row = {"code": "NB-1", "status": "fully_paid", "refunded_amount": 0, "refunded_at": None}
+    found = pr.fields("orders", [row])
+    assert found["refunded_amount"] == "refunded_amount"
+    assert found["refunded_at"] == "refunded_at"
+    assert "refunded_at" not in pr.fields("orders", [{"code": "NB-2", "status": "paid"}])

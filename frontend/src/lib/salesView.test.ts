@@ -57,6 +57,21 @@ test("부족 상태는 숫자 없이 이유와 품질 사실만 보인다", () =
   assert.equal(JSON.stringify(v).includes("18,420,000"), false);
 });
 
+test("취소·환불은 늘면 나쁜 쪽 색(화살표는 그대로), 값이 없으면 집계 없음", () => {
+  const extra = [
+    { key: "cancel_count" as const, label: "취소 주문", unit: "count" as const, value: 12, previous: 10, change: 0.2, change_kind: "ratio" as const },
+    { key: "refund_amount" as const, label: "환불액", unit: "won" as const, value: null, previous: null, change: null, change_kind: "ratio" as const },
+  ];
+  const v = salesView(sample({ kpis: [...sample().kpis, ...extra] })) as SalesOkView;
+  const cancel = v.kpis.find((k) => k.label === "취소 주문")!;
+  assert.equal(cancel.value, "12건");
+  assert.equal(cancel.change, "▲ 20%");
+  assert.equal(cancel.tone, "down");
+  assert.equal(v.kpis.find((k) => k.label === "환불액")!.value, "집계 없음");
+  // 매출은 그대로 늘면 좋은 쪽
+  assert.equal(v.kpis[0].tone, "up");
+});
+
 test("정상 상태는 원·건·비율과 변화를 글자로 만든다", () => {
   const v = salesView(sample()) as SalesOkView;
   assert.equal(v.kind, "ok");

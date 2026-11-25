@@ -99,6 +99,8 @@ def _buyers(t: Tally, sales: SalesStore, tenant_id: str, start: datetime, end: d
     """구매자 숫자: 결정 1 전까지 원본 그 기간 그대로 (날짜끼리 더할 수 없다)."""
     src, _ = tally(sales, tenant_id, start, end)
     t.buyers, t.repeat_buyers = src.buyers, src.repeat_buyers
+    # 취소·환불도 원본 그 기간 그대로 (일별 집계 행에 없는 칸)
+    t.cancelled, t.refund_amount = src.cancelled, src.refund_amount
     t.new_revenue, t.repeat_revenue = src.new_revenue, src.repeat_revenue
 
 

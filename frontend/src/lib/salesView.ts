@@ -26,6 +26,10 @@ export function rate(v: number): string {
 }
 
 /** 변화 한 줄. ratio → "▲ 6.2%", points → "▲ 1.8%p", 없으면 "비교 없음" */
+/** 늘면 나쁜 KPI (취소 주문·환불액) */
+const RISE_IS_BAD = new Set<string>(["cancel_count", "refund_amount"]);
+const flip = (t: Tone): Tone => (t === "up" ? "down" : t === "down" ? "up" : t);
+
 export function changeText(change: number | null, kind: "ratio" | "points"): { text: string; tone: Tone } {
   if (change == null || !Number.isFinite(change)) return { text: "비교 없음", tone: "flat" };
   const unit = kind === "points" ? "%p" : "%";
@@ -143,7 +147,9 @@ export function salesView(out: SalesAnalysisOutput): SalesView {
     compare: from && to ? `비교 기간 ${from} ~ ${to}` : "비교 기간 모름",
     definition: out.definition,
     kpis: out.kpis.map((k) => {
-      const c = changeText(k.change, k.change_kind);
+      const raw = changeText(k.change, k.change_kind);
+      // 취소·환불은 늘면 나쁜 쪽이라 색을 뒤집는다 (화살표 방향은 그대로)
+      const c = RISE_IS_BAD.has(k.key) ? { ...raw, tone: flip(raw.tone) } : raw;
       const value = k.value == null ? "집계 없음" : k.unit === "won" ? won(k.value) : k.unit === "rate" ? rate(k.value) : countText(k.value);
       return { label: k.label, value, change: c.text, tone: c.tone };
     }),

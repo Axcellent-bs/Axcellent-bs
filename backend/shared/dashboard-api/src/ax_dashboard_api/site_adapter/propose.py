@@ -43,6 +43,8 @@ OPTIONAL: dict[Resource, dict[str, tuple[str, ...]]] = {
     "orders": {
         "updated_at": ("updated_at", "modified_at", "updated"),
         "refunded_amount": ("refunded_amount", "refund_amount", "refunded"),
+        # 환불 시각 (11/25, 누비투어 예약·스터디온 주문에 추가됨). 없으면 주문 바뀐 시각으로 센다
+        "refunded_at": ("refunded_at", "refund_at", "refunded_time"),
     },
     "products": {},
 }

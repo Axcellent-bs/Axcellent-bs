@@ -97,6 +97,11 @@ def kpis(cur: Tally, prev: Tally) -> list[SalesKpi]:
                  change=change(aov, prev_aov)),
         SalesKpi(key="repeat_rate", label="재구매 고객 비율", unit="rate", value=repeat,
                  previous=prev_repeat, change=repeat_change, change_kind="points"),
+        # 취소·환불 (11/25): 원본에서 세지 못했으면 값 없음 ("확인할 수 없음")
+        SalesKpi(key="cancel_count", label="취소 주문", unit="count", value=cur.cancelled,
+                 previous=prev.cancelled, change=change(cur.cancelled, prev.cancelled)),
+        SalesKpi(key="refund_amount", label="환불액", unit="won", value=cur.refund_amount,
+                 previous=prev.refund_amount, change=change(cur.refund_amount, prev.refund_amount)),
     ]  # fmt: skip
 
 
