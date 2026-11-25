@@ -464,8 +464,9 @@ async def test_each_connected_company_is_read_on_its_own(
     def route(request: httpx.Request) -> httpx.Response:
         if request.url.path.startswith("/site-adapter/nubi/"):
             headers.append(("nubi", request.headers.get(cc.CALLER_COMPANY_HEADER, "")))
-            inner = request.copy_with(url=request.url.copy_with(
-                path=request.url.path.removeprefix("/site-adapter/nubi")))  # fmt: skip
+            path = request.url.path.removeprefix("/site-adapter/nubi")
+            inner = httpx.Request(request.method, request.url.copy_with(path=path),
+                                  headers=request.headers)  # fmt: skip
             return nubi.handle(inner)
         return shop.handle(request)
 
@@ -475,6 +476,7 @@ async def test_each_connected_company_is_read_on_its_own(
     shop.put(order("ord_1", "2026-11-20T01:00:00Z"))
     nubi.put(order("NB-1", "2026-11-20T01:00:00Z"))
     first = await cd.run_all()
+    assert first["catbooks"].error is None and first["nubi"].error is None
     assert first["catbooks"].baseline and first["nubi"].baseline
     assert (Path(cd._state_path("catbooks")).name, Path(cd._state_path("nubi")).name) == (
         "state.json",
