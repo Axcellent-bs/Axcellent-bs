@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 기획 state proposals[].video_plan → 제안 화면 "3 영상 제작안" 값 (lib/videoPlan.ts)
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sceneKeyframeLine, sceneTime, toVideoPlan, videoPlanChip, videoPlanSummary, videoPurposeChip } from "./videoPlan.ts";
+import { sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip } from "./videoPlan.ts";
 
 // 11/20 16:55 서버 PROP-15 모양 (snake_case, 계약 VideoPlan)
 const RAW = {
@@ -126,4 +126,30 @@ test("3D 마네킹 콘티(11/25): 그라데이션·url(#id)가 든 8KB 넘는 SV
   assert.equal(v.scenes[0].startSvg, svg);
   assert.equal(v.scenes[0].endSvg, svg);
   assert.equal(v.scenes.length, 4);
+});
+
+test("규칙 초안 이유: 이유마다 칩 옆 한 줄, 칸이 비거나 모르는 값이면 지금 그대로(빈 줄)", () => {
+  const want = {
+    no_llm: "회사 AI가 연결되지 않아 규칙으로 썼어요",
+    timeout: "AI가 제한 시간 안에 답하지 못해 규칙으로 썼어요",
+    bad_format: "AI 답 형식이 맞지 않아 규칙으로 썼어요",
+    rejected: "AI 답이 금지 규칙에 걸려 규칙으로 썼어요",
+    error: "AI 호출이 실패해 규칙으로 썼어요",
+  };
+  for (const [reason, line] of Object.entries(want)) {
+    const v = toVideoPlan({ ...RAW, written_by: "rule", fallback_reason: reason });
+    assert.ok(v);
+    assert.equal(v.fallbackReason, reason);
+    assert.equal(videoFallbackLine(v), line);
+    assert.equal(videoFallbackLine(toVideoPlan({ ...RAW, writtenBy: "rule", fallbackReason: reason })!), line); // camel 같은 값
+    assert.equal(videoPlanChip(v), "규칙 초안 · 15초 · 9:16"); // 칩은 그대로
+  }
+  for (const raw of [{ ...RAW, written_by: "rule" }, { ...RAW, written_by: "rule", fallback_reason: "" }, { ...RAW, written_by: "rule", fallback_reason: "모름" }]) {
+    const v = toVideoPlan(raw);
+    assert.ok(v);
+    assert.equal("fallbackReason" in v, false);
+    assert.equal(videoFallbackLine(v), "");
+  }
+  // LLM 제작안이면 이유 칸이 와도 줄을 그리지 않는다
+  assert.equal(videoFallbackLine(toVideoPlan({ ...RAW, fallback_reason: "timeout" })!), "");
 });

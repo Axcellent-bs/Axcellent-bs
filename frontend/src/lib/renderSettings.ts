@@ -22,7 +22,8 @@ export interface RenderValues {
   speed: Speed | null;
 }
 export interface ImageModelOption { id: string; name: string }
-export interface VideoModelOption { id: string; name: string; min_s: number; max_s: number; aspects: Aspect[] }
+/** 11/25: 서버가 모르는 모델은 `min_s`·`max_s`가 null이다(계약 `RenderVideoModel.min_s: int | None`) */
+export interface VideoModelOption { id: string; name: string; min_s: number | null; max_s: number | null; aspects: Aspect[] }
 export interface RenderSettingsState {
   settings: RenderValues | null;
   defaults: RenderValues;
@@ -63,6 +64,9 @@ function parseValues(x: unknown): RenderValues | null {
   };
 }
 
+/** 초 범위 값: 수 또는 null(없음 포함). 그 밖(글자 등)은 모양이 틀린 응답 */
+const secOrNull = (v: unknown): v is number | null | undefined => v === null || v === undefined || (typeof v === "number" && Number.isFinite(v));
+
 /** 서버 응답(`data` 안쪽)을 화면 상태로. 모양이 맞지 않으면 null → 칸을 숨긴다 */
 export function parseRenderSettings(raw: unknown): RenderSettingsState | null {
   if (!isObj(raw)) return null;
@@ -82,8 +86,8 @@ export function parseRenderSettings(raw: unknown): RenderSettingsState | null {
   }
   const video: VideoModelOption[] = [];
   for (const o of m.video) {
-    if (!isObj(o) || typeof o.id !== "string" || typeof o.name !== "string" || typeof o.min_s !== "number" || typeof o.max_s !== "number" || !Array.isArray(o.aspects)) return null;
-    video.push({ id: o.id, name: o.name, min_s: o.min_s, max_s: o.max_s, aspects: o.aspects.filter(isAspect) });
+    if (!isObj(o) || typeof o.id !== "string" || typeof o.name !== "string" || !secOrNull(o.min_s) || !secOrNull(o.max_s) || !Array.isArray(o.aspects)) return null;
+    video.push({ id: o.id, name: o.name, min_s: o.min_s ?? null, max_s: o.max_s ?? null, aspects: o.aspects.filter(isAspect) });
   }
   if (typeof raw.can_edit !== "boolean") return null;
   const speedSupported = isObj(raw.defaults) && "speed" in raw.defaults;
@@ -108,17 +112,31 @@ export function videoModelOf(s: RenderSettingsState, id: string | null): VideoMo
   return id ? s.models.video.find((m) => m.id === id) ?? null : null;
 }
 
-/** 고른 영상 모델의 길이 선택지(기획서 따르기는 늘 따로). 모르는 모델이면 비어 있다 */
+/** 길이 선택지를 만들 때 모르는 쪽 끝(한쪽만 알 때) */
+export const SECONDS_FLOOR = 1;
+export const SECONDS_CEIL = 60;
+
+/** 고른 영상 모델의 길이 선택지(기획서 따르기는 늘 따로). 모르는 모델이면 비어 있다.
+ *  범위를 둘 다 모르면(null) 비어 있다(= "기획서 따르기"만). 한쪽만 알면 아는 쪽으로 자른다(모르는 쪽은 1·60초) */
 export function secondsOptions(model: VideoModelOption | null): number[] {
-  if (!model || model.max_s < model.min_s) return [];
+  if (!model || (model.min_s === null && model.max_s === null)) return [];
+  const lo = Math.max(SECONDS_FLOOR, Math.ceil(model.min_s ?? SECONDS_FLOOR));
+  const hi = model.max_s ?? Math.min(SECONDS_CEIL, lo + SECONDS_CEIL - 1);
+  if (hi < lo) return [];
   const out: number[] = [];
-  for (let n = Math.ceil(model.min_s); n <= model.max_s && out.length < 60; n++) out.push(n);
+  for (let n = lo; n <= hi && out.length < 60; n++) out.push(n);
   return out;
 }
 
-/** 고른 영상 모델의 비율 선택지. 모르는 모델이면 셋 모두 */
+/** 모델 목록에 붙일 길이 글: "3~20초", 한쪽만 알면 "~20초"·"3초~", 모르면 "" */
+export function rangeLabel(model: Pick<VideoModelOption, "min_s" | "max_s">): string {
+  if (model.min_s === null && model.max_s === null) return "";
+  return `${model.min_s ?? ""}${model.min_s !== null && model.max_s === null ? "초" : ""}~${model.max_s !== null ? `${model.max_s}초` : ""}`;
+}
+
+/** 고른 영상 모델의 비율 선택지. 모르는 모델이거나 서버가 비율을 비워 주면 셋 모두 */
 export function aspectOptions(model: VideoModelOption | null): Aspect[] {
-  return model ? model.aspects : ASPECTS;
+  return model && model.aspects.length ? model.aspects : ASPECTS;
 }
 
 /** 영상 모델을 바꾸면, 새 모델 범위를 벗어난 길이·비율은 "기획서 따르기"로 되돌린다 */

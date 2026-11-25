@@ -22,6 +22,9 @@ const inFlight = new Set<string>();
 /** 게시 요청을 보내는 중인 기획안. 같은 건을 두 번 요청하지 않는다 */
 const publishing = new Set<string>();
 
+/** 제작 기록 만들기를 보내는 중인 기획안. 같은 건을 두 번 보내지 않는다 */
+const creativeRecordInFlight = new Set<string>();
+
 const TONE: Record<string, string> = { info: "bg-brand-50 text-brand-700", ok: "bg-brand-50 text-brand-700", warn: "bg-amber-50 text-amber-800", bad: "bg-red-50 text-red-800" };
 
 function PublishRequest({ proposalId, prepared, state, onDone }: { proposalId: string; prepared: PreparedMedia; state: PublishState | null | undefined; onDone: () => void }) {
@@ -101,6 +104,60 @@ function PublishRequest({ proposalId, prepared, state, onDone }: { proposalId: s
   );
 }
 
+/**
+ * 영상 기획안의 새 길: "제작 기록으로 만들기". 기획안의 video_plan을 제작 기록(CR-…)으로 보내고,
+ * 콘티 확인·승인·영상 만들기는 제작 기록 화면(/marketing/records?id=…)에서 이어 한다.
+ * 이 버튼은 만들기만 한다 — 영상 자체는 여기서 만들지 않는다(11/25 둘로 나뉜 영상 만드는 길을 하나로 모음, 재현).
+ */
+function CreativeRecordButton({ proposalId, onDone }: { proposalId: string; onDone: () => void }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "failed">(() => (creativeRecordInFlight.has(proposalId) ? "busy" : "idle"));
+  const [recordId, setRecordId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function make() {
+    if (creativeRecordInFlight.has(proposalId)) return; // 클릭 잠금
+    creativeRecordInFlight.add(proposalId);
+    setState("busy");
+    setError(null);
+    try {
+      const { record_id } = await briefs.makeCreativeRecord(proposalId);
+      setRecordId(record_id);
+      setState("done");
+    } catch (e) {
+      setError(mediaHttpErrorKo((e as { status?: number }).status, (e as { code?: string | null }).code));
+      setState("failed");
+    } finally {
+      creativeRecordInFlight.delete(proposalId);
+      onDone();
+    }
+  }
+
+  if (state === "done" && recordId) {
+    return (
+      <p className="text-ink-700" role="status">
+        <span className="chip bg-brand-50 text-brand-700">제작 기록 만듦</span>{" "}
+        <Link className="font-medium text-brand-700 underline" to={`/marketing/records?id=${encodeURIComponent(recordId)}`}>제작 기록 열기</Link>
+        {" "}— 콘티 확인·승인·영상 만들기는 여기서 이어 합니다.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2" aria-label={`${proposalId} 제작 기록으로 만들기`}>
+      <button
+        className="btn-primary text-xs"
+        disabled={!HUMAN_TOKEN_SET || state === "busy"}
+        title={!HUMAN_TOKEN_SET ? "로그인이 필요해요" : undefined}
+        onClick={() => void make()}
+      >
+        {state === "busy" ? "만드는 중…" : "제작 기록으로 만들기"}
+      </button>
+      {error ? <span className="text-red-800" role="alert">{error}</span>
+        : <span className="text-ink-500">영상 계획을 제작 기록으로 보내 콘티부터 만듭니다. 영상은 여기서 만들지 않습니다.</span>}
+    </div>
+  );
+}
+
 function Preview({ proposalId, prepared }: { proposalId: string; prepared: PreparedMedia }) {
   const [broken, setBroken] = useState(false);
   // 사람 토큰을 붙여 받는다(서버가 읽기에도 토큰을 요구한다)
@@ -173,6 +230,9 @@ export function BriefMediaMaker({ item, onDone }: { item: StoredBrief; onDone: (
   const prepared = h?.prepared ?? (fresh?.key === requestKey ? fresh.prepared : null);
   const ready = prepared?.stage === "draft_ready";
   const kind = request.media_kind;
+  // 11/25: 영상은 제작 기록 길로(재현). 아래 옛 영상 만들기 길(만들기→사용량 확인→초안→게시 요청)은
+  // 지우지 않고 화면에서만 숨긴다 — 이미지는 그대로 그 길을 쓴다.
+  if (isReel(kind)) return <CreativeRecordButton proposalId={id} onDone={onDone} />;
   const video = isReel(kind) ? estimate?.video ?? null : null;
   const length = video ? chosen ?? video.current_s ?? video.max_s : null;
   const lengthProblem = estimate && length != null ? durationProblemKo(estimate, length) : null;

@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timedelta
 
-from ax_contracts.data_access.sales_aggregates import AggRun
+from ax_contracts.data_access.sales_aggregates import AggInput, AggRun
 from ax_contracts.schemas.data import CatalogSales
 from data_agent.aggregate import compare
 from data_agent.aggregate.backfill import (
@@ -87,15 +87,19 @@ def run_daily(  # noqa: PLR0913 - 두 저장소·회사·카탈로그·시각
     cfg: CatalogSales | None,
     now: datetime,
     run_id: str | None = None,
+    input_name: AggInput = "sales_db",
 ) -> AggRun | None:
-    """하루 계산. 이미 그 기준일로 끝났으면 None(돌지 않음)."""
+    """하루 계산. 이미 그 기준일로 끝났으면 None(돌지 않음).
+
+    `input_name`: 원본이 `sales.db`면 sales_db, 데이터 AI 메모리 저장소(3-3 A안)면
+    company_server."""
     as_of = kst_day(now) - timedelta(days=1)
     done_as_of, since = last_success(agg, tenant_id)
     if done_as_of is not None and done_as_of >= as_of:
         return None
     run = AggRun(
         run_id=run_id or f"agg_{uuid.uuid4().hex[:12]}", tenant_id=tenant_id, as_of=as_of,
-        input="sales_db", started_at=now, status="running",
+        input=input_name, started_at=now, status="running",
         source_cursor=source_cursor(sales, tenant_id),
         source_name=sales.sync_state(tenant_id).source,
     )  # fmt: skip

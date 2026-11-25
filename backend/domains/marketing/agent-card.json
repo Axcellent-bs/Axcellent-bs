@@ -809,6 +809,18 @@
       "priority": "optional"
     },
     {
+      "id": "prepare_brief_creative",
+      "description": "넘어온 기획안(proposal_id)의 영상 제작안(video_plan)으로 제작 기록(CR-…)을 만든다. 입력은 기획안 번호뿐이고 제작안은 보관본에서 읽는다. 회사 대표 캐릭터(기본)가 있으면 시트를 복사하고, 없으면 캐릭터 칸이 빈 기록을 만든 뒤 장면 스토리보드를 코드로 붙인다(LLM 없음). 스토리보드 그림은 화면의 스토리보드 만들기와 같은 규칙(시트 그림이 있고 영상에 필요할 때만, 안전 관문 generate_media B·그림 크레딧 예약)으로 시작한다. 영상 만들기·게시는 하지 않는다(영상은 creative_video_request, C 사람 승인). 같은 기획안은 다시 불러도 같은 기록이다(reused). 출력 record_id·character_record_id·reused. 실패 outcome은 brief_not_found·no_video_plan·no_scenes·storage_error·invalid_input.",
+      "input_schema": "agents/marketing/src/marketing_agent/brief_creative.py#PrepareBriefCreativeInput",
+      "output_schema": "agents/marketing/src/marketing_agent/brief_creative.py#PrepareBriefCreativeOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "choose_brief_audio",
       "description": "만든 영상(prepare_brief_media 결과)의 소리를 사람이 한 번 정한다. choice=keep: 이 영상 그대로 사용(공급자가 만든 소리를 그대로 두고 결정만 prepared.audio.decision에 남긴다. 비용 없음). choice=bgm: 배경음악 따로 만들기(영상은 같은 장부 키라 재생되어 비용이 다시 나지 않고, BGM 한 곡만 generate_media로 만든다: B등급 안전 관문 audio_cost_single·건당/월 상한·단가표 fail-closed 그대로. 영상 소리를 BGM으로 바꾸고 AI 라벨·XMP·점검을 다시 한다). 결정은 한 번만이고(audio_already_decided) 이미 게시 요청이 있으면 바꾸지 않는다(publish_already_requested). BGM이 보류·거절·실패하면 결정을 남기지 않는다. 소리가 있는 영상은 결정이 있어야 게시 요청을 만들 수 있다. 게시(publish_sns, C등급 사람 승인)는 부르지 않는다.",
       "input_schema": "agents/marketing/src/marketing_agent/brief_media.py#ChooseBriefAudioInput",

@@ -872,6 +872,10 @@ class VideoPlan(AxModel):
     purpose: Literal["solution_ad", "client_offer", "channel_content"] | None = None
     offer_ko: str = Field(default="", max_length=60)  # 혜택 한 줄 (한국어, 비면 없음)
     cta_ko: str = Field(default="", max_length=40)  # 마지막 행동 문구 (한국어, 비면 없음)
+    # 규칙 제작안으로 쓴 이유 (11/25 PROP-37 "규칙 초안"이 왜인지 화면에 보이게). LLM 제작안·사람·
+    # 예전 제작안은 "". no_llm = 회사 AI 연결 없음, timeout = 제한 시간 초과, bad_format = 답 형식
+    # 불일치, rejected = 금지 규칙에 걸림, error = 그 밖의 호출 실패
+    fallback_reason: Literal["", "no_llm", "timeout", "error", "bad_format", "rejected"] = ""
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:

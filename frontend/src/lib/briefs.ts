@@ -339,6 +339,21 @@ async function requestOutagePublish(draftId: string, retry = false): Promise<Pub
 export const outageMediaPreviewUrl = (draftId: string, version: string | null) =>
   `${DASHBOARD_API_URL}${outagePath(draftId)}/media/preview${version ? `?v=${encodeURIComponent(version.slice(0, 12))}` : ""}`;
 
+/**
+ * 넘긴 기획안의 영상 요청(`video_plan`)을 제작 기록 길로 만든다(dashboard-api, 사람 토큰 필요, POST).
+ * 기획안 번호만 보낸다(영상 계획은 서버가 보관본에서 읽는다). 서버가 기획안 id로 context_id를 고정하므로
+ * 같은 기획안을 두 번 눌러도 제작 기록은 하나다(이미 있으면 그 record_id를 그대로 돌려준다).
+ * 이 화면은 만들기만 한다: 콘티 확인·승인·영상 만들기는 제작 기록(/marketing/records?id=…)에서 이어 한다.
+ * 오류는 상태 코드만 담아 던진다(문구는 호출하는 쪽에서 붙인다).
+ */
+async function makeCreativeRecord(proposalId: string): Promise<{ record_id: string }> {
+  const path = `/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}/creative-record`;
+  const res = await fetch(`${DASHBOARD_API_URL}${path}`, { method: "POST", headers: dashboardAuth(), cache: "no-store" });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.data?.record_id) throw statusOnlyError(json, res.status);
+  return json.data as { record_id: string };
+}
+
 export const briefs = {
   list: (limit = 50) => get<BriefList>(`/api/dashboard/marketing/briefs?limit=${briefsListLimit(limit)}`),
   get: (proposalId: string) => get<StoredBrief>(`/api/dashboard/marketing/briefs/${encodeURIComponent(proposalId)}`),
@@ -347,6 +362,7 @@ export const briefs = {
   mergeOutageSnsDrafts,
   handoff,
   makeMedia,
+  makeCreativeRecord,
   chooseAudio,
   requestPublish,
   getManualPublishPackage,

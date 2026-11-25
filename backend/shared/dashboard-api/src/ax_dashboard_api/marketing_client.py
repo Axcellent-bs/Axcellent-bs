@@ -951,6 +951,10 @@ VIDEO_REFUSALS = {
     "gate_blocked": (409, "GATE_BLOCKED"),
     "unknown_campaign": (422, "UNKNOWN_CAMPAIGN"),
     "rights_not_confirmed": (422, "RIGHTS_NOT_CONFIRMED"),
+    # 기획안으로 제작 기록 만들기(11/25)
+    "brief_not_found": (404, "NOT_FOUND"),
+    "no_video_plan": (409, "NO_VIDEO_PLAN"),
+    "no_scenes": (409, "NO_SCENES"),
 }
 CREATIVE_FILES = {
     "sheet_image": ("sheet.jpg", "image/jpeg"),
@@ -971,6 +975,13 @@ UPLOAD_BASE = {
     "video": "video",
     "final_video": "final",
 }
+
+
+async def brief_creative_call(proposal_id: str) -> dict[str, Any]:
+    """넘어온 기획안의 영상 제작안으로 제작 기록을 만든다(마케팅 `prepare_brief_creative`).
+
+    같은 기획안은 마케팅이 같은 기록을 돌려준다. 영상은 만들지 않는다."""
+    return await _creative_read("prepare_brief_creative", {"proposal_id": proposal_id})
 
 
 async def creative_video_call(record_id: str, who: str | None) -> dict[str, Any]:

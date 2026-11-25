@@ -102,6 +102,7 @@ from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutpu
 from marketing_agent import ad_metrics as _ad_metrics
 from marketing_agent import board_svg as _board_svg
 from marketing_agent import (
+    brief_creative,
     brief_media,
     brief_publish,
     cost_limits,
@@ -2457,6 +2458,13 @@ def _publish_status(record: SnsHandoffRecord) -> str | None:
     return state.get("status") if state else None
 
 
+async def prepare_brief_creative_skill(request: AgentRequest) -> AgentResult:
+    """넘어온 기획안의 영상 제작안으로 제작 기록을 만든다. 영상은 만들지 않는다."""
+    return await brief_creative.prepare_brief_creative(
+        request, briefs=STATE.briefs, ledger=STATE.media_ledger
+    )
+
+
 async def choose_brief_audio_skill(request: AgentRequest) -> AgentResult:
     """만든 영상의 소리를 한 번 정한다(그대로 쓰기 / 배경음악 따로 만들기). 게시는 하지 않는다."""
     result = await brief_media.choose_brief_audio(
@@ -2810,6 +2818,7 @@ HANDLERS = {
     "prepare_sns_post_from_media": prepare_sns_post_from_media_skill,
     "prepare_brief_media": prepare_brief_media_skill,
     "choose_brief_audio": choose_brief_audio_skill,
+    "prepare_brief_creative": prepare_brief_creative_skill,
     "request_brief_publish": request_brief_publish_skill,
     "prepare_outage_sns_media": prepare_outage_sns_media_skill,
     "request_outage_sns_publish": request_outage_sns_publish_skill,

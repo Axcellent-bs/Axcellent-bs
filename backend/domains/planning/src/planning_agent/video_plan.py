@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import tomllib
 import unicodedata
 from datetime import timedelta, timezone
@@ -31,7 +32,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ValidationError
 
 from ax_agent_template import tenant
-from ax_agent_template.llm import LLMClient
+from ax_agent_template.llm import LLMClient, LLMFormatError
 from ax_contracts.schemas.planning import VideoMediaHints, VideoPlan, VideoScene
 from ax_workflow.models import Proposal
 from planning_agent import storyboard_svg
@@ -42,7 +43,11 @@ DEFAULT_SECONDS = 30
 MIN_SECONDS, MAX_SECONDS = 10, 60
 RULE_SCENES = 4
 MIN_SCENES, MAX_SCENES = 3, 6
-TIMEOUT_SECONDS = 40.0
+# 11/25 PROP-37: 장면마다 키프레임 칸·혜택·행동 문구까지 출력이 늘어 40초 안에 못 끝나 규칙 초안으로
+# 떨어졌다. 의뢰 흐름은 뒤에서 돌고(#1788 단계 제한 없음) 150초까지 기다린다. 사람이 버튼을 누르고
+# 기다리는 곳(기획안으로 만들기)은 호출하는 곳에서 HUMAN_WAIT_SECONDS를 넘긴다
+TIMEOUT_SECONDS = 150.0
+HUMAN_WAIT_SECONDS = 40.0
 
 # 모든 장면에 공통으로 붙는 화풍·금지. 화풍·주인공·배경은 회사 설정 [brand](tenant.brand())
 # 11/22: 고양이·책방 고정을 없앴다(회사가 바뀌어도 같던 문제). 캣북스는 [brand]에 고양이·책방
@@ -852,10 +857,23 @@ def _from_llm(
     """LLM 답을 계약 모양으로. 장면 수·프롬프트 규칙·실존 이름에 걸리면 None (이유 코드만 로그).
 
     광고 목적이면 첫 장면을 2초 훅으로(fun_timings) 둔다. 채널 콘텐츠면 혜택·행동 문구를 비운다."""
+    return _checked(p, got, d, b, style_, purpose)[0]
+
+
+def _checked(
+    p: Proposal,
+    got: _PlanOut,
+    d: int,
+    b: dict[str, str],
+    style_: str = PRODUCT,
+    purpose: str = CHANNEL_CONTENT,
+    elapsed: float = 0.0,
+) -> tuple[VideoPlan | None, str]:
+    """`_from_llm`과 같고, 못 쓰면 규칙 제작안 이유(`rejected`·`bad_format`)를 같이 돌려준다."""
     reason = reject_reason(p, got, style_, purpose)
     if reason:
-        log.info("LLM 영상 제작안 대신 규칙 제작안: %s", reason)
-        return None
+        log.info("LLM 영상 제작안 거절 → 규칙 제작안: %s %.1fs", reason, elapsed)
+        return None, "rejected"
     n = len(got.scenes)
     ad = purpose in PURPOSE_DIRECTION
     cuts = fun_timings(d, n) if style_ == FUN_FIRST or ad else timings(d, n)
@@ -873,7 +891,7 @@ def _from_llm(
             for i, ((start, end), s) in enumerate(zip(cuts, got.scenes, strict=True), start=1)
         ]
         scenes = overlay_safe(scenes, _company()["name"], got.cta_ko if ad else "")
-        return VideoPlan(
+        plan = VideoPlan(
             concept=_short(got.concept, 200), duration_s=d, script=_short(got.script, 800),
             scenes=scenes, style=style(b, fixed_setting=style_ != FUN_FIRST),
             negative=NEGATIVE, written_by="llm",
@@ -882,16 +900,41 @@ def _from_llm(
             cta_ko=_short(got.cta_ko, 40) if ad else "",
         )  # fmt: skip
     except ValidationError:
-        return None
+        log.info("LLM 영상 제작안 형식 → 규칙 제작안: ValidationError %.1fs", elapsed)
+        return None, "bad_format"
+    return plan, ""
+
+
+# 규칙 제작안으로 쓴 이유 (계약 VideoPlan.fallback_reason). 시간 초과·형식은 예외 종류로 가른다
+FORMAT_ERRORS: tuple[type[BaseException], ...] = (LLMFormatError, ValidationError, ValueError)
+
+
+def fallback_of(exc: BaseException) -> str:
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, FORMAT_ERRORS):
+        return "bad_format"
+    return "error"
+
+
+def _rule(p: Proposal, promo: tuple[str, str], reason: str) -> VideoPlan:
+    return rule_plan(p, promo).model_copy(update={"fallback_reason": reason})
 
 
 async def write(
-    llm: LLMClient | None, p: Proposal, context_id: str, promo: tuple[str, str] | None = None
+    llm: LLMClient | None,
+    p: Proposal,
+    context_id: str,
+    promo: tuple[str, str] | None = None,
+    timeout: float = TIMEOUT_SECONDS,
 ) -> VideoPlan:
-    """LLM 제작안, 없거나 실패·규칙 위반이면 규칙 제작안. promo: 홍보 방향(없으면 promo_of)."""
+    """LLM 제작안, 없거나 실패·규칙 위반이면 규칙 제작안. promo: 홍보 방향(없으면 promo_of).
+
+    규칙 제작안이면 `fallback_reason`에 이유(no_llm·timeout·bad_format·rejected·error)를 남긴다.
+    timeout: LLM 제한 시간(초). 사람이 기다리는 곳은 HUMAN_WAIT_SECONDS를 넘긴다."""
     promo = promo or promo_of(p)
     if llm is None:
-        return rule_plan(p, promo)
+        return _rule(p, promo, "no_llm")
     d = duration_of(p)
     b = tenant.brand()
     data = {
@@ -915,14 +958,20 @@ async def write(
         character_ko=b["character_ko"], setting_rule=setting_rule(style_, b),
         direction=direction(style_, exposure, purpose),
     )  # fmt: skip
+    started = time.monotonic()
     try:
         got = await asyncio.wait_for(
             llm.structured(prompt, _PlanOut, untrusted=data, context_id=context_id),
-            TIMEOUT_SECONDS,
+            timeout,
         )
-    except Exception:  # noqa: BLE001 - 규칙 제작안으로 대신
-        return rule_plan(p, promo)
-    plan = _from_llm(p, got, d, b, style_, purpose) or rule_plan(p, promo)
+    except Exception as exc:  # noqa: BLE001 - 규칙 제작안으로 대신 (종류·경과 초만 로그)
+        elapsed = time.monotonic() - started
+        log.warning("LLM 영상 제작안 실패 → 규칙 제작안: %s %.1fs", type(exc).__name__, elapsed)
+        return _rule(p, promo, fallback_of(exc))
+    elapsed = time.monotonic() - started
+    plan, reason = _checked(p, got, d, b, style_, purpose, elapsed)
+    if plan is None:
+        plan = _rule(p, promo, reason)
     # 11/25 예진: 장면별 첫·끝 화면 SVG 콘티를 같은 LLM으로 그려 함께 넘긴다(실패해도 그대로)
     drawn, _ = await storyboard_svg.draw(llm, plan, context_id)
     return drawn

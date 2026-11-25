@@ -40,7 +40,22 @@ export interface VideoPlanView {
   purpose?: VideoPurpose // 광고 목적 (예전 제작안·규칙 제작안은 없음)
   offerKo?: string // 혜택 한 줄
   ctaKo?: string // 마지막 행동 문구
+  fallbackReason?: VideoFallbackReason // 규칙 초안이 된 이유 (11/25, 예전 제작안·LLM 제작안은 없음)
 }
+
+export type VideoFallbackReason = 'no_llm' | 'timeout' | 'bad_format' | 'rejected' | 'error'
+/** 규칙 초안 칩 옆 이유 한 줄 (계약 VideoPlan.fallback_reason) */
+export const VIDEO_FALLBACK_LINE: Record<VideoFallbackReason, string> = {
+  no_llm: '회사 AI가 연결되지 않아 규칙으로 썼어요',
+  timeout: 'AI가 제한 시간 안에 답하지 못해 규칙으로 썼어요',
+  bad_format: 'AI 답 형식이 맞지 않아 규칙으로 썼어요',
+  rejected: 'AI 답이 금지 규칙에 걸려 규칙으로 썼어요',
+  error: 'AI 호출이 실패해 규칙으로 썼어요',
+}
+const FALLBACKS = new Set<string>(Object.keys(VIDEO_FALLBACK_LINE))
+/** 규칙 초안이고 이유가 있을 때만 그 한 줄, 아니면 '' (지금 화면 그대로) */
+export const videoFallbackLine = (v: Pick<VideoPlanView, 'writtenBy' | 'fallbackReason'>) =>
+  v.writtenBy === 'rule' && v.fallbackReason ? VIDEO_FALLBACK_LINE[v.fallbackReason] : ''
 
 type Json = Record<string, unknown>
 const obj = (v: unknown): Json | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Json) : null)
@@ -96,6 +111,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
   const hints = h ? { season: str(h.season) || undefined, colorTheme: str(pick(h, 'colorTheme', 'color_theme')) || undefined, category: str(h.category) || undefined } : undefined
   const purpose = str(o.purpose)
   const offerKo = str(pick(o, 'offerKo', 'offer_ko')), ctaKo = str(pick(o, 'ctaKo', 'cta_ko'))
+  const fallback = str(pick(o, 'fallbackReason', 'fallback_reason'))
   return {
     concept, durationS, aspect, script: str(o.script),
     scenes: (scenes as VideoSceneView[]).slice().sort((a, b) => a.n - b.n),
@@ -105,6 +121,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     ...(PURPOSES.has(purpose) ? { purpose: purpose as VideoPurpose } : {}),
     ...(offerKo ? { offerKo } : {}),
     ...(ctaKo ? { ctaKo } : {}),
+    ...(FALLBACKS.has(fallback) ? { fallbackReason: fallback as VideoFallbackReason } : {}),
   }
 }
 

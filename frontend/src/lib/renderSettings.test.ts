@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { ApiError } from "./apiError.ts";
 import {
   FORBIDDEN_NOTE, SPEEDS, aspectOptions, changeVideoModel, defaultHint, loadRenderSettings, parseRenderSettings, sameValues, saveBody, saveErrorKo,
-  secondsOptions, speedLabel, startValues, videoModelOf, type RenderSettingsState,
+  rangeLabel, secondsOptions, speedLabel, startValues, videoModelOf, type RenderSettingsState,
 } from "./renderSettings.ts";
 import { speedLine, videoSummaryLine } from "./creativeVideo.ts";
 
@@ -116,4 +116,50 @@ test("영상 요약: 배속했으면 만든 길이 → 배속 → 기획 길이"
   assert.equal(speedLine({ seconds: 15 }), null); // 옛 기록
   const line = videoSummaryLine("awaiting_approval", { model: "kling4_0", seconds: 18, speed: 1.2, generated_seconds: 18, aspect: "9:16" });
   assert.equal(line, "kling4_0 · 18초 만들어 1.2배속 → 15초 · 9:16");
+});
+
+// 11/25 운영: 서버가 모르는 영상 모델의 min_s·max_s를 null로 줘서 설정 전체가 숨던 것
+const NULL_RANGE = {
+  ...RAW,
+  models: {
+    ...RAW.models,
+    video: [
+      ...RAW.models.video,
+      { id: "kling4_0", name: "Kling 4.0", min_s: null, max_s: null, aspects: [] },
+      { id: "max_only", name: "Max only", min_s: null, max_s: 6, aspects: ["9:16"] },
+      { id: "min_only", name: "Min only", min_s: 25, max_s: null, aspects: ["1:1"] },
+    ],
+  },
+};
+
+test("min_s·max_s가 null인 모델이 섞여도 설정을 버리지 않는다", () => {
+  const s = parseRenderSettings(NULL_RANGE);
+  assert.ok(s);
+  assert.equal(s.models.video.length, 5);
+  const k = videoModelOf(s, "kling4_0");
+  assert.deepEqual(k && { min: k.min_s, max: k.max_s }, { min: null, max: null });
+  // 범위를 모르면 "기획서 따르기"만(정수 칸 없음), 비율이 비면 셋 모두
+  assert.deepEqual(secondsOptions(k), []);
+  assert.deepEqual(aspectOptions(k), ["9:16", "1:1", "16:9"]);
+  // 한쪽만 알면 아는 쪽으로 자른다
+  assert.deepEqual(secondsOptions(videoModelOf(s, "max_only")), [1, 2, 3, 4, 5, 6]);
+  const minOnly = secondsOptions(videoModelOf(s, "min_only"));
+  assert.equal(minOnly[0], 25);
+  assert.ok(minOnly.length > 0 && minOnly.length <= 60);
+  // 범위를 아는 모델은 그대로
+  assert.equal(secondsOptions(videoModelOf(s, "kling")).length, 18);
+  // 모델을 바꾸면 길이 정수는 기획서 따르기로
+  assert.equal(changeVideoModel(s, { ...startValues(s), video_seconds: 10 }, "kling4_0").video_seconds, "plan");
+});
+
+test("모델 목록 길이 글: 모르면 비우고 한쪽만 알면 그쪽만", () => {
+  assert.equal(rangeLabel({ min_s: 3, max_s: 20 }), "3~20초");
+  assert.equal(rangeLabel({ min_s: null, max_s: null }), "");
+  assert.equal(rangeLabel({ min_s: null, max_s: 6 }), "~6초");
+  assert.equal(rangeLabel({ min_s: 25, max_s: null }), "25초~");
+});
+
+test("초 범위가 글자면 여전히 모양이 틀린 응답(숨김)", () => {
+  const bad = { ...RAW, models: { ...RAW.models, video: [{ id: "x", name: "X", min_s: "3", max_s: 20, aspects: [] }] } };
+  assert.equal(parseRenderSettings(bad), null);
 });
