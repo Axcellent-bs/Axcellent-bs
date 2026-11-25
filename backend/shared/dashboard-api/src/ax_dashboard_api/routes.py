@@ -1619,10 +1619,18 @@ async def marketing_creative_video(
     """스토리보드 그림으로 Higgsfield 영상 만들기를 사람 승인에 올린다(`creative_video_request`, C).
 
     승인 전에는 아무것도 만들지 않는다. 요청한 사람 이름은 사람 토큰에서 채운다.
+    11/26 본문 `{"regenerate": true}`: 기술 검사 확인 필요인 다 만든 영상을 다시 만들기(사람 버튼).
     """
     if is_mock():
         raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
     who = human_from_authorization(request.headers.get("authorization"))
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    regenerate = isinstance(body, dict) and body.get("regenerate") is True
+    if regenerate:
+        return ok(await marketing_client.creative_video_call(record_id, who, regenerate=True))
     return ok(await marketing_client.creative_video_call(record_id, who))
 
 

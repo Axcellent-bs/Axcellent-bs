@@ -860,18 +860,25 @@ async def _mcp_render(
 # ---------------------------------------------------------------- 영상 (사람 승인)
 async def request_video(
     ledger: MediaLedger, meta: RequestMeta, record_id: str, who: str | None,
-    cid: str | None = None,
+    cid: str | None = None, *, regenerate: bool = False,
 ) -> dict[str, Any]:  # fmt: skip
     """영상 만들기를 사람 승인에 올린다. 돌려주는 값은 기록의 render.video.
 
     회사: `cid` → 그림을 만들 때 남긴 회사 → `request_company(meta)`. 정한 값을 기록에 남겨
-    승인 뒤(check_video·_render_video)에도 같은 회사로 만든다."""
+    승인 뒤(check_video·_render_video)에도 같은 회사로 만든다.
+
+    11/26 `regenerate`(화면 [영상 다시 만들기] 버튼에서만): 다 만든 영상(done)이라도 그 기록의
+    기술 검사(render.qc)에 확인 필요(warn)가 있으면 새 멱등 키로 영상 승인을 다시 요청한다.
+    사람 승인 관문·영상 예산 예약은 그대로이고 그 밖은 지금과 같다(자동으로 다시 만들지 않는다)."""
+    from marketing_agent import creative_qc
+
     rec = _creative.store().get(record_id)
     if rec is None:
         raise RenderError("not_found")
     render = rec.get("render") or {}
     video = render.get("video") or {}
-    if video.get("status") in ("awaiting_approval", "running", "done"):
+    again = regenerate and video.get("status") == "done" and creative_qc.has_warn(render)
+    if video.get("status") in ("awaiting_approval", "running", "done") and not again:
         return video
     if render.get(SUPERSEDED):  # 11/26 의뢰 캐릭터를 바꿔 멈춘 기록으로는 영상을 요청하지 않는다
         raise RenderError(CHARACTER_CHANGED)
@@ -916,7 +923,10 @@ async def request_video(
             raise RenderError(_code(error)) from None
     # 11/26 거절(사람·기한 지남) 뒤 다시 요청하면 새 키로 묻는다. 같은 키면 관문이 예전 거절을
     # 그대로 돌려준다. 콘티·키프레임은 기록에 그대로 있어 다시 만들지 않는다
-    attempt = int(video.get("attempt") or 0) + (1 if video.get("status") == "rejected" else 0)
+    # 11/26 기술 검사 확인 필요로 다시 만들 때(again)도 새 키
+    attempt = int(video.get("attempt") or 0) + (
+        1 if video.get("status") == "rejected" or again else 0
+    )
     key = f"{meta.context_id}:{VIDEO_ACTION}:{record_id}" + (f":retry{attempt}" if attempt else "")
     now = _now()
     try:
@@ -1252,6 +1262,14 @@ async def _overlay_after_attach(record_id: str, cid: str | None) -> None:
         await creative_overlay.apply(record_id, cid)
     except Exception:  # noqa: BLE001 - 자막 얹기는 부가 기능이라 영상·게시 흐름을 막지 않는다
         logger.exception("creative_render: 자막 얹기 실패 (%s)", record_id)
+    # 11/26 영상 기술 검사(검은 화면·멈춘 화면·길이). 자막 얹기 뒤 내보낼 영상으로 한 번,
+    # 같은 sha면 다시 안 돌린다. 실패해도 흐름은 계속
+    try:
+        from marketing_agent import creative_qc
+
+        await creative_qc.run(record_id, cid)
+    except Exception:  # noqa: BLE001 - 기술 검사는 부가 기능이라 영상·게시 흐름을 막지 않는다
+        logger.exception("creative_render: 기술 검사 실패 (%s)", record_id)
 
 
 async def _api_video(
