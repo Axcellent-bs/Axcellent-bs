@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 영상 대본 칸의 순수 계산 (11/23).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { nearestCount, saveBody, scriptProblem, sourceLabel, spanLabel, stageChips, updateScene, type CreativeScript } from "./creativeScript.ts";
+import { boardBehindScript, nearestCount, saveBody, scriptProblem, sourceLabel, spanLabel, stageChips, updateScene, type CreativeScript } from "./creativeScript.ts";
 
 const SCRIPT: CreativeScript = {
   title_ko: "들판의 하루",
@@ -57,4 +57,20 @@ test("다시 쓰기 장면 수는 6·9·12 중 가장 가까운 값", () => {
   assert.equal(nearestCount(8), 9);
   assert.equal(nearestCount(12), 12);
   assert.equal(nearestCount(1), 6);
+});
+
+test("boardBehindScript: 대본이 있고 스토리보드가 대본을 안 따르면 다시 만들기", () => {
+  assert.equal(boardBehindScript({ script: { at: "2026-11-25T03:00:00Z" }, storyboard: { script_used: false } }), true);
+});
+
+test("boardBehindScript: 대본을 스토리보드보다 나중에 고쳤으면 다시 만들기", () => {
+  const rec = { script: { at: "2026-11-25T03:10:00Z" }, storyboard: { script_used: true }, storyboard_at: "2026-11-25T03:00:00Z" };
+  assert.equal(boardBehindScript(rec), true);
+  assert.equal(boardBehindScript({ ...rec, storyboard_at: "2026-11-25T03:20:00Z" }), false);
+});
+
+test("boardBehindScript: 대본이나 스토리보드가 없거나 시각을 모르면 버튼을 안 띄운다", () => {
+  assert.equal(boardBehindScript({ script: null, storyboard: { script_used: false } }), false);
+  assert.equal(boardBehindScript({ script: { at: "2026-11-25T03:00:00Z" }, storyboard: null }), false);
+  assert.equal(boardBehindScript({ script: { at: null }, storyboard: { script_used: true }, storyboard_at: "2026-11-25T03:00:00Z" }), false);
 });

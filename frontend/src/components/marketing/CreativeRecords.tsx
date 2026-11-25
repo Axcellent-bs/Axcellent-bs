@@ -10,7 +10,8 @@ import { PromptBox } from "./PromptParts";
 import { RenderPanel } from "./RenderPanel";
 import { RequestVideos } from "./RequestVideos";
 import { ScriptPanel } from "./ScriptPanel";
-import { nearestCount, stageChips } from "@/lib/creativeScript";
+import { RecordBoardFromScript, RecordScriptWrite } from "./RecordScriptStart";
+import { boardBehindScript, nearestCount, stageChips } from "@/lib/creativeScript";
 
 // 마케팅 › 제작 기록 (/marketing/records). 탭 두 개:
 // - 이미지 시트 · 스토리보드: SNS·미디어 탭에서 만든 이미지 시트와 이어 만든 대본·스토리보드를 기록마다 다시 본다.
@@ -61,8 +62,14 @@ function Detail({ id }: { id: string }) {
         <div className="pt-3">
           {rec.script
             ? <ScriptPanel recordId={rec.record_id} script={rec.script} scenes={nearestCount(rec.script.scenes.length)} onChange={(script) => setRec({ ...rec, script })} />
-            : <p className="text-sm text-ink-500">이 기록에는 대본이 없어요. SNS·미디어에서 줄거리를 넣고 만들면 대본이 먼저 생기고 스토리보드가 그 장면을 따라요.</p>}
-          {rec.script && rec.storyboard && !rec.storyboard.script_used && <p className="mt-2 text-xs text-ink-500">지금 스토리보드는 대본 없이 줄거리로 만든 것이에요.</p>}
+            : <RecordScriptWrite recordId={rec.record_id} story={rec.story ?? ""} scenes={rec.storyboard?.shots.length ?? 6}
+                onWritten={(script, story) => setRec({ ...rec, script, story })} />}
+          {rec.script && boardBehindScript(rec) && (
+            <div className="mt-3">
+              <RecordBoardFromScript recordId={rec.record_id} story={rec.story ?? rec.script.title_ko} characterEn={rec.sheet.consistency_en}
+                scenes={rec.script.scenes.length} onBoard={(storyboard) => setRec({ ...rec, storyboard, storyboard_at: new Date().toISOString() })} />
+            </div>
+          )}
         </div>
       </details>
       <section className="space-y-3">
