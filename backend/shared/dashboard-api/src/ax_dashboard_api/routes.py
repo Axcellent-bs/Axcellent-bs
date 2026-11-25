@@ -2933,8 +2933,11 @@ async def incident(context_id: str, authorization: str | None = Header(None)) ->
 
 
 @router.get("/executions")
-async def executions(context_id: str | None = None) -> dict:
-    """안전 관문 실행 기록. 요청 원문(`params`)은 빼고 판정과 금액만 보여 준다."""
+async def executions(
+    context_id: str | None = None, authorization: str | None = Header(None)
+) -> dict:
+    """안전 관문 실행 기록. 요청 원문(`params`)은 빼고 판정과 금액만 보여 준다.
+    로그인 세션 토큰을 넘겨 그 회사 기록만 받는다(11/25 회사 분리)."""
     if is_mock():
         items = [
             e
@@ -2942,7 +2945,7 @@ async def executions(context_id: str | None = None) -> dict:
             if context_id is None or e["request"]["context_id"] == context_id
         ]
     else:
-        items = await relay.executions(context_id)
+        items = await relay.executions(context_id, authorization)
     return ok(items, total=len(items))
 
 

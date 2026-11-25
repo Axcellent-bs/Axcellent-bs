@@ -148,9 +148,14 @@ def project_execution(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def executions(context_id: str | None = None) -> list[dict[str, Any]]:
+async def executions(
+    context_id: str | None = None, authorization: str | None = None
+) -> list[dict[str, Any]]:
+    """세션 토큰이면 넘겨 safety가 그 회사 실행 기록만 주게 한다(11/25 회사 분리)."""
     params = {"context_id": context_id} if context_id else None
-    data = await _get("safety", "/api/safety/executions", params)
+    data = await _get(
+        "safety", "/api/safety/executions", params, headers=_session_headers(authorization)
+    )
     if not isinstance(data, list):
         raise ApiError(502, "UPSTREAM_ERROR", "safety 응답 형식이 다르다")
     return [project_execution(r) for r in data if isinstance(r, dict)]

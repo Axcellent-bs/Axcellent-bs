@@ -345,3 +345,30 @@ def test_from_to_and_message_type_filters(monkeypatch):
     assert ids(dept="finance", message_type="reply") == ["log_t2", "log_t4"]
     assert ids() == [f"log_t{n}" for n in range(1, 7)]  # 거르개가 없으면 그대로
     assert client.get(URL, params={"message_type": "x"}).status_code == 422
+
+
+def test_common_log_query_uses_the_session_company(monkeypatch):
+    """소통 줄은 로그인 회사 것만 읽는다(11/25 회사 분리). 캣북스·세션 없음은 예전 값(shop-demo)."""
+    from ax_dashboard_api import envelope
+
+    monkeypatch.delenv("DASHBOARD_MOCK", raising=False)
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    monkeypatch.delenv("TENANT_ID", raising=False)
+    seen: list[CommonLogQuery] = []
+
+    def reader(q: CommonLogQuery) -> CommonLogResult:
+        seen.append(q)
+        return CommonLogResult()
+
+    communications.set_reader(reader)
+    for company, want in (
+        ("nubi-tour", "nubi-tour"),
+        ("catbooks", "shop-demo"),
+        (None, "shop-demo"),
+    ):
+        token = envelope._SESSION_COMPANY.set(company)
+        try:
+            communications.list_communications(None, None)
+        finally:
+            envelope._SESSION_COMPANY.reset(token)
+        assert seen[-1].tenant_id == want, company
