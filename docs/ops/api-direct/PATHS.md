@@ -39,7 +39,7 @@
 | 4 | `GET /dashboard-api/api/dashboard/communications` | dashboard-api | 세션 | 읽기 | 위와 같이 3초 폴링 |
 | 5 | `GET /dashboard-api/api/dashboard/office-room` | dashboard-api | 세션 | 읽기 | 4초 폴링(단톡방) |
 | 6 | `GET /dashboard-api/api/dashboard/handoffs?status=open` | dashboard-api | 세션 | 읽기 | 사이드바 숫자, 30초 |
-| 6 | `GET /planning-api/api/planning/state`, `GET /dev-api/api/planning/state` | 기획(8101)·개발(8111) | 없음 | 읽기 | 사이드바 숫자, 30초마다 각 1회. state 전체라 응답이 크다 |
+| 6 | `GET /planning-api/api/planning/state`, `GET /dev-api/api/planning/state` | 기획(8101)·개발(8111) | 세션 | 읽기 | 사이드바 숫자, 30초마다 각 1회. state 전체라 응답이 크다. 11/25부터 세션 토큰을 실어 서버가 세션 회사 상태를 준다(회사 분리) |
 | 6 | `GET /orch/api/incidents` | 총괄 | 없음 | 읽기 | 사이드바 총괄 승인 대기 숫자, 30초 (4번과 같은 경로. 11/23부터 캣북스 경유 중계를 쓰지 않는다) |
 | 7 | `GET /dashboard-api/api/dashboard/shop/banners`, `.../shop/faults` | dashboard-api 중계 | 세션 | 읽기 | 대화방·마케팅 화면에서 필요할 때 |
 

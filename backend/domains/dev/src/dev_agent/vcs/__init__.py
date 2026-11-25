@@ -204,6 +204,45 @@ _screen: dict[str, Connection] | None = None
 _adapters: dict[str, tuple[Connection, VcsAdapter]] = {}
 # 부품을 만들 때 본 보관함 앱 값 (연결 id → `_app_key`). 앱 정보가 바뀌면 부품을 다시 만든다
 _adapter_apps: dict[str, Any] = {}
+# 캣북스가 아닌 회사의 화면 연결 (회사 id → 연결들, 11/25 회사 분리). 캣북스(설치 회사)와 회사를
+# 모르는 요청은 `_screen`·환경변수 연결 그대로다. 다른 회사는 자기 화면 연결만 보고, 환경변수
+# 연결(캣북스 레포)은 보지 않는다. 처음 볼 때 그 회사 파일(`_store_path_for`)에서 읽는다
+_others: dict[str, dict[str, Connection] | None] = {}
+
+
+def _company() -> str | None:
+    """지금 요청의 회사가 캣북스가 아니면 그 회사 id, 아니면 None (설치 회사 연결)."""
+    from ax_agent_template import company_scope
+
+    active = company_scope.active()
+    if active is None:
+        return None
+    cid = company_scope.scope_id(active)
+    return None if cid == company_scope.CATBOOKS else cid
+
+
+def _get_screen() -> dict[str, Connection] | None:
+    company = _company()
+    if company is None:
+        return _screen
+    if company not in _others:
+        _others[company] = _read(_store_path_for(company))
+    return _others[company]
+
+
+def _set_screen(rows: dict[str, Connection] | None) -> None:
+    global _screen
+    company = _company()
+    if company is None:
+        _screen = rows
+    else:
+        _others[company] = rows
+
+
+def _key(connection_id: str) -> str:
+    """부품 캐시 열쇠: 회사마다 연결 id(conn-1 …)가 겹치므로 회사를 앞에 붙인다."""
+    company = _company()
+    return connection_id if company is None else f"{company}/{connection_id}"
 
 
 def clean_paths(paths: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
@@ -238,6 +277,8 @@ def logical_paths(connection_id: str | None, paths: list[str] | tuple[str, ...])
 
 
 def _env_connection() -> Connection | None:
+    if _company() is not None:  # 환경변수 연결은 설치 회사(캣북스) 레포다
+        return None
     kind = (os.getenv("PLANNING_VCS_KIND") or "").strip().lower()
     if not kind or kind == "mock":
         return None
@@ -272,7 +313,7 @@ def _read_key_file(path: str) -> str:
 
 def connections() -> list[Connection]:
     """설정된 연결 (화면 연결을 넣은 순서대로, 그다음 환경변수 연결)."""
-    rows = list((_screen or {}).values())
+    rows = list((_get_screen() or {}).values())
     env = _env_connection()
     if env is not None:
         rows.append(env)
@@ -345,13 +386,14 @@ def get_adapter(connection_id: str) -> VcsAdapter:
     if conn is None:
         raise VcsError("not_found", f"모르는 연결: {connection_id}")
     key = _app_key(conn)
-    hit = _adapters.get(conn.id)
-    if hit is not None and hit[0] == conn and _adapter_apps.get(conn.id) == key:
+    slot = _key(conn.id)
+    hit = _adapters.get(slot)
+    if hit is not None and hit[0] == conn and _adapter_apps.get(slot) == key:
         return hit[1]
-    _adapters.pop(conn.id, None)  # 보관함에서 앱이 지워졌으면 예전 부품을 쓰지 않는다
+    _adapters.pop(slot, None)  # 보관함에서 앱이 지워졌으면 예전 부품을 쓰지 않는다
     adapter = _build(conn)
-    _adapters[conn.id] = (conn, adapter)
-    _adapter_apps[conn.id] = key
+    _adapters[slot] = (conn, adapter)
+    _adapter_apps[slot] = key
     return adapter
 
 
@@ -373,6 +415,7 @@ def set_vcs(adapter: VcsAdapter | None) -> None:
     global _override, _cached
     _override = adapter
     _cached = None
+    _others.clear()
     _adapters.clear()
     _adapter_apps.clear()
 
@@ -392,7 +435,25 @@ STORE_ENV = "PLANNING_VCS_STORE"
 STORE_NAME = "vcs_connections.json"
 
 
+def _store_path_for(company: str) -> str:
+    """캣북스가 아닌 회사의 화면 연결 파일. 경로를 정했으면 그 옆 `<경로>.<회사>`, 회사 폴더를
+    켰으면 `<회사 폴더>/<회사>/vcs_connections.json`(옛 파일을 옮겨 오지 않는다),
+    아니면 메모리만."""
+    explicit = os.getenv(STORE_ENV) or ""
+    if explicit:
+        return f"{explicit}.{company}"
+    if not company_files.folders_on():
+        return ""
+    from ax_agent_template.companies import company_path
+
+    path = company_path(company, STORE_NAME)
+    return str(path) if path is not None else ""
+
+
 def _store_path() -> str:
+    company = _company()
+    if company is not None:
+        return _store_path_for(company)
     explicit = os.getenv(STORE_ENV) or ""
     if explicit:
         company_files.restore_old(STORE_NAME, target=Path(explicit))
@@ -411,7 +472,9 @@ def _save() -> None:
         folder.parent.parent.mkdir(parents=True, exist_ok=True)
         folder.parent.mkdir(mode=company_files.DIR_MODE, exist_ok=True)
         folder.mkdir(mode=company_files.DIR_MODE, exist_ok=True)
-    rows = [{**dataclasses.asdict(c), "paths": list(c.paths)} for c in (_screen or {}).values()]
+    rows = [
+        {**dataclasses.asdict(c), "paths": list(c.paths)} for c in (_get_screen() or {}).values()
+    ]
     tmp = path + ".tmp"
     # 토큰·App 개인 키가 들어 있어 만든 사용자만 읽는다 (llm_key와 같은 방식). 프로세스 umask
     # (서버는 0002)로 만들면 그룹·다른 사용자가 읽을 수 있으므로 처음부터 0600으로 만들고,
@@ -423,12 +486,10 @@ def _save() -> None:
     os.replace(tmp, path)
 
 
-def load_saved() -> int:
-    """저장해 둔 화면 연결을 읽는다. 읽은 수를 돌려준다 (파일이 없거나 깨졌으면 0)."""
-    global _screen
-    path = _store_path()
+def _read(path: str) -> dict[str, Connection] | None:
+    """화면 연결 파일을 읽는다. 없거나 깨졌으면 None."""
     if not path or not os.path.exists(path):
-        return 0
+        return None
     try:
         os.chmod(path, 0o600)  # 예전에 넓은 권한으로 저장된 파일도 만든 사용자만 읽게 맞춘다
     except OSError:
@@ -438,8 +499,18 @@ def load_saved() -> int:
             rows = json.load(f)
         conns = {r["id"]: Connection(**{**r, "paths": tuple(r.get("paths") or ())}) for r in rows}
     except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return conns or None
+
+
+def load_saved() -> int:
+    """저장해 둔 화면 연결(설치 회사)을 읽는다. 읽은 수를 돌려준다 (파일이 없거나 깨졌으면 0).
+    다른 회사 연결은 그 회사 요청이 처음 볼 때 읽는다(`_get_screen`)."""
+    global _screen
+    conns = _read(_store_path())
+    if conns is None:
         return 0
-    _screen = conns or None
+    _screen = conns
     _adapters.clear()
     _adapter_apps.clear()
     _migrate_inline_apps()
@@ -576,11 +647,10 @@ def upsert_connection(
     None이면 이전 값을 둔다. 인증이 token이면 비운다.
 
     부품을 바로 만들어 보고, 형식이 틀리면 `VcsError`(config)를 던지고 아무것도 바꾸지 않는다."""
-    global _screen
     kind = (kind or "").strip().lower()
     if kind not in KINDS:
         raise VcsError("config", f"모르는 형상관리 종류: {kind} (가능: {', '.join(KINDS)})")
-    rows = dict(_screen or {})
+    rows = dict(_get_screen() or {})
     cid = (id or "").strip()
     if cid == ENV_ID:
         raise VcsError("config", "환경변수 연결은 화면에서 바꾸지 않는다")
@@ -630,25 +700,24 @@ def upsert_connection(
     )
     adapter = _build(conn)  # 틀리면 여기서 VcsError, 상태는 그대로
     rows[cid] = conn
-    _screen = rows
-    _adapters[cid] = (conn, adapter)
-    _adapter_apps[cid] = _app_key(conn)
+    _set_screen(rows)
+    _adapters[_key(cid)] = (conn, adapter)
+    _adapter_apps[_key(cid)] = _app_key(conn)
     _save()
     return conn
 
 
 def delete_connection(connection_id: str) -> bool:
     """화면 연결을 지운다. 없으면 False. 환경변수 연결은 `VcsError`(config)."""
-    global _screen
     if connection_id == ENV_ID and _env_connection() is not None:
         raise VcsError("config", "환경변수 연결은 화면에서 지우지 않는다")
-    rows = dict(_screen or {})
+    rows = dict(_get_screen() or {})
     if connection_id not in rows:
         return False
     del rows[connection_id]
-    _screen = rows or None
-    _adapters.pop(connection_id, None)
-    _adapter_apps.pop(connection_id, None)
+    _set_screen(rows or None)
+    _adapters.pop(_key(connection_id), None)
+    _adapter_apps.pop(_key(connection_id), None)
     _save()
     return True
 
@@ -665,7 +734,7 @@ def configure(
     token: str | None = None,
 ) -> None:
     """첫 화면 연결을 바꾼다 (없으면 새로 만든다). 설명·담당 경로는 그대로 둔다."""
-    first = next(iter((_screen or {}).values()), None)
+    first = next(iter((_get_screen() or {}).values()), None)
     upsert_connection(
         id=first.id if first else None,
         kind=kind,

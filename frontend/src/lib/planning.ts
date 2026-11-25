@@ -220,9 +220,11 @@ async function call<T>(base: string, path: string, init?: RequestInit): Promise<
 type Who = 'human' | 'admin'
 const post = (body: unknown = {}, who: Who = 'human'): RequestInit => {
   const token = who === 'admin' ? RELAY_TOKEN : SAFETY_HUMAN_TOKEN
+  // 로그인 세션이 있으면 X-AX-Session으로 같이 싣는다: 서버가 그 세션 회사 자리에 쓴다(11/25 회사 분리, 권한은 Authorization 그대로)
+  const session = sessionAuth().Authorization?.replace(/^Bearer /, '')
   return {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(session ? { 'X-AX-Session': session } : {}) },
     body: JSON.stringify(body),
   }
 }
