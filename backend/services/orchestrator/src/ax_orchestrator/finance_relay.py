@@ -39,8 +39,12 @@ def planning_input(opinion: dict[str, Any]) -> ReceiveInsightInput | str | None:
         return f"기획 입력이 계약과 다름 ({error.error_count()}곳)"
 
 
-async def send_to_planning(inp: ReceiveInsightInput, context_id: str) -> dict[str, Any]:
-    """기획에 넘긴다. {ok, outcome, proposal_id, problem}을 돌려준다."""
+async def send_to_planning(
+    inp: ReceiveInsightInput, context_id: str, tenant_id: str | None = None
+) -> dict[str, Any]:
+    """기획에 넘긴다. {ok, outcome, proposal_id, problem}을 돌려준다.
+
+    `tenant_id`: 그 의견을 받은 매니저의 회사(11/25). 없으면 받는 쪽 기본값(캣북스)."""
     sent = AgentRequest(
         meta=RequestMeta(
             context_id=context_id,
@@ -48,6 +52,7 @@ async def send_to_planning(inp: ReceiveInsightInput, context_id: str) -> dict[st
             path=[],
             deadline=datetime.now(UTC) + timedelta(seconds=CALL_TIMEOUT_SECONDS),
             idempotency_key=f"relay:{TARGET}:{inp.insight_id}",
+            **({"tenant_id": tenant_id} if tenant_id else {}),
         ),
         skill=SKILL,
         input=inp.model_dump(mode="json"),

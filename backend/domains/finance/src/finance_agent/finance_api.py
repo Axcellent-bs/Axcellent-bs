@@ -1129,6 +1129,8 @@ def add_finance_api(app: FastAPI) -> None:
         context_id = f"ctx_req_finance_{number:04d}"
         meta_req = RequestMeta(
             context_id=context_id,
+            # 로그인한 회사 기획에 넣는다(11/25): 빠지면 누비투어 재무 요청이 캣북스 기획에 들어갔다
+            tenant_id=_company(),
             token="finance-dashboard",
             deadline=fc.now() + timedelta(seconds=40),
             idempotency_key=f"{context_id}:finance_request_change",
