@@ -244,6 +244,23 @@ async def test_metric_series_skips_metric_shop_api_does_not_compute() -> None:
     assert seen == []
 
 
+async def test_site_adapter_connection_reads_cancel_refund_inquiry_series() -> None:
+    """다른 형식 API 회사(사이트 변환기 주소)는 취소·환불·문의 시계열도 읽는다(11/25).
+    캣북스 shop-api 주소는 위 시험처럼 그대로 읽지 않는다."""
+    seen: list[httpx.Request] = []
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_series_handler(seen, lambda ts: 2.0)))
+    api = ShopApi("http://dash:8020/site-adapter", token="mock:data", client=client)
+    source = HttpMetricSource(api)
+    for metric in ("inquiry_count", "cancel_count", "refund_amount"):
+        got = await source.fetch(metric, W_FROM, W_TO)
+        assert got and all(v == 2.0 for _, v in got)
+    assert {r.url.params["metric"] for r in seen} == {
+        "inquiry_count",
+        "cancel_count",
+        "refund_amount",
+    }
+
+
 async def test_anomaly_detection_reads_payment_fail_rate_from_shop_api() -> None:
     seen: list[httpx.Request] = []
 

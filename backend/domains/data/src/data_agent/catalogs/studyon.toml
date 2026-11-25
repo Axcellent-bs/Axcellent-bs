@@ -21,6 +21,20 @@ bad_direction = "up"
 unit = "건"
 aggregate = "sum"
 
+[[metrics]]
+id = "cancel_count"
+label = "취소 주문"
+bad_direction = "up"  # 늘면 이상
+unit = "건"
+aggregate = "sum"
+
+[[metrics]]
+id = "refund_amount"
+label = "환불액"
+bad_direction = "up"
+unit = "원"
+aggregate = "sum"
+
 [impact]
 unit_label = "수강 결제"
 customer_label = "수강생"

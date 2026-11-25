@@ -41,7 +41,21 @@ from data_agent.connectors import (
 
 DEFAULT_SHOP_API_URL = "http://shop-api:8010"
 TIMEOUT_SECONDS = 10.0
-SHOP_METRICS: frozenset[str] = frozenset(get_args(MetricName))
+# 캣북스 shop-api가 계산하는 지표 (계약 MetricName 처음 7개). 나머지는 사이트 변환기만 센다
+SHOP_METRICS: frozenset[str] = frozenset(
+    {
+        "order_count",
+        "order_fail_count",
+        "payment_fail_rate",
+        "payment_count",
+        "order_amount",
+        "coupon_order_count",
+        "coupon_discount_amount",
+    }
+)
+# 사이트 변환기(`/site-adapter`, 다른 형식 API 회사)가 주문·문의 원본에서 더 세는 지표 (11/25)
+ADAPTER_METRICS: frozenset[str] = frozenset(get_args(MetricName))
+ADAPTER_PATH = "/site-adapter"
 # shop-api는 한 번에 5분 버킷 2016점(7일)까지 준다. 기준선 7일 + 구간을 하루씩 나눠 읽는다
 SERIES_CHUNK = timedelta(days=1)
 # 주문 목록은 한 시간씩 나눠 읽는다. 주문이 많은 구간(수만 건)을 한 번에 받으면 shop-api가 그동안
@@ -198,7 +212,8 @@ class ShopApiConnector:
     async def metric_series(
         self, metric_id: str, window_from: datetime, window_to: datetime, bucket: str = "5m"
     ) -> list[Point]:
-        if metric_id not in SHOP_METRICS:
+        allowed = ADAPTER_METRICS if ADAPTER_PATH in self.api.base_url else SHOP_METRICS
+        if metric_id not in allowed:
             return []
         points: dict[datetime, float] = {}
         start = window_from
