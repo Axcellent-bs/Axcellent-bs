@@ -8,6 +8,12 @@ DejaFix는 모든 API에 로그인 토큰(JWT)을 요구한다. 서버 nginx는 
 DEJAFIX_USERNAME·DEJAFIX_PASSWORD) → 없으면 503. 계정은 화면·로그에 싣지 않는다.
 `GET /status`는 그 연결의 출처(builtin·custom·none)와 응답 여부만 알려 준다 (화면의 연결 카드용).
 `/status`도 호출자 토큰을 확인한다(DejaFix에 실제로 로그인해 보므로). `/healthz`만 토큰 없이 연다.
+
+회사(11/25, 로드맵 6단계): 부르는 회사의 연결만 쓴다. 회사는 로그인 세션 토큰의 `cid`, 에이전트
+토큰이면 `X-AX-Company` 머리글, 둘 다 없으면 캣북스(예전 그대로). 보관함은 그 회사 것을 읽고
+(`tool_connections`가 요청 회사 폴더를 본다), 환경변수 연결(같이 설치된 DejaFix)은 캣북스만 쓴다.
+로그인 토큰(세션)도 회사마다 따로 둔다. 연결이 없는 회사는 503·"연결 정보가 없어요"다
+(다른 회사 장애를 보여 주지 않는다).
 """
 
 from __future__ import annotations
@@ -20,7 +26,14 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request, Response
 
-from ax_agent_template import company_connection, pinned_http, tool_connections
+from ax_agent_template import (
+    company_connection,
+    company_scope,
+    human_auth,
+    pinned_http,
+    tool_connections,
+)
+from ax_agent_template.companies import canonical_company_id
 from ax_agent_template.config import refuse_mock_outside_tests
 from ax_dejafix_proxy import auth
 
@@ -107,15 +120,36 @@ class DejaFixSession:
 Target = tuple[str, str, str]
 
 
-def _target() -> tuple[Target, bool] | None:
-    """부를 때마다 정한다: 보관함 `dejafix` → 환경 변수 → 없음(None). 둘째 값: 보관함에서 왔는가."""
-    conn = tool_connections.find("dejafix")
+def caller_company(request: Request) -> str | None:
+    """부르는 회사(정식 회사 ID). 세션 토큰은 `cid`, 에이전트는 `X-AX-Company`, 없으면 캣북스.
+
+    소속 회사가 없는 계정(`nocid`)이면 None(어느 회사 연결도 쓰지 않는다)."""
+    token = human_auth.bearer(request.headers.get("authorization")) or ""
+    if human_auth.is_session_token(token):
+        try:
+            human = human_auth.verify_session(token, allow_no_company=True)
+        except human_auth.HumanAuthError:
+            return None  # check_caller가 먼저 거른다. 여기 오면 회사를 모르는 것으로 본다
+        return human.company_id
+    header = request.headers.get(company_connection.CALLER_COMPANY_HEADER, "")
+    return canonical_company_id(header.strip()) or company_scope.CATBOOKS
+
+
+def _target(company: str | None = company_scope.CATBOOKS) -> tuple[Target, bool] | None:
+    """부를 때마다 정한다: 그 회사 보관함 `dejafix` → (캣북스만) 환경 변수 → 없음(None).
+    둘째 값: 보관함에서 왔는가."""
+    if company is None:
+        return None
+    with company_scope.using(company):
+        conn = tool_connections.find("dejafix")
     if conn is not None:
         url = str(conn.config.get("url") or "").strip().rstrip("/")
         user = str(conn.config.get("username") or "").strip()
         password = conn.secrets.get("password", "")
         if url and user and password:
             return (url, user, password), True
+    if company != company_scope.CATBOOKS:
+        return None  # 같이 설치된 DejaFix(환경 변수)는 캣북스 것이다
     user = os.getenv("DEJAFIX_USERNAME", "")
     password = os.getenv("DEJAFIX_PASSWORD", "")
     if user and password:
@@ -129,9 +163,10 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
     state: dict[str, tuple[Target, DejaFixSession]] = {}
     retired: list[DejaFixSession] = []  # 종료 때 끝까지 닫는다
 
-    def session_for(target: Target, guarded: bool = False) -> DejaFixSession:
-        """대상·계정·비밀번호가 바뀌면 세션(토큰)을 새로 만든다."""
-        held = state.get("s")
+    def session_for(target: Target, guarded: bool = False, company: str = "") -> DejaFixSession:
+        """회사마다 세션(로그인 토큰)을 따로 둔다. 대상·계정·비밀번호가 바뀌면 새로 만든다."""
+        key = company or company_scope.CATBOOKS
+        held = state.get(key)
         if held is not None and held[0] == target:
             return held[1]
         url, user, password = target
@@ -146,18 +181,19 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
             # 이미 닫힌 세션(비밀번호를 쥔)은 들고 있지 않는다
             retired[:] = [r for r in retired if r._closing is None or not r._closing.done()]
             retired.append(held[1])
-        state["s"] = (target, fresh)
+        state[key] = (target, fresh)
         return fresh
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         refuse_mock_outside_tests(auth.MOCK_NAME)  # 목 모드는 토큰 없이 `human:`을 받으므로
         yield
-        held = state.pop("s", None)
+        held = list(state.values())
+        state.clear()
         closing = [r.shutdown() for r in retired]
         retired.clear()
-        if held is not None and client is None:
-            closing.append(held[1].aclose())
+        if client is None:
+            closing.extend(h[1].aclose() for h in held)
         # 하나가 실패해도 나머지는 끝까지 닫는다
         await asyncio.gather(*closing, return_exceptions=True)
 
@@ -186,7 +222,8 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
             auth.check_caller(request.headers.get("authorization"))
         except auth.AuthFailure as exc:
             return _error(401, exc.code, exc.message)
-        found = _target()
+        company = caller_company(request)
+        found = _target(company)
         if found is None:
             return {"source": "none", "reachable": None, "detail": "연결 정보가 없어요"}
         target, from_vault = found
@@ -197,7 +234,7 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
             except ValueError:
                 return {"source": source, "reachable": False, "detail": "주소를 쓸 수 없어요"}
         try:
-            res = await session_for(target, from_vault).get(
+            res = await session_for(target, from_vault, company or "").get(
                 "/api/incidents", "status=problem&limit=1"
             )
         except httpx.HTTPError:
@@ -224,7 +261,8 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         # 로그인 API 등은 밖으로 열지 않는다. 넘기는 것은 화면·AI가 쓰는 DejaFix 조회 세 가지뿐이다.
         if not auth.allowed_path(full):
             return _error(404, "NOT_FOUND", "넘길 수 없는 경로입니다")
-        found = _target()
+        company = caller_company(request)
+        found = _target(company)
         if found is None:
             return _error(
                 503,
@@ -241,7 +279,9 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
             except ValueError as exc:
                 return _error(502, "DEJAFIX_UNREACHABLE", f"DejaFix 주소를 쓸 수 없습니다: {exc}")
         try:
-            upstream = await session_for(target, from_vault).get(full, request.url.query)
+            upstream = await session_for(target, from_vault, company or "").get(
+                full, request.url.query
+            )
         except httpx.HTTPError:
             return _error(502, "DEJAFIX_UNREACHABLE", "DejaFix 백엔드에 연결할 수 없습니다")
         return Response(

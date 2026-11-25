@@ -1,6 +1,7 @@
 // 사람 할 일함: 켜지 않은 서비스로 가던 일을 에이전트가 dashboard-api(8020)에 넣고, 사람이 여기서 끝낸다.
 // 계약은 backend/shared/contracts/src/ax_contracts/schemas/handoff.py (HandoffTask, HandoffCompleteBody).
 import { useEffect, useSyncExternalStore } from "react";
+import { sessionCompanyId } from "@/lib/humanSession";
 import { ApiError } from "./apiError";
 import { DASHBOARD_API_URL, SAFETY_HUMAN_TOKEN, dashboardAuth } from "./env";
 
@@ -76,19 +77,29 @@ export function completeHandoff(taskId: string, result: string, status: "done" |
 // 메뉴(AdminShell)와 할 일함 화면이 같은 값을 본다. 서버에 연결하지 못하면 null(개수를 띄우지 않음).
 const POLL_MS = 30_000;
 let openCount: number | null = null;
+// 센 회사. 로그인 회사가 바뀌면 앞 회사 개수를 보여 주지 않는다(6단계 회사 분리)
+let countCompany: string | undefined;
 const listeners = new Set<() => void>();
 
 export function setOpenCount(n: number | null) {
+  countCompany = sessionCompanyId();
   if (n === openCount) return;
   openCount = n;
   listeners.forEach((l) => l());
 }
 
+/** 지금 로그인 회사의 개수. 다른 회사가 센 값이면 null(다시 셀 때까지 띄우지 않음) */
+function currentOpenCount(): number | null {
+  return countCompany === sessionCompanyId() ? openCount : null;
+}
+
 export async function refreshOpenCount() {
+  const company = sessionCompanyId();
   try {
-    setOpenCount((await listHandoffs({ status: "open" })).length);
+    const n = (await listHandoffs({ status: "open" })).length;
+    if (company === sessionCompanyId()) setOpenCount(n);
   } catch {
-    setOpenCount(null);
+    if (company === sessionCompanyId()) setOpenCount(null);
   }
 }
 
@@ -105,6 +116,6 @@ export function useOpenHandoffCount(poll: boolean) {
       listeners.add(l);
       return () => listeners.delete(l);
     },
-    () => openCount,
+    currentOpenCount,
   );
 }

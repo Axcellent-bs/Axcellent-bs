@@ -141,3 +141,34 @@ def test_departments_marks_unavailable_dept(monkeypatch) -> None:
     infra = next(d for d in depts if d["name"] == "infra")
     assert infra["available"] is False and infra["skills"] == []
     assert "카드" in infra["unavailable_reason"]
+
+
+def test_usage_is_counted_per_company() -> None:
+    """부서별 사용량은 그 호출의 회사로 나눠 센다 (11/25, 로드맵 6단계). 회사를 안 주면 전부."""
+    usage = UsageRecorder()
+    cat = _rec(ms=100)
+    nubi = CallRecord("data", "impact_analysis", now(), 300, "completed", None, "ctx_n", None,
+                      company="nubi-tour")  # fmt: skip
+    usage.add(cat)
+    usage.add(nubi)
+    assert cat.company == "catbooks"  # 예전 기록·회사 없는 호출은 캣북스
+    assert usage.summary("data", company="nubi-tour")["calls"] == 1
+    assert usage.summary("data", company="nubi-tour")["avg_ms"] == 300
+    assert usage.summary("data", company="catbooks")["calls"] == 1
+    assert usage.summary("data")["calls"] == 2
+    assert sum(b["calls"] for b in usage.series("data", company="nubi-tour")) == 1
+    assert [r["context_id"] for r in usage.recent("data", company="nubi-tour")] == ["ctx_n"]
+
+
+@pytest.mark.asyncio
+async def test_recording_caller_stamps_request_company() -> None:
+    usage = UsageRecorder()
+
+    async def inner(_dept: str, req: AgentRequest) -> AgentResult:
+        return AgentResult(meta=req.meta, status=TaskStatus.COMPLETED)
+
+    req = _req()
+    nubi = req.model_copy(update={"meta": req.meta.model_copy(update={"tenant_id": "nubi-tour"})})
+    await RecordingCaller(inner, usage)("data", nubi)
+    await RecordingCaller(inner, usage)("data", _req())  # 기본 tenant(shop-demo) = 캣북스
+    assert [r.company for r in usage._records] == ["nubi-tour", "catbooks"]

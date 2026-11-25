@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { relayError } from "@/lib/adminRelay";
 import type { OrchIncident } from "@/lib/agentChat";
 import { hr } from "@/lib/hr";
+import { sessionCompanyId } from "@/lib/humanSession";
 
 // 총괄 이슈 목록을 한 번만 읽어서 화면 여러 곳이 같이 쓴다(총괄·아카이브 AI 장애 기록·결정 기록).
 // 읽는 곳이 하나라도 열려 있으면 10초마다 새로 받고, 모두 닫히면 멈춘다. 읽기 전용이다.
@@ -13,7 +14,20 @@ interface State {
   updatedAt: Date | null;
 }
 
-let state: State = { incidents: null, error: null, updatedAt: null };
+const EMPTY: State = { incidents: null, error: null, updatedAt: null };
+let state: State = EMPTY;
+// 받은 목록의 회사. 로그인 회사가 바뀌면 앞 회사 목록을 보여 주지 않는다(6단계 회사 분리)
+let stateCompany: string | undefined;
+
+/** 지금 로그인 회사와 다른 회사 목록이면 비운다 */
+function forCurrentCompany(): State {
+  const company = sessionCompanyId();
+  if (company !== stateCompany) {
+    stateCompany = company;
+    state = EMPTY;
+  }
+  return state;
+}
 const listeners = new Set<() => void>();
 let timer: ReturnType<typeof setInterval> | undefined;
 let inflight: Promise<void> | null = null;
@@ -23,8 +37,11 @@ const emit = () => listeners.forEach((l) => l());
 export function reloadIncidents(): Promise<void> {
   if (inflight) return inflight;
   inflight = (async () => {
+    const company = sessionCompanyId();
     try {
       const incidents = await hr.incidents();
+      if (company !== sessionCompanyId()) return; // 받는 사이 회사가 바뀌었다
+      stateCompany = company;
       state = { incidents, error: null, updatedAt: new Date() };
     } catch (e) {
       // 받지 못해도 마지막으로 받은 목록은 그대로 둔다
@@ -54,6 +71,6 @@ function subscribe(listener: () => void): () => void {
 
 /** 총괄 이슈 목록. `incidents`가 null이면 아직 처음 받는 중이다 */
 export function useIncidents(): State & { reload: () => Promise<void> } {
-  const s = useSyncExternalStore(subscribe, () => state);
+  const s = useSyncExternalStore(subscribe, forCurrentCompany);
   return { ...s, reload: reloadIncidents };
 }
