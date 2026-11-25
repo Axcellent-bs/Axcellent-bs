@@ -49,6 +49,12 @@ export interface RenderPart {
   by?: string | null;
   /** 영상 칸의 요약(모델·길이·비율·참조·예상 크레딧). 아직 없을 수 있다 */
   summary?: CreativeVideoSummary;
+  /** 영상 거절 이유(11/26): review_timeout = 기한 지나 자동 취소, rejected = 사람 거절 */
+  reason?: string | null;
+  /** 영상 다시 승인 요청 횟수(처음 0) */
+  attempt?: number;
+  /** 승인 대기를 시작한 시각 */
+  held_at?: string | null;
 }
 
 export interface CreativeRecord {

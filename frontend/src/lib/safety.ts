@@ -59,6 +59,8 @@ async function get<T>(path: string): Promise<T> {
 export const safety = {
   executions: () => get<ExecutionRecord[]>("/api/safety/executions"),
   reviews: () => get<Review[]>("/api/safety/reviews"),
+  /** 보류 건 하나(마감 `expires_at`으로 남은 시간을 보여 준다) */
+  review: (reviewId: string) => get<Review>(`/api/safety/reviews/${encodeURIComponent(reviewId)}`),
   thresholds: () => get<SafetyThresholds>("/api/safety/thresholds"),
   registry: async () => (await get<{ actions: RegisteredAction[] }>("/api/safety/registry")).actions,
   connectionHolds: () => get<ConnectionHold[]>("/api/safety/connection-holds"),

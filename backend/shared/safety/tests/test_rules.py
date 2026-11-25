@@ -14,7 +14,7 @@ from ax_safety.rules import ActionSpec, Rule, ThresholdTable, load_registry, loa
 
 def test_rule_files_load_and_match_agreed_values() -> None:
     registry, table = load_registry(), load_thresholds()
-    assert table.version == 11
+    assert table.version == 12
     assert table.review_timeout_seconds == 600  # 데모 10분 자동 거절
     values = {rule.key: rule.value for rule in table.rules if rule.metric != "param"}
     values.pop("pr_allowed_paths")
@@ -305,10 +305,33 @@ def test_on_verify_reject_is_validated() -> None:
 def test_settlement_review_timeout_is_24_hours_and_others_keep_the_default() -> None:
     """판매자 정산 지급 승인만 24시간, 나머지 액션은 기준표 기본값(데모 10분)."""
     table = load_thresholds()
-    assert table.review_timeout_by_action == {"confirm_settlement": 86_400}
+    assert table.review_timeout_by_action == {
+        "confirm_settlement": 86_400,
+        "generate_creative_video": 3600,  # v12 영상 승인 1시간
+        "generate_creative_thumbnails": 3600,
+    }
     assert table.review_timeout_for("confirm_settlement") == 86_400
     assert table.review_timeout_for("issue_coupon") == 600
     assert table.review_timeout_for("refund_request") == 600
+
+
+def test_creative_video_and_thumbnail_reviews_wait_one_hour() -> None:
+    """v12(11/26): 영상은 콘티·키프레임을 보고 정해서 10분이면 놓친다. 영상·썸네일 승인은 1시간.
+
+    키프레임·시트 그림(generate_media, B)은 사람 결정이 아니라 기본값 그대로다."""
+    table = load_thresholds()
+    assert table.review_timeout_for("generate_creative_video") == 3600
+    assert table.review_timeout_for("generate_creative_thumbnails") == 3600
+    assert table.review_timeout_for("generate_media") == 600
+
+
+def test_env_review_timeout_does_not_shorten_the_video_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SAFETY_REVIEW_TIMEOUT_SECONDS", "120")
+    table = load_thresholds()
+    assert table.review_timeout_for("generate_media") == 120
+    assert table.review_timeout_for("generate_creative_video") == 3600
 
 
 def test_env_review_timeout_does_not_shorten_the_settlement_timeout(

@@ -912,7 +912,10 @@ async def request_video(
             credits = await _mcp_preflight(cid, "video", preview)
         except _ERRORS as error:
             raise RenderError(_code(error)) from None
-    key = f"{meta.context_id}:{VIDEO_ACTION}:{record_id}"
+    # 11/26 거절(사람·기한 지남) 뒤 다시 요청하면 새 키로 묻는다. 같은 키면 관문이 예전 거절을
+    # 그대로 돌려준다. 콘티·키프레임은 기록에 그대로 있어 다시 만들지 않는다
+    attempt = int(video.get("attempt") or 0) + (1 if video.get("status") == "rejected" else 0)
+    key = f"{meta.context_id}:{VIDEO_ACTION}:{record_id}" + (f":retry{attempt}" if attempt else "")
     now = _now()
     try:
         res = ledger.reserve(
@@ -992,6 +995,8 @@ async def request_video(
         "summary": summary,
         "speed": speed,
         "plan_seconds": planned,
+        "attempt": attempt,
+        "reason": None,  # 거절 이유(review_timeout 등). 새 요청이면 지운다
     }
     if keyframed:
         base["keyframes"] = True  # 승인 뒤에도 같은 방식으로 만든다
@@ -1004,6 +1009,7 @@ async def request_video(
             status="awaiting_approval",
             review_id=decision.review_id,
             error=None,
+            held_at=now.isoformat(),
             **base,
         )
     if decision.status == "executed":
@@ -1039,7 +1045,10 @@ async def check_video(ledger: MediaLedger, meta: RequestMeta, record_id: str) ->
         _spawn(_render_video(ledger, record_id, seq, decision))
         return
     _safe(lambda: ledger.release(seq))
-    _set(record_id, "video", status="rejected", error=f"gate_{decision.status}")
+    # 11/26 기한 지나 자동 취소(review_timeout)면 화면이 "기한 지나 취소됨" + [다시 승인 요청]
+    timed_out = decision.hold_reason == "review_timeout"
+    reason = "review_timeout" if timed_out else "rejected"
+    _set(record_id, "video", status="rejected", error=f"gate_{decision.status}", reason=reason)
 
 
 VIDEO_PROMPT_MAX = 2000  # 키 길(`_api_video`)·MCP 길(`creative_mcp.video_params`)이 자르는 길이

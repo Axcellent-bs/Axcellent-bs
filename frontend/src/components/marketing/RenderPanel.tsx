@@ -11,6 +11,8 @@ import type { StoryboardResult } from "@/lib/storyboard";
 import { canToggleOriginal, overlayVisibleFor, playPartFor, type PlayPart } from "@/lib/videoOverlay";
 import { OverlayControls } from "./OverlayControls";
 import { KeyframePairs } from "./KeyframePairs";
+import { ApprovalDeadline, TimedOutRetry } from "./ApprovalDeadline";
+import { timedOut } from "@/lib/videoApprovalTime";
 import { framesOf, keyframesDone } from "@/lib/keyframes";
 import { videoSummaryLine } from "@/lib/creativeVideo";
 import { canAskVideo, usesOriginalReference } from "@/lib/videoAsk";
@@ -236,9 +238,11 @@ export function RenderPanel({ recordId }: { recordId: string }) {
           playPart={playPartFor("video", render, showOriginal)} version={overlayVersion} />
         {overlayControls("video")}
         {video?.status === "awaiting_approval" && (
-          <p className="text-xs text-ink-700">사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>
+          <p className="text-xs text-ink-700"><ApprovalDeadline reviewId={video.review_id} className="mr-1" />사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>
         )}
-        {canAsk && (
+        {/* 11/26 기한 지나 자동 취소: 같은 기록으로 영상 요청만 다시(콘티·키프레임 재사용) */}
+        {timedOut(video) && canAsk && <TimedOutRetry busy={asking} onRetry={() => void ask()} />}
+        {canAsk && !timedOut(video) && (
           <button type="button" className="btn-primary text-xs" disabled={asking} onClick={() => void ask()}>
             {asking ? "요청 중…" : video?.status ? "영상 다시 요청 (사람 승인)" : "영상 만들기 요청 (사람 승인)"}
           </button>
