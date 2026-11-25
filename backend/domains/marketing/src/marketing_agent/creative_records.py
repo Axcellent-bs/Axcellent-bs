@@ -86,6 +86,18 @@ CREATE TABLE IF NOT EXISTS marketing_request_video_instagram (
 )
 """
 
+# 기획안에서 만든 제작 기록 번호(11/25). 같은 기획안을 두 번 눌러도 기록 하나
+_BRIEF_RECORD_SCHEMA = """
+CREATE TABLE IF NOT EXISTS marketing_brief_creative (
+    proposal_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    character_record_id TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (proposal_id, tenant_id)
+)
+"""
+
 
 UPLOAD_KINDS = ("real_photo", "virtual_human", "illustration")
 
@@ -126,6 +138,7 @@ class CreativeRecords:
             self._conn.execute(_SCHEMA)
             self._conn.execute(_REQUEST_YOUTUBE_SCHEMA)
             self._conn.execute(_REQUEST_INSTAGRAM_SCHEMA)
+            self._conn.execute(_BRIEF_RECORD_SCHEMA)
             info = self._conn.execute("PRAGMA table_info(marketing_creative_records)")
             have = {r["name"] for r in info}
             if "render" not in have:  # 2026-11-20 Higgsfield 그림·영상 칸
@@ -427,6 +440,38 @@ class CreativeRecords:
             note = f"의뢰 {context_id.removeprefix('ctx_')} · 대표 캐릭터 {brand_id}"
             self.add_sheet(source["sheet"], note, source["thumbnail_base64"], record_id=rid)
         return rid
+
+    # ------------------------------------------------ 기획안에서 만든 기록 (11/25)
+    def brief_record(self, proposal_id: str) -> tuple[str, str | None] | None:
+        """(기록 번호, 그때 쓴 대표 캐릭터 번호). 만든 적이 없으면 None."""
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT record_id, character_record_id FROM marketing_brief_creative"
+                " WHERE proposal_id = ? AND tenant_id = ?",
+                (proposal_id, self.company_id),
+            ).fetchone()
+        return (r["record_id"], r["character_record_id"]) if r is not None else None
+
+    def set_brief_record(
+        self, proposal_id: str, record_id: str, character_record_id: str | None
+    ) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO marketing_brief_creative"
+                " (proposal_id, tenant_id, record_id, character_record_id, created_at)"
+                " VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT(proposal_id, tenant_id) DO UPDATE SET"
+                " record_id = excluded.record_id,"
+                " character_record_id = excluded.character_record_id,"
+                " created_at = excluded.created_at",
+                (
+                    proposal_id,
+                    self.company_id,
+                    record_id,
+                    character_record_id,
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
 
     # ------------------------------------------------ 의뢰로 만든 영상의 유튜브 상태
     def get_request_youtube(self, post_draft_id: str) -> dict[str, Any]:
