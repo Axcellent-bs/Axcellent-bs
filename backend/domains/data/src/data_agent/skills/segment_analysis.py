@@ -238,7 +238,8 @@ def snapshot(
         report = quality_brief(store, tenant_id, w, created)
     else:
         report = quality_counted(store, tenant_id, w, created, cfg)
-    reasons = gate(report, paid, cfg, now) + early
+    ready = rb.from_snapshot(tenant_id, now, lambda agg, day: True) is True  # 3-2 ⑨
+    reasons = gate(report, paid, cfg, now, aggregate_ready=ready) + early
     basis = SalesBasis(
         period_from=w.start,
         period_to=w.end,

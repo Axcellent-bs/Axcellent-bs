@@ -8,6 +8,9 @@ import { ThumbnailPicker } from "./ThumbnailPicker";
 import { chosenThumb, thumbUrl } from "@/lib/creativeThumbnails";
 import { YoutubePanel } from "./YoutubePanel";
 import type { StoryboardResult } from "@/lib/storyboard";
+import { canToggleOriginal, overlayVisibleFor, playPartFor, type PlayPart } from "@/lib/videoOverlay";
+import { OverlayControls } from "./OverlayControls";
+import { videoSummaryLine } from "@/lib/creativeVideo";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
@@ -89,11 +92,12 @@ function DropArea({ enabled, busy, onFile, onError, children }: { enabled: boole
   );
 }
 
-function Picture({ recordId, part, info, label, onChanged, onError }: { recordId: string; part: RenderPartKey; info?: RenderPart | null; label: string; onChanged: () => void; onError: (m: string) => void }) {
+function Picture({ recordId, part, info, label, onChanged, onError, playPart, version }: { recordId: string; part: RenderPartKey; info?: RenderPart | null; label: string; onChanged: () => void; onError: (m: string) => void; playPart?: PlayPart; version?: string }) {
   const done = info?.status === "done" && !!info.sha256;
   const uploaded = info?.source === "upload";
   const busy = info?.status === "running" || info?.status === "awaiting_approval";
-  const { src, failed } = useAuthedMedia(done ? assetUrl(recordId, part, info?.sha256 ?? null) : null);
+  // 자막을 얹은 파일(overlay_video)을 재생할 때는 그 파일 주소를 쓴다(올리기·끌어 놓기는 늘 원래 칸 part)
+  const { src, failed } = useAuthedMedia(done ? assetUrl(recordId, playPart ?? part, playPart === "overlay_video" && version ? version : info?.sha256 ?? null) : null);
   const { busy: uploading, upload } = useUpload(recordId, part, onChanged, onError);
   return (
     <figure className="space-y-1">
@@ -154,6 +158,8 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   const [rec, setRec] = useState<CreativeRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [overlayNonce, setOverlayNonce] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -174,6 +180,13 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   }, [pending, load]);
 
   const video = render.video;
+  // 자막을 얹은 영상이 있으면 가장 나중 영상 칸이 그 파일을 재생한다(없으면 지금과 같다)
+  const overlayVersion = `ov${overlayNonce}-${(render.overlay?.captions ?? 0)}-${(render.final_video?.sha256 ?? render.video?.sha256 ?? "").slice(0, 6)}`;
+  const overlayControls = (part: "video" | "final_video") => overlayVisibleFor(part, render) && (
+    <OverlayControls recordId={recordId} overlay={render.overlay} shots={rec?.storyboard?.shots} showOriginal={showOriginal} canToggle={canToggleOriginal(render)}
+      onToggle={() => setShowOriginal((v) => !v)} onChanged={() => { setOverlayNonce((n) => n + 1); setShowOriginal(false); void load(); }} />
+  );
+  const summaryLine = videoSummaryLine(video?.status, video?.summary);
   const thumb = chosenThumb(render.thumbnails); // 인스타 릴스 표지 = 고른 썸네일(안 고르면 첫 장)
   const reelCover = thumb ? { url: thumbUrl(recordId, thumb.media_id), picked: thumb.picked } : null;
   const canAsk = render.board_image?.status === "done" && !["awaiting_approval", "running", "done"].includes(video?.status ?? "");
@@ -199,7 +212,10 @@ export function RenderPanel({ recordId }: { recordId: string }) {
         <Picture recordId={recordId} part="board_image" info={render.board_image} label="스토리보드 그림" onChanged={() => void load()} onError={setError} />
       </div>
       <div className="space-y-2 border-t border-ink-100 pt-3">
-        <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" onChanged={() => void load()} onError={setError} />
+        {summaryLine && <p className="text-xs text-ink-700" aria-label="영상 만들기 요약">{summaryLine}</p>}
+        <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" onChanged={() => void load()} onError={setError}
+          playPart={playPartFor("video", render, showOriginal)} version={overlayVersion} />
+        {overlayControls("video")}
         {video?.status === "awaiting_approval" && (
           <p className="text-xs text-ink-700">사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>
         )}
@@ -212,7 +228,9 @@ export function RenderPanel({ recordId }: { recordId: string }) {
         {rec?.storyboard && <HiggsfieldWeb board={rec.storyboard} />}
       </div>
       <div className="border-t border-ink-100 pt-3">
-        <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError} />
+        <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError}
+          playPart={playPartFor("final_video", render, showOriginal)} version={overlayVersion} />
+        {overlayControls("final_video")}
       </div>
       <ThumbnailPicker recordId={recordId} state={render.thumbnails} youtubeStatus={render.youtube?.status} instagramStatus={render.instagram?.status}
         hasVideo={render.video?.status === "done" || render.final_video?.status === "done"} onChanged={() => void load()} />

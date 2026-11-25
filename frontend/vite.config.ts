@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import { dejafixProxy } from './dejafix-proxy'
 import { bundleTokenGuard, proxyTokens, withTokens } from './token-proxy'
+import { apiPreconnect } from './api-preconnect'
 
 // 화면은 항상 실제 AI 백엔드를 부른다 (backend/scripts/run_all.sh, .env.example). 녹화본 데모는 없다.
 // 아래 프록시는 CORS가 없는 서버를 개발 서버가 대신 부르는 것이다. 포트는 ax-backend/CLAUDE.md 포트 표 기준.
@@ -35,7 +36,8 @@ export default defineConfig(({ mode }) => {
   return {
     // /dejafix-api 는 플러그인이 맡는다: 기본은 백엔드 dejafix-proxy(8030)로 그대로, 계정을 적으면 대신 로그인 (dejafix-proxy.ts)
     // bundleTokenGuard: vite build가 진짜 토큰을 번들에 실으면 빌드를 멈춘다
-    plugins: [react(), dejafixProxy(env), bundleTokenGuard(tokens)],
+    // apiPreconnect: 읽기 API 직접 호스트(VITE_API_DIRECT_BASE)가 있으면 index.html에서 미리 연결한다(첫 화면 성능)
+    plugins: [react(), dejafixProxy(env), bundleTokenGuard(tokens), apiPreconnect(env.VITE_API_DIRECT_BASE)],
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
     server: { port: 3090, strictPort: true, proxy },
     preview: { port: 3090, strictPort: true, proxy },

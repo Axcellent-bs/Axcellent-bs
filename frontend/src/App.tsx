@@ -3,53 +3,119 @@ import { Navigate, Route, Routes, useLocation } from 'react-router'
 
 import { AdminShell } from '@/components/admin/AdminShell'
 import LoginPage from '@/demo/LoginPage'
-import SignupPage from '@/demo/SignupPage'
-import PlanPurchase from '@/demo/PlanPurchase'
 import { ADMIN_HOME, canOpen, homeOf, useSession } from '@/demo/session'
 import { useCompany, useCompanyLoaded } from '@/demo/company'
-import Setup from '@/demo/Setup'
-import WaitingPage from '@/demo/WaitingPage'
 import CatalogHome from '@/demo/CatalogHome'
-import { PrivacyPage, TermsPage } from '@/demo/PolicyPages'
-import OperatorLogin from '@/control/OperatorLogin'
 import { useHumanTokenSet } from '@/lib/useHumanTokenSet'
+import { preloadRoute, type RoutePreload } from '@/lib/routePreload'
+
+// 로그인 전 화면 중 메인(카탈로그)·로그인만 바로 보이게 첫 묶음에 둔다.
+// 가입·요금제·회사 설정·대기·약관·운영자 입구는 가끔 여는 화면이라 열 때 받는다 (11/25 Lighthouse: 업무 화면 첫 묶음 줄이기)
+const SignupPage = lazy(() => import('@/demo/SignupPage'))
+const PlanPurchase = lazy(() => import('@/demo/PlanPurchase'))
+const Setup = lazy(() => import('@/demo/Setup'))
+const WaitingPage = lazy(() => import('@/demo/WaitingPage'))
+const PrivacyPage = lazy(() => import('@/demo/PolicyPages').then((m) => ({ default: m.PrivacyPage })))
+const TermsPage = lazy(() => import('@/demo/PolicyPages').then((m) => ({ default: m.TermsPage })))
+const OperatorLogin = lazy(() => import('@/control/OperatorLogin'))
 
 // 로그인한 뒤 들어가는 업무 페이지는 따로 받는다(페이지별 코드 나누기). 처음 화면을 열 때 모든 페이지 코드를
 // 한꺼번에 받지 않고, 그 페이지를 처음 열 때 그 페이지 코드만 받는다. 로그인 전 화면은 바로 보이게 그대로 둔다
-const AgentChat = lazy(() => import('@/pages/AgentChat'))
-const AgentOffice = lazy(() => import('@/pages/AgentOffice'))
-const Claims = lazy(() => import('@/pages/Claims'))
-const Console = lazy(() => import('@/pages/Console'))
-const Dashboard = lazy(() => import('@/pages/Dashboard'))
-const Data = lazy(() => import('@/pages/Data'))
-const Finance = lazy(() => import('@/pages/Finance'))
-const FinanceGuide = lazy(() => import('@/pages/FinanceGuide'))
-const Handoffs = lazy(() => import('@/pages/Handoffs'))
-const ArchiveIncidents = lazy(() => import('@/pages/ArchiveIncidents'))
-const Hr = lazy(() => import('@/pages/Hr'))
-const AgentEvaluation = lazy(() => import('@/pages/AgentEvaluation'))
-const OrgChanges = lazy(() => import('@/pages/OrgChanges'))
-const Incidents = lazy(() => import('@/pages/Incidents'))
-const IncidentDetail = lazy(() => import('@/pages/IncidentDetail'))
-const Orchestrator = lazy(() => import('@/pages/Orchestrator'))
-const Safety = lazy(() => import('@/pages/Safety'))
-const Kb = lazy(() => import('@/pages/Kb'))
-const Marketing = lazy(() => import('@/pages/Marketing'))
-const PlanningPage = lazy(() => import('@/pages/Planning'))
-const DevPage = lazy(() => import('@/pages/Dev'))
-const Queue = lazy(() => import('@/pages/Queue'))
-const Reviews = lazy(() => import('@/pages/Reviews'))
-const Voice = lazy(() => import('@/pages/Voice'))
-const Support = lazy(() => import('@/pages/Support'))
-const SellerSettlements = lazy(() => import('@/pages/SellerSettlements'))
-const Orders = lazy(() => import('@/pages/Orders'))
-const ToolConnections = lazy(() => import('@/demo/ToolConnections'))
-const CompanyConnect = lazy(() => import('@/demo/CompanyConnect'))
-const MembersPage = lazy(() => import('@/demo/MembersPage'))
-const ControlCenter = lazy(() => import('@/control/ControlCenter'))
+const load = {
+  AgentChat: () => import('@/pages/AgentChat'),
+  AgentOffice: () => import('@/pages/AgentOffice'),
+  Claims: () => import('@/pages/Claims'),
+  Console: () => import('@/pages/Console'),
+  Dashboard: () => import('@/pages/Dashboard'),
+  Data: () => import('@/pages/Data'),
+  Finance: () => import('@/pages/Finance'),
+  FinanceGuide: () => import('@/pages/FinanceGuide'),
+  Handoffs: () => import('@/pages/Handoffs'),
+  ArchiveIncidents: () => import('@/pages/ArchiveIncidents'),
+  Hr: () => import('@/pages/Hr'),
+  AgentEvaluation: () => import('@/pages/AgentEvaluation'),
+  OrgChanges: () => import('@/pages/OrgChanges'),
+  Incidents: () => import('@/pages/Incidents'),
+  IncidentDetail: () => import('@/pages/IncidentDetail'),
+  Orchestrator: () => import('@/pages/Orchestrator'),
+  Safety: () => import('@/pages/Safety'),
+  Kb: () => import('@/pages/Kb'),
+  Marketing: () => import('@/pages/Marketing'),
+  PlanningPage: () => import('@/pages/Planning'),
+  DevPage: () => import('@/pages/Dev'),
+  Queue: () => import('@/pages/Queue'),
+  Reviews: () => import('@/pages/Reviews'),
+  Voice: () => import('@/pages/Voice'),
+  Support: () => import('@/pages/Support'),
+  SellerSettlements: () => import('@/pages/SellerSettlements'),
+  Orders: () => import('@/pages/Orders'),
+  ToolConnections: () => import('@/demo/ToolConnections'),
+  CompanyConnect: () => import('@/demo/CompanyConnect'),
+  MembersPage: () => import('@/demo/MembersPage'),
+  ControlCenter: () => import('@/control/ControlCenter'),
+}
+const AgentChat = lazy(load.AgentChat)
+const AgentOffice = lazy(load.AgentOffice)
+const Claims = lazy(load.Claims)
+const Console = lazy(load.Console)
+const Dashboard = lazy(load.Dashboard)
+const Data = lazy(load.Data)
+const Finance = lazy(load.Finance)
+const FinanceGuide = lazy(load.FinanceGuide)
+const Handoffs = lazy(load.Handoffs)
+const ArchiveIncidents = lazy(load.ArchiveIncidents)
+const Hr = lazy(load.Hr)
+const AgentEvaluation = lazy(load.AgentEvaluation)
+const OrgChanges = lazy(load.OrgChanges)
+const Incidents = lazy(load.Incidents)
+const IncidentDetail = lazy(load.IncidentDetail)
+const Orchestrator = lazy(load.Orchestrator)
+const Safety = lazy(load.Safety)
+const Kb = lazy(load.Kb)
+const Marketing = lazy(load.Marketing)
+const PlanningPage = lazy(load.PlanningPage)
+const DevPage = lazy(load.DevPage)
+const Queue = lazy(load.Queue)
+const Reviews = lazy(load.Reviews)
+const Voice = lazy(load.Voice)
+const Support = lazy(load.Support)
+const SellerSettlements = lazy(load.SellerSettlements)
+const Orders = lazy(load.Orders)
+const ToolConnections = lazy(load.ToolConnections)
+const CompanyConnect = lazy(load.CompanyConnect)
+const MembersPage = lazy(load.MembersPage)
+const ControlCenter = lazy(load.ControlCenter)
+
+// 처음 연 주소의 페이지 코드는 로그인·회사 확인을 기다리지 않고 바로 받기 시작한다(같은 import라 lazy가 그대로 쓴다).
+// 그동안 세션 확인과 페이지 코드 받기가 나란히 돌아 첫 화면이 한 단계 빨라진다 (11/25 /finance/daily 성능)
+const PRELOAD: RoutePreload[] = [
+  ['/finance/guide', load.FinanceGuide],
+  ['/finance', load.Finance],
+  ['/marketing', load.Marketing],
+  ['/planning', load.PlanningPage],
+  ['/dev', load.DevPage],
+  ['/data', load.Data],
+  ['/orchestrator', load.Orchestrator],
+  ['/safety', load.Safety],
+  ['/support', load.Support],
+  ['/ops', load.Hr],
+  ['/infra', load.Incidents],
+  ['/handoffs', load.Handoffs],
+  ['/agents/chat', load.AgentChat],
+  ['/agents/office', load.AgentOffice],
+  ['/inquiry', load.Dashboard],
+  ['/orders', load.Orders],
+  ['/control', load.ControlCenter],
+  ['/system/connect', load.CompanyConnect],
+  ['/system/members', load.MembersPage],
+  ['/system/tools', load.ToolConnections],
+]
+if (typeof window !== 'undefined') preloadRoute(window.location.pathname, PRELOAD)
+
 
 export function App() {
   return (
+    <Suspense fallback={null}>
     <Routes>
       {/* 로그인 전에도 여는 메인: 서비스 제품군 카탈로그 */}
       <Route path="/" element={<CatalogHome />} />
@@ -67,6 +133,7 @@ export function App() {
       <Route path="/control/login" element={<OperatorLogin />} />
       <Route path="*" element={<Guarded><Pages /></Guarded>} />
     </Routes>
+    </Suspense>
   )
 }
 

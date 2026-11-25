@@ -110,7 +110,15 @@ SHEET_ASPECT, BOARD_ASPECT, VIDEO_ASPECT = "16:9", "3:4", "9:16"
 IMAGE_CREDITS_DISABLED = "image_credits_disabled"  # 회사 만들기 설정: 그림에 크레딧을 쓰지 않음
 
 PARTS = ("sheet_image", "board_image", "video")
-FILES = {"sheet_image": "sheet.jpg", "board_image": "board.jpg", "video": "video.mp4"}
+FILES = {
+    "sheet_image": "sheet.jpg",
+    "board_image": "board.jpg",
+    "video": "video.mp4",
+    "overlay_video": "overlay.mp4",  # 자막·엔드카드를 얹은 영상(`creative_overlay`)
+}
+OVERLAY_PART = "overlay_video"
+OVERLAY_STATE = "overlay"  # render.overlay: {status, error, captions, source_part, ...}
+LATEST_VIDEO_PARTS = ("final_video", "video")  # 먼저 있는 것이 최신 영상(BGM 입힌 완성 영상 우선)
 ATTACH_ACTION = "attach_creative_file"  # 사람이 올린 파일을 기록에 붙임(A)
 # 사람이 올릴 수 있는 칸과 저장 이름(그림은 JPEG·PNG, 영상은 MP4)
 UPLOAD_FILES = {
@@ -291,6 +299,41 @@ def _dir(record_id: str, cid: str | None = None) -> Path:
 
 def asset_path(record_id: str, part: str, cid: str | None = None) -> Path:
     return _dir(record_id, cid) / FILES[part]
+
+
+def latest_video_part(rec: dict[str, Any] | None) -> str | None:
+    """지금 "최신 영상" 칸: 완성 영상(`final_video`, BGM)이 끝났으면 그것, 아니면 `video`.
+
+    둘 다 없으면 None."""
+    render = (rec or {}).get("render") or {}
+    for part in LATEST_VIDEO_PARTS:
+        if (render.get(part) or {}).get("status") == "done":
+            return part
+    return None
+
+
+def publish_video_part(rec: dict[str, Any] | None) -> str | None:
+    """유튜브·인스타·썸네일·화면이 같이 쓰는 "내보낼 영상" 칸 (고르는 규칙은 여기 한 곳).
+
+    최신 영상(`latest_video_part`)이 기준이다. 자막을 얹은 결과(`render.overlay`)가 `applied`이고
+    그 원본 칸(`source_part`)이 최신 영상 그대로(올린 파일이 바뀌었으면 `source_sha256`도 같게)이며
+    `overlay_video`가 끝나 있으면 `overlay_video`, 아니면 최신 영상."""
+    latest = latest_video_part(rec)
+    if latest is None:
+        return None
+    render = (rec or {}).get("render") or {}
+    overlay = render.get(OVERLAY_STATE) or {}
+    result = render.get(OVERLAY_PART) or {}
+    if (
+        overlay.get("status") == "applied"
+        and overlay.get("source_part") == latest
+        and result.get("status") == "done"
+        and result.get("asset")
+        and result.get("sha256")
+        and overlay.get("source_sha256") in (None, (render.get(latest) or {}).get("sha256"))
+    ):
+        return OVERLAY_PART
+    return latest
 
 
 def _set(record_id: str, part: str, **values: Any) -> dict[str, Any]:
@@ -558,10 +601,12 @@ def _story_sha(rec: dict[str, Any]) -> str:
 
 
 def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
-                      cid: str | None = None) -> None:  # fmt: skip
+                      cid: str | None = None, force: bool = False) -> None:  # fmt: skip
     """스토리보드가 붙었고 이미지 시트 그림이 있으면 스토리보드 그림을 만든다.
 
-    회사: `cid` → 시트 그림을 만들 때 남긴 회사 → `request_company(meta)`."""
+    회사: `cid` → 시트 그림을 만들 때 남긴 회사 → `request_company(meta)`.
+    11/25: 영상이 가상 인물 원본을 참조로 쓰면(`board_needed`가 False) 그림을 만들지 않는다(크레딧
+    예약 없음). 사람이 [Higgsfield 그림으로 다시 그리기]를 고르면 `force=True`."""
     rec = _creative.store().get(record_id)
     if rec is None or not rec.get("storyboard"):
         return
@@ -576,6 +621,8 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
         return  # 시트 그림이 끝나면 다시 부른다
     cid = cid or sheet.get("company_id") or request_company(meta)
     via = route(cid)
+    if not force and not board_needed(rec, via):
+        return
     _log_route(via, cid, "board_image", record_id)
     why = configured("image", via, cid)
     if why:
@@ -587,6 +634,7 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
         _set(record_id, "board_image", status="failed", error="sheet_file_missing")
         return
     board_out = rec["storyboard"]
+    _creative.store().set_board_source(record_id, "higgsfield")
     _set(
         record_id,
         "board_image",
@@ -782,11 +830,11 @@ async def request_video(
     video = render.get("video") or {}
     if video.get("status") in ("awaiting_approval", "running", "done"):
         return video
-    if (render.get("board_image") or {}).get("status") != "done":
-        raise RenderError("board_image_not_ready")
     board = render.get("board_image") or {}
     cid = cid or board.get("company_id") or request_company(meta)
     via = route(cid)
+    if board.get("status") != "done" and board_needed(rec, via):
+        raise RenderError("board_image_not_ready")
     _log_route(via, cid, "video", record_id)
     why = configured("video", via, cid)
     if why:
@@ -1043,6 +1091,17 @@ async def _render_video(
         sha256=sha,
         execution_id=decision.execution_id,
     )
+    await _overlay_after_attach(record_id, cid)
+
+
+async def _overlay_after_attach(record_id: str, cid: str | None) -> None:
+    """영상·완성 영상이 붙으면 최신 영상에 자막·엔드카드를 한 번 얹는다. 실패해도 흐름은 계속."""
+    try:
+        from marketing_agent import creative_overlay
+
+        await creative_overlay.apply(record_id, cid)
+    except Exception:  # noqa: BLE001 - 자막 얹기는 부가 기능이라 영상·게시 흐름을 막지 않는다
+        logger.exception("creative_render: 자막 얹기 실패 (%s)", record_id)
 
 
 async def _api_video(
@@ -1066,7 +1125,7 @@ def expire_stale(record_id: str) -> None:
     """서버가 다시 켜져 끊긴 'running'을 실패로 바꾼다(기록을 읽을 때)."""
     render = _creative.store().get_render(record_id)
     changed = False
-    for part in PARTS:
+    for part in (*PARTS, OVERLAY_STATE):
         cur = render.get(part) or {}
         if cur.get("status") != "running" or not cur.get("at"):
             continue
@@ -1133,10 +1192,24 @@ def video_reference(rec: dict[str, Any], model: str) -> tuple[str, str]:
     자리)을 `image_references`로. 아니면(모르는 모델 포함) 지금처럼 스토리보드 그림을
     `start_image`로."""
     sheet = (rec.get("render") or {}).get("sheet_image") or {}
-    original = sheet.get("source") == ORIGINAL_SOURCE and sheet.get("status") == "done"
+    # 의뢰 기록은 대표 캐릭터의 원본을 복사해 오므로(`source="brand_copy"`) `original`로 이어 본다
+    original = (sheet.get("source") == ORIGINAL_SOURCE or sheet.get("original") is True) and (
+        sheet.get("status") == "done"
+    )
     if is_reference_kind(rec) and original and _mcp.takes_image_references(model):
         return "sheet_image", _mcp.IMAGE_REF_ROLE
     return "board_image", _mcp.VIDEO_START_ROLE
+
+
+def board_needed(rec: dict[str, Any], via: str) -> bool:
+    """영상 입력으로 Higgsfield 스토리보드 그림이 필요한가(11/25).
+
+    회사 계정(MCP)으로 만들고 영상 모델이 `image_references`를 받으며 캐릭터가 올린 원본이면
+    그 원본을 참조로 쓰므로 필요 없다. 그 밖(start_image 모델·real_photo·캐릭터 없음·키 길)은
+    지금처럼."""
+    if via != MCP:
+        return True
+    return video_reference(rec, mcp_video_model())[0] != "sheet_image"
 
 
 def plan_seconds(plan_s: Any, model: str, setting: Any = "plan") -> tuple[int, int | None]:
@@ -1207,7 +1280,7 @@ async def attach_upload(
     )
     if decision.status != "executed":
         raise RenderError(f"gate_{decision.status}")
-    return _set(
+    item = _set(
         record_id,
         part,
         status="done",
@@ -1219,3 +1292,6 @@ async def attach_upload(
         by=who,
         review_id=None,
     )
+    if part in LATEST_VIDEO_PARTS:  # 새 최신 영상에 자막을 얹는다(올리는 응답은 기다리지 않는다)
+        _spawn(_overlay_after_attach(record_id, _request_company.active()))
+    return item

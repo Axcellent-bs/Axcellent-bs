@@ -6,6 +6,7 @@
 
 import { isOpenRequest, type WorkRequestRow } from "./workRequests.ts";
 import type { VideoPlanView } from "./videoPlan.ts";
+import type { CharacterReference } from "./characterSheet.ts";
 
 export const PREPARE_SKILL = "prepare_video_draft_from_plan";
 export const MAKE_SKILL = "generate_media";
@@ -64,6 +65,8 @@ export interface SavedCharacter {
   kind?: "real_photo" | "virtual_human" | "illustration";
   thumbnail_base64?: string | null;
   preview_part?: string | null;
+  /** 참조 이미지 정보 (없으면 한 장짜리·옛 기록). index 0 = 대표 */
+  references?: CharacterReference[];
   saved_at: string;
   is_default?: boolean;
 }

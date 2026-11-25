@@ -70,3 +70,20 @@ def from_snapshot[T](
     except Exception:  # noqa: BLE001 - 집계를 못 읽으면 원본 경로로 (화면은 그대로)
         logger.warning("[aggregate] 스냅샷 읽기 실패: 원본으로 계산", exc_info=True)
         return None
+
+
+def run_key(tenant_id: str) -> str:
+    """판매 캐시 키 조각 (3-2 ⑧): 스위치가 켜졌으면 마지막으로 끝난 집계 계산 번호, 꺼졌으면 "".
+    하루 계산이 새로 끝나면 키가 달라져 어제 스냅샷으로 낸 결과가 섞이지 않는다."""
+    if not enabled():
+        return ""
+    try:
+        agg = AggregateStore(db_path())
+        try:
+            done = [r for r in agg.runs(tenant_id) if r["status"] == "done"]
+        finally:
+            agg.close()
+    except Exception:  # noqa: BLE001 - 못 읽으면 원본 경로와 같은 키 조각
+        logger.warning("[aggregate] 계산 기록 읽기 실패: 캐시 키는 원본 기준", exc_info=True)
+        return ""
+    return f"aggregate:{done[-1]['run_id']}" if done else "aggregate:"

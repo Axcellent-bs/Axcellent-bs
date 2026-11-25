@@ -867,13 +867,15 @@ async def render_settings_options_call() -> dict[str, Any]:
     raise ApiError(502, "UPSTREAM_FAILED", f"마케팅이 요청을 처리하지 못했다 ({result.outcome})")
 
 
-async def _creative_read(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def _creative_read(
+    skill: str, payload: dict[str, Any], deadline_s: int = 20
+) -> dict[str, Any]:
     config.set_agent_name(AGENT_NAME)
     request = AgentRequest(
         meta=RequestMeta(
             context_id=f"ctx_creative_{uuid.uuid4().hex[:12]}",
             token=config.agent_token(AGENT_NAME),
-            deadline=datetime.now(UTC) + timedelta(seconds=20),
+            deadline=datetime.now(UTC) + timedelta(seconds=deadline_s),
             idempotency_key=f"ui:creative:{uuid.uuid4().hex}",
             **tenant_meta(),
         ),
@@ -945,6 +947,7 @@ CREATIVE_FILES = {
     "board_image": ("board.jpg", "image/jpeg"),
     "video": ("video.mp4", "video/mp4"),
     "final_video": ("final.mp4", "video/mp4"),
+    "overlay_video": ("overlay.mp4", "video/mp4"),  # 자막·엔드카드를 얹은 영상(읽기 전용)
 }
 # 사람이 올린 PNG 그림은 PNG 그대로 둔다
 CREATIVE_ALT_FILES = {
@@ -966,6 +969,19 @@ async def creative_video_call(record_id: str, who: str | None) -> dict[str, Any]
     if who:
         payload["who"] = who
     return await _creative_read("creative_video_request", payload)
+
+
+OVERLAY_DEADLINE_SECONDS = 120  # ffmpeg로 자막을 얹는 시간까지 기다린다
+
+
+async def creative_overlay_call(
+    record_id: str, captions: list[dict[str, Any]], who: str | None
+) -> dict[str, Any]:
+    """사람이 고친 자막으로 최신 영상에 다시 얹는다(마케팅 `creative_overlay_redo`, read)."""
+    payload: dict[str, Any] = {"record_id": record_id, "captions": captions}
+    if who:
+        payload["who"] = who
+    return await _creative_read("creative_overlay_redo", payload, OVERLAY_DEADLINE_SECONDS)
 
 
 SCRIPT_REFUSALS = {

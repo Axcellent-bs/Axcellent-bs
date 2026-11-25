@@ -93,6 +93,8 @@ def _copy_sheet_image(brand_id: str, record_id: str) -> None:
         sha256=item.get("sha256"),
         source="brand_copy",
         copied_from=brand_id,
+        # 올린 원본(가상 인물·일러스트)을 복사한 것이면 영상 참조로 쓸 수 있다(video_reference)
+        original=item.get("source") == _render.ORIGINAL_SOURCE,
     )
 
 
@@ -232,6 +234,9 @@ async def _ensure_images(
         sheet = _part(record_id, "sheet_image")
         if sheet.get("status") != "done":
             return f"sheet_image_{sheet.get('status') or 'failed'}"
+    rec = _creative.store().get(record_id) or rec
+    if not _render.board_needed(rec, _render.route(cid)):
+        return None  # 11/25 가상 인물 원본이 영상 참조: 스토리보드 그림(크레딧)을 만들지 않는다
     _render.maybe_start_board(ledger, meta, record_id, cid)  # 이미 만들었거나 도는 중이면 안 한다
     board = await _wait_part(record_id, "board_image")
     if board.get("status") != "done":

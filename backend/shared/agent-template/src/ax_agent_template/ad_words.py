@@ -22,11 +22,39 @@ BLOCKED_WORDS: tuple[str, ...] = (
     "씨발", "시발", "좆", "개새끼", "병신", "섹스", "야동", "19금",
 )  # fmt: skip
 
+# 허용 예외: 금지어가 부분 문자열로 들어 있지만 흔히 쓰는 일반 단어.
+# 글에서 이 단어를 먼저 지운 뒤 금지어를 찾는다 (예외와 금지어가 같이 있으면 금지어는 남아 막힌다).
+ALLOWED_WORDS: tuple[str, ...] = (
+    # 시발: 시발점·시발역·시발지, 출시/동시/정시/임시/상시/한시/전시 + 발...
+    # "개시발"·"병신년"은 그 자체로 욕으로 흔히 쓰여 예외에 넣지 않는다.
+    "시발점", "시발역", "시발지", "시발차",
+    "출시발", "동시발", "정시발", "임시발", "상시발", "한시발", "전시발",
+    # 섹스: 지명·단어 (Sussex·Essex·Middlesex·Wessex, sextet, sextant)
+    "서섹스", "에섹스", "미들섹스", "웨섹스", "섹스텟", "섹스탄트",
+    # 야동: 파주 야동동
+    "야동동",
+    # 19금: 2019 금요일·금융
+    "19금요", "19금융",
+    # xxx: 옷 치수
+    "xxxl", "xxxs",
+    # shit: shiitake 오타 표기, 일본 성 Takeshita·Kishita
+    "shitake", "takeshita", "kishita",
+)  # fmt: skip
+
 _SEP = re.compile(r"[\s._\-]+")
 
 
 def _plain(text: str) -> str:
     return _SEP.sub("", text).casefold()
+
+
+_ALLOWED = tuple(sorted({p for w in ALLOWED_WORDS if (p := _plain(w))}, key=len, reverse=True))
+
+
+def _without_allowed(plain: str) -> str:
+    for w in _ALLOWED:
+        plain = plain.replace(w, "")
+    return plain
 
 
 def words_from(raw: Mapping[str, Any] | None) -> tuple[str, ...]:
@@ -41,7 +69,7 @@ def blocked_word(texts: Iterable[str | None], extra: Iterable[str] = ()) -> str 
     """글 중 하나라도 욕설·성인 표현이 들었으면 그 단어(정리한 형태), 아니면 None."""
     words = [p for w in (*BLOCKED_WORDS, *extra) if (p := _plain(w))]
     for text in texts:
-        plain = _plain(text or "")
+        plain = _without_allowed(_plain(text or ""))
         if plain and (hit := next((w for w in words if w in plain), None)):
             return hit
     return None

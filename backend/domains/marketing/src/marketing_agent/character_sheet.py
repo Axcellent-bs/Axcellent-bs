@@ -216,6 +216,10 @@ def build_output(
             "guessed_ko": _clean_list(read.guessed_ko, 12, 120),
         }
     )
+    if kind == "illustration" and read.real_person_photo:
+        # 11/25 "그림"으로 골랐어도 실제 사람 사진이면 지금 규칙(그림체로 바꾸기, 원본 저장 안 함).
+        # 실사 얼굴을 그대로 쓰려면 virtual_human(실존 인물 아님·쓸 권리 확인)으로만 올린다
+        kind = "real_photo"
     keep = kind in REFERENCE_KINDS  # 그대로 참조로 쓰는 종류 (사람이 고른 값이 먼저)
     stylized = read.real_person_photo and not keep
     style = VIRTUAL_STYLE_EN if kind == "virtual_human" else read.art_style_en

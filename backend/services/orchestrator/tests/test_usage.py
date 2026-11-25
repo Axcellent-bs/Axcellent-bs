@@ -1,4 +1,3 @@
-import asyncio
 import time
 from datetime import timedelta
 
@@ -64,13 +63,18 @@ def test_per_skill_summary() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recording_caller_records_result_and_exception() -> None:
+async def test_recording_caller_records_result_and_exception(monkeypatch) -> None:
     usage = UsageRecorder()
+    # 실제 sleep은 Windows 타이머 해상도 때문에 10ms보다 짧게 깨어날 수 있다. 가짜 시계로 고정한다.
+    clock = [0.0]
+    monkeypatch.setattr(
+        "ax_orchestrator.usage.time", type("FakeTime", (), {"perf_counter": lambda: clock[0]})
+    )
 
     async def inner(dept, req):
         if req.skill == "boom":
             raise RuntimeError("down")
-        await asyncio.sleep(0.01)
+        clock[0] += 0.01
         return AgentResult(meta=req.meta, status=TaskStatus.COMPLETED)
 
     caller = RecordingCaller(inner, usage)

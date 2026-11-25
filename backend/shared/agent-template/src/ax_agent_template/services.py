@@ -182,6 +182,7 @@ SERVICES: tuple[Service, ...] = (
             "youtube_uploads_list",
             "list_marketing_campaigns",
             "creative_record_attach",
+            "creative_overlay_redo",
             "creative_thumbnails_request",
             "creative_thumbnail_select",
             "render_settings_options",

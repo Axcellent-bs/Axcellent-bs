@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -122,6 +123,23 @@ def probe_size(video: Path) -> tuple[int, int] | None:
     return None
 
 
+def ffmpeg_frame_at(video: Path, seconds: float, out: Path) -> bool:
+    """영상의 `seconds`초 장면 한 장을 JPEG로(인자 목록으로만, 시간 제한 있음)."""
+    return _ffmpeg(["-ss", f"{max(seconds, 0.0):.3f}", "-i", str(video), "-frames:v", "1",
+                    "-q:v", "3"], out)  # fmt: skip
+
+
+def probe_duration(video: Path) -> float | None:
+    fmt = (sns_media.run_ffprobe(video) or {}).get("format") or {}
+    try:
+        value = float(fmt.get("duration"))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+FRAME_AT: Callable[[Path, float, Path], bool] = ffmpeg_frame_at
+DURATION: Callable[[Path], float | None] = probe_duration
 FIRST_FRAME: Callable[[Path, Path], bool] = ffmpeg_first_frame
 NORMALIZE: Callable[[Path, Path], bool] = ffmpeg_normalize
 PROBE: Callable[[Path], tuple[int, int] | None] = probe_size
@@ -129,7 +147,12 @@ PROBE: Callable[[Path], tuple[int, int] | None] = probe_size
 
 # ---------------------------------------------------------------- 상태
 def get(record_id: str) -> dict[str, Any]:
-    return dict(_creative.store().get_render(record_id).get(PART) or {})
+    state = dict(_creative.store().get_render(record_id).get(PART) or {})
+    if state.get("candidates"):  # 옛 후보(source 칸 없음)는 그림 생성으로 읽는다
+        state["candidates"] = [
+            {**c, "source": c.get("source") or "generated"} for c in state["candidates"]
+        ]
+    return state
 
 
 def _set(record_id: str, **values: Any) -> dict[str, Any]:
@@ -141,9 +164,13 @@ def _folder(record_id: str) -> Path:
 
 
 def source_video(rec: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
-    """후보를 맞출 영상 칸(완성 영상 우선). 둘 다 없으면 None."""
+    """후보를 맞출 영상 칸: 내보낼 영상(`creative_render.publish_video_part`, 약속 B 한 곳).
+
+    그 칸에 파일 정보가 모자라면 예전처럼 완성 영상 → 영상 순. 없으면 None."""
     render = rec.get("render") or {}
-    for part in SOURCES:
+    for part in (_render.publish_video_part(rec), *SOURCES):
+        if part is None:
+            continue
         info = render.get(part) or {}
         if info.get("status") == "done" and info.get("sha256") and info.get("asset"):
             return part, info
@@ -163,8 +190,9 @@ def aspect_for(record_id: str, part: str, info: dict[str, Any]) -> str:
         return _render.video_aspect()
     path = _video_path(record_id, info)
     size = PROBE(path) if path is not None and path.is_file() else None
-    if size is None:
-        return WIDE if part == "final_video" else _render.VIDEO_ASPECT
+    if size is None:  # 자막을 얹은 영상은 원본 칸(source_part)을 따른다
+        origin = info.get("source_part") if part == _render.OVERLAY_PART else part
+        return WIDE if origin == "final_video" else _render.VIDEO_ASPECT
     return TALL if size[1] > size[0] else WIDE
 
 
@@ -289,6 +317,103 @@ def _reserve(ledger: MediaLedger, key: str, via: str) -> int:
     return res.row.seq
 
 
+# ---------------------------------------------------------------- 영상 장면 자르기 (11/25)
+END_CARD_S = 2.0  # 마지막 2초는 엔드카드(자막 얹기)
+FRAME_SOURCE = "video_frame"
+
+
+def _span(shots: list[Any], i: int, n: int, duration: float) -> tuple[float, float]:
+    """칸 i의 (시작, 끝)초. 시간이 없거나 맞지 않으면 영상 길이를 칸 수로 균등 분할."""
+    shot = shots[i] if i < len(shots) and isinstance(shots[i], dict) else {}
+    a, b = shot.get("start_s"), shot.get("end_s")
+    ok = all(isinstance(x, int | float) and not isinstance(x, bool) for x in (a, b))
+    if ok and 0 <= a < b:  # type: ignore[operator]
+        return float(a), float(b)  # type: ignore[arg-type]
+    return duration * i / n, duration * (i + 1) / n
+
+
+def frame_times(shots: list[Any], duration: float) -> list[float]:
+    """KINDS 순서(closeup·scene·moment)의 장면 시각(초).
+
+    closeup=훅(첫) 칸 가운데, scene=중간 칸 가운데, moment=엔드카드 직전. 칸이 없으면 3등분."""
+    n = len(shots) or 3
+    last = max(duration - 0.1, 0.0)
+    hook = sum(_span(shots, 0, n, duration)) / 2
+    mid = sum(_span(shots, n // 2, n, duration)) / 2
+    moment = duration - END_CARD_S - 0.2
+    return [round(min(max(t, 0.0), last), 3) for t in (hook, mid, moment)]
+
+
+def _cut_frames(record_id: str, rec: dict[str, Any], part: str, info: dict[str, Any]
+                ) -> list[dict[str, Any]]:  # fmt: skip
+    """최신 영상에서 장면 3장을 잘라 후보 파일로 만든다. 못 만들면 빈 목록(그림 생성 경로로)."""
+    video = _video_path(record_id, info)
+    if video is None or not video.is_file():
+        return []
+    shots = list((rec.get("storyboard") or {}).get("shots") or [])
+    duration = DURATION(video) or info.get("seconds")
+    if not isinstance(duration, int | float) or duration <= 0:
+        return []
+    folder = _folder(record_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    model = _render.mcp_video_model() or _render.video_model() or "video"
+    made: list[dict[str, Any]] = []
+    for n, (kind, at) in enumerate(zip(KINDS, frame_times(shots, float(duration)), strict=True)):
+        raw = folder / f".raw_{n}.jpg"
+        try:
+            if not FRAME_AT(video, at, raw):
+                return []  # ffmpeg 없음·실패: 일부만 쓰지 않고 그림 생성 경로로
+            done = _finish(raw, folder, model)
+        except (OSError, sns_label.LabelError):
+            return []
+        finally:
+            raw.unlink(missing_ok=True)
+        if any(m["media_id"] == done["media_id"] for m in made):
+            continue  # 같은 장면은 한 번만
+        made.append(done | {"kind": kind, "at_s": at})
+    return made
+
+
+async def _from_video(record_id: str, rec: dict[str, Any], source: tuple[str, dict[str, Any]],
+                      cur: dict[str, Any]) -> dict[str, Any] | None:  # fmt: skip
+    """영상 장면 후보를 만들어 기록한다(크레딧 0, 안전 관문 없음). 못 만들면 None."""
+    part, info = source
+    try:
+        made = await asyncio.to_thread(_cut_frames, record_id, rec, part, info)
+    except Exception:  # noqa: BLE001 - 실패해도 그림 생성 경로로 이어 간다
+        logger.exception("썸네일 장면 자르기 실패: %s", record_id)
+        return None
+    if not made:
+        return None
+    model = made[0]["mark"]["ai_generator_model"]
+    _render._safe(lambda: _write_meta(_folder(record_id), made, model))  # noqa: SLF001
+    candidates = [
+        {
+            "media_id": m["media_id"],
+            "kind": m["kind"],
+            "sha256": m["sha256"],
+            "is_ai_generated": True,  # 영상이 AI로 만든 것이라 같게 표시한다
+            "ai_label_text": AI_TEXT,
+            "ai_generator_model": model,
+            "source": FRAME_SOURCE,
+            "at_s": m["at_s"],
+        }
+        for m in made
+    ]
+    state = _set(
+        record_id,
+        status="done",
+        error=None,
+        errors=[],
+        candidates=candidates,
+        chosen=None,
+        source_part=part,
+        cover_rev=int(cur.get("cover_rev") or 0) + 1,
+    )
+    _reset_approvals(record_id)
+    return state
+
+
 async def request(
     ledger: MediaLedger,
     meta: RequestMeta,
@@ -318,6 +443,10 @@ async def request(
             return cur
         raise ThumbError("cover_locked")
     _set(record_id, status="requesting", error=None)  # 첫 await 전에 표시(겹쳐 읽어도 한 번만)
+    if not regenerate:  # 11/25 그림 생성은 사람이 [Higgsfield로 다시 만들기]를 고를 때만
+        done = await _from_video(record_id, rec, source, cur)
+        if done is not None:
+            return done
     try:
         return await _request(ledger, meta, record_id, who, rec, source, cur, auto)
     except ThumbError as error:
@@ -634,6 +763,7 @@ async def _make(ledger: MediaLedger, record_id: str, seq: int, decision: Execute
             "is_ai_generated": True,
             "ai_label_text": AI_TEXT,
             "ai_generator_model": model,
+            "source": "generated",
         }
         for m in made
     ]
