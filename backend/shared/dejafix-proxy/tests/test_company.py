@@ -45,7 +45,7 @@ def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def _save(user: str, password: str, company: str | None = None) -> None:
     def put() -> None:
         tc.upsert("dejafix", "장애", {"url": "http://10.0.0.5:8000", "username": user},
-                  {"password": password}, by="t")  # fmt: skip
+                  {"password": password}, conn_id=None, by="t")  # fmt: skip
 
     if company is None:
         put()
