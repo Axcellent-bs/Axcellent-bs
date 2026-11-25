@@ -210,6 +210,19 @@ AI 오피스 단톡방·AI 대화방 전체 대화방에서 부서 AI에게 건 
 - 화면은 4초마다 목록을 읽고, 새로 오르거나 시각이 바뀐 대화와 답을 기다리는 대화만 부서 창구에서 다시 읽는다.
 - 저장: `AX_OFFICE_ROOM_DB`(run_all은 `.data/office_room.db`). 비어 있으면 메모리(다시 켜면 사라진다).
 
+### 장애 확정 원인 (사람이 적는 기록)
+
+장애 상세(`/infra/{id}`)의 원인 후보는 DejaFix AI의 추정이다. 사람이 실제 원인을 적어 저장하는 기록은 여기(AXcellent)에 두고 DejaFix에는 쓰지 않는다 (`incident_causes.py`).
+
+| 경로 | 하는 일 |
+| --- | --- |
+| `GET /api/dashboard/incidents/{incident_id}/cause` | 지금 확정 원인(`confirmed`, 없으면 null)과 바뀐 기록(`history`, 최근 것부터 최대 20줄). 사람 토큰 |
+| `POST /api/dashboard/incidents/{incident_id}/cause` | `{text, from_rank?}`. 로그인 세션만(저장한 사람 이름·시각을 남긴다. 공용 토큰 403). 다시 저장하면 지금 것을 바꾸고 앞의 것은 `history`로 남긴다. `text`는 앞뒤 공백을 떼고 1~1000자, `from_rank` 1~20 |
+
+- 회사: 로그인 세션의 회사(세션이 없으면 캣북스). 같은 장애 번호라도 회사마다 따로 저장하고 다른 회사 기록은 읽지도 덮지도 않는다.
+- 사람이 화면에서 남기는 기록이라 `execute()`(AI 상태 변경 관문)를 거치지 않는다. AI가 이 값을 쓰는 경로는 없다.
+- 저장: `AX_INCIDENT_CAUSES_DB`(run_all은 `.data/incident_causes.db`). 비어 있으면 메모리(다시 켜면 사라진다).
+
 ### 사이트 변환기 (`/site-adapter`)
 
 AXcellent 규격(shop-api)이 아닌 고객사 자기 API를 AI들이 shop-api처럼 쓰게 바꿔 준다.
