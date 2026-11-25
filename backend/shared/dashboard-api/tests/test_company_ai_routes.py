@@ -473,8 +473,7 @@ def test_status_stops_at_the_limit_percent(client: TestClient, people: Any) -> N
 def test_no_limit_percent_means_the_whole_budget(client: TestClient, people: Any) -> None:
     _put_key(client, people["a-1"])
     client.post(
-        f"{ADMIN}/settings",
-        json={"model": "m", "monthly_budget_tokens": 100},
+        f"{ADMIN}/settings", json={"model": "m", "monthly_budget_tokens": 100},
         headers=people["a-1"],
     )
     _usage("catbooks", "finance", 50, 49, datetime.now(UTC))
