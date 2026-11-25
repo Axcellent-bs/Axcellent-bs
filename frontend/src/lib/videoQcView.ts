@@ -53,6 +53,8 @@ export interface RegenerateResult { status?: string | null; reason?: string | nu
 
 /** 다시 만들기가 안 됐을 때 안내 한 줄. 없으면 null */
 export function regenerateNote(result: RegenerateResult | null | undefined): string | null {
+  // 11/26 K: 승인 뒤 만들기가 실패해도(status failed, reason은 실패 코드) 예전 영상
+  if (result?.status === "failed") return "다시 만들기가 실패해 예전 영상을 그대로 써요(게시·썸네일 포함).";
   if (result?.status !== "rejected") return null;
   const why = result.reason === "review_timeout" ? "기한이 지나 취소돼" : result.reason === "blocked" ? "승인 관문에서 막혀" : "거절돼";
   return `다시 만들기가 ${why} 예전 영상을 그대로 써요(게시·썸네일 포함).`;

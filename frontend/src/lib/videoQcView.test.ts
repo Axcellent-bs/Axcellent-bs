@@ -38,6 +38,7 @@ test("다시 만들기가 거절·기한 지남·막힘이면 예전 영상을 �
   assert.equal(regenerateNote({ status: "rejected", reason: "rejected" }), "다시 만들기가 거절돼 예전 영상을 그대로 써요(게시·썸네일 포함).");
   assert.match(regenerateNote({ status: "rejected", reason: "review_timeout" })!, /기한이 지나 취소돼/);
   assert.match(regenerateNote({ status: "rejected", reason: "blocked" })!, /승인 관문에서 막혀/);
+  assert.equal(regenerateNote({ status: "failed", reason: "download_broken" }), "다시 만들기가 실패해 예전 영상을 그대로 써요(게시·썸네일 포함).");
 });
 
 test("버튼은 지금 있는 영상 요청 길을 regenerate만 붙여 부른다", () => {
