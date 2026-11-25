@@ -116,3 +116,27 @@ def unsafe_raw_path(raw_path: bytes) -> bool:
 
 def allowed_path(path: str) -> bool:
     return any(p.fullmatch(path) for p in _ALLOWED)
+
+
+# 화면에서 Zabbix 연결을 바꾸는 쓰기(`/settings/zabbix`)는 로그인 세션의 운영자·관리자만.
+# 에이전트 토큰·공용 사람 토큰·일반회원은 받지 않는다
+# (설정 변경은 사람이 화면에서, CLAUDE.md 예외 규칙)
+ADMIN_ROLES = ("operator", "admin")
+
+
+def check_admin_session(authorization: str | None) -> human_auth.Human:
+    """로그인 세션 토큰이고 운영자·관리자면 그 사람.
+
+    아니면 `AuthFailure`(코드로 401·403을 나눈다).
+    """
+    token = _bearer(authorization)
+    if not human_auth.is_session_token(token):
+        raise AuthFailure("ADMIN_REQUIRED", "로그인한 운영자·관리자만 바꿀 수 있어요")
+    try:
+        human = human_auth.verify_session(token, allow_no_company=True)
+    except human_auth.HumanAuthError as exc:
+        code = exc.code if exc.status_code == 401 else "TOKEN_INVALID"
+        raise AuthFailure(code, exc.message) from None
+    if human.role not in ADMIN_ROLES:
+        raise AuthFailure("ADMIN_REQUIRED", "로그인한 운영자·관리자만 바꿀 수 있어요")
+    return human

@@ -8,6 +8,9 @@ DejaFix는 모든 API에 로그인 토큰(JWT)을 요구한다. 서버 nginx는 
 DEJAFIX_USERNAME·DEJAFIX_PASSWORD) → 없으면 503. 계정은 화면·로그에 싣지 않는다.
 `GET /status`는 그 연결의 출처(builtin·custom·none)와 응답 여부만 알려 준다 (화면의 연결 카드용).
 `/status`도 호출자 토큰을 확인한다(DejaFix에 실제로 로그인해 보므로). `/healthz`만 토큰 없이 연다.
+`/settings/zabbix`(GET·PUT, POST도 저장): 화면에서 Zabbix 주소·읽기 토큰을 바꾼다
+(DejaFix 계약 #28·#29). 로그인 세션 운영자·관리자만, 같이 설치된 DejaFix만,
+DejaFix 관리자 계정(`DEJAFIX_ADMIN_*`)으로 넘긴다.
 
 회사(11/25, 로드맵 6단계): 부르는 회사의 연결만 쓴다. 회사는 로그인 세션 토큰의 `cid`, 에이전트
 토큰이면 `X-AX-Company` 머리글, 둘 다 없으면 캣북스(예전 그대로). 보관함은 그 회사 것을 읽고
@@ -38,6 +41,9 @@ from ax_agent_template.config import refuse_mock_outside_tests
 from ax_dejafix_proxy import auth
 
 JSON = "application/json"
+# 화면에서 Zabbix 연결을 바꿀 때 DejaFix에 로그인하는 관리자 계정 (viewer 계정과 따로, 서버 .env)
+ADMIN_USER_ENV = "DEJAFIX_ADMIN_USERNAME"
+ADMIN_PASSWORD_ENV = "DEJAFIX_ADMIN_PASSWORD"
 
 
 def _error(status: int, code: str, message: str) -> Response:
@@ -95,24 +101,29 @@ class DejaFixSession:
         return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
     async def get(self, path: str, query: str) -> httpx.Response:
+        return await self.send("GET", path, query)
+
+    async def send(
+        self, method: str, path: str, query: str = "", body: dict | None = None
+    ) -> httpx.Response:
         self._inflight += 1
         try:
-            return await self._get(path, query)
+            return await self._send(method, path, query, body)
         finally:
             self._inflight -= 1
             if self._retired and self._inflight == 0:
                 self._close_later()
 
-    async def _get(self, path: str, query: str) -> httpx.Response:
+    async def _send(self, method: str, path: str, query: str, body: dict | None) -> httpx.Response:
         url = f"{path}?{query}" if query else path
         async with self._lock:
             if self._token is None:
                 self._token = await self._login()
-        res = await self._client.get(url, headers=self._auth())
+        res = await self._client.request(method, url, headers=self._auth(), json=body)
         if res.status_code == 401:
             async with self._lock:
                 self._token = await self._login()
-            res = await self._client.get(url, headers=self._auth())
+            res = await self._client.request(method, url, headers=self._auth(), json=body)
         return res
 
 
@@ -188,8 +199,9 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
     async def lifespan(_: FastAPI):
         refuse_mock_outside_tests(auth.MOCK_NAME)  # 목 모드는 토큰 없이 `human:`을 받으므로
         yield
-        held = list(state.values())
+        held = list(state.values()) + list(admin_state.values())
         state.clear()
+        admin_state.clear()
         closing = [r.shutdown() for r in retired]
         retired.clear()
         if client is None:
@@ -242,6 +254,101 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         if res.status_code != 200:
             return {"source": source, "reachable": False, "detail": f"HTTP {res.status_code}"}
         return {"source": source, "reachable": True, "detail": "응답해요"}
+
+    admin_state: dict[str, tuple[Target, DejaFixSession]] = {}
+
+    def admin_session(target: Target) -> DejaFixSession:
+        """DejaFix 관리자 계정 세션(viewer 세션과 따로). 같이 설치된 DejaFix(캣북스)만 쓴다."""
+        held = admin_state.get(company_scope.CATBOOKS)
+        if held is not None and held[0] == target:
+            return held[1]
+        http = client or httpx.AsyncClient(base_url=target[0], timeout=20.0, follow_redirects=False)
+        fresh = DejaFixSession(http, target[1], target[2])
+        if held is not None and client is None:
+            held[1].retire()
+            retired.append(held[1])
+        admin_state[company_scope.CATBOOKS] = (target, fresh)
+        return fresh
+
+    async def zabbix_settings(request: Request, method: str) -> Response:
+        """화면에서 Zabbix 연결 (DejaFix 계약 #28·#29). 운영자·관리자 세션만, 같이 설치된 DejaFix만.
+
+        DejaFix에는 관리자 계정(`DEJAFIX_ADMIN_USERNAME`·`DEJAFIX_ADMIN_PASSWORD`)으로 넘긴다.
+        Zabbix 토큰은 요청 본문으로만 넘기고 응답·로그에 싣지 않는다.
+        """
+        try:
+            auth.check_admin_session(request.headers.get("authorization"))
+        except auth.AuthFailure as exc:
+            status = 403 if exc.code == "ADMIN_REQUIRED" else 401
+            return _error(status, exc.code, exc.message)
+        company = caller_company(request)
+        found = _target(company)
+        if found is None:
+            return _error(503, "DEJAFIX_NOT_CONNECTED", "DejaFix가 연결되지 않았어요")
+        target, from_vault = found
+        if from_vault:
+            return _error(
+                409,
+                "DEJAFIX_NOT_BUILTIN",
+                "화면에서 Zabbix를 연결하는 건 AXcellent와 같이 설치된 DejaFix에서만 돼요",
+            )
+        user = os.getenv(ADMIN_USER_ENV, "").strip()
+        password = os.getenv(ADMIN_PASSWORD_ENV, "")
+        if not (user and password):
+            return _error(
+                503,
+                "DEJAFIX_ADMIN_NOT_SET",
+                f"서버 담당이 {ADMIN_USER_ENV}·{ADMIN_PASSWORD_ENV}를 넣어야 해요",
+            )
+        body: dict | None = None
+        if method == "PUT":
+            try:
+                raw = await request.json()
+            except ValueError:
+                raw = None
+            if not isinstance(raw, dict):
+                return _error(422, "VALIDATION_ERROR", "본문은 {url, token, verify_tls}예요")
+            url, token, verify = raw.get("url"), raw.get("token", ""), raw.get("verify_tls", True)
+            if (
+                not isinstance(url, str)
+                or not isinstance(token, str)
+                or not isinstance(verify, bool)
+                or len(url) > 2048
+                or len(token) > 512
+            ):
+                return _error(422, "VALIDATION_ERROR", "Zabbix 주소·토큰 형식이 맞지 않아요")
+            body = {"url": url, "token": token, "verify_tls": verify}
+        try:
+            upstream = await admin_session((target[0], user, password)).send(
+                method, "/api/settings/zabbix", "", body
+            )
+        except httpx.HTTPError:
+            return _error(502, "DEJAFIX_UNREACHABLE", "DejaFix 백엔드에 연결할 수 없습니다")
+        if upstream.status_code == 404:
+            return _error(
+                501, "DEJAFIX_TOO_OLD", "이 DejaFix는 아직 화면에서 Zabbix를 바꾸지 못해요"
+            )
+        try:
+            payload = upstream.json()
+        except ValueError:
+            return _error(502, "DEJAFIX_UNREACHABLE", "DejaFix 응답을 읽을 수 없습니다")
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if isinstance(data, dict):
+            data.pop("token", None)  # 계약상 없지만 혹시 와도 내보내지 않는다
+        return Response(
+            content=json.dumps(payload, ensure_ascii=False),
+            status_code=upstream.status_code,
+            media_type=JSON,
+        )
+
+    @app.get("/settings/zabbix")
+    async def get_zabbix(request: Request) -> Response:
+        return await zabbix_settings(request, "GET")
+
+    # 운영 서버 nginx가 PUT을 못 열 수 있어 POST도 같은 저장으로 받는다
+    @app.api_route("/settings/zabbix", methods=["PUT", "POST"])
+    async def put_zabbix(request: Request) -> Response:
+        return await zabbix_settings(request, "PUT")
 
     @app.api_route(
         "/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
