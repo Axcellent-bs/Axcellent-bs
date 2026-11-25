@@ -175,6 +175,15 @@ export function videoApproval(r: Pick<WorkRequestRow, "plan" | "steps">): { step
   return null;
 }
 
+/** 영상 승인이 닫혔다(사람 거절 또는 기한 지남, 총괄 `video_rejected`). 기한 지남인지는 제작 기록 `render.video.reason`이 안다 (11/26) */
+export const VIDEO_REJECTED = "video_rejected";
+export function videoRejected(r: Pick<WorkRequestRow, "plan" | "steps">): boolean {
+  return r.plan.some((p) => {
+    const s = r.steps[p.step_id];
+    return p.skill === MAKE_SKILL && s?.status === "rejected_by_human" && s.reason_code === VIDEO_REJECTED;
+  });
+}
+
 /** 진행 카드 버튼 (시안 ②): 제작 기록이 있으면 [이미지 시트][스토리보드], 없으면 기획 장면 글이 있을 때 [스토리보드]만 */
 export function creativeButtons(r: Pick<WorkRequestRow, "plan" | "steps">, plan?: Pick<VideoPlanView, "scenes"> | null): { sheet: boolean; storyboard: boolean } {
   if (!isVideoRequest(r)) return { sheet: false, storyboard: false };

@@ -13,7 +13,7 @@
 # - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 11
+version = 12
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
@@ -24,8 +24,13 @@ review_timeout_seconds = 600
 # 액션별 사람 확인 기한(초). 여기 적은 액션은 위 값(과 SAFETY_REVIEW_TIMEOUT_SECONDS) 대신 이 값을 쓴다.
 # 1분~7일만 받는다. v11(2026-11-12): 판매자 정산 지급 승인은 24시간. 10분이면 고객지원 담당이
 # 자리에 없을 때 W44 요청처럼 그냥 만료된다
+# v12(2026-11-26): 제작 기록 영상·썸네일 승인은 1시간. 영상은 콘티·키프레임을 보고 정해서 10분이면 놓친다
+# (11/25 16:49 generate_creative_video가 기한 안에 결정이 없어 자동 취소). 키프레임·시트 그림은
+# generate_media(B, 사람 결정 아님)라 여기 없다
 [review_timeout_by_action]
 confirm_settlement = 86400
+generate_creative_video = 3600
+generate_creative_thumbnails = 3600
 
 [[rules]]
 key = "coupon_total"
