@@ -375,6 +375,8 @@ export interface TrendRequestCard {
     /** 의뢰 주제와 쓰임 (#1540, 예전 카드는 없음) */
     theme?: string | null
     theme_mode?: 'find' | 'use' | null
+    /** 주제를 넓힌 검색어 (11/26, 예전 카드는 없음) */
+    related_terms?: string[]
   }
   preset: string | null
   /** "인스타 약 45번·네이버 약 6번·AI 2번" */

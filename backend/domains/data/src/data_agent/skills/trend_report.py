@@ -970,6 +970,12 @@ def evidence_catalog(report: TrendReport) -> Catalog:
                      else "지표")  # fmt: skip
         out[f"competitor:{n}"] = (f"{c.account}: {', '.join(nums) or '지표 없음'}{traits}",
                                   ", ".join(words), short_of(f"{who_c} {brief_num}"))  # fmt: skip
+    # 11/26: 의뢰 주제와 연결 낱말이 없는 근거·공지·광고·끝난 급상승(`excluded`)은 빼고, 감지 탭에서
+    # 끌어온 주제 급상승(scan:N)을 맨 앞에 (결론·재료·인사이트·기획 넘김이 이 목록을 같이 쓴다)
+    from data_agent.skills import trend_report_topic as tt
+
+    drop = tt.excluded_ids(report)
+    out = {**tt.scan_catalog(report), **{k: v for k, v in out.items() if k not in drop}}
     # 11/24: 조회 천만 이상을 앞에, 인스타 표본이 적은 대상층이면 검색·유튜브를 앞에
     return ra.order_catalog(out, s.content.audience_thin)
 
@@ -1264,6 +1270,8 @@ class Deps:
     # 주제 후보 섹션 재료 (11/20): async () → (레이더 이름들, YouTube 이름들, 회사 상품명들).
     # 저장분만 읽는다(외부 호출 없음). 없으면 빈 목록으로 LLM 후보만
     theme_inputs: Callable[[], Awaitable[tuple[list[str], list[str], list[str]]]] | None = None
+    # 11/26 감지 탭 저장분 (keyword_trend 응답 캐시). 주제가 있는 의뢰만 읽는다(외부 호출 없음)
+    scan: Callable[[], Any] | None = None
 
 
 def needs_company(brief: TrendReportBrief) -> bool:
@@ -1364,6 +1372,7 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
             report.calls.llm += llm_calls
             report.calls.instagram += ig_calls
     report.brief = resolved.brief
+    report.related_terms = list(resolved.related_terms)
     limits = [*FIXED_LIMITS, *resolved.limits]
     await save()
     ig = await read_accounts(resolved.accounts, deps.graph, store, deps.env, now,
@@ -1438,7 +1447,12 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
         if audience is not None:
             from data_agent import meme_shorts
 
-            words = meme_shorts.load_keywords(deps.env) or list(report.brief.keywords)
+            # 11/26: 주제가 있으면 주제·확장어로 쇼츠를 찾는다 (회사 고정 밈 키워드 대신)
+            from data_agent.skills.trend_report_topic import topic_words
+
+            words = (topic_words(report.brief.theme, report.related_terms)
+                     or meme_shorts.load_keywords(deps.env)
+                     or list(report.brief.keywords))  # fmt: skip
             await ra.add_extra_shorts(audience, deps.env, deps.youtube, words, now, deps.llm,
                                       category_cache=deps.category_cache,
                                       context_id=context_id)  # fmt: skip
@@ -1465,6 +1479,17 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
         report.limits = list(dict.fromkeys(limits))
         report.limit_groups = limit_groups(limits)
         await save()
+
+    # 11/26 의뢰 주제로 찾은 근거 (주제가 없으면 그대로). 실패해도 보고서는 계속
+    try:
+        from data_agent.skills import trend_report_topic as tt
+
+        tt.apply(report, deps.scan() if deps.scan is not None and report.brief.theme else None)
+        if report.excluded:
+            limits.append(f"의뢰 주제와 상관없는 근거 등 {len(report.excluded)}개는"
+                          " 결론 근거에서 뺌")  # fmt: skip
+    except Exception as error:  # noqa: BLE001 - 주제 근거 표만 비운다
+        limits.append(f"의뢰 주제 근거를 고르지 못함 ({type(error).__name__})")
 
     async def run_recommendation() -> None:
         # 11/24 홍보 방향: 회사 설정(화면 저장 → tenant.toml) + 의뢰 문장이 제품을 직접 말하는지

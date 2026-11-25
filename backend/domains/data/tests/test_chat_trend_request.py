@@ -227,12 +227,18 @@ def test_fields_given_means_no_llm_extraction() -> None:
     request = TrendReportInput(request_text=ECO, product="친환경 화장품", target_gender="f",
                                target_ages=["20", "30"], caller="human",
                                chat_thread_id="datachat-1")  # fmt: skip
+    # 11/26: 칸 값이 와도 확장어(related_terms)가 안 왔으면 의뢰문을 한 번 읽어 주제·확장어만 쓴다
+    # (예전 기대: 0번). 칸은 그대로 폼 값 > 프리셋
     got = asyncio.run(tb.resolve(request, llm))
-    assert llm.calls == [] and got.llm_calls == 0 and got.extract_error is None
+    assert len(llm.calls) == 1 and got.llm_calls == 1 and got.extract_error is None
     assert got.brief.sources.product == "input" and got.brief.sources.keywords == "preset"
+    # 대화 카드처럼 확장어를 같이 넘기면 의뢰문을 다시 읽지 않는다 (0번)
+    again = asyncio.run(tb.resolve(request.model_copy(update={"related_terms": []}), llm))
+    assert len(llm.calls) == 1 and again.llm_calls == 0
+    assert again.brief.sources.product == "input" and again.brief.sources.keywords == "preset"
     # 칸 값이 없으면 지금처럼 의뢰문을 읽는다
     asyncio.run(tb.resolve(TrendReportInput(request_text=ECO), llm))
-    assert len(llm.calls) == 1
+    assert len(llm.calls) == 2
 
 
 def _chat_with_card(store: DataChatStore, who: str = "재현") -> str:

@@ -1301,6 +1301,7 @@ def _trend_report_deps() -> Any:
                 search=get_trend_connector(), shopping=get_shopping_connector(),
                 memes=lambda: RESPONSES.latest("trend_memes"),
                 radar=lambda: RESPONSES.latest("instagram_radar"),
+                scan=lambda: RESPONSES.latest("keyword_trend"),
                 youtube=_report_youtube(), category_cache=get_category_cache(),
                 searchad=get_searchad_connector(), pool_path=pool,
                 company=_trend_report_company, theme_inputs=_trend_report_theme_inputs)  # fmt: skip

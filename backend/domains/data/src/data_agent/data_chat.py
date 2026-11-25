@@ -250,7 +250,8 @@ def request_card(text: str, resolved: Any, names: Mapping[str, str]) -> dict[str
                "target_ages": list(b.target_ages), "format": b.format,
                "competitors": list(b.competitors), "keywords": list(b.keywords),
                "competitor_names": {a: names[a] for a in b.competitors if names.get(a)},
-               "sources": src, "theme": b.theme, "theme_mode": b.theme_mode},
+               "sources": src, "theme": b.theme, "theme_mode": b.theme_mode,
+               "related_terms": list(getattr(resolved, "related_terms", []) or [])},
         preset=b.preset,
         # 카드 칸 값으로 접수하면 의뢰문을 다시 읽지 않아 보고서 쪽 AI는 추천 1번
         cost_note=cost_note(len(resolved.accounts), len(b.keywords), 1 if filled else 2),

@@ -1922,6 +1922,8 @@ export interface TrendReportInput {
   /** 의뢰 주제("아이돌")와 쓰임 (#1540). 카드·폼 칸 값으로 접수해도 주제가 남게 넘긴다 */
   theme?: string | null;
   theme_mode?: ThemeMode | null;
+  /** 주제를 넓힌 검색어 (11/26). 대화 카드가 뽑은 것을 그대로 넘겨 의뢰문을 다시 읽지 않게 */
+  related_terms?: string[] | null;
 }
 export interface TrendReportCreated {
   report_id: string;
@@ -2073,7 +2075,26 @@ export interface TrendReport {
   /** v2 (옛 저장본에는 없음) */
   limit_groups?: TrendLimitGroups;
   calls: { instagram: number; naver: number; llm: number };
+  /** 11/26 (예전 저장본에는 없음). 주제가 없는 의뢰는 모두 빈 목록 */
+  related_terms?: string[];
+  topic_evidence?: TrendTopicEvidenceRow[];
+  excluded?: TrendExcludedEvidence[];
 }
+export type TopicEvidenceKind = "scan" | "search" | "shopping" | "hashtag" | "shorts" | "content" | "mega" | "meme";
+/** 의뢰 주제로 찾은 근거 한 줄 (값은 서버가 만든 짧은 글) */
+export interface TrendTopicEvidenceRow {
+  kind: TopicEvidenceKind;
+  label: string;
+  value: string;
+  source: string;
+  evidence_id: string | null;
+  /** 참고로만 (끝난 급상승) */
+  reference: boolean;
+  peak_end: string | null;
+}
+/** off_topic: 주제와 연결 낱말 없음 · notice_ad: 브랜드 공지·광고 · faded: 끝난 급상승 */
+export type ExcludedReason = "off_topic" | "notice_ad" | "faded";
+export interface TrendExcludedEvidence { label: string; value: string; reason: ExcludedReason; evidence_id: string | null }
 export interface TrendLimitGroups {
   method: string[];
   cannot_see: string[];
