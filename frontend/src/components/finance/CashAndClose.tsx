@@ -107,7 +107,7 @@ export function BankSection({ tick }: { tick: number }) {
     <Panel id="bank" title="은행 입금 대조" meta={res.env?.meta}
       hint="PG가 보내기로 한 정산금이 실제 통장에 들어왔는지 날짜별로 맞춥니다. 은행 연동이 없어 은행에서 내려받은 거래내역 CSV를 올린 기간의 입금만 봅니다. 출금은 아래 '은행 출금 대조'에서 봅니다.">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <label className={`btn-primary ${!humanTokenSet || busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
+        <label className={`btn-primary relative ${!humanTokenSet || busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
           {busy ? "올리는 중…" : "은행 거래내역 파일 올리기"}
           <input type="file" accept=".csv,.txt,.xlsx,.xls,text/csv" className="sr-only" disabled={!humanTokenSet || busy}
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} />

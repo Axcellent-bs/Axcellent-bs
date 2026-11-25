@@ -160,3 +160,21 @@ def test_withdrawn_rows_stay_out_after_a_restart(monkeypatch: pytest.MonkeyPatch
     assert persist.load(handlers.state(), path)
     assert _listed(TestClient(app)) == []
     assert planning_questions.STORE.find(row["tenant_id"], "REQ-7", "ctx_req_0007") is None
+
+
+def test_new_request_goes_to_the_logged_in_company_planning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """회사 분리 7번(11/25): 누비투어로 로그인해 보낸 개선 요청은 누비투어 기획에 들어간다
+    (회사가 빠지면 받는 쪽이 캣북스로 봐 캣북스 기획 요청 목록에 섞였다). 캣북스는 예전 값."""
+    from ax_contracts.schemas.common import TENANT_ID_DEFAULT
+
+    fake = FakePlanning()
+    monkeypatch.setattr(finance_api, "call_agent", fake)
+    client = TestClient(app)
+    _send(client)
+    monkeypatch.setattr(finance_api, "_company", lambda: "nubi-tour")
+    row = _send(client)
+    tickets = [c for c in fake.calls if c.skill == "create_ticket"]
+    assert [c.meta.tenant_id for c in tickets] == [TENANT_ID_DEFAULT, "nubi-tour"]
+    assert row["tenant_id"] == "nubi-tour"

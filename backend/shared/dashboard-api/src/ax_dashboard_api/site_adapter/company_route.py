@@ -41,6 +41,9 @@ SCREEN_PREFIXES = (
     "/api/dashboard/orders",
     "/api/dashboard/metrics",
     "/api/dashboard/shop",
+    # 도구 연결 보관함(GitHub 앱·배포·DejaFix 등, 11/25 회사 분리): 회사를 안 걸면 캣북스
+    # 파일을 읽어 누비투어 화면에 캣북스 GitHub 앱·배포 레포가 보였다
+    "/api/dashboard/tool-connections",
 )
 
 

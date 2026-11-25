@@ -95,7 +95,7 @@ export function ReconciliationSection({ tick }: { tick: number }) {
 
   const tools = (
     <>
-      <label className={`btn-ghost py-1 text-sm ${!humanTokenSet || busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}
+      <label className={`btn-ghost relative py-1 text-sm ${!humanTokenSet || busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}
         title="PG 관리자 화면에서 받은 정산 내역 CSV. 그 판매일 기간은 이 파일과 맞춥니다">
         {busy ? "처리 중…" : "PG 정산 파일 올리기"}
         <input type="file" accept=".csv,.txt,text/csv" className="sr-only" disabled={!humanTokenSet || busy}

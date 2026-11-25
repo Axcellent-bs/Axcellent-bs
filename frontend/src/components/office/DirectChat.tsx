@@ -380,7 +380,7 @@ function AgentTalk({ agent, talk: api, account, narrow }: { agent: DirectAgent; 
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div ref={box} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">
+        <div ref={box} className="scroll-thin relative min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">
           {prep && (
             <p role="status" className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-violet-50 px-3 py-2 text-xs text-violet-800">
               <PreparingChip /> {agent.name}는 아직 준비 중이에요. 서버가 연결되고 LLM 키가 들어가면 여기서 말을 걸 수 있어요.

@@ -83,7 +83,7 @@ export function OfficeChat({ items: all, typing, freshIds, title, longTitle, sta
         {big && <Link href={chatHref} className="btn-ghost shrink-0 px-2 py-1 text-xs" title="대화 기록에서 크게 보기">크게 보기</Link>}
       </header>
       {inc && <PinNotice inc={inc} />}
-      <div ref={box} onScroll={onScroll} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-4">
+      <div ref={box} onScroll={onScroll} className="scroll-thin relative min-h-0 flex-1 overflow-y-auto px-3 py-4">
         {clearedAt && onUndoClear && <ClearDivider clearedAt={clearedAt} onUndo={onUndoClear} />}
         {items.length === 0 ? (
           clearedAt ? null : <p className="py-16 text-center text-sm text-ink-500">아직 이 방에서 주고받은 말이 없어요.</p>

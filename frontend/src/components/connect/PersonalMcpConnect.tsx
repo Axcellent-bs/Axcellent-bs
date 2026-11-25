@@ -145,7 +145,7 @@ function Form({ mine, onDone }: { mine: PersonalMcp; onDone: () => void }) {
           {MCP_AGENTS.map((a) => {
             const on = agents.includes(a.id)
             return (
-              <label key={a.id} className={`chip cursor-pointer ${on ? 'bg-brand-600 !text-white' : 'bg-ink-100 text-ink-700'} ${off ? 'opacity-60' : ''}`}>
+              <label key={a.id} className={`chip relative cursor-pointer ${on ? 'bg-brand-600 !text-white' : 'bg-ink-100 text-ink-700'} ${off ? 'opacity-60' : ''}`}>
                 <input type="checkbox" className="sr-only" checked={on} disabled={off} onChange={() => setAgents((cur) => toggleAgent(cur, a.id))} />
                 {a.name}
               </label>

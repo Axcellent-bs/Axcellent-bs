@@ -29,9 +29,6 @@ DEPT_LABEL = {
     "archive": "아카이브",
 }
 READ_GRADE = "read"
-MEDIA_TIMEOUT_S = (
-    300.0  # 영상 제작은 공급자가 몇십 초~몇 분 걸린다(마케팅이 긴 작업으로 바뀌기 전까지)
-)
 HUMAN_GRADE = "C"  # 총괄이 사람 승인을 먼저 받는 등급(`human_gate`가 있는 단계도 같다)
 BRAND_CHARACTER_KEY = "brand_character_record_id"  # 홍보 영상에 쓸 회사 대표 캐릭터 (11/23)
 # 11/24: 홍보 영상은 회사 캐릭터 답을 먼저 받는다. 이 사람 단계는 사람 확인(승인·거절)이 아니라
@@ -206,7 +203,6 @@ PROMO_VIDEO = TaskDef(
             after=("prepare",),
             takes_carry=True,
             on_missing="fail",
-            timeout_s=MEDIA_TIMEOUT_S,
         ),
     ),
 )

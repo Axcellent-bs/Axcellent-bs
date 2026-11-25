@@ -154,8 +154,9 @@ def test_chat_passes_scene_and_note_only_for_redraw() -> None:
 
     async def act(action: dict[str, Any]) -> ActionResult:
         seen.append(action)
-        return ActionResult(changed=True,
-                            output={"proposal_id": action["proposal"], "scenes": 1, "sent": True})
+        return ActionResult(
+            changed=True, output={"proposal_id": action["proposal"], "scenes": 1, "sent": True}
+        )
 
     actions = [turn.ChatAction(type="redraw_storyboard", proposal="PROP-91", scene=2,
                                note="인물을 왼쪽에"),
@@ -166,3 +167,32 @@ def test_chat_passes_scene_and_note_only_for_redraw() -> None:
     assert seen[1] == {"type": "make_plan", "proposal": "PROP-91"}
     assert "2번 장면 콘티를 다시 그렸어요" in lines[0] and "다시 넘겨야" in lines[0]
     assert "redraw_storyboard" in turn.SYSTEM_PROMPT
+
+
+def test_media_hint_category_comes_from_the_company_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """11/25 예진: 분류는 기획이 회사 분류 목록에서 골라 넘긴다 (마케팅 "미정" 방지)."""
+    cats = {"categories": ["그림책", "자기계발", "에세이"]}
+    monkeypatch.setattr(vp.tenant, "brand_section", lambda name=None: cats)
+    # 제안 글에 나온 분류가 먼저
+    assert vp.media_hints(_prop(idea="출근길 에세이 한 줄 공감")).category == "에세이"
+    # 글에 없으면 LLM이 목록에서 고른 값, 목록 밖이면 버린다
+    assert vp.media_hints(_prop(), "자기계발").category == "자기계발"
+    assert vp.media_hints(_prop(), "소설").category is None
+    # 회사 목록이 없으면 비운다(지어내지 않는다)
+    monkeypatch.setattr(vp.tenant, "brand_section", lambda name=None: {})
+    assert vp.media_hints(_prop(), "에세이").category is None
+
+
+def test_llm_plan_carries_the_picked_category(monkeypatch: pytest.MonkeyPatch) -> None:
+    cats = {"categories": ["그림책", "자기계발"]}
+    monkeypatch.setattr(vp.tenant, "brand_section", lambda name=None: cats)
+    scenes = [{"visual": f"장면 {i}", "caption": "", "prompt": "A woman reading on a calm subway"}
+              for i in range(4)]  # fmt: skip
+    out = vp._PlanOut.model_validate(
+        {"concept": "출근길", "script": "훅 → 공감", "scenes": scenes, "category": "자기계발"}
+    )
+    llm = MockLLMClient(responses={vp._PlanOut: out})
+    plan = asyncio.run(vp.write(llm, _prop(), "ctx", (vp.FUN_FIRST, vp.END_CARD)))
+    assert plan.written_by == "llm" and plan.media_hints is not None
+    assert plan.media_hints.category == "자기계발"
+    assert '"categories"' in llm.calls[0] and "그림책" in llm.calls[0]
