@@ -19,9 +19,9 @@ from __future__ import annotations
 import sqlite3
 import threading
 import tomllib
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -206,6 +206,7 @@ async def list_sources(
     now: datetime | None = None,
     store: ProbeStore | None = None,
     recheck: bool = False,
+    tenant_id: str | None = None,
 ) -> SourcesResult:
     """출처 목록과 상태. 확인이 필요한 출처는 저장된 확인 결과가 없을 때만 1번 부른다."""
     now = now or datetime.now(UTC)
@@ -267,6 +268,8 @@ async def list_sources(
         f" 키 필요 {', '.join(need) or '없음'}"
     )
     out.collectors = collector_states(env, now)  # 요약 문장은 그대로 (출처 목록만 센다)
+    if tenant_id and (agg := aggregate_state(env, tenant_id, now)) is not None:
+        out.collectors.append(agg)  # 일별 집계 병행 비교 한 줄 (3단계 설계 6.3)
     out.llm_usage = llm_usage_today(env)
     # YouTube 오늘 사용량/하루 상한 (하나의 장부, 서버·수집기가 같은 기록)
     from data_agent.youtube_quota import LEDGER
@@ -385,3 +388,65 @@ def collector_states(env: Mapping[str, str], now: datetime) -> list[CollectorSta
             stalled=warning is not None, warning=warning, reason=state.reason,
         ))  # fmt: skip
     return out
+
+
+AGGREGATE_MAX_AGE_HOURS = 26.0  # 하루 한 번(한국 00:30 뒤) 계산. 이보다 오래되면 집계 멈춤
+
+
+def aggregate_state(
+    env: Mapping[str, str], tenant_id: str, now: datetime
+) -> CollectorStatus | None:
+    """그 회사 일별 집계의 마지막 계산과 병행 비교 한 줄 (3단계 설계 6.3). 읽기만 한다.
+
+    reason = "일별 집계 병행 비교: 3일 연속 같음(마지막 11월 23일)" 또는 "… 11월 23일 다름 2".
+    집계 파일이 없거나 그 회사 계산 기록이 없으면 None(줄을 만들지 않는다)."""
+    from data_agent.aggregate.store import AggregateStore, db_path  # noqa: PLC0415 - 가벼운 시작
+
+    path = db_path(dict(env))
+    if not path.is_file():
+        return None
+    try:
+        agg = AggregateStore(path)
+        try:
+            runs = agg.runs(tenant_id)
+            compares = agg.compare_rows(tenant_id)
+        finally:
+            agg.close()
+    except sqlite3.DatabaseError:
+        return None
+    if not runs:
+        return None
+    done = [r for r in runs if r["status"] == "done"]
+    last = datetime.fromisoformat(done[-1]["finished_at"]).astimezone(UTC) if done else None
+    age = (now - last).total_seconds() / 3600 if last else None
+    warning = None
+    if age is None:
+        warning = "집계 멈춤: 끝난 계산이 없음"
+    elif age > AGGREGATE_MAX_AGE_HOURS:
+        warning = f"집계 멈춤: 마지막 계산 {age:.1f}시간 전 (기준 {AGGREGATE_MAX_AGE_HOURS:g}시간)"
+    return CollectorStatus(
+        collector_id="daily_aggregate", name="일별 집계", running=warning is None,
+        last_collected_at=last, max_age_hours=AGGREGATE_MAX_AGE_HOURS,
+        stalled=warning is not None, warning=warning, reason=compare_line(compares),
+    )  # fmt: skip
+
+
+def compare_line(rows: Sequence[sqlite3.Row]) -> str:
+    """병행 비교 기록 → 한 줄. 마지막 기준일부터 거슬러 다름 0인 날이 이어진 수."""
+    days: dict[str, int] = {}
+    for r in rows:
+        days[r["as_of"]] = days.get(r["as_of"], 0) + (0 if r["same"] else 1)
+    if not days:
+        return "일별 집계 병행 비교: 아직 비교 기록 없음"
+    order = sorted(days, reverse=True)
+    latest = date.fromisoformat(order[0])
+    label = f"{latest.month}월 {latest.day}일"
+    if days[order[0]]:
+        return f"일별 집계 병행 비교: {label} 다름 {days[order[0]]}"
+    streak, expect = 0, latest
+    for d in order:
+        if date.fromisoformat(d) != expect or days[d]:
+            break
+        streak += 1
+        expect -= timedelta(days=1)
+    return f"일별 집계 병행 비교: {streak}일 연속 같음(마지막 {label})"
