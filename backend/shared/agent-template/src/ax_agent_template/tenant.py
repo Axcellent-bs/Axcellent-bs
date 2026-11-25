@@ -45,6 +45,13 @@ logger = logging.getLogger("ax.tenant")
 _cache: dict[Path, tuple[int, dict[str, Any]]] = {}
 
 
+def frame_dir() -> Path:
+    """틀 기본값 폴더(`config/frame/`, 11/25): 회사 설정이 정해지지 않은 다른 회사가 쓴다.
+
+    회사 폴더들 옆(`tenants_dir()`의 형제)에 있다. 회사 목록(`list_tenants`)에는 들어가지 않는다."""
+    return tenants_dir().parent / "frame"
+
+
 def tenants_dir() -> Path:
     """회사 폴더들이 있는 곳: `AX_TENANTS_DIR` → 레포 backend/config/tenants → 작업 폴더.
 
@@ -167,7 +174,7 @@ def _other_company() -> bool:
 
 
 def setting(env_name: str) -> str:
-    """회사 설정 값. 환경변수 → 지금 회사 폴더. 없으면 "".
+    """회사 설정 값. 환경변수 → 지금 회사 폴더 → (다른 회사, 회사 설정 없음) 틀 기본값. 없으면 "".
 
     회사 설정 환경변수(`DERIVED`)는 설치 하나에 하나라 캣북스 것이다. 다른 회사 요청이면 환경변수를
     보지 않고 그 회사 폴더만 본다(11/25: 서버 `DATA_TENANT_CATALOG`가 누비투어에도 캣북스 카탈로그를
@@ -178,9 +185,14 @@ def setting(env_name: str) -> str:
     if given and not _other_company():
         return given
     name = current()
-    if name is None:
+    if name is not None:
+        folder = (tenants_dir() / name).resolve()
+    elif _other_company():
+        # 캣북스가 아닌 회사인데 회사 설정이 정해지지 않았다(가입만 한 회사): 틀 기본값
+        # (공통 카탈로그·업무 배정 틀·시간대). 다른 회사 폴더나 캣북스 값으로 가지 않는다(11/25)
+        folder = frame_dir().resolve()
+    else:
         return ""
-    folder = (tenants_dir() / name).resolve()
     raw = _read(folder) or {}
     if env_name in _FILE_KEYS:
         value = raw.get(_FILE_KEYS[env_name])

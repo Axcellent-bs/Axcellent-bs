@@ -1,0 +1,30 @@
+# 틀 기본 지표 카탈로그 (11/25): 회사 설정이 정해지지 않은 회사가 쓴다(config/frame/tenant.toml).
+# 형식: ax_contracts.schemas.data.MetricCatalog
+# 사이트 변환기가 회사 API를 shop-api 규격으로 바꿔 주므로, 그 규격으로 어느 회사나 받을 수 있는 지표만 둔다.
+# 업종 전용 칸(장르·분류·판매 세부)은 두지 않는다(캣북스 서점 문구가 다른 회사에 나오지 않게).
+id = "common"
+name = "기본"
+connector = "shop-api"
+volume_metric = "order_count"
+volume_label = "주문"
+
+[[metrics]]
+id = "order_count"
+label = "주문 수"
+bad_direction = "down"  # 감소만 이상
+unit = "건"
+aggregate = "sum"
+
+[[metrics]]
+id = "inquiry_count"
+label = "문의량"
+bad_direction = "up"
+unit = "건"
+aggregate = "sum"
+
+[impact]
+unit_label = "주문"
+customer_label = "고객"
+money_field = "amount"
+money_unit = "원"
+money_label = "결제 실패(미결제) 금액"

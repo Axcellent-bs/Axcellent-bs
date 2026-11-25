@@ -157,9 +157,14 @@ def test_color_from_brief_or_season_default() -> None:
 
 
 def test_category_is_never_invented() -> None:
-    missing = _notes()["category"]
+    # 상품이 있는데 분류 언급이 없으면 미정
+    missing = _notes(products=["여름 신상 텀블러"])["category"]
     assert missing.value is None and missing.source == "undecided"
-    assert "미정" in missing.reason
+    assert missing.reason == "기획안에 회사 분류 언급이 없어 미정(지어내지 않음)"
+    # 상품도 분류 언급도 없으면 회사 홍보(값은 여전히 비움, 지어내지 않음)
+    promo = _notes()["category"]
+    assert promo.value is None and promo.source == "undecided"
+    assert promo.reason == "회사 홍보 영상이라 분류 없음"
     assert _notes(idea="그림책 신간을 알린다")["category"].value == "그림책"
     assert _notes(products=["어린이 과학 전집"])["category"].value == "과학"
     assert _notes(title="에세이 기획전", idea="소설도 함께")["category"].value == "에세이"
@@ -192,6 +197,8 @@ def test_company_without_categories_never_guesses(
     note = _notes(idea="그림책 신간을 알린다")["category"]
     assert note.value is None and note.source == "undecided"
     assert note.reason == "회사 설정에 분류 목록이 없어 미정(지어내지 않음)"
+    # 목록이 없으면 상품이 없어도 지금 문구 그대로
+    assert _notes(products=[])["category"].reason == note.reason
 
 
 def test_recommended_values_pass_the_scene_template_whitelist() -> None:

@@ -3,7 +3,7 @@ import { useEffect, useState, type Dispatch } from 'react'
 import { RequestDecideBar, VideoStoryboard } from '@/components/planning/videoPlan'
 import { requestOfSearch, storyBasis } from '@/lib/videoStoryboard'
 import { Button, Notice, useToast } from '@dejafix/common-frontend'
-import { DEPT_NAME, nextDocId, type Action, type Decision, type Spec, type State as S } from '@/lib/planningData'
+import { DEPT_NAME, nextDocId, type Action, type CodingStatus, type Decision, type Task, type Spec, type State as S } from '@/lib/planningData'
 import { State, Tag, rowNav } from '@/components/planning-common/parts'
 import { Linked, Ref, go, idText, reviewOf, toPath } from '@/components/planning-common/links'
 import { CONFIRMED_BY } from '@/components/planning-common/flow'
@@ -311,6 +311,30 @@ function PlanHandoff({ s, d, spec }: P & { spec: Spec }) {
       ) : p.status === '기획서로' ? <span className="small">개발로 넘김 · 작업 {s.tasks.filter((t) => t.spec === spec.id).length}개</span>
         : p.handoff ? <span className="small" title={p.handoff.campaign ? `캠페인 ${p.handoff.campaign}` : undefined}>{p.handoff.ok ? '마케팅이 받음' : '마케팅 전달 실패'}{p.status !== '마케팅 전달' && <> · <a href={toPath(`proposals/${p.id}`)}>{p.status}</a></>}</span>
         : <span className="muted small">{p.status}</span>}
+    </div>
+  )
+}
+
+// 요청에서 온 기획서가 개발로 넘어간 뒤의 줄 (11/25): 작업 몇 개가 어디까지 갔고 무엇이 막혔는지.
+// 기획서 화면에서 개발 진행이 안 보여 멈춘 것처럼 보였다. 막힌 작업은 눌러서 개발 화면으로 간다
+const DONE: CodingStatus[] = ['merged', 'covered']
+const STUCK: CodingStatus[] = ['waiting_human', 'failed']
+function DevHandoff({ s, spec }: { s: S; spec: Spec }) {
+  if (spec.origin === PROPOSAL_ORIGIN) return null
+  const tasks = s.tasks.filter((t) => t.spec === spec.id && !t.discarded)
+  if (!tasks.length) return null
+  const st = (t: Task) => t.coding?.status
+  const done = tasks.filter((t) => DONE.includes(st(t) as CodingStatus))
+  const stuck = tasks.filter((t) => STUCK.includes(st(t) as CodingStatus))
+  const waiting = tasks.filter((t) => !stuck.includes(t) && !done.includes(t) && (t.coding?.waitingFor?.length ?? 0) > 0)
+  const why = (t: Task) => (st(t) === 'waiting_human' ? '사람 확인' : '실패') + (t.coding?.error ? ` · ${t.coding.error}` : '')
+  return (
+    <div className="plan-handoff">
+      <span className="small">개발로 넘김 · 작업 <b>{tasks.length}</b>개 · 끝남 {done.length}</span>
+      {waiting.length > 0 && <span className="muted small" title={waiting.map((t) => `${idText(t.id)} ← ${(t.coding?.waitingFor ?? []).map(idText).join(', ')}`).join('\n')}>앞 작업 기다림 {waiting.length}</span>}
+      {stuck.map((t) => <a key={t.id} className="plan-fail" href={`/dev/work/prs/${encodeURIComponent(t.id)}`} title={why(t)}>{idText(t.id)} {st(t) === 'waiting_human' ? '사람 확인' : '실패'}</a>)}
+      <span style={{ flex: 1 }} />
+      <a className="small" href="/dev">개발 작업 현황 ›</a>
     </div>
   )
 }
@@ -709,6 +733,7 @@ function SpecView({ s, d, spec, item2 }: P & { spec: Spec; item2?: string }) {
         <div className="print-hide">
           {xr && <ReviewDecide d={d} spec={spec} xr={xr} />}
           <PlanHandoff s={s} d={d} spec={spec} />
+          <DevHandoff s={s} spec={spec} />
           {spec.status === '확정' && <ReleaseCheckBox d={d} spec={spec.id} />}
         </div>
         {/* 제안에 영상 제작안이 있으면 같은 스토리보드를 본문 위에 (11/23 재현 님 시안 ④) */}

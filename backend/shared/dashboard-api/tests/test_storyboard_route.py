@@ -323,3 +323,28 @@ def test_background_needs_a_record(client: TestClient, fake: Fake) -> None:
     assert res.status_code == 422
     assert fake.calls == []
     assert client.post(URL, json={"story": "들판", "background": "yes"}).status_code in (400, 422)
+
+
+def test_a_failed_background_storyboard_tells_the_screen_why(
+    client: TestClient, fake: Fake
+) -> None:
+    """11/25 뒤에서 만들다 실패하면 기록이 안 바뀌기만 해서 이유를 몰랐다. 상태로 남긴다."""
+    rid = "CR-00000000beef"
+    assert client.get(f"{URL}/jobs/{rid}").json()["data"]["status"] == "none"
+    fake.status, fake.outcome = TaskStatus.FAILED, "llm_failed"
+    fake.output = {"message": "LLM API를 부르지 못했다(시간 초과 등)"}
+    body = {"story": "들판", "shots": 6, "record_id": rid, "background": True}
+    assert client.post(URL, json=body).status_code == 200
+    client.get(f"{URL}/jobs/{rid}")  # 이벤트 루프가 한 번 더 돌게
+    job = client.get(f"{URL}/jobs/{rid}").json()["data"]
+    assert job["status"] == "failed"
+    assert "LLM API" in job["message"]
+
+
+def test_a_finished_background_storyboard_is_done(client: TestClient, fake: Fake) -> None:
+    rid = "CR-00000000cafe"
+    body = {"story": "들판", "shots": 6, "record_id": rid, "background": True}
+    assert client.post(URL, json=body).status_code == 200
+    client.get(f"{URL}/jobs/{rid}")
+    assert client.get(f"{URL}/jobs/{rid}").json()["data"]["status"] == "done"
+    assert client.get(f"{URL}/jobs/nope").status_code == 422

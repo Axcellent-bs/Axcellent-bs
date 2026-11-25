@@ -2,3 +2,5 @@
 org.yaml
 # 회사 설정 폴더의 조직도는 커밋한다 (비밀값 없음, README "새 회사를 붙일 때"). 위 규칙은 config/org.yaml 덮어쓰기용
 !tenants/*/org.yaml
+# 틀 기본값 조직도(업무 배정만, 비밀값·인원 없음)도 커밋한다
+!frame/org.yaml

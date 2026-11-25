@@ -6,7 +6,8 @@
 고친 코드는 다시 리뷰하지 않고 CI 통과로 확인한다 (토큰 절약. CI가 없는 레포면 사람 확인).
 
 - 상태 잠금 밖에서 돈다. 단계마다 서비스의 작은 액션(`coding_*`)으로 진행 상태를 적는다 (SSE).
-- 한도: 파일 5개, 바뀐 줄 합 1500줄, 고칠 파일 600줄. 넘으면 PR 없이 사람 확인(`waiting_human`).
+- 한도: 파일 5개, 바뀐 줄 합 1500줄. 넘으면 PR 없이 사람 확인(`waiting_human`). 파일 크기 한도는
+  없다. 600줄 넘는 파일은 통째로 다시 쓰지 않고 바꿀 부분(edits)만 고친다.
 - 줄 수는 difflib로 코드가 센다. LLM은 파일 고르기·글 쓰기·리뷰만 한다.
 - 기획 글·파일 글은 데이터 블록으로만 넣는다. 토큰은 보내지 않는다.
 - LLM은 `DEV_LLM_*`·`LLM_*` 설정 (기획 `PLANNING_LLM_*`와 따로, llm_env).
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
 
 MAX_FILES = 5  # 한 번에 고칠 파일 수
 MAX_TOTAL_LINES = 1500  # 바뀐 줄(더한 줄 + 지운 줄) 합
-MAX_FILE_LINES = 600  # 통째로 다시 쓸 수 있는 파일 길이
+MAX_FILE_LINES = 600  # 이보다 긴 파일은 통째로 다시 쓰지 않는다 (바꿀 부분만 고친다)
 MAX_LISTING = 400  # LLM에 보여 줄 파일 경로 수
 MAX_SCORED = 200  # 그중 작업 낱말로 고른 경로 수 (나머지는 폴더 구조를 보여 준다)
 MAX_PER_MENTION = 50  # 글에 적힌 폴더·파일 이름 하나가 당겨 올 경로 수
@@ -898,6 +899,13 @@ async def _write_one(
             fixed, still = apply_some(text, again.edits)
             if not still:
                 return fixed, reason
+        n = len(_lines(current))
+        if n > MAX_FILE_LINES:  # 긴 파일을 통째로 다시 쓰면 중간이 빠지기 쉽다
+            raise CoderStop(
+                "waiting_human",
+                f"{pick.path} 바꿀 부분을 파일에 맞추지 못함 ({n}줄이라 통째로 다시 쓰지 않음) "
+                "→ 사람 확인",
+            )
         got = await _ask(llm, f"파일 다시 쓰기 {pick.path}", FULL_PROMPT, FileWrite, data, job.ctx)
     reason = _one_line(got.reason or pick.reason)
     if got.content:
@@ -916,7 +924,7 @@ async def _read_all(adapter: VcsAdapter, paths: list[str]) -> dict[str, str]:
 async def _originals(
     adapter: VcsAdapter, picks: list[FilePick], known: dict[str, str]
 ) -> dict[str, str]:
-    """고칠 파일의 지금 글 (새 파일은 빈 글). 읽어 둔 건 다시 읽지 않는다. 너무 길면 사람 확인."""
+    """고칠 파일의 지금 글 (새 파일은 빈 글). 읽어 둔 건 다시 읽지 않는다. 길이 한도는 없다."""
     need = [p.path for p in picks if p.action == "modify" and p.path not in known]
     bodies = {**known, **(await _read_all(adapter, need))}
     out: dict[str, str] = {}
@@ -924,11 +932,7 @@ async def _originals(
         if pick.action == "create":
             out[pick.path] = ""
             continue
-        body = bodies[pick.path]
-        n = len(_lines(body))
-        if n > MAX_FILE_LINES:
-            raise CoderStop("waiting_human", f"{pick.path} {n}줄 > {MAX_FILE_LINES}줄 → 사람 확인")
-        out[pick.path] = body
+        out[pick.path] = bodies[pick.path]
     return out
 
 
@@ -1528,10 +1532,6 @@ async def _revise(svc: DevService, job: Job, llm: Any, adapter: VcsAdapter) -> N
     head_rows = await asyncio.gather(*(_read_or_empty(adapter, p, pr.branch) for p in every))
     base = dict(zip(every, base_rows, strict=True))
     current = dict(zip(every, head_rows, strict=True))
-    for p in paths:
-        n = len(_lines(current[p]))
-        if n > MAX_FILE_LINES:
-            raise CoderStop("waiting_human", f"{p} {n}줄 > {MAX_FILE_LINES}줄 → 사람 확인")
     picks = [
         FilePick(path=p, action="modify" if current[p] else "create", reason="사람 지시 반영")
         for p in paths

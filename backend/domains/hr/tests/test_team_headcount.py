@@ -140,13 +140,13 @@ def test_only_finance_and_orchestrator_may_ask(org, client) -> None:
 
 
 def test_other_company_gets_no_example_roster(svc, org, client, monkeypatch) -> None:
-    """회사 분리(11/25): 예시 명부(팀원 6명)는 캣북스만. 누비투어는 입력한 발령이 없으면 0명."""
-    # #1783부터 다른 회사는 환경변수 조직도(AX_ORG_CONFIG)를 보지 않고 그 회사 폴더 조직도만 읽는다.
-    # 이 시험엔 회사 연결이 없어, 누비투어 조직도 자리에 시험 조직도를 넣는다
-    from ax_agent_template.routing import load_org
-    from hr_agent.org import roster
+    """회사 분리(11/25): 예시 명부(팀원 6명)는 캣북스만. 누비투어는 입력한 발령이 없으면 0명.
 
-    monkeypatch.setattr(roster, "load_org", lambda path=None: load_org(path or str(org)))
+    다른 회사 요청은 설치 환경변수(AX_ORG_CONFIG, 캣북스 것)를 보지 않고 그 회사 연결의 설정
+    폴더 조직도를 읽는다(#1783). 누비투어 연결이 `nubi` 폴더를 고른 상태로 둔다."""
+    from ax_agent_template import tenant
+
+    monkeypatch.setattr(tenant, "current", lambda: "nubi")
     body = _body()
     body["meta"]["tenant_id"] = "nubi-tour"
     res = client.post("/a2a", json=body).json()
@@ -155,3 +155,15 @@ def test_other_company_gets_no_example_roster(svc, org, client, monkeypatch) -> 
     assert sum(r.headcount for r in out.rows) == 0
     assert out.example is True  # 등록 전이라 재무가 예산을 확정하지 못하게
     assert out.basis == "등록한 직원 없음(발령 기록 0건), 2026-11-01 소속"
+
+
+def test_company_without_settings_uses_frame_teams_and_no_people(svc, org, client) -> None:
+    """가입만 한 회사(c-cf2f0d, 회사 설정 없음)는 틀 기본 업무 배정의 부서로 세고 인원은 0명(11/25).
+    캣북스 예시 인원(6명)·캣북스 조직도(AX_ORG_CONFIG)는 보이지 않는다."""
+    body = _body()
+    body["meta"]["tenant_id"] = "c-cf2f0d"
+    res = client.post("/a2a", json=body).json()
+    assert res["status"] == "completed"
+    out = TeamHeadcountOutput.model_validate(res["output"])
+    assert out.rows and sum(r.headcount for r in out.rows) == 0
+    assert out.example is True

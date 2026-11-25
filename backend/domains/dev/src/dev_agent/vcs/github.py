@@ -39,7 +39,6 @@ from dev_agent.vcs.base import (
     ISSUE_LIST_LIMIT,
     ISSUE_STATES,
     LIST_LIMIT,
-    MAX_READ_BYTES,
     Branch,
     Capabilities,
     Change,
@@ -496,9 +495,10 @@ class GithubVcsAdapter:
         )
         if not isinstance(got, dict) or got.get("type") != "file":
             raise VcsError("invalid", f"파일이 아니다: {path}")
-        if int(got.get("size") or 0) > MAX_READ_BYTES:
-            raise VcsError("invalid", f"파일이 너무 크다 ({got.get('size')}바이트): {path}")
-        if got.get("encoding") != "base64":
+        if got.get("encoding") == "none" and got.get("sha"):
+            # 1MB가 넘는 파일은 contents가 내용을 비워 보낸다 → 같은 sha의 blob으로 받는다
+            got = await self._call("GET", f"/git/blobs/{quote(str(got['sha']), safe='')}")
+        if not isinstance(got, dict) or got.get("encoding") != "base64":
             raise VcsError("invalid", f"읽을 수 없는 인코딩: {path}")
         try:
             data = base64.b64decode(str(got.get("content") or ""), validate=False)

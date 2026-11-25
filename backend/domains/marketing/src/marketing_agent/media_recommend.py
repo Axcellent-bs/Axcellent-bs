@@ -341,11 +341,18 @@ def _category(brief: CampaignBriefInput) -> FieldNote:
             return FieldNote(
                 field="category", value=word, source="brief", reason=f'기획안의 "{word}" 언급'
             )
+    # 11/25 #1789·#1791: 기획은 상품 영상일 때만 분류를 넘긴다(브랜드·채널 홍보·솔루션 광고는 비움).
+    # 상품이 없으면 회사 홍보라 분류가 없는 게 맞다. 오류처럼 "미정"으로 보이지 않게 한다
+    if not brief.products:
+        return FieldNote(field="category", source="undecided", reason=PROMO_NO_CATEGORY)
     return FieldNote(
         field="category",
         source="undecided",
         reason="기획안에 회사 분류 언급이 없어 미정(지어내지 않음)",
     )
+
+
+PROMO_NO_CATEGORY = "회사 홍보 영상이라 분류 없음"
 
 
 def recommend_fields(

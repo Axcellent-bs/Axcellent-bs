@@ -1494,6 +1494,17 @@ class StoryboardBody(BaseModel):
 
 
 _STORYBOARD_TASKS: set[asyncio.Task[Any]] = set()
+# 11/25 뒤에서 만드는 스토리보드의 마지막 상태(기록 번호별, 메모리).
+# 실패하면 화면이 이유를 보여 준다.
+# 재시작하면 비워진다(그때 화면은 "모름"으로 보고 기록만 다시 읽는다)
+_STORYBOARD_JOBS: dict[str, dict[str, Any]] = {}
+_STORYBOARD_JOBS_MAX = 200
+
+
+def _set_storyboard_job(record_id: str, **job: Any) -> None:
+    if record_id not in _STORYBOARD_JOBS and len(_STORYBOARD_JOBS) >= _STORYBOARD_JOBS_MAX:
+        _STORYBOARD_JOBS.pop(next(iter(_STORYBOARD_JOBS)))
+    _STORYBOARD_JOBS[record_id] = {"at": datetime.now(UTC).isoformat(), **job}
 
 
 async def _storyboard_in_background(
@@ -1508,8 +1519,15 @@ async def _storyboard_in_background(
             record_id,
             deadline_s=marketing_client.STORYBOARD_BACKGROUND_DEADLINE_SECONDS,
         )
-    except Exception:  # noqa: BLE001 - 화면은 기록을 다시 읽어 실패(안 바뀜)를 안다
+    except ApiError as exc:
+        logger.warning("스토리보드(뒤에서 만들기) 실패: %s %s", record_id, exc.code)
+        _set_storyboard_job(record_id, status="failed", code=exc.code, message=exc.message)
+        return
+    except Exception:  # noqa: BLE001 - 이유는 서버 로그에만, 화면엔 코드만
         logger.exception("스토리보드(뒤에서 만들기) 실패: %s", record_id)
+        _set_storyboard_job(record_id, status="failed", code="ERROR", message="서버 오류")
+        return
+    _set_storyboard_job(record_id, status="done")
 
 
 @router.post("/marketing/storyboard")
@@ -1536,6 +1554,7 @@ async def marketing_storyboard(body: StoryboardBody) -> dict:
                 body.record_id,
             )
         )
+        _set_storyboard_job(body.record_id, status="running")
         _STORYBOARD_TASKS.add(task)  # 끝나기 전에 가비지 수집되지 않게 잡아 둔다
         task.add_done_callback(_STORYBOARD_TASKS.discard)
         return ok({"record_id": body.record_id, "started": True})
@@ -1548,6 +1567,14 @@ async def marketing_storyboard(body: StoryboardBody) -> dict:
             body.record_id,
         )
     )
+
+
+@router.get("/marketing/storyboard/jobs/{record_id}")
+async def marketing_storyboard_job(
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """뒤에서 만드는 스토리보드의 마지막 상태(running·done·failed). 없으면 status "none"."""
+    return ok({"record_id": record_id, **_STORYBOARD_JOBS.get(record_id, {"status": "none"})})
 
 
 @router.get("/marketing/creative-records")

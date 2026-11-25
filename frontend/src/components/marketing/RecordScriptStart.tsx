@@ -2,7 +2,7 @@ import { useState } from "react";
 import { writeScript } from "@/lib/creativeScriptApi";
 import { DEFAULT_SCRIPT_SECONDS, SCRIPT_SECONDS, boardArrived, nearestCount, type CreativeScript, type ScriptSeconds } from "@/lib/creativeScript";
 import { getCreativeRecord, type CreativeRecord } from "@/lib/creativeRecords";
-import { MAX_STORY, startStoryboard } from "@/lib/storyboard";
+import { MAX_STORY, startStoryboard, storyboardJob } from "@/lib/storyboard";
 
 // 제작 기록 상세에서 대본 시작하기 (11/25).
 // 총괄 홍보 영상 의뢰로 생긴 기록은 대본 없이 스토리보드만 있어 대사·자막을 고칠 수 없었다.
@@ -75,6 +75,12 @@ export function RecordBoardFromScript({ recordId, story, characterEn, scenes, on
         const rec = await getCreativeRecord(recordId).catch(() => null);
         if (rec && boardArrived(rec, startedAt)) {
           onRecord(rec);
+          return;
+        }
+        // 서버가 실패를 알려 주면 5분을 다 기다리지 않고 이유를 보여 준다
+        const job = await storyboardJob(recordId).catch(() => null);
+        if (job?.status === "failed") {
+          setError(`스토리보드를 만들지 못했어요${job.message ? ` — ${job.message}` : ""}${job.code ? ` (${job.code})` : ""}`);
           return;
         }
       }
