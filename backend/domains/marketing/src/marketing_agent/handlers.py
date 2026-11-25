@@ -1103,6 +1103,15 @@ def _save_original(request: AgentRequest, record_id: str) -> None:
         _render._set(record_id, "sheet_image", status="failed", error="original_not_saved")  # noqa: SLF001
 
 
+def _save_extras(record_id: str, extras: list[Any]) -> None:
+    """추가 참조 이미지를 회사 기록 폴더에 ref_1~ref_3으로 둔다. 실패해도 결과는 그대로."""
+    for index, (image, _label) in enumerate(extras, start=1):
+        try:
+            _render.save_extra(record_id, index, image.data, image.mime_type)
+        except Exception:  # noqa: BLE001 - 기록은 부가 기능이라 결과를 막지 않는다
+            _creative.logger.exception("제작 기록: 추가 참조 이미지를 저장하지 못함")
+
+
 def _start_sheet_render(request: AgentRequest, out: Any) -> None:
     ref: bytes | None = None
     try:
@@ -1484,10 +1493,18 @@ async def character_sheet_prompt(request: AgentRequest) -> AgentResult:
         why = "AI 가상 인물 확인(실존 인물 아님·쓸 권리)이 없다"
         return _result(request, TaskStatus.FAILED, outcome="virtual_unconfirmed",
                        output={"message": why})  # fmt: skip
+    extras: list[Any] = []
     try:
+        # 11/25 참조 여러 장: 시트 설명(LLM 1회)은 대표 한 장으로. 추가 이미지는 LLM에 보내지 않는다
+        extras = _character_sheet.decode_extra_images(request.untrusted.get("extra_images"), kind)
         out = await _character_sheet.make_character_sheet(
             request.untrusted, factory, context_id=request.meta.context_id, kind=kind
         )
+        if kind in REFERENCE_KINDS:
+            front = _character_sheet.decode_image(request.untrusted.get("image"))
+            out = out.model_copy(
+                update={"references": _character_sheet.build_references(front, extras)}
+            )
     except _character_sheet.CharacterSheetRefused as refused:
         return _result(
             request,
@@ -1499,6 +1516,7 @@ async def character_sheet_prompt(request: AgentRequest) -> AgentResult:
     if out.record_id and out.kind in REFERENCE_KINDS:  # 그림인데 실사면 real_photo로 바뀐다
         # 11/24 가상 인물·일러스트: 시트 그림을 만들지 않고(크레딧 0) 올린 원본을 시트 그림 자리에
         _save_original(request, out.record_id)
+        _save_extras(out.record_id, extras)
     elif out.record_id:  # Higgsfield로 이미지 시트 그림(키·모델이 없으면 기록에 이유만)
         _start_sheet_render(request, out)
     return _result(
