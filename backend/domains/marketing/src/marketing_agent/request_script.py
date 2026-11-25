@@ -1,0 +1,197 @@
+"""홍보 영상 의뢰(대화방)의 대본 (2026-11-25).
+
+총괄 홍보 영상 흐름에서 영상 초안을 준비할 때(`prepare_video_draft_from_plan`) 의뢰용 제작 기록에
+대본을 써 붙이고, 스토리보드 칸에 대본의 대사·말하는 사람·자막·시간을 붙인다. 그래서 대화방
+의뢰 하나로 만든 영상에도 대사가 들어가고, 제작 기록에서 바로 대본을 보고 고칠 수 있다.
+
+- 기획 제작안에는 대사 칸이 없고 기획 LLM은 의뢰문을 받지 않는다. 의뢰문(`request_text`)은
+  총괄이 모든 단계에 데이터 칸(untrusted)으로 넘기므로 여기서 대본 작가에게 데이터로만 준다.
+- 대본: 기획 장면(화면) + 의뢰문을 줄거리로 `creative_script.write_script`(LLM). LLM이 없거나
+  실패하면 기획 장면으로 만든 대본(대사 없음)을 쓴다(의뢰문 문장을 대사로 옮기지 않는다).
+- 코드 보장: 의뢰문에 `첫 대사는 "…"`처럼 따옴표로 적힌 첫 대사가 있으면 1장면 대사로,
+  "여자 목소리"·"남자 목소리"가 있으면 대사 있는 장면의 말하는 사람으로 둔다.
+- 장면 수 = 스토리보드 칸 수(기획 장면, 최대 8). 이미 대본이 있는 기록(사람이 고쳤거나 다시
+  준비)은 건드리지 않는다. 실패해도 영상 준비를 막지 않는다(호출부가 예외를 삼킨다).
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from collections.abc import Callable
+from typing import Any
+
+from ax_contracts.schemas.marketing_script import (
+    MAX_SCRIPT_CAPTION,
+    MAX_SCRIPT_LINE,
+    MAX_SCRIPT_SCENES,
+    MAX_SCRIPT_SPEAKER,
+    MAX_SCRIPT_VISUAL,
+    CreativeScript,
+    ScriptScene,
+)
+from marketing_agent import creative_records as _creative
+from marketing_agent import creative_script as _script
+from marketing_agent import storyboard as _storyboard
+
+logger = logging.getLogger("marketing.request_script")
+
+MAX_PLAN_SCENES = 8  # 스토리보드 칸(request_creative.MAX_SCENES)과 같다
+MAX_REQUEST = 600  # 줄거리에 붙이는 의뢰문 길이
+_OPEN = "\"'“‘「『"
+_CLOSE = "\"'”’」』"
+FIRST_LINE = re.compile(
+    rf"첫\s*(?:대사|마디|말)[^{_OPEN}\n]{{0,24}}[{_OPEN}]([^{_CLOSE}\n]{{1,{MAX_SCRIPT_LINE}}})[{_CLOSE}]"
+)
+VOICE = re.compile(r"(여자|여성|남자|남성)\s*(?:의\s*)?목소리")
+_VOICE_NAME = {"여자": "여자", "여성": "여자", "남자": "남자", "남성": "남자"}
+NARRATION = ("내레이션", "나레이션")
+
+
+def _cut(text: Any, n: int) -> str:
+    return " ".join(str(text or "").split())[:n]
+
+
+def first_line(request_text: str | None) -> str | None:
+    """의뢰문에 따옴표로 적힌 첫 대사. 없으면 None."""
+    m = FIRST_LINE.search(request_text or "")
+    return (_cut(m.group(1), MAX_SCRIPT_LINE) or None) if m else None
+
+
+def voice_speaker(request_text: str | None) -> str:
+    """의뢰문의 목소리(여자·남자). 없으면 빈 문자열."""
+    m = VOICE.search(request_text or "")
+    return _VOICE_NAME[m.group(1)] if m else ""
+
+
+def _plan_scenes(plan: Any) -> list[Any]:
+    """스토리보드 칸과 같은 장면(영상 프롬프트가 있는 장면, 최대 8)."""
+    scenes = getattr(plan, "scenes", None) or []
+    return [s for s in scenes if _cut(getattr(s, "prompt", ""), 10)][:MAX_PLAN_SCENES]
+
+
+def _visual(s: Any) -> str:
+    return _cut(getattr(s, "visual", None) or getattr(s, "prompt", ""), MAX_SCRIPT_VISUAL)
+
+
+def plan_script(plan: Any) -> CreativeScript | None:
+    """기획 장면으로 만든 대본(화면·자막·시간, 대사 없음). 장면이 없으면 None."""
+    scenes = _plan_scenes(plan)[:MAX_SCRIPT_SCENES]
+    if not scenes:
+        return None
+    seconds = max(1, int(getattr(plan, "duration_s", 0) or 15))
+    times = _script.split_times([1.0] * len(scenes), seconds)
+    rows = [
+        ScriptScene(
+            no=i,
+            start_s=start,
+            end_s=end,
+            visual_ko=_visual(s) or f"장면 {i}",
+            caption_ko=_cut(getattr(s, "caption", ""), MAX_SCRIPT_CAPTION),
+        )
+        for i, (s, (start, end)) in enumerate(zip(scenes, times, strict=True), start=1)
+    ]
+    title = _cut(getattr(plan, "concept", ""), 80) or "홍보 영상"
+    return CreativeScript(
+        title_ko=title, total_seconds=seconds, scenes=rows, source="rule", at=_script._now()
+    )
+
+
+def request_story(plan: Any, request_text: str | None) -> str:
+    """대본 작가에게 줄 줄거리: 기획 장면 + 의뢰문(데이터로만)."""
+    lines = [f"{i}. {_visual(s)}" for i, s in enumerate(_plan_scenes(plan), start=1)]
+    story = f"기획 장면: {' '.join(lines)}"
+    asked = _cut(request_text, MAX_REQUEST)
+    if asked:
+        story += f" 의뢰자 요청(대사·목소리·연출은 이대로): {asked}"
+    return _cut(story, _script.MAX_STORY)
+
+
+def apply_request(script: CreativeScript, request_text: str | None) -> CreativeScript:
+    """의뢰문의 첫 대사·목소리를 코드로 지킨다."""
+    line = first_line(request_text)
+    voice = voice_speaker(request_text)
+    rows = []
+    for s in script.scenes:
+        update: dict[str, Any] = {}
+        if s.no == 1 and line:
+            update["line_ko"] = line
+        said = update.get("line_ko") or s.line_ko
+        if voice and said and (not s.speaker_ko or s.speaker_ko in NARRATION):
+            update["speaker_ko"] = _cut(voice, MAX_SCRIPT_SPEAKER)
+        rows.append(s.model_copy(update=update) if update else s)
+    return script.model_copy(update={"scenes": rows})
+
+
+async def write_request_script(
+    plan: Any,
+    request_text: str | None,
+    character: dict[str, Any] | None,
+    llm_factory: Callable[[], Any] | None,
+    context_id: str | None = None,
+) -> CreativeScript | None:
+    """의뢰 대본. 기획 장면이 없으면 None."""
+    base = plan_script(plan)
+    if base is None:
+        return None
+    script = base
+    try:
+        written = await _script.write_script(
+            request_story(plan, request_text),
+            len(base.scenes),
+            base.total_seconds,
+            character,
+            llm_factory,
+            context_id,
+        )
+        # 고정 규칙 대본은 줄거리(의뢰문) 문장을 대사로 옮기므로 쓰지 않는다
+        if written.source == "llm" and len(written.scenes) == len(base.scenes):
+            script = written
+    except _script.ScriptRefused:
+        pass
+    return apply_request(script, request_text)
+
+
+def board_with_script(board: dict[str, Any], script: CreativeScript) -> dict[str, Any]:
+    """스토리보드 칸에 대본의 시간·대사·말하는 사람·자막을 붙인다(칸 수가 다르면 그대로)."""
+    fields = _storyboard.StoryboardPromptOutput.model_fields
+    extra = {k: v for k, v in board.items() if k not in fields}  # 기획 길이 등
+    out = _storyboard.StoryboardPromptOutput.model_validate(
+        {k: v for k, v in board.items() if k in fields}
+    )
+    if len(out.shots) != len(script.scenes):
+        return board
+    scenes = [s.model_dump(mode="json") for s in script.scenes]
+    merged = _storyboard.with_script(out, scenes, script.cta_ko).model_dump(mode="json")
+    return {**merged, **extra}
+
+
+async def attach(
+    record_id: str,
+    plan: Any,
+    request_text: str | None,
+    llm_factory: Callable[[], Any] | None,
+    context_id: str | None = None,
+) -> bool:
+    """의뢰 기록에 대본을 쓰고 스토리보드 칸에 붙인다. 붙였으면 True."""
+    store = _creative.store()
+    rec = store.get(record_id) or {}
+    if rec.get("script") or not rec.get("storyboard"):
+        return False  # 이미 대본이 있으면(사람이 고쳤거나 다시 준비) 그대로 둔다
+    script = await write_request_script(
+        plan, request_text, rec.get("sheet") or {}, llm_factory, context_id
+    )
+    if script is None:
+        return False
+    story = request_story(plan, None)
+    store.attach_script(record_id, script.model_dump(mode="json"), None)
+    board = board_with_script(rec["storyboard"], script)
+    store.attach_storyboard(record_id, rec.get("story") or story, len(board["shots"]), board)
+    logger.info(
+        "의뢰 대본: 기록 %s 장면 %d source=%s 첫대사=%s",
+        record_id,
+        len(script.scenes),
+        script.source,
+        "지정" if first_line(request_text) else "없음",
+    )
+    return True
