@@ -58,6 +58,44 @@ def test_card_file_loads_and_is_valid() -> None:
         assert abs(sum(b.ratio for b in c.beats) - 1) < 0.01
         assert sum(b.punch for b in c.beats) == 1
         assert c.punchline in fc.PUNCHLINES and c.ai_difficulty in fc.DIFFICULTIES
+        # 추천에 쓰는 카드는 한 화면 인물 2명 이하
+        assert not c.recommend or c.people <= fc.MAX_PEOPLE
+
+
+def test_feasible_card_rules_11_26() -> None:
+    """한 화면 인물 2명 이하 · 같은 사람 둘 한 화면 금지 · 타임랩스·화면 나누기 없음."""
+    got = fc.by_id()
+    assert got["F-14"].recommend is False and got["F-14"].people > fc.MAX_PEOPLE
+    assert all(c.recommend for cid, c in got.items() if cid != "F-14")
+    assert "타임랩스" not in got["F-09"].name and "Timelapse" not in got["F-09"].audio_names
+    assert any("컷" in b.label for b in got["F-09"].beats)
+    assert "둘로 나누" not in got["F-06"].hook and "날짜 자막" in got["F-06"].hook
+    assert "번갈아 컷" in got["F-08"].hook and "한 화면에 같은 사람 둘 금지" in got["F-08"].hook
+
+
+def test_crowded_card_must_not_be_recommendable(tmp_path: Path) -> None:
+    bad = tmp_path / "cards.toml"
+    body = ('[[cards]]\nid = "F-01"\nname = "x"\nbeats = [["a", 0.5], ["b", 0.5]]\n'
+            'punch_beat = 1\npunchline = "표정"\npeople = 3\n'
+            'ai_difficulty = "어려움"\n')  # fmt: skip
+    bad.write_text(body, encoding="utf-8")
+    with pytest.raises(fc.FormatCardError):
+        fc.load_cards(bad)
+    bad.write_text(body + "recommend = false\n", encoding="utf-8")
+    assert fc.load_cards(bad)[0].recommend is False
+
+
+def test_not_recommendable_card_is_never_picked() -> None:
+    from ax_contracts.schemas.data import TrendFormatSignal, TrendHumorSituation
+
+    cards = fc.cards()
+    sit = [TrendHumorSituation(text="a", format_id="F-14", source_kind="shorts_title")]
+    sig = [TrendFormatSignal(name="Squad", count=3, days_seen=5, format_id="F-14")]
+    assert th.recommend(sit, sig, cards) == []
+    raw = th._Situations.model_validate({"situations": [
+        {"text": "다 같이 놀라는 순간", "format_id": "F-14", "source": "shorts_title"}]})
+    got = th.clean(raw, [("shorts_title", "아무 제목")], [c.id for c in cards if c.recommend])
+    assert got[0].format_id == ""  # 형식 추정에서도 쓰지 않는다
 
 
 def test_bad_card_file_is_rejected(tmp_path: Path) -> None:

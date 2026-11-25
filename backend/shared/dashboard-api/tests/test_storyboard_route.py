@@ -142,6 +142,18 @@ def test_video_request_goes_to_marketing_with_the_record(client: TestClient, fak
     target, request = fake.calls[0]
     assert (target, request.skill) == ("marketing", "creative_video_request")
     assert request.input["record_id"] == "CR-0123456789ab"
+    assert "regenerate" not in request.input  # 보통 요청은 지금 그대로
+
+
+def test_video_regenerate_passes_through_only_when_true(client: TestClient, fake: Fake) -> None:
+    """11/26 기술 검사 [영상 다시 만들기]: 본문 regenerate=true만 마케팅에 넘긴다."""
+    fake.output = {"record_id": "CR-0123456789ab", "video": {"status": "awaiting_approval"}}
+    assert client.post(VIDEO_URL, json={"regenerate": True}).status_code == 200
+    assert fake.calls[-1][1].input["regenerate"] is True
+    assert client.post(VIDEO_URL, json={"regenerate": "yes"}).status_code == 200
+    assert "regenerate" not in fake.calls[-1][1].input
+    assert client.post(VIDEO_URL, content=b"not json").status_code == 200
+    assert "regenerate" not in fake.calls[-1][1].input
 
 
 @pytest.mark.parametrize(

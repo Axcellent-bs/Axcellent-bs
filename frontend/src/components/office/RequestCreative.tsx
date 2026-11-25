@@ -10,6 +10,7 @@ import { getCreativeRecord, redrawBoardImage, requestCreativeVideo, thumbSrc, up
 import { acceptFor, uploadProblem } from "@/lib/higgsfieldWeb";
 import { creativeButtons, creativeRecordOf, sceneCells, videoApproval, videoRejected } from "@/lib/requestCharacter";
 import { ApprovalDeadline, TimedOutRetry } from "@/components/marketing/ApprovalDeadline";
+import { VideoQc } from "@/components/marketing/VideoQc";
 import { timedOut } from "@/lib/videoApprovalTime";
 import type { VideoPlanView } from "@/lib/videoPlan";
 import type { WorkRequestRow } from "@/lib/workRequests";
@@ -168,13 +169,40 @@ function VideoRetry({ recordId, version }: { recordId: string; version: string }
   );
 }
 
+/** 11/26 ⑦ 영상 단계: 다 만든 영상의 기술 검사 칩·표. 확인 필요면 [영상 다시 만들기](같은 영상 요청 길 + regenerate) */
+function VideoQcStage({ recordId, version }: { recordId: string; version: string }) {
+  const [rec, setRec] = useState<CreativeRecord | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    loadRecord(recordId, version).then((r) => live && setRec(r), () => undefined);
+    return () => { live = false; };
+  }, [recordId, version]);
+  const video = rec?.render?.video;
+  if (video?.status !== "done" || !rec?.render?.qc) return null;
+  const regenerate = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const got = (await requestCreativeVideo(recordId, { regenerate: true })).video;
+      setRec((cur) => (cur ? { ...cur, render: { ...cur.render, video: got } } : cur));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "영상 다시 만들기 요청을 보내지 못했어요");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <VideoQc qc={rec.render.qc} videoStatus={video.status} credits={video.summary?.credits_estimate} busy={busy} error={error} regenerate={video.regenerate} onRegenerate={() => void regenerate()} />;
+}
+
 export function RequestCreative({ row, plan }: { row: WorkRequestRow; plan: Pick<VideoPlanView, "scenes"> | null }) {
   const [open, setOpen] = useState<Tab | null>(null);
   const buttons = creativeButtons(row, plan);
   const approval = videoApproval(row);
   const recordId = creativeRecordOf(row);
   const closed = videoRejected(row) && !!recordId;
-  if (!buttons.sheet && !buttons.storyboard && !approval && !closed) return null;
+  if (!buttons.sheet && !buttons.storyboard && !approval && !closed && !recordId) return null;
   const toggle = (t: Tab) => setOpen((cur) => (cur === t ? null : t));
   return (
     <div className="space-y-2">
@@ -186,6 +214,7 @@ export function RequestCreative({ row, plan }: { row: WorkRequestRow; plan: Pick
         </p>
       )}
       {closed && recordId && <VideoRetry recordId={recordId} version={row.updated_at} />}
+      {recordId && !closed && !approval && <VideoQcStage recordId={recordId} version={row.updated_at} />}
       {(buttons.sheet || buttons.storyboard) && (
         <span className="flex flex-wrap gap-1.5">
           {buttons.sheet && <button type="button" aria-expanded={open === "sheet"} className={`btn-card ${open === "sheet" ? "btn-primary" : "btn-ghost"}`} onClick={() => toggle("sheet")}>이미지 시트</button>}

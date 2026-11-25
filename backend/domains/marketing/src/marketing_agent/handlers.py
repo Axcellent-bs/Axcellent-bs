@@ -1155,9 +1155,11 @@ async def creative_video_request(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     try:
+        # 11/26 regenerate: 화면 [영상 다시 만들기](기술 검사 확인 필요일 때만 다시 승인 요청)
         video = await _render.request_video(
-            STATE.media_ledger, request.meta, data.record_id, data.who
-        )
+            STATE.media_ledger, request.meta, data.record_id, data.who,
+            regenerate=data.regenerate,
+        )  # fmt: skip
     except _render.RenderError as error:
         return _result(
             request, TaskStatus.FAILED, outcome=str(error), output={"message": str(error)}
