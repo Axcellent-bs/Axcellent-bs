@@ -13,6 +13,9 @@ export interface CreativeVideoSummary {
   /** 11/25 재생 속도: 실제 배속(1.0이면 배속 안 함)과 만든 길이(= seconds) */
   speed?: number | null;
   generated_seconds?: number | null;
+  /** 11/25 키프레임 방식(reference "keyframes"): 키프레임 장 수·그 그림에 쓴 크레딧(모르면 null) */
+  keyframes?: number | null;
+  keyframe_credits?: number | null;
 }
 
 /** 배속한 영상이면 "18초 만들어 1.2배속 → 15초", 아니면 null */
@@ -37,7 +40,10 @@ export function videoSummaryLine(status: string | null | undefined, s: CreativeV
   if (!s || !SHOW_STATUS.has(status ?? "")) return null;
   const parts: string[] = [];
   const ref = s.reference ? REFERENCE_KO[s.reference] : undefined;
-  if (ref) parts.push(`참조: ${ref}`);
+  if (s.reference === "keyframes" && typeof s.keyframes === "number" && s.keyframes > 0) {
+    const credits = typeof s.keyframe_credits === "number" ? `(그림 약 ${num(s.keyframe_credits)})` : "";
+    parts.push(`참조: 키프레임 ${s.keyframes}장${credits}`);
+  } else if (ref) parts.push(`참조: ${ref}`);
   if (s.model) parts.push(s.model);
   if (typeof s.seconds === "number" && s.seconds > 0) {
     const from = typeof s.seconds_clamped_from === "number" && s.seconds_clamped_from > s.seconds ? `(${num(s.seconds_clamped_from)}초에서 줄임)` : "";

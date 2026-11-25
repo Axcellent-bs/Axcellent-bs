@@ -49,7 +49,9 @@ VIDEO_MODELS: dict[str, dict[str, Any]] = {
         "max_s": 20,
         "modes": True,
     },
-    "kling4_0": {"image_references": True, "modes": True, "max_s": 30},
+    # 11/25 키프레임: image-to-video에서 start_image·end_image + 중간 프레임 image_references
+    # (순서대로, 합계 10장)
+    "kling4_0": {"image_references": True, "modes": True, "max_s": 30, "keyframes": True},
     "kling3_0_turbo": {"image_references": False},
 }
 MODE_BY_ROLE = {IMAGE_REF_ROLE: "reference-to-video", VIDEO_START_ROLE: "image-to-video"}
@@ -364,6 +366,31 @@ def with_media(params: dict[str, Any], media_id: str, role: str) -> dict[str, An
 def with_medias(params: dict[str, Any], media_ids: list[str], role: str) -> dict[str, Any]:
     """같은 역할로 여러 장(순서 그대로)."""
     return _with_mode({**params, "medias": [{"value": m, "role": role} for m in media_ids]})
+
+
+VIDEO_END_ROLE = "end_image"
+KEYFRAME_MODE = "image-to-video"
+MAX_KEYFRAMES = 10  # start + 중간 + end 합계 (models_explore 11/25)
+
+
+def takes_keyframes(model: str) -> bool:
+    """영상 모델이 키프레임(start_image·end_image·중간 image_references)을 받는지."""
+    return bool(VIDEO_MODELS.get(str(model).strip(), {}).get("keyframes"))
+
+
+def with_keyframes(params: dict[str, Any], media_ids: list[str]) -> dict[str, Any]:
+    """키프레임 순서대로: 첫 장 start_image, 마지막 end_image, 사이는 image_references(순서대로).
+
+    mode는 늘 image-to-video(중간 프레임이 있어도 reference-to-video가 아니다). 10장 넘으면 사이를
+    앞에서부터 남긴다(첫·끝은 늘 남는다). 2장 미만이면 ValueError."""
+    if len(media_ids) < 2:
+        raise ValueError("keyframes_need_two")
+    first, *middle, last = media_ids
+    middle = middle[: MAX_KEYFRAMES - 2]
+    medias = [{"value": first, "role": VIDEO_START_ROLE}]
+    medias += [{"value": m, "role": IMAGE_REF_ROLE} for m in middle]
+    medias.append({"value": last, "role": VIDEO_END_ROLE})
+    return {**params, "medias": medias, "mode": KEYFRAME_MODE}
 
 
 def max_image_references(model: str) -> int:

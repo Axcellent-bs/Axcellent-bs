@@ -112,6 +112,23 @@ class CreativeRecordAttachOutput(AxModel):
     item: dict[str, Any]  # render.<part>
 
 
+# ---- 키프레임 (2026-11-25, 추가). 상태는 기록의 render.keyframes
+# {status, frames: [{index, at_s, scene_n, svg_source("planning"|"none"), svg, prompt_en,
+#  layout_asset, layout_png_media_id, asset, media_id, sha256, status, error, credits_estimate}],
+#  approved_at}. 키프레임 영상 모델(Kling 4.0)로 만들 때만 생긴다
+CREATIVE_KEYFRAME_REDRAW_SKILL = "creative_keyframe_redraw"
+MAX_KEYFRAMES = 10  # start_image + 중간 image_references + end_image 합계
+
+
+class CreativeKeyframeRedrawInput(AxModel):
+    """키프레임 한 장 [다시 그리기] (그림 1장, 지금 그림 관문 B·그림 크레딧 그대로).
+
+    결과는 `CreativeRecordAttachOutput`(part="keyframes", item=render.keyframes)."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    index: int = Field(ge=0, lt=MAX_KEYFRAMES)
+
+
 # ---- 유튜브 올리기 (2026-11-23). 상태는 기록의 render.youtube
 CREATIVE_YOUTUBE_DRAFT_SKILL = "creative_youtube_draft"
 CREATIVE_YOUTUBE_REQUEST_SKILL = "creative_youtube_request"
