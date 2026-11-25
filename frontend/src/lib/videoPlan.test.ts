@@ -113,3 +113,17 @@ test("SVG 콘티: start_svg·end_svg를 읽고(snake·camel), 없으면 칸을 �
   assert.equal("startSvg" in v.scenes[1], false); // 예전 제작안은 칸이 없다 (화면은 지금 색 칸 그대로)
   assert.deepEqual(toVideoPlan(v), v);
 });
+
+test("3D 마네킹 콘티(11/25): 그라데이션·url(#id)가 든 8KB 넘는 SVG도 그대로, 포즈 칸이 와도 깨지지 않는다", () => {
+  const grid = Array.from({ length: 220 }, (_, i) => `<line x1="${i}.5" y1="200" x2="${i}.5" y2="320"/>`).join("");
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 320"><defs><radialGradient id="sk" cx="35%" cy="30%" r="75%">'
+    + '<stop offset="0%" stop-color="#ffe6c7"/></radialGradient></defs>'
+    + `<g stroke="#e6dccd" stroke-width="0.6">${grid}</g><circle cx="90" cy="120" r="12" fill="url(#sk)"/></svg>`;
+  assert.ok(svg.length > 8192 && svg.length <= 16384);
+  const pose = { shot: "medium", x: 0, z: 0, yaw: 35, head: { yaw: -40, pitch: -5 }, arm_l: { raise: 40, bend: 60 }, arm_r: { raise: 30, bend: 80 }, step: 0.15, prop: null, label_ko: "0초 · 놀라 돌아봄" };
+  const v = toVideoPlan({ ...RAW, scenes: RAW.scenes.map((s, i) => (i === 0 ? { ...s, start_svg: svg, end_svg: svg, start_pose: pose, end_pose: pose } : s)) });
+  assert.ok(v);
+  assert.equal(v.scenes[0].startSvg, svg);
+  assert.equal(v.scenes[0].endSvg, svg);
+  assert.equal(v.scenes.length, 4);
+});

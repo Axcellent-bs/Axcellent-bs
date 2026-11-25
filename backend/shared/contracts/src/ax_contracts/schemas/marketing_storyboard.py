@@ -20,7 +20,9 @@ from pydantic import Field
 from ax_contracts.schemas.common import AxModel
 
 STORYBOARD_SKILL = "storyboard_prompt"
-MAX_SVG_BYTES = 8192  # 칸 하나의 SVG 원문 상한(정리한 뒤 UTF-8 바이트)
+# 칸 하나의 SVG 원문 상한(정리한 뒤 UTF-8 바이트). 11/25 기획 3D 마네킹 콘티(그라데이션·격자)를
+# 그대로 받으려고 8KB → 16KB (허용 범위 확대, 기획 VideoScene.start_svg와 같다)
+MAX_SVG_BYTES = 16384
 
 MAX_STORY = 1000
 MAX_CHARACTER_EN = 1500
