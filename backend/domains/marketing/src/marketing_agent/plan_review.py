@@ -5,7 +5,7 @@
 대본을 만들기 전에 마케팅 기준만 코드로 확인한다(LLM 아님, 기획 검사와 겹치지 않는다):
 
 - duration: 장면 길이(end_s − start_s, 배속 전)가 영상 모델 최소(`MARKETING_PLAN_MIN_SCENE_S`, 기본
-  3초) 미만. 엔드카드 장면은 보지 않는다
+  2초) 미만. 엔드카드 장면과 첫 훅 장면(0초 시작, 2초 이하)은 보지 않는다
 - refs: 회사 캐릭터를 골랐을 때, 회사 캐릭터 말고 다른 사람이 클로즈업·미디엄으로 나온다(참조는 회사
   캐릭터 한 사람뿐이다. 원본과 추가 참조는 같은 사람). 배경 군중·관객은 괜찮다(장면 글 낱말로 본다)
 - text: 장면 prompt에 글자·간판·화면 속 문구를 그리라는 말(금칙어 표 `text_request_words` 그대로)
@@ -37,7 +37,12 @@ logger = logging.getLogger("marketing.plan_review")
 
 PLANNING = "planning"
 REVIEW_KEY = "plan_review"  # 의뢰 제작 기록 render 칸
-MIN_SCENE_ENV, MIN_SCENE_S = "MARKETING_PLAN_MIN_SCENE_S", 3.0
+# 11/26 L: 기본 3초 → 2초. 3초면 재미 먼저 흐름의 0~2초 훅이 늘 걸려 기획이 장면을 고르게 다시 나눠
+# "첫 2초 훅" 설계가 사라졌다
+MIN_SCENE_ENV, MIN_SCENE_S = "MARKETING_PLAN_MIN_SCENE_S", 2.0
+# 훅 장면: 첫 장면이 0초에 시작하고 이 길이 이하 (기획 재미 먼저·광고 fun_timings의 첫 구간 0~2초).
+# 엔드카드처럼 길이 검사에서 뺀다 (도메인끼리 import 안 해 값을 옮김)
+HOOK_MAX_S = 2.0
 TIMEOUT_ENV, TIMEOUT_S = "MARKETING_PLAN_REVISE_TIMEOUT_S", 180.0
 MAX_VERSION = 2  # 의뢰당 고치기 1회 (1판 → 2판)
 # 회사 캐릭터 말고 다른 사람을 뜻하는 낱말 / 배경 군중이라 괜찮은 낱말 / 넓은 샷 낱말
@@ -69,6 +74,12 @@ def _has(text: str, words: tuple[str, ...]) -> bool:
     return any(w in low for w in words)
 
 
+def is_hook(i: int, scene: dict[str, Any]) -> bool:
+    """첫 장면이 0초에 시작하는 짧은 훅(0~2초)인가. 훅은 짧은 것이 설계라 길이 검사에서 뺀다."""
+    start, end = _num(scene.get("start_s")), _num(scene.get("end_s"))
+    return i == 1 and start == 0 and end is not None and 0 < end <= HOOK_MAX_S
+
+
 def check(plan: dict[str, Any], has_character: bool) -> list[dict[str, Any]]:
     """마케팅 확인 문제 {kind, scene, detail_ko} (계약 CheckProblem 모양). 문제 없으면 []."""
     min_s = _env_float(MIN_SCENE_ENV, MIN_SCENE_S)
@@ -81,7 +92,7 @@ def check(plan: dict[str, Any], has_character: bool) -> list[dict[str, Any]]:
         if pose_board.is_end_card(visual):
             continue
         start, end = _num(s.get("start_s")), _num(s.get("end_s"))
-        if start is not None and end is not None and end - start < min_s:
+        if start is not None and end is not None and end - start < min_s and not is_hook(i, s):
             sec = f"{end - start:g}"
             detail = f"장면 길이 {sec}초 (영상 모델 최소 {min_s:g}초)"
             out.append({"kind": "duration", "scene": n, "detail_ko": detail})

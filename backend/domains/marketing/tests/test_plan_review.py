@@ -39,7 +39,10 @@ def _plan(*scenes: dict[str, Any], version: int = 1) -> dict[str, Any]:
             "scenes": list(scenes), "version": version}  # fmt: skip
 
 
-V1 = _plan(_scene(1, 0, 2), _scene(2, 2, 10), _scene(3, 10, 15))
+# 11/26 L 바뀐 기대값: 예전 V1은 장면 1(0~2초)이 짧은 것이었다. 이제 첫 2초 훅은 검사에서 빼므로
+# 본론 장면 2(1초)가 짧은 제작안으로 본다
+V1 = _plan(_scene(1, 0, 2), _scene(2, 2, 3), _scene(3, 3, 15))
+STUCK = _plan(_scene(1, 0, 2), _scene(2, 2, 3), _scene(3, 3, 15), version=2)
 V2 = _plan(_scene(1, 0, 5), _scene(2, 5, 10), _scene(3, 10, 15), version=2)
 
 
@@ -81,15 +84,45 @@ def _review(plan: dict[str, Any], planning: Planning, character: str | None = No
 
 def test_short_scene_is_a_duration_problem_but_end_card_is_not() -> None:
     got = pr.check(V1, has_character=False)
-    assert got == [{"kind": "duration", "scene": 1,
-                    "detail_ko": "장면 길이 2초 (영상 모델 최소 3초)"}]  # fmt: skip
-    card = _plan(_scene(1, 0, 5), _scene(2, 5, 13), _scene(3, 13, 15, visual="채널 이름 엔드 카드"))
-    assert pr.check(card, has_character=False) == []
+    assert got == [{"kind": "duration", "scene": 2,
+                    "detail_ko": "장면 길이 1초 (영상 모델 최소 2초)"}]  # fmt: skip
+    card = _plan(_scene(1, 0, 5), _scene(2, 5, 14), _scene(3, 14, 15, visual="채널 이름 엔드 카드"))
+    assert pr.check(card, has_character=False) == []  # 엔드카드 1초는 그대로 뺀다
 
 
 def test_min_scene_seconds_come_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(pr.MIN_SCENE_ENV, "2")
+    monkeypatch.setenv(pr.MIN_SCENE_ENV, "1")
     assert pr.check(V1, has_character=False) == []
+
+
+# ---------------------------------------------------------------- L: 첫 훅은 짧은 것이 설계 (11/26)
+
+
+def test_two_second_hook_with_four_scenes_is_not_a_problem_and_no_call() -> None:
+    fun = _plan(_scene(1, 0, 2), _scene(2, 2, 7), _scene(3, 7, 12),
+                _scene(4, 12, 15, visual="채널 이름 엔드 카드"))  # fmt: skip
+    assert pr.MIN_SCENE_S == 2.0 and pr.check(fun, has_character=False) == []
+    planning = Planning(V2)
+    req, log = _review(fun, planning)
+    assert planning.sent == [] and log is None  # 호출 0
+    assert req.input["video_plan"] == fun  # 장면 시간 그대로 (훅 0~2초 유지)
+
+
+def test_short_body_scene_is_still_a_problem_even_with_a_hook() -> None:
+    body = _plan(_scene(1, 0, 2), _scene(2, 2, 3.5), _scene(3, 3.5, 15))
+    assert [(x["kind"], x["scene"], x["detail_ko"]) for x in pr.check(body, False)] == [
+        ("duration", 2, "장면 길이 1.5초 (영상 모델 최소 2초)")
+    ]
+
+
+def test_only_the_first_short_scene_from_zero_is_a_hook(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(pr.MIN_SCENE_ENV, "3")  # 기준을 올려도 첫 2초 훅은 뺀다
+    hook = _plan(_scene(1, 0, 2), _scene(2, 2, 10), _scene(3, 10, 15))
+    assert pr.check(hook, has_character=False) == []
+    late = _plan(_scene(1, 0, 5), _scene(2, 5, 7), _scene(3, 7, 15))  # 두 번째 장면 2초는 훅 아님
+    assert [x["scene"] for x in pr.check(late, has_character=False)] == [2]
+    long_open = _plan(_scene(1, 0, 2.5), _scene(2, 2.5, 15))  # 2초보다 긴 첫 장면은 훅 아님
+    assert [x["scene"] for x in pr.check(long_open, has_character=False)] == [1]
 
 
 def test_another_person_close_to_the_camera_is_a_refs_problem() -> None:
@@ -125,11 +158,11 @@ def test_short_scene_asks_planning_once_and_uses_version_two() -> None:
     assert req.input["video_plan"] == V2 and req.input["proposal_id"] == "PROP-7"
     assert [(v["version"], v["passed"]) for v in log["versions"]] == [(1, False), (2, True)]
     assert log["outcome"] == "revised" and log["needs_human"] is False
-    assert log["summary_ko"] == "장면 1 장면 길이 2초 (영상 모델 최소 3초)"
+    assert log["summary_ko"] == "장면 2 장면 길이 1초 (영상 모델 최소 2초)"
 
 
 def test_version_two_still_failing_is_not_asked_again_and_needs_a_person() -> None:
-    planning = Planning(_plan(_scene(1, 0, 2), _scene(2, 2, 15), version=2))
+    planning = Planning(STUCK)
     req, log = _review(V1, planning)
     assert len(planning.sent) == 1  # 1회 상한
     assert req.input["video_plan"]["version"] == 2  # 2판으로 계속
@@ -149,7 +182,7 @@ def test_planning_timeout_or_failure_keeps_version_one(monkeypatch: pytest.Monke
 
 def test_already_revised_plan_or_clean_plan_makes_no_call() -> None:
     planning = Planning(V2)
-    req, log = _review(_plan(_scene(1, 0, 2), _scene(2, 2, 15), version=2), planning)
+    req, log = _review(STUCK, planning)
     assert planning.sent == [] and log and log["outcome"] == "revise_limit"  # 의뢰당 1회
     req, log = _review(V2, planning)
     assert planning.sent == [] and log is None and req.input["video_plan"] == V2  # 지금과 같음
