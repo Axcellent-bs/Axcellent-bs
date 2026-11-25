@@ -3,16 +3,20 @@ import { Navigate, Route, Routes, useLocation } from 'react-router'
 
 import { AdminShell } from '@/components/admin/AdminShell'
 import LoginPage from '@/demo/LoginPage'
-import SignupPage from '@/demo/SignupPage'
-import PlanPurchase from '@/demo/PlanPurchase'
 import { ADMIN_HOME, canOpen, homeOf, useSession } from '@/demo/session'
 import { useCompany, useCompanyLoaded } from '@/demo/company'
-import Setup from '@/demo/Setup'
-import WaitingPage from '@/demo/WaitingPage'
 import CatalogHome from '@/demo/CatalogHome'
-import { PrivacyPage, TermsPage } from '@/demo/PolicyPages'
-import OperatorLogin from '@/control/OperatorLogin'
 import { useHumanTokenSet } from '@/lib/useHumanTokenSet'
+
+// 로그인 전 화면 중 메인(카탈로그)·로그인만 바로 보이게 첫 묶음에 둔다.
+// 가입·요금제·회사 설정·대기·약관·운영자 입구는 가끔 여는 화면이라 열 때 받는다 (11/25 Lighthouse: 업무 화면 첫 묶음 줄이기)
+const SignupPage = lazy(() => import('@/demo/SignupPage'))
+const PlanPurchase = lazy(() => import('@/demo/PlanPurchase'))
+const Setup = lazy(() => import('@/demo/Setup'))
+const WaitingPage = lazy(() => import('@/demo/WaitingPage'))
+const PrivacyPage = lazy(() => import('@/demo/PolicyPages').then((m) => ({ default: m.PrivacyPage })))
+const TermsPage = lazy(() => import('@/demo/PolicyPages').then((m) => ({ default: m.TermsPage })))
+const OperatorLogin = lazy(() => import('@/control/OperatorLogin'))
 
 // 로그인한 뒤 들어가는 업무 페이지는 따로 받는다(페이지별 코드 나누기). 처음 화면을 열 때 모든 페이지 코드를
 // 한꺼번에 받지 않고, 그 페이지를 처음 열 때 그 페이지 코드만 받는다. 로그인 전 화면은 바로 보이게 그대로 둔다
@@ -50,6 +54,7 @@ const ControlCenter = lazy(() => import('@/control/ControlCenter'))
 
 export function App() {
   return (
+    <Suspense fallback={null}>
     <Routes>
       {/* 로그인 전에도 여는 메인: 서비스 제품군 카탈로그 */}
       <Route path="/" element={<CatalogHome />} />
@@ -67,6 +72,7 @@ export function App() {
       <Route path="/control/login" element={<OperatorLogin />} />
       <Route path="*" element={<Guarded><Pages /></Guarded>} />
     </Routes>
+    </Suspense>
   )
 }
 

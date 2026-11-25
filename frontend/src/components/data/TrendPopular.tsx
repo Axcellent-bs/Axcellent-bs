@@ -52,7 +52,8 @@ export function videoTitles(out: TrendPopularOutput | null): Map<string, string 
 // ------------------------------------------------------------------- 맨 위 한 줄
 
 export function TrendHeadline({ popular }: { popular: SkillState<TrendPopularOutput> }) {
-  if (popular.kind === "loading") return <p className="text-sm text-ink-500" aria-live="polite">지금 인기 받는 중…</p>;
+  // 받는 중 줄도 다 받은 줄과 같은 글자 크기(text-base)라 줄 높이가 같다 (CLS)
+  if (popular.kind === "loading") return <p className="truncate text-base text-ink-500" aria-live="polite">지금 인기 받는 중…</p>;
   if (popular.kind === "failed") return <p className="text-sm text-amber-700">지금 인기를 받지 못했어요. {popular.reason}</p>;
   const out = popular.out;
   const top = out.items[0] ?? null;
