@@ -1864,3 +1864,33 @@ def test_agent_rewrites_once_after_merge_conflict(
     assert run(tick()) == ["T-D1"]
     c = _task(service).coding
     assert c.status == "merged" and c.pr != first and c.auto_retries == 1
+
+
+def test_long_file_is_edited_in_place_without_line_limit() -> None:
+    """600줄 넘는 파일도 고친다. 바꿀 부분만 맞추고, 통째로 다시 쓰지는 않는다."""
+    from dev_agent.coder import Edit
+
+    long_text = "".join(f"line {i}\n" for i in range(2000)) + "export const target = 1\n"
+    pick = FilePick(path=BANNER, reason="긴 파일")
+    job = coder.Job(1, "T", "S", "R", "c", "t", "p", (), (), None)
+
+    class Edits(FakeLLM):
+        def __init__(self, edits: list[Edit]) -> None:
+            super().__init__(plan=CodePlan(files=[pick]))
+            self.edits = edits
+
+        async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+            if schema is FileWrite:
+                self.calls.append(("FileWrite", prompt, untrusted or {}))
+                return FileWrite(edits=self.edits, reason="고침")
+            return await super().structured(prompt, schema, untrusted, images, context_id)
+
+    ok = Edits([Edit(find="export const target = 1", replace="export const target = 2")])
+    text, _ = run(coder._write_one(ok, job, pick, long_text, []))
+    assert text.endswith("export const target = 2\n") and text.count("\n") == 2001
+
+    bad = Edits([Edit(find="없는 글", replace="x")])
+    with pytest.raises(coder.CoderStop) as stop:
+        run(coder._write_one(bad, job, pick, long_text, []))
+    assert stop.value.status == "waiting_human" and "통째로 다시 쓰지 않음" in stop.value.message
+    assert len(bad.calls) == 2  # 처음 + 못 맞춘 부분 다시 묻기. 전체 다시 쓰기(FULL_PROMPT) 없음

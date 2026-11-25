@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import shutil
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -38,7 +40,12 @@ AS_OF = date(2026, 11, 15)
 
 def filled() -> SalesStore:
     store = SalesStore(":memory:")
-    src = FakeSalesSource(load_config(FAKE_DIR / "catbooks.toml"), clock=lambda: NOW)
+    # 데모 설정(90일 × 하루 60건)을 40일 × 20건으로 줄인다 (11/25 CI 시간 줄이기).
+    # 기간 시작 자르기는 30일 창에서 확인되고, 90일·365일 창은 가진 기간 전부로 견준다
+    cfg = load_config(FAKE_DIR / "catbooks.toml").model_copy(
+        update={"period_days": 40, "orders_per_day": 20}
+    )
+    src = FakeSalesSource(cfg, clock=lambda: NOW)
     assert asyncio.run(collect_once(src, store, source_name="fake", now=NOW)).errors == []
     store.upsert(TENANT, old_customers(), NOW)
     return store
@@ -71,16 +78,30 @@ def cat():  # noqa: ANN201
     return catalog.load_catalog("catbooks")
 
 
-@pytest.fixture
-def world(tmp_path, cat, monkeypatch: pytest.MonkeyPatch) -> SalesStore:  # noqa: ANN001
-    path = tmp_path / "aggregates.db"
-    monkeypatch.setenv(DB_ENV, str(path))
-    monkeypatch.delenv(read.READ_ENV, raising=False)
+@pytest.fixture(scope="module")
+def _built(tmp_path_factory: pytest.TempPathFactory) -> tuple[SalesStore, Path]:
+    """판매 원본과 하루 계산을 파일에서 한 번만 만든다 (시험마다 다시 하면 4초씩, 11/25 CI 시간).
+    판매 원본은 시험이 바꾸지 않고, 집계 파일은 시험마다 복사본을 쓴다."""
+    path = tmp_path_factory.mktemp("agg") / "aggregates.db"
     sales, agg = filled(), AggregateStore(path)
-    run = daily.run_daily(sales, agg, TENANT, cat.sales, NOW, run_id="d1")
+    run = daily.run_daily(sales, agg, TENANT, catalog.load_catalog("catbooks").sales, NOW,
+                          run_id="d1")  # fmt: skip
     assert run is not None and run.status == "done"
     assert AS_OF.isoformat() in agg.snapshot_days(TENANT)
     agg.close()
+    return sales, path
+
+
+@pytest.fixture
+def world(_built, tmp_path, monkeypatch: pytest.MonkeyPatch) -> SalesStore:  # noqa: ANN001
+    sales, built = _built
+    path = tmp_path / "aggregates.db"
+    for suffix in ("", "-wal", "-shm"):
+        src = built.with_name(built.name + suffix)
+        if src.exists():
+            shutil.copyfile(src, path.with_name(path.name + suffix))
+    monkeypatch.setenv(DB_ENV, str(path))
+    monkeypatch.delenv(read.READ_ENV, raising=False)
     return sales
 
 

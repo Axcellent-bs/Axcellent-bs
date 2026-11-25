@@ -64,7 +64,10 @@ def edge_orders() -> list[SalesOrderRow]:
 
 def filled() -> SalesStore:
     store = SalesStore(":memory:")
-    src = FakeSalesSource(load_config(FAKE_DIR / "catbooks.toml"), clock=lambda: NOW)
+    # 데모 설정(90일 × 하루 60건)을 하루 20건으로 줄인다 (11/25 CI 시간 줄이기). 기간은
+    # 떠날 위험 단골(마지막 주문 뒤 churn_days일)이 생기도록 90일 그대로
+    cfg = load_config(FAKE_DIR / "catbooks.toml").model_copy(update={"orders_per_day": 20})
+    src = FakeSalesSource(cfg, clock=lambda: NOW)
     assert asyncio.run(collect_once(src, store, source_name="fake", now=NOW)).errors == []
     store.upsert(TENANT, edge_orders(), NOW)
     return store

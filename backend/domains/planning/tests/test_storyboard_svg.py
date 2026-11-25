@@ -175,9 +175,12 @@ def test_media_hint_category_comes_from_the_company_list(monkeypatch: pytest.Mon
     monkeypatch.setattr(vp.tenant, "brand_section", lambda name=None: cats)
     # 제안 글에 나온 분류가 먼저
     assert vp.media_hints(_prop(idea="출근길 에세이 한 줄 공감")).category == "에세이"
-    # 글에 없으면 LLM이 목록에서 고른 값, 목록 밖이면 버린다
-    assert vp.media_hints(_prop(), "자기계발").category == "자기계발"
-    assert vp.media_hints(_prop(), "소설").category is None
+    # 글에 없으면 상품이 있는 제안만 LLM이 목록에서 고른 값, 목록 밖이면 버린다
+    goods = _prop(products=["독서 기록장 A5"])
+    assert vp.media_hints(goods, "자기계발").category == "자기계발"
+    assert vp.media_hints(goods, "소설").category is None
+    # 11/25 재현 님: 상품도 분류 언급도 없는 회사·채널 홍보는 LLM이 골라 와도 비운다
+    assert vp.media_hints(_prop(), "자기계발").category is None
     # 회사 목록이 없으면 비운다(지어내지 않는다)
     monkeypatch.setattr(vp.tenant, "brand_section", lambda name=None: {})
     assert vp.media_hints(_prop(), "에세이").category is None
@@ -192,7 +195,17 @@ def test_llm_plan_carries_the_picked_category(monkeypatch: pytest.MonkeyPatch) -
         {"concept": "출근길", "script": "훅 → 공감", "scenes": scenes, "category": "자기계발"}
     )
     llm = MockLLMClient(responses={vp._PlanOut: out})
-    plan = asyncio.run(vp.write(llm, _prop(), "ctx", (vp.FUN_FIRST, vp.END_CARD)))
+    goods = _prop(products=["독서 기록장 A5"])
+    plan = asyncio.run(vp.write(llm, goods, "ctx", (vp.FUN_FIRST, vp.END_CARD)))
     assert plan.written_by == "llm" and plan.media_hints is not None
     assert plan.media_hints.category == "자기계발"
     assert '"categories"' in llm.calls[0] and "그림책" in llm.calls[0]
+    assert "특정 상품이 아니면 반드시 빈 문자열" in llm.calls[0]
+
+
+def test_solution_ad_never_gets_a_category(monkeypatch: pytest.MonkeyPatch) -> None:
+    """솔루션 광고는 상품 분류가 없다. 글·LLM에 분류가 나와도 비운다."""
+    monkeypatch.setattr(vp.tenant, "brand_section", lambda name=None: {"categories": ["에세이"]})
+    ad = _prop(idea="솔루션 소개 에세이 장면", products=["독서 기록장 A5"])
+    assert vp.purpose_of(ad) == vp.SOLUTION_AD
+    assert vp.media_hints(ad, "에세이").category is None

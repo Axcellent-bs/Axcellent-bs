@@ -51,6 +51,16 @@ export const MAX_STORY = 1000;
 
 const PATH = "/api/dashboard/marketing/storyboard";
 
+/** 11/25 뒤에서 만드는 스토리보드의 마지막 상태. 서버를 재시작하면 "none" */
+export interface StoryboardJob { status: "none" | "running" | "done" | "failed"; code?: string; message?: string }
+
+export async function storyboardJob(recordId: string): Promise<StoryboardJob> {
+  const res = await fetch(`${DASHBOARD_API_URL}${PATH}/jobs/${encodeURIComponent(recordId)}`, { headers: dashboardAuth(), cache: "no-store" });
+  const parsed: unknown = await res.json().catch(() => undefined);
+  if (!res.ok) return { status: "none" };
+  return (parsed as { data: StoryboardJob }).data;
+}
+
 /** 11/25 기록에 붙일 스토리보드를 뒤에서 만들게 한다(바로 답함). 끝나면 기록의 storyboard_at이 바뀐다 */
 export async function startStoryboard(body: { story: string; character_en?: string; shots: ShotCount; record_id: string }): Promise<void> {
   const res = await fetch(`${DASHBOARD_API_URL}${PATH}`, {

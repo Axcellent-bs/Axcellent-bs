@@ -124,7 +124,8 @@ def test_auto_leaves_ungrounded_field_undecided() -> None:
     assert media["media_kind"] == "image" and media["recommendation_rule"] == "default_image"
     assert media["recommendation_confidence"] == "low"
     assert media["missing_fields"] == ["category"] and "category" not in media["fields"]
-    assert "미정" in media["field_reasons"]["category"]
+    # 상품 없는 기획안 = 회사 홍보라 분류 없음(11/25). 값은 여전히 비운다
+    assert media["field_reasons"]["category"] == "회사 홍보 영상이라 분류 없음"
     assert media["field_sources"]["season"] == "default"
 
 
