@@ -124,6 +124,7 @@ async def test_mock_tokens_only_with_proxy_mock(monkeypatch: pytest.MonkeyPatch)
         ("/api/incidents?status=problem&limit=100", "/api/incidents"),
         ("/api/incidents/42", "/api/incidents/42"),
         ("/api/dashboard/summary", "/api/dashboard/summary"),
+        ("/api/hosts", "/api/hosts"),
     ],
 )
 async def test_allowed_paths_pass(token: str, url: str, path: str) -> None:
@@ -137,7 +138,8 @@ async def test_allowed_paths_pass(token: str, url: str, path: str) -> None:
 @pytest.mark.parametrize(
     "url",
     [
-        "/api/hosts",
+        "/api/hosts/1",
+        "/api/hosts/x/metrics",
         "/api/incidents/abc",
         "/api/incidents/1/reports",
         "/api/dashboard",

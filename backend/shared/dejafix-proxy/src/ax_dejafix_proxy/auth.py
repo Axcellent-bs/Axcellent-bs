@@ -28,12 +28,14 @@ from ax_agent_template.server import verify_token
 
 MOCK_NAME = "dejafix-proxy"  # `DEJAFIX_PROXY_MOCK=1`
 
-# 넘기는 DejaFix 조회 (GET만). 화면 `frontend/src/lib/dejafix.ts`, 인프라 AI `dejafix_watch.py`,
+# 넘기는 DejaFix 조회 (GET만). 화면 `frontend/src/lib/dejafix.ts`(장애·요약·호스트),
+# 인프라 AI `dejafix_watch.py`,
 # 개발 AI `deploy_signals.py`가 부르는 것뿐이다. 그 밖의 `/api/*`는 404
 _ALLOWED = (
     re.compile(r"/api/incidents"),  # 쿼리 허용 (status·limit 등)
     re.compile(r"/api/incidents/[0-9]+"),
     re.compile(r"/api/dashboard/summary"),
+    re.compile(r"/api/hosts"),  # 감시 호스트·에이전트 연결 상태 (DejaFix 계약 #7, 연결한 PC 칸)
 )
 
 
