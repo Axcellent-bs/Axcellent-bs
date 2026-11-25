@@ -60,7 +60,19 @@ const authHeaders = (): Record<string, string> => (SAFETY_HUMAN_TOKEN ? { Author
 /** dejafix-proxy가 화면 토큰을 막았을 때의 코드 (DejaFix 계정 문제의 401과 나눠 알린다) */
 const PROXY_AUTH_CODES = new Set(["AUTH_REQUIRED", "TOKEN_INVALID", "SESSION_EXPIRED", "SESSION_REVOKED", "SESSION_ENDED"]);
 
-async function get<T>(path: string): Promise<T> {
+/** 404면 null로 돌려준다(DejaFix 옛 버전에 없는 경로). 그 밖은 `get`과 같다 */
+async function getOrNull<T>(path: string): Promise<T | null> {
+  try {
+    return await get<T>(path, true);
+  } catch (e) {
+    if (e instanceof NotFound) return null;
+    throw e;
+  }
+}
+
+class NotFound extends Error {}
+
+async function get<T>(path: string, quietNotFound = false): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${DEJAFIX_API_URL}${path}`, { cache: "no-store", headers: authHeaders() });
@@ -78,9 +90,24 @@ async function get<T>(path: string): Promise<T> {
     if (code && PROXY_AUTH_CODES.has(code)) throw new Error("장애 목록을 볼 권한이 없거나 로그인이 끊겼습니다. 다시 로그인해 주세요.");
     throw new Error("DejaFix 로그인 정보가 없거나 만료됐습니다 (서버 담당이 설치 설정의 DejaFix 계정을 확인해 주세요).");
   }
-  if (res.status === 404) throw new Error("DejaFix에 없는 장애입니다.");
+  if (res.status === 404) throw quietNotFound ? new NotFound(path) : new Error("DejaFix에 없는 장애입니다.");
   if (!res.ok) throw new Error(`DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`);
   return (await res.json()) as T;
+}
+
+/** DejaFix 계약 #7 `GET /api/hosts`: Zabbix 감시 호스트와 에이전트 연결 상태 */
+export interface DejafixHost {
+  id: string;
+  name: string;
+  /** 에이전트 가용성: up 응답함 · down 응답 없음 · unknown 확인할 수 없음 (장애 여부와 따로) */
+  state: "up" | "down" | "unknown";
+  /** 열린 Problem 수 */
+  problems: number;
+}
+
+/** 호스트 목록. DejaFix가 아직 이 API를 주지 않으면(옛 버전) null */
+export async function hostList(): Promise<{ data: DejafixHost[]; meta: { collected_at?: string; truncated?: boolean } } | null> {
+  return getOrNull("/api/hosts");
 }
 
 /** 프록시 `GET /status`(연결 출처·응답 여부). 회원·서버 관리 › DejaFix 연결 카드가 읽는다. 못 읽으면 null ("확인할 수 없음") */
