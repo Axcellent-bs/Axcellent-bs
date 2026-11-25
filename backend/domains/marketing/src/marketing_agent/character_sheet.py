@@ -145,6 +145,42 @@ NEGATIVE = (
     "overlapping panels, busy background, text artifacts, watermark, logo, signature, blurry, "
     "low resolution, multiple different characters"
 )
+# 11/26 원본 그대로 참조로 쓰는 종류(REFERENCE_KINDS: virtual_human·illustration)의 읽기 지시.
+# 운영 증거 11/25 CR-4dc50bc2cc75: virtual_human인데 "실사 사진으로 보여 그림체 캐릭터로 바꿔 외형을
+# 정리한다"가 나왔다(위 PROMPT의 사진 규칙을 그대로 따름)
+PHOTO_RULE = (
+    "- 실제 사람을 찍은 사진이면 real_person_photo=true로 하고, "
+    "그 사람의 얼굴을 그대로 옮기지 말고\n"
+    "  그림체 캐릭터(art_style_en)로 바꾼 외형을 적는다. 이름·신원을 추측하지 않는다.\n"
+)
+REFERENCE_RULE = (
+    "- 이 이미지는 원본 그대로 참조로 쓴다. "
+    "그림체로 바꾸지 말고 원본 그대로의 외형(얼굴·머리·옷)을\n"
+    "  적는다. 그림체로 바꾼다는 말을 쓰지 않는다. "
+    "실제 사람을 찍은 사진이면 real_person_photo=true로\n"
+    "  한다. 이름·신원을 추측하지 않는다.\n"
+)
+
+
+KEEP_SUMMARY = "올린 이미지 그대로의 외형을 참조로 씀"  # 요약이 그림체 문장뿐이면 이 문장
+
+
+def prompt_for(kind: str) -> str:
+    """올린 이미지 종류별 읽기 지시문. virtual_human·illustration은 원본 그대로의 외형."""
+    return PROMPT.replace(PHOTO_RULE, REFERENCE_RULE) if kind in REFERENCE_KINDS else PROMPT
+
+
+# 결과 글에서 뺄 "그림체로 바꿈/바꿔" 문장 (원본 그대로 참조로 쓰는 종류만)
+_STYLIZE = re.compile(r"그림체[^.!?。\n]*?(?:바꾸|바꿔|바꿈|바꾼|바뀐|변환|전환)"
+                      r"|(?:바꾸|바꿔|바꿈|바꾼|변환)[^.!?。\n]*?그림체")  # fmt: skip
+
+
+def drop_stylize(text: str | None) -> str:
+    """문장 단위로 나눠 그림체로 바꾼다는 문장만 뺀다."""
+    parts = re.split(r"(?<=[.!?。])\s+", (text or "").strip())
+    return " ".join(p for p in parts if p and not _STYLIZE.search(p))
+
+
 PHOTO_NEGATIVE = "photorealistic, real person likeness, photograph"
 # 11/24 AI 가상 인물: 회사 그림체(style_en, 예: flat illustration) 대신 이 문장 (코드 상수)
 VIRTUAL_STYLE_EN = "photorealistic, same person as the reference image"
@@ -297,6 +333,14 @@ def build_output(
         kind = "real_photo"
     keep = kind in REFERENCE_KINDS  # 그대로 참조로 쓰는 종류 (사람이 고른 값이 먼저)
     stylized = read.real_person_photo and not keep
+    if keep:
+        # 11/26: 원본 그대로 참조로 쓰는데 LLM이 "그림체로 바꿈/바꿔"를 적었으면 그 문장을 뺀다
+        read = read.model_copy(update={
+            "summary_ko": drop_stylize(read.summary_ko) or KEEP_SUMMARY,
+            "personality_ko": drop_stylize(read.personality_ko) or None,
+            "seen_ko": [x for x in read.seen_ko if not _STYLIZE.search(x)],
+            "guessed_ko": [x for x in read.guessed_ko if not _STYLIZE.search(x)],
+        })  # fmt: skip
     style = VIRTUAL_STYLE_EN if kind == "virtual_human" else read.art_style_en
     if stylized:
         style = f"{style}, stylized illustrated character, not photorealistic"
@@ -414,7 +458,8 @@ async def make_character_sheet(
     data = {"note": note} if note else {"note": "(없음)"}
     try:
         read = await llm.structured(
-            PROMPT, CharacterRead, untrusted=data, images=[image], context_id=context_id
+            prompt_for(kind), CharacterRead, untrusted=data, images=[image],
+            context_id=context_id,
         )
     except LLMNotConfiguredError as exc:
         raise CharacterSheetRefused(

@@ -167,7 +167,8 @@ def recommend(situations: Sequence[TrendHumorSituation], signals: Sequence[Trend
         if g.format_id:
             weight = 0.5 if g.new else 1.0
             score[g.format_id] = score.get(g.format_id, 0.0) + min(g.count, 3) * weight
-    rank = {c.id: c.difficulty_rank for c in cards}
+    # 추천에서 뺀 카드(recommend = false, 한 화면 인물 3명 이상 등)는 점수가 있어도 고르지 않는다
+    rank = {c.id: c.difficulty_rank for c in cards if getattr(c, "recommend", True)}
     picked = [cid for cid in score if cid in rank and score[cid] > 0]
     picked.sort(key=lambda cid: (-score[cid], rank[cid], cid))
     return picked[:MAX_CARDS]
@@ -220,7 +221,7 @@ async def humor_section(report: TrendReport, llm: Any, env: Mapping[str, str], n
     else:
         data = {"재료": [{"종류": k, "글": t} for k, t in given],
                 "형식_카드": [{"id": c.id, "이름": c.name, "설명": c.note}
-                              for c in cards]}  # fmt: skip
+                              for c in cards if c.recommend]}  # fmt: skip
         calls = 1
         try:
             got = await llm.structured(PROMPT, _Situations, untrusted=data, context_id=context_id)
@@ -231,7 +232,7 @@ async def humor_section(report: TrendReport, llm: Any, env: Mapping[str, str], n
             report.humor_status = "unknown"
             report.humor_reason = f"LLM 호출 실패 ({type(error).__name__}), 상황을 뽑지 못함"
         else:
-            situations = clean(got, given, [c.id for c in cards])
+            situations = clean(got, given, [c.id for c in cards if c.recommend])
             if situations:
                 report.humor_status, report.humor_reason = "known", None
             else:
