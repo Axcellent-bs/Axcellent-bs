@@ -19,6 +19,7 @@ import {
   DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
   type A2AResult, type KeywordWindow, type PromoConceptsOutput, type TrendInsightBriefOutput, type TrendPopularOutput, type TrendScanOutput, type TrendVerdict,
 } from "@/lib/data";
+import { fadedChip } from "@/lib/keywordTrendView";
 
 // 감지 탭이 아닌 하위 탭·인스타 칩 칸은 처음 열 때 받는다. 첫 화면(감지)은 이 코드 없이 먼저 그린다 (11/25 Lighthouse)
 const CampaignEffect = lazy(() => import("@/components/data/CampaignEffect").then((m) => ({ default: m.CampaignEffect })));
@@ -86,14 +87,16 @@ function notAdOf(v: TrendVerdict, popular: TrendPopularOutput | null, promo: Pro
 /** 직접 판정 한 줄: 주제 · 평소의 N배(서버 배수) · 판정(급상승·평범·판정 못 함) · 광고 재료 아님 · 판정에 쓴 마지막 날 + 근거 */
 function JudgedRow({ v, notAd }: { v: TrendVerdict; notAd: string | null }) {
   const day = v.evidence.latest_period;
-  const label = v.status === "rising" ? "급상승" : v.status === "normal" ? "평범" : "판정 못 함";
+  const faded = v.status === "rising" ? fadedChip(v.evidence) : null;
+  const label = faded ? "지난 급상승" : v.status === "rising" ? "급상승" : v.status === "normal" ? "평범" : "판정 못 함";
   return (
     <li className="space-y-1.5 py-2.5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-semibold text-ink-900">{v.group_name}</span>
-        <span className={`text-sm font-semibold ${v.status === "rising" ? "text-red-700" : "text-ink-700"}`}>
+        <span className={`text-sm font-semibold ${v.status === "rising" && !faded ? "text-red-700" : "text-ink-700"}`}>
           {v.ratio != null ? `평소의 ${fixed(v.ratio)}배` : "배수 모름"} · {label}
         </span>
+        {faded && <span className={`chip text-xs ${TONE.warn}`} title="정점이 지나고 지금 값은 평소 범위 안이에요">{faded}</span>}
         {notAd != null && (
           <span className={`chip max-w-full text-xs ${TONE.muted}`} title={notAd || undefined}>
             광고 재료 아님{notAd ? <span className="ml-1 truncate">· {notAd}</span> : null}
@@ -143,7 +146,8 @@ function DirectJudge({ popular, promo }: { popular: TrendPopularOutput | null; p
   const out = scan.kind === "ok" ? scan.res.output : null;
   const headline = scan.kind === "ok" ? evidenceLines(scan.res.evidence?.data_summary).headline : null;
   const windowFrom = out?.results.find((r) => r.window_from)?.window_from ?? null;
-  const results = out ? [...out.results].sort((a, b) => (b.ratio ?? -1) - (a.ratio ?? -1)) : [];
+  // 끝난 급상승(faded)은 뒤로, 그 안에서 배수 큰 순
+  const results = out ? [...out.results].sort((a, b) => Number(!!a.evidence.faded) - Number(!!b.evidence.faded) || (b.ratio ?? -1) - (a.ratio ?? -1)) : [];
   return (
     <details className="card p-4 text-sm sm:p-5">
       <summary className="cursor-pointer font-semibold text-ink-700">키워드 직접 판정</summary>

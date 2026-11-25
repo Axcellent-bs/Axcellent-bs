@@ -71,6 +71,24 @@ class Settings:
     min_weekday_points: int = (
         4  # 요일 보정에 쓸 같은 요일 값이 이보다 적으면 그 요일은 보정하지 않음
     )
+    # 끝난 급상승(faded): rising인데 정점 구간 끝이 마지막 값 날보다 이 일수 넘게 앞이고 마지막
+    # 값이 평소 범위 위끝(band_high) 이하면 faded. 환경 변수 `DATA_TREND_FADED_AFTER_DAYS`로 바꾼다
+    faded_after_days: int = field(default_factory=lambda: faded_after_days_env())
+
+
+FADED_ENV = "DATA_TREND_FADED_AFTER_DAYS"
+FADED_DEFAULT_DAYS = 2
+
+
+def faded_after_days_env(env: Mapping[str, str] | None = None) -> int:
+    """끝난 급상승 기준 일수. 환경 변수가 없거나 틀리면 2일 (0 미만은 0)."""
+    import os
+
+    raw = (env if env is not None else os.environ).get(FADED_ENV)
+    try:
+        return max(0, int(raw)) if raw not in (None, "") else FADED_DEFAULT_DAYS
+    except (TypeError, ValueError):
+        return FADED_DEFAULT_DAYS
 
 
 DEFAULT_SETTINGS = Settings()
@@ -219,6 +237,7 @@ def _judge_core(series: TrendSeries, start: date, end: date, settings: Settings)
     assert peak is not None  # window가 비어 있지 않다
     last_day, last_value = window[-1]
     rising = peak.z >= settings.z_threshold
+    band_high = round(math.exp(center + sigma), 4)
     return TrendVerdict(
         group_name=group,
         status="rising" if rising else "normal",
@@ -229,10 +248,30 @@ def _judge_core(series: TrendSeries, start: date, end: date, settings: Settings)
                 "latest_value": round(last_value, 4),
                 "score": round(peak.z, 2),
                 "band_low": round(math.exp(center - sigma), 4),
-                "band_high": round(math.exp(center + sigma), 4),
+                "band_high": band_high,
+                "peak_start": peak.start,
+                "peak_end": peak.end,
+                "faded": rising
+                and is_faded(peak.end, last_day, last_value, band_high, settings),
             }
         ),
     )
+
+
+def is_faded(
+    peak_end: date | None,
+    latest_period: date | None,
+    latest_value: float | None,
+    band_high: float | None,
+    settings: Settings = DEFAULT_SETTINGS,
+) -> bool:
+    """끝난 급상승: 정점 끝이 마지막 값 날보다 `faded_after_days`일 넘게 앞이고 지금 값이 평소 범위
+    위끝 이하. 값 하나라도 없으면 False (모르면 끝났다고 하지 않는다). 배수·점수는 그대로 둔다."""
+    if None in (peak_end, latest_period, latest_value, band_high):
+        return False
+    assert peak_end is not None and latest_period is not None
+    assert latest_value is not None and band_high is not None
+    return (latest_period - peak_end).days > settings.faded_after_days and latest_value <= band_high
 
 
 def judge(
@@ -356,9 +395,11 @@ class TrendScanResult:
 
 
 def _facts(results: list[TrendVerdict]) -> dict[str, int | float | str]:
-    rising = [r for r in results if r.status == "rising"]
+    # 끝난 급상승(faded)은 요약 숫자·키워드에 쓰지 않고 수만 따로 센다
+    rising = [r for r in results if r.status == "rising" and not r.evidence.faded]
     facts: dict[str, int | float | str] = {
         "급상승 수": len(rising),
+        "끝난 급상승 수": sum(r.status == "rising" and r.evidence.faded for r in results),
         "그룹 수": len(results),
         "판정 불가 수": sum(r.status == "unknown" for r in results),
     }

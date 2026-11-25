@@ -939,7 +939,9 @@ async def popular(
                     if cat is None or cat.category == "unknown"
                     else cat.category not in exclude
                 ),
-                rising_now=(None if verdict is None else verdict.status == "rising"),
+                # 끝난 급상승(faded)은 "지금 급상승"이 아니다 (11/26)
+                rising_now=(None if verdict is None else verdict.status == "rising"
+                            and not verdict.evidence.faded),  # fmt: skip
                 rising_ratio=verdict.ratio if verdict is not None else None,
                 real_entity=cat.real_entity if cat else None,
                 entity_names=list(cat.entity_names) if cat else [],
