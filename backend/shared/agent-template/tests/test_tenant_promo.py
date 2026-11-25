@@ -67,3 +67,22 @@ def test_file_sits_next_to_company_connection(
 ) -> None:
     monkeypatch.setenv("AX_COMPANY_CONNECTION_FILE", str(tmp_path / "company.json"))
     assert tenant.promo_file() == tmp_path / "promo_style.json"
+
+
+def test_brand_priority_screen_then_tenant_then_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "promo_style.json"
+    monkeypatch.setenv("AX_PROMO_FILE", str(path))
+    monkeypatch.setenv("AX_TENANT", "catbooks")
+    file_style = tenant.brand()["style_en"]  # tenant.toml 값
+    assert file_style != tenant.BRAND_DEFAULTS["style_en"]
+    _save(path, {"catbooks": {"character_ko": "화면 캐릭터", "style_en": "logo text style"}})
+    got = tenant.brand()
+    assert got["character_ko"] == "화면 캐릭터"  # 화면 저장 > 기본값
+    assert got["style_en"] == file_style  # 규칙에 걸린 화면 값은 버리고 tenant.toml
+    assert got["setting_en"] == tenant.brand_values(tenant.brand_section())["setting_en"]
+    _save(path, {"nubi": {"character_ko": "남의 캐릭터"}})  # 다른 회사 값은 안 섞인다
+    assert tenant.brand()["character_ko"] == tenant.BRAND_DEFAULTS["character_ko"]
+    path.write_text("{깨짐", encoding="utf-8")
+    assert tenant.brand_saved() == {}

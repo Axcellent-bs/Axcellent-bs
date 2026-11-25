@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ax_agent_template import human_auth
 from ax_agent_template import tenant as tenants
@@ -40,6 +40,13 @@ class SaveIn(BaseModel):
 
     promo_style: Literal["fun_first", "product"]
     brand_exposure: Literal["end_card", "prop", "caption"]
+    # 기본 캐릭터·배경·그림체 (선택). 안 보내면 저장돼 있던 값 그대로, 빈 글자("")면 지움.
+    # 영어 칸은 사람이 쓴다(자동 번역 없음). 금칙·길이는 tenant.brand_ok와 같다
+    character_ko: str | None = Field(default=None, max_length=200)
+    character_en: str | None = Field(default=None, max_length=200)
+    setting_ko: str | None = Field(default=None, max_length=200)
+    setting_en: str | None = Field(default=None, max_length=200)
+    style_en: str | None = Field(default=None, max_length=200)
 
 
 def _admin(authorization: str | None) -> human_auth.Human:
@@ -72,10 +79,22 @@ def _state() -> dict[str, Any]:
     now = tenants.promo(name)
     source = {k: "screen" if k in saved else "tenant" if k in from_file else "default"
               for k in tenants.PROMO_DEFAULTS}  # fmt: skip
+    brand_screen = tenants.brand_saved(name)
+    section = tenants.brand_section(name) if name else {}
+    for k in tenants.BRAND_DEFAULTS:
+        source[k] = (
+            "screen" if k in brand_screen
+            else "tenant" if tenants.brand_ok(k, section.get(k))
+            else "default"
+        )  # fmt: skip
+    shown = (
+        tenants.brand_values({**section, **brand_screen}) if name else dict(tenants.BRAND_DEFAULTS)
+    )
     return {
         **now,
+        **shown,
         "source": source,
-        "defaults": dict(tenants.PROMO_DEFAULTS),
+        "defaults": {**tenants.PROMO_DEFAULTS, **tenants.BRAND_DEFAULTS},
         "editable": tenants.promo_file() is not None and name is not None,
     }
 
@@ -107,9 +126,26 @@ def get_promo_style() -> dict:
 def save_promo_style(body: SaveIn, authorization: str | None = Header(None)) -> dict:
     _admin(authorization)
     name, path = _company(), _path()
+    sent = body.model_fields_set
+    brand_in: dict[str, str] = {}
+    for key in tenants.BRAND_DEFAULTS:
+        text = " ".join((getattr(body, key) or "").split())
+        if key in sent and text:
+            if not tenants.brand_ok(key, text):  # 금칙·길이·글자 규칙은 tenant와 같다
+                raise ApiError(422, "BRAND_FIELD_REJECTED", f"{key} 칸에 쓸 수 없는 말이 있어요")
+            brand_in[key] = text
     with _lock:
         data = _raw(path)
-        data["companies"][name] = body.model_dump()
+        row = {"promo_style": body.promo_style, "brand_exposure": body.brand_exposure}
+        old = data["companies"].get(name)
+        old = old if isinstance(old, dict) else {}
+        for key in tenants.BRAND_DEFAULTS:  # 안 보낸 칸은 저장돼 있던 값 그대로, ""는 지움
+            if key in sent:
+                if key in brand_in:
+                    row[key] = brand_in[key]
+            elif isinstance(old.get(key), str):
+                row[key] = old[key]
+        data["companies"][name] = row
         _write(path, data)
     return ok(_state())
 

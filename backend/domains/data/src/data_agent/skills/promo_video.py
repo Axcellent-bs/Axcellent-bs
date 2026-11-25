@@ -150,7 +150,7 @@ def company(env: Mapping[str, str] | None = None, terms: Sequence[str] = ()) -> 
     name = (profile.name or "").strip() or _company_list_name() or UNKNOWN_COMPANY_NAME
     raw = profile.brand
     # `[brand]` 배경·주인공 (한글). 적지 않았거나 금칙에 걸려 기본값이면 회사 소재가 아니다
-    shown = tenant.brand_values(raw)
+    shown = tenant.brand_values({**raw, **tenant.brand_saved()})  # 화면 저장 > tenant.toml
     given = {k: v for k, v in shown.items() if v != tenant.BRAND_DEFAULTS[k]}
     place, character = given.get("setting_ko"), given.get("character_ko")
     try:
