@@ -158,10 +158,24 @@ def remember(name: str) -> None:
     os.replace(tmp, path)
 
 
+def _other_company() -> bool:
+    """지금 요청이 캣북스가 아닌 회사인가(요청 밖·캣북스면 False)."""
+    from ax_agent_template.company_connection import company_of
+    from ax_agent_template.company_scope import CATBOOKS
+
+    return company_of() != CATBOOKS
+
+
 def setting(env_name: str) -> str:
-    """회사 설정 값. 환경변수 → 지금 회사 폴더. 없으면 ""."""
+    """회사 설정 값. 환경변수 → 지금 회사 폴더. 없으면 "".
+
+    회사 설정 환경변수(`DERIVED`)는 설치 하나에 하나라 캣북스 것이다. 다른 회사 요청이면 환경변수를
+    보지 않고 그 회사 폴더만 본다(11/25: 서버 `DATA_TENANT_CATALOG`가 누비투어에도 캣북스 카탈로그를
+    줘서 데이터 화면에 "소설은 누가 사나" 같은 서점 문구가 나옴)."""
     given = os.getenv(env_name, "").strip()
-    if given or env_name not in DERIVED:
+    if env_name not in DERIVED:
+        return given
+    if given and not _other_company():
         return given
     name = current()
     if name is None:
