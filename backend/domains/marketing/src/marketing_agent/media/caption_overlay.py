@@ -63,6 +63,7 @@ class OverlayResult:
     end_card: bool
     commands: tuple[tuple[str, ...], ...]
     ffmpeg_bin: str
+    speed: float = 1.0  # 실제로 한 배속(안 했으면 1.0)
 
 
 def font_path() -> Path | None:
@@ -146,21 +147,44 @@ def _drawtext(font: Path, textfile: Path, start: float, end: float, *, size: str
     )
 
 
+def _speed(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
 def build_args(
     ffmpeg: str,
     video: Path,
     out: Path,
-    font: Path,
+    font: Path | None,
     text_files: Sequence[tuple[Path, float, float, str]],
+    *,
+    speed: float = 1.0,
+    has_audio: bool = True,
 ) -> list[str]:
-    """ffmpeg 인자 목록. `text_files`는 (글 파일, 시작, 끝, 글자 크기 식)."""
-    filters = ",".join(_drawtext(font, f, s, e, size=size) for f, s, e, size in text_files)
+    """ffmpeg 인자 목록. `text_files`는 (글 파일, 시작, 끝, 글자 크기 식).
+
+    11/25 배속(`speed` > 1): 영상 `setpts=PTS/배속`을 먼저 하고 그 뒤에 자막·엔드카드를 얹는다
+    (자막 시각은 빨라진 영상 기준 = 기획 시각). 소리는 `atempo=배속`(소리 트랙이 없으면 생략).
+    배속 1.0이면 지금 인자 그대로다."""
+    parts: list[str] = []
+    fast = speed > 1.0
+    if fast:
+        parts.append(f"setpts=PTS/{_speed(speed)}")
+    if text_files:
+        if font is None:
+            raise OverlayError("font_not_found")
+        parts.extend(_drawtext(font, f, s, e, size=size) for f, s, e, size in text_files)
+    if not parts:
+        raise OverlayError("nothing_to_overlay")
+    audio = ["-c:a", "copy"]
+    if fast and has_audio:
+        audio = ["-af", f"atempo={_speed(speed)}", "-c:a", "aac", "-b:a", "128k"]
     return [
         ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
-        "-i", str(video), "-vf", filters,
+        "-i", str(video), "-vf", ",".join(parts),
         "-map", "0:v:0", "-map", "0:a?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-        "-c:a", "copy", "-movflags", "+faststart", str(out),
+        *audio, "-movflags", "+faststart", str(out),
     ]  # fmt: skip
 
 
@@ -175,12 +199,20 @@ def apply_overlay(
     runner: Runner = subprocess_runner,
     ffmpeg: str | None = None,
     timeout_s: int = FFMPEG_TIMEOUT_S,
+    speed: float = 1.0,
+    has_audio: bool = True,
 ) -> OverlayResult:
-    """영상(`video`)에 자막·엔드카드를 얹은 mp4를 `output`에 쓴다. 원본은 그대로."""
+    """영상(`video`)에 자막·엔드카드를 얹은 mp4를 `output`에 쓴다. 원본은 그대로.
+
+    `duration_s`는 결과 영상 길이(배속을 했으면 빨라진 길이 = 기획 길이)다.
+    11/25 `speed` > 1이면 같은 ffmpeg 한 번에 배속도 한다. 자막·엔드카드가 없으면(글꼴이 없어
+    건너뛸 때 등) 배속만 한다. 그때는 글꼴이 필요 없다."""
     if duration_s <= 0:
         raise OverlayError("invalid_duration")
+    fast = speed > 1.0
+    texts = bool(end_card) or any(c.text for c in captions)
     font = font or font_path()
-    if font is None or not font.is_file():
+    if texts and (font is None or not font.is_file()):
         raise OverlayError("font_not_found")
     video, output = video.resolve(), output.resolve()
     if not video.is_file():
@@ -192,7 +224,7 @@ def apply_overlay(
         [ln for part in (end_card or "").split("\n") if (ln := wrap_text(part))]
     ).strip()
     shown = [c for c in captions if c.text and c.start_s < (card_from if card else duration_s)]
-    if not shown and not card:
+    if not shown and not card and not fast:
         raise OverlayError("nothing_to_overlay")
     binary = ffmpeg or ffmpeg_bin()
     tmp_out = output.with_name(f"{output.stem}.tmp{output.suffix}")
@@ -209,9 +241,12 @@ def apply_overlay(
             path = Path(folder) / "end.txt"
             path.write_text(card, encoding="utf-8")
             items.append((path, card_from, duration_s, "h/22"))
-        if not items:
+        if not items and not fast:
             raise OverlayError("nothing_to_overlay")
-        args = build_args(binary, video, tmp_out, font, items)
+        args = build_args(
+            binary, video, tmp_out, font if items else None, items,
+            speed=speed, has_audio=has_audio,
+        )  # fmt: skip
         try:
             try:
                 done = runner(args, timeout_s)
@@ -232,4 +267,5 @@ def apply_overlay(
         end_card=bool(card),
         commands=(tuple(args),),
         ffmpeg_bin=binary,
+        speed=speed if fast else 1.0,
     )

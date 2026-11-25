@@ -18,17 +18,23 @@ from ax_contracts.schemas.common import AxModel
 
 RENDER_SETTINGS_OPTIONS_SKILL = "render_settings_options"
 Aspect = Literal["plan", "9:16", "1:1", "16:9"]
+# 11/25 재생 속도(AI 티 줄이기): 길게 만들고 코드(ffmpeg)로 빠르게 튼다. "1.0" = 배속 끔
+Speed = Literal["1.0", "1.2", "1.5"]
+SPEEDS: tuple[str, ...] = ("1.0", "1.2", "1.5")
+DEFAULT_SPEED = "1.2"
 MAX_MODEL_ID = 120
 
 
 class RenderSettingsValues(AxModel):
-    """다섯 칸 모두 선택. 비우면(None) 서버 설정값(지금 동작)."""
+    """칸 모두 선택. 비우면(None) 서버 설정값(지금 동작)."""
 
     image_model: str | None = Field(default=None, max_length=MAX_MODEL_ID)
     video_model: str | None = Field(default=None, max_length=MAX_MODEL_ID)
     image_credits_ok: bool | None = None  # 비우면 true (그림에 크레딧을 쓴다)
     video_seconds: Literal["plan"] | int | None = None  # "plan" = 기획 길이, 정수 = 그 초(1~600)
     aspect: Aspect | None = None
+    # 비우면 서버 설정 `MARKETING_VIDEO_SPEED`, 그것도 없으면 "1.2" (11/25)
+    speed: Speed | None = None
 
     @field_validator("video_seconds")
     @classmethod
@@ -75,3 +81,6 @@ class RenderVideoSummary(AxModel):
     aspect: str
     reference: Literal["character_original", "storyboard_image"]
     credits_estimate: float | None = None
+    # 11/25 재생 속도: 실제 배속(만든 길이 ÷ 기획 길이, 1.0 미만이면 1.0)과 만든 길이(= seconds)
+    speed: float | None = None
+    generated_seconds: int | None = None

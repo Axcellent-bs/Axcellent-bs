@@ -59,7 +59,11 @@ def test_no_settings_keeps_todays_behavior(env: dict[str, Any]) -> None:  # noqa
         "aspect": "9:16",
         "reference": "storyboard_image",
         "credits_estimate": 2.0,
+        # 11/25 재생 속도: 설정이 비면 서버 설정, 그것도 없으면 1.2배속(5초 → 6초로 만든다)
+        "speed": 1.2,
+        "generated_seconds": video["seconds"],
     }
+    assert video["seconds"] == 6 and video["plan_seconds"] == 5
     image = _generate(env, "image")
     assert image["model"] == "nano_banana_pro" and image["aspect_ratio"] == "3:4"
 

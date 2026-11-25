@@ -35,6 +35,7 @@ NO_DEFAULTS: dict[str, Any] = {
     "image_credits_ok": True,
     "video_seconds": "plan",
     "aspect": "plan",
+    "speed": None,  # 마케팅을 못 부르면 서버 기본값을 모른다(지어내지 않는다)
 }
 
 

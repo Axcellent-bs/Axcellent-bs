@@ -851,8 +851,12 @@ async def request_video(
     # 11/24 기획 제작안 길이 → 서버 설정·모델 상한 안으로 (기획 길이가 없으면 지금 규칙)
     model = _model("video", via, cid)
     shown = _settings.effective(cid)  # 11/25 회사 만들기 설정: 길이 plan|정수, 비율, 영상 모델
-    seconds, clamped = plan_seconds(
-        (rec.get("storyboard") or {}).get(PLAN_DURATION_KEY), model, shown.video_seconds
+    # 11/25 재생 속도: 더 길게 만들고 자막을 얹을 때 같은 ffmpeg로 빠르게 튼다(creative_overlay)
+    seconds, clamped, planned, speed = sped_seconds(
+        (rec.get("storyboard") or {}).get(PLAN_DURATION_KEY),
+        model,
+        shown.video_seconds,
+        shown.speed,
     )
     expected = usage_mod.UsageAmount("seconds", seconds)
     applies = _quota_applies(settings, via)
@@ -896,8 +900,12 @@ async def request_video(
         "reference": "character_original"
         if video_reference(rec, model)[0] == "sheet_image" else "storyboard_image",
         "credits_estimate": credits,
+        "speed": speed,
+        "generated_seconds": seconds,
     }
     extra_ko = f", {model or '모델 미정'}, 비율 {aspect}"
+    if speed > 1.0:
+        extra_ko += f", {speed:g}배속으로 틀어 {planned}초"
     if credits is not None:
         extra_ko += f", 예상 {credits:g} 크레딧"
     params: dict[str, Any] = {
@@ -931,6 +939,8 @@ async def request_video(
         "route": via,
         "company_id": cid,
         "summary": summary,
+        "speed": speed,
+        "plan_seconds": planned,
     }
     if clamped is not None:
         base["seconds_clamped_from"] = clamped
@@ -1257,6 +1267,34 @@ def plan_seconds(plan_s: Any, model: str, setting: Any = "plan") -> tuple[int, i
     if isinstance(setting, int) and not isinstance(setting, bool) and setting >= 1:
         plan_s = setting
     return _plan_seconds(plan_s, model)
+
+
+def speed_value(raw: Any) -> float:
+    """재생 속도 글("1.0"·"1.2"·"1.5") → 수. 모르면 1.0."""
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 1.0
+    return value if 1.0 <= value <= 2.0 else 1.0
+
+
+def sped_seconds(
+    plan_s: Any, model: str, setting: Any = "plan", speed: Any = "1.0"
+) -> tuple[int, int | None, int, float]:
+    """(만들 초, 줄였으면 원래 기획 초, 기획 초, 실제 배속). 11/25 재생 속도(AI 티 줄이기).
+
+    만들 길이 = round(기획 길이 × 배속). 모델 상한·서버 `VIDEO_DURATION_S`를 넘으면 상한으로
+    줄이고, 실제 배속 = 만든 길이 ÷ 기획 길이(1.0 미만이면 1.0). 기획 길이 자체가 상한을 넘으면
+    지금처럼 상한으로 줄인다(`seconds_clamped_from` = 기획 길이).
+    배속 1.0이면 `plan_seconds` 그대로."""
+    base, clamped = plan_seconds(plan_s, model, setting)
+    target = speed_value(speed)
+    if target <= 1.0 or clamped is not None:
+        return base, clamped, base, 1.0
+    made, _ = _plan_seconds(round(base * target), model)
+    made = max(made, base)
+    actual = round(made / base, 3)
+    return made, None, base, actual if actual > 1.0 else 1.0
 
 
 def _plan_seconds(plan_s: Any, model: str) -> tuple[int, int | None]:

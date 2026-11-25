@@ -51,6 +51,26 @@ def probe_duration(video: Path) -> float | None:
 
 PROBE: Callable[[Path], float | None] = probe_duration
 
+
+def probe_audio(video: Path) -> bool:
+    """소리 트랙이 있나. ffprobe가 없거나 읽지 못하면 True(있다고 보고 `0:a?`로 맡긴다)."""
+    data = sns_media.run_ffprobe(video)
+    if not data or not isinstance(data.get("streams"), list):
+        return True
+    return any(isinstance(s, dict) and s.get("codec_type") == "audio" for s in data["streams"])
+
+
+PROBE_AUDIO: Callable[[Path], bool] = probe_audio
+
+
+def record_speed(render: dict[str, Any]) -> float:
+    """영상을 요청할 때 정한 실제 배속(`render.video.speed`, 없으면 요약). 옛 기록은 1.0."""
+    video = render.get("video") or {}
+    raw = video.get("speed")
+    if raw is None:
+        raw = (video.get("summary") or {}).get("speed")
+    return _render.speed_value(raw)
+
 _busy: set[tuple[str, str]] = set()
 _again: set[tuple[str, str]] = set()
 
@@ -186,19 +206,31 @@ async def _run(
     source = _source_file(record_id, cid, info)
     if source is None or not source.is_file():
         return state("failed", "video_not_found")
+    # 11/25 재생 속도: 더 길게 만든 영상을 같은 ffmpeg 한 번에 빠르게 튼다. 배속 1.0이면 지금 그대로
+    speed = record_speed(render)
+    fast = speed > 1.0
+    base["speed"] = speed
+    base["speed_applied"] = False
+    base["captions_skipped"] = None
     font = _co.font_path()
-    if font is None:
+    if font is None and not fast:
         return state("skipped", "font_not_found")
     shots = _shots(rec, merged)
-    duration = _duration(rec, part, source, shots)
+    made = _duration(rec, part, source, shots)
+    duration = made / speed  # 결과 길이 = 빨라진 영상 길이(기획 길이). 자막 시각도 이 기준
     if duration <= 0:
         return state("skipped", "duration_unknown")
-    plan = _co.plan_captions(shots, duration)
+    plan = _co.plan_captions(shots, duration) if font is not None else []
     board = rec.get("storyboard") or {}
     cta = " ".join(str(board.get("cta_ko") or "").split())
-    card = "\n".join(x for x in (_company_label(cid), cta) if x) or None
-    if not plan and card is None:
+    card = ("\n".join(x for x in (_company_label(cid), cta) if x) or None) if font else None
+    if not plan and card is None and not fast:
         return state("skipped", "nothing_to_overlay")
+    # 글꼴이 없거나 얹을 글이 없으면 배속만 한다(자막을 건너뛴 이유는 `captions_skipped`)
+    if font is None:
+        base["captions_skipped"] = "font_not_found"
+    elif not plan and card is None:
+        base["captions_skipped"] = "nothing_to_overlay"
     state("running")
     output = _folder(record_id, cid) / _render.FILES[_render.OVERLAY_PART]
     try:
@@ -211,6 +243,8 @@ async def _run(
             duration_s=duration,
             font=font,
             runner=RUNNER,
+            speed=speed,
+            has_audio=PROBE_AUDIO(source) if fast else True,
         )
     except _co.OverlayError as error:
         status = "skipped" if error.code in ("ffmpeg_not_found", "font_not_found") else "failed"
@@ -229,7 +263,13 @@ async def _run(
         source_part=part,
         model=info.get("model"),
     )
-    return state("applied", None, captions=result.captions, end_card=result.end_card)
+    return state(
+        "applied",
+        None,
+        captions=result.captions,
+        end_card=result.end_card,
+        speed_applied=result.speed > 1.0,
+    )
 
 
 async def redo(
