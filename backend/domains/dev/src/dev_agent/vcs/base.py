@@ -20,8 +20,6 @@ from typing import Literal, Protocol, runtime_checkable
 
 # 생성 PR 브랜치는 이 접두사로만 만든다 (FR-AG-008)
 BRANCH_PREFIX = "gen/"
-# 파일 읽기 한도 (이보다 크면 읽지 않는다)
-MAX_READ_BYTES = 100 * 1024
 LIST_LIMIT = 2000
 
 CheckState = Literal["passed", "failed", "pending"]
@@ -619,9 +617,8 @@ def check_path(path: str) -> str:
 
 
 def decode_text(data: bytes, path: str) -> str:
-    """파일 바이트를 글로 바꾼다. 한도 초과·바이너리면 `VcsError`(invalid)."""
-    if len(data) > MAX_READ_BYTES:
-        raise VcsError("invalid", f"파일이 너무 크다 ({len(data)}바이트): {path}")
+    """파일 바이트를 글로 바꾼다. 바이너리·UTF-8이 아니면 `VcsError`(invalid). 크기 한도는 없다
+    (고객사 레포의 큰 파일도 고칠 수 있어야 한다)."""
     if b"\x00" in data:
         raise VcsError("invalid", f"바이너리 파일: {path}")
     try:

@@ -64,6 +64,7 @@ class FakeGithub:
     refs: dict[str, str] = field(default_factory=dict)
     commits: dict[str, dict[str, str]] = field(default_factory=dict)  # sha → {경로: 내용}
     blobs: dict[str, str] = field(default_factory=dict)
+    big: dict[str, bytes] = field(default_factory=dict)  # 1MB 넘는 파일 (sha → 내용)
     trees: dict[str, dict[str, str]] = field(default_factory=dict)
     pulls: dict[int, dict] = field(default_factory=dict)
     files: dict[int, list[dict]] = field(default_factory=dict)
@@ -157,6 +158,13 @@ class FakeGithub:
             return httpx.Response(200, json={"object": {"sha": sha}})
         if m == "GET" and (g := re.fullmatch(r"/git/commits/(\w+)", path)):
             return httpx.Response(200, json={"sha": g.group(1), "tree": {"sha": f"t{g.group(1)}"}})
+        if m == "GET" and (g := re.fullmatch(r"/git/blobs/(\w+)", path)):
+            raw = self.big.get(g.group(1))
+            if raw is None:
+                return httpx.Response(404, json={"message": "Not Found"})
+            return httpx.Response(
+                200, json={"encoding": "base64", "content": base64.b64encode(raw).decode("ascii")}
+            )
         if m == "POST" and path == "/git/blobs":
             sha = self._sha("blob")
             self.blobs[sha] = body["content"]
@@ -201,6 +209,13 @@ class FakeGithub:
             if content is None:
                 return httpx.Response(404, json={"message": "Not Found"})
             raw = content.encode("utf-8")
+            if len(raw) > 1024 * 1024:  # GitHub처럼 1MB 넘으면 내용을 비우고 blob sha만 준다
+                self.big[hashlib.sha1(raw).hexdigest()] = raw
+                return httpx.Response(
+                    200,
+                    json={"type": "file", "encoding": "none", "size": len(raw), "content": "",
+                          "sha": hashlib.sha1(raw).hexdigest()},
+                )  # fmt: skip
             encoded = base64.b64encode(raw).decode("ascii")
             # GitHub처럼 60자마다 줄을 바꿔 보낸다
             wrapped = "\n".join(encoded[i : i + 60] for i in range(0, len(encoded), 60))
@@ -504,15 +519,18 @@ def test_read_file_base_and_errors(h: Harness) -> None:
             **BASE_FILES,
             "shop-web/logo.bin": "PNG\x00\x01",
             "shop-web/big.ts": "x" * (100 * 1024 + 1),
+            "shop-web/huge.json": "y" * (1024 * 1024 + 1),
         },
     )
     assert run(h.adapter.read_file("shop-web/b/c.ts")) == "export const c = 2\n"
+    # 크기 한도 없음: 고객사 레포의 큰 파일(1MB 넘는 것도)을 그대로 읽는다
+    assert run(h.adapter.read_file("shop-web/big.ts")) == "x" * (100 * 1024 + 1)
+    assert run(h.adapter.read_file("shop-web/huge.json")) == "y" * (1024 * 1024 + 1)
     cases = {
         "shop-web/none.ts": "not_found",
         "../etc/passwd": "invalid",
         "/shop-web/a.tsx": "invalid",
         "shop-web/logo.bin": "invalid",
-        "shop-web/big.ts": "invalid",
     }
     for path, code in cases.items():
         with pytest.raises(VcsError) as err:
