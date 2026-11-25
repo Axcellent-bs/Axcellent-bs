@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { SheetBoard } from "@/components/marketing/SheetBoard";
 import { StoryboardView } from "@/components/marketing/StoryboardMaker";
 import { approvalLink } from "@/lib/briefMedia";
-import { getCreativeRecord, thumbSrc, type CreativeRecord } from "@/lib/creativeRecords";
+import { getCreativeRecord, redrawBoardImage, thumbSrc, type CreativeRecord } from "@/lib/creativeRecords";
 import { creativeButtons, creativeRecordOf, sceneCells, videoApproval } from "@/lib/requestCharacter";
 import type { VideoPlanView } from "@/lib/videoPlan";
 import type { WorkRequestRow } from "@/lib/workRequests";
@@ -55,7 +55,7 @@ function Panel({ recordId, plan, tab, setTab, version }: {
         {recordId && !rec && !error && <p className="animate-pulse text-xs text-ink-500">이미지 시트를 불러오는 중…</p>}
         {recordId && rec && tab === "sheet" && <SheetBoard r={rec.sheet} thumb={thumbSrc(rec.thumbnail_base64)} />}
         {recordId && rec && tab === "storyboard" && (rec.storyboard
-          ? <StoryboardView r={rec.storyboard} />
+          ? <StoryboardView r={rec.storyboard} onRedraw={async () => { await redrawBoardImage(rec.record_id); }} />
           : <p className="text-xs text-ink-500">스토리보드를 아직 붙이지 않았어요</p>)}
         {!recordId && plan && (
           <ol className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">

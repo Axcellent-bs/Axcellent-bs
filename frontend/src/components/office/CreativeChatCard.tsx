@@ -4,7 +4,7 @@ import { SheetBoard } from "@/components/marketing/SheetBoard";
 import { StoryboardView } from "@/components/marketing/StoryboardMaker";
 import { RenderPanel } from "@/components/marketing/RenderPanel";
 import { ScriptPanel } from "@/components/marketing/ScriptPanel";
-import { assetUrl, getCreativeRecord, thumbSrc, type CreativeRecord, type RenderPartKey } from "@/lib/creativeRecords";
+import { assetUrl, getCreativeRecord, redrawBoardImage, thumbSrc, type CreativeRecord, type RenderPartKey } from "@/lib/creativeRecords";
 import { recordLink, renderPending, renderTab, type TabChip } from "@/lib/creativeCardView";
 import { useAuthedMedia } from "@/lib/authedMedia";
 import type { CreativeCard } from "@/lib/planningData";
@@ -86,7 +86,7 @@ export function CreativeChatCard({ card }: { card: CreativeCard }) {
           <p className="text-xs font-medium text-ink-700">스토리보드{boardTab.chip && <TabChipView chip={boardTab.chip} />}</p>
           {boardTab.show === "image"
             ? <RenderImage recordId={card.record_id} part="board_image" version={boardTab.version} label="스토리보드 그림" />
-            : rec.storyboard && <StoryboardView r={rec.storyboard} />}
+            : rec.storyboard && <StoryboardView r={rec.storyboard} onRedraw={async () => { await redrawBoardImage(card.record_id); }} />}
         </div>
       )}
       <RenderPanel recordId={card.record_id} />

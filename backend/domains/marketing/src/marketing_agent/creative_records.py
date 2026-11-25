@@ -206,6 +206,37 @@ class CreativeRecords:
             )
         return True
 
+    def set_board_svgs(self, record_id: str, svgs: dict[int, str], tried_key: str) -> bool:
+        """스토리보드 칸 `svg`만 채운다(칸 문장·시간·자막·`storyboard_at` 그대로).
+
+        기록이나 스토리보드가 없으면 False.
+
+        `tried_key`에 시도했다고 남겨 같은 의뢰를 다시 준비해도 LLM을 또 부르지 않게 한다.
+        하나라도 채우면 `board_source`가 "layout"일 때만 "svg"로 바꾼다
+        (Higgsfield 그림은 그대로)."""
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT storyboard FROM marketing_creative_records"
+                " WHERE record_id = ? AND tenant_id = ?",
+                (record_id, self.company_id),
+            ).fetchone()
+            if row is None or not row["storyboard"]:
+                return False
+            board = json.loads(row["storyboard"])
+            for shot in board.get("shots") or []:
+                svg = svgs.get(shot.get("no")) if isinstance(shot, dict) else None
+                if svg:
+                    shot["svg"] = svg
+            if svgs and board.get("board_source", "layout") == "layout":
+                board["board_source"] = "svg"
+            board[tried_key] = True
+            self._conn.execute(
+                "UPDATE marketing_creative_records SET storyboard = ?"
+                " WHERE record_id = ? AND tenant_id = ?",
+                (json.dumps(board), record_id, self.company_id),
+            )
+        return True
+
     def attach_script(self, record_id: str, script: dict[str, Any], story: str | None) -> bool:
         """기록에 대본을 붙인다(다시 쓰거나 고치면 바꾼다). 줄거리를 주면 같이 남긴다.
 

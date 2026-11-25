@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Tabs } from "@/components/connect/parts";
 import { shortDateTime } from "@/lib/format";
-import { RECORD_ID, getCreativeRecord, listCreativeRecords, thumbSrc, type CreativeRecord, type CreativeRecordSummary } from "@/lib/creativeRecords";
+import { RECORD_ID, getCreativeRecord, listCreativeRecords, redrawBoardImage, thumbSrc, type CreativeRecord, type CreativeRecordSummary } from "@/lib/creativeRecords";
 import { thumbChip } from "@/lib/creativeThumbnails";
 import { SheetBoard } from "./SheetBoard";
 import { StoryboardView } from "./StoryboardMaker";
@@ -67,7 +67,7 @@ function Detail({ id }: { id: string }) {
       </details>
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-ink-900">스토리보드</h3>
-        {rec.storyboard ? <StoryboardView r={rec.storyboard} /> : <p className="text-sm text-ink-500">이 기록에는 스토리보드가 없어요. SNS·미디어에서 줄거리를 넣고 다시 만들면 붙어요.</p>}
+        {rec.storyboard ? <StoryboardView r={rec.storyboard} onRedraw={async () => { await redrawBoardImage(rec.record_id); }} /> : <p className="text-sm text-ink-500">이 기록에는 스토리보드가 없어요. SNS·미디어에서 줄거리를 넣고 다시 만들면 붙어요.</p>}
       </section>
     </div>
   );

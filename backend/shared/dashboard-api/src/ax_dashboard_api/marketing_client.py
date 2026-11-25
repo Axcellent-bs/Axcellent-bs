@@ -989,6 +989,18 @@ async def creative_overlay_call(
     return await _creative_read("creative_overlay_redo", payload, OVERLAY_DEADLINE_SECONDS)
 
 
+async def creative_board_redraw_call(record_id: str) -> dict[str, Any]:
+    """[Higgsfield 그림으로 다시 그리기](마케팅 `creative_board_redraw`, read). LLM 없이 그림만.
+
+    다른 회사 기록이면 마케팅이 not_found → 404."""
+    try:
+        return await _creative_read("creative_board_redraw", {"record_id": record_id})
+    except ApiError as error:
+        if error.status_code == 502 and "(no_storyboard)" in error.message:
+            raise ApiError(409, "NO_STORYBOARD", "스토리보드가 없는 기록이다") from error
+        raise
+
+
 SCRIPT_REFUSALS = {
     "not_found": (404, "NOT_FOUND"),
     "no_story": (422, "NO_STORY"),

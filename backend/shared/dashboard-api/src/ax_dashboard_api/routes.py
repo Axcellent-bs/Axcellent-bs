@@ -1539,6 +1539,21 @@ async def marketing_creative_video(
     return ok(await marketing_client.creative_video_call(record_id, who))
 
 
+@router.post("/marketing/creative-records/{record_id}/board-image")
+async def marketing_creative_board_image(
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+) -> dict:
+    """[Higgsfield 그림으로 다시 그리기] 스토리보드 그림만 만든다.
+
+    마케팅 `creative_board_redraw`(read)를 부른다.
+
+    LLM을 부르지 않는다. 안전 관문·그림 크레딧 예약은 지금 스토리보드 그림 규칙 그대로다.
+    다른 회사 기록은 404. 결과 `item`은 기록의 `render.board_image`."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    return ok(await marketing_client.creative_board_redraw_call(record_id))
+
+
 class CreativeScriptBody(BaseModel):
     story: str | None = Field(default=None, max_length=MAX_STORY)  # 비우면 기록의 줄거리
     scenes: Literal[6, 9, 12] = 6  # 스토리보드 칸 수와 같다

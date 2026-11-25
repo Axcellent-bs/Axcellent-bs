@@ -8,6 +8,7 @@ import type { StoryboardResult } from "./storyboard";
 import type { CreativeScript } from "./creativeScript";
 import type { OverlayState, PlayPart } from "./videoOverlay";
 import type { CreativeVideoSummary } from "./creativeVideo";
+import { boardImagePath } from "./storyboardSvg";
 
 // 마케팅 › 제작 기록. 이미지 시트를 만들 때마다 남은 기록과 이어 만든 스토리보드를 읽는다.
 // dashboard-api GET /marketing/creative-records(목록) · /marketing/creative-records/{id}(상세)
@@ -96,6 +97,20 @@ export async function requestCreativeVideo(id: string): Promise<{ record_id: str
   const parsed: unknown = await res.json().catch(() => undefined);
   if (!res.ok) throw failureError(parsed, res.status, "영상 요청을 보내지 못했어요");
   return (parsed as { data: { record_id: string; video: RenderPart } }).data;
+}
+
+/** [Higgsfield 그림으로 다시 그리기]: 스토리보드 그림만 만든다(POST, LLM 없음, 그림 크레딧·관문은 그대로).
+ *  서버가 아직 이 경로를 모르거나 다른 회사 기록이면 404(ApiError.status) */
+export async function redrawBoardImage(id: string): Promise<{ record_id: string; part: string; item: RenderPart }> {
+  const res = await fetch(`${DASHBOARD_API_URL}${boardImagePath(id)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
+    body: "{}",
+    cache: "no-store",
+  });
+  const parsed: unknown = await res.json().catch(() => undefined);
+  if (!res.ok) throw failureError(parsed, res.status, "그림을 요청하지 못했어요");
+  return (parsed as { data: { record_id: string; part: string; item: RenderPart } }).data;
 }
 
 /** 자막을 고쳐서 다시 얹는다(POST). 서버가 아직 이 경로를 모르면 404(ApiError.status)로 온다 */

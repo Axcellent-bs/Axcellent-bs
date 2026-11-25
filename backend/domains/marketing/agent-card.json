@@ -171,6 +171,18 @@
       "priority": "recommended"
     },
     {
+      "id": "creative_board_redraw",
+      "description": "[Higgsfield 그림으로 다시 그리기] 전용. 제작 기록(input.record_id: CR-…)의 스토리보드 그림(board_image)을 LLM 없이 만든다. 가상 인물 원본을 영상 참조로 써서 평소에는 그리지 않는 기록도 사람이 고르면 그린다(force). 안전 관문(B generate_media, media_kind=image)·그림 크레딧 예약·회사 image_credits_ok는 지금 스토리보드 그림 규칙 그대로이고 executed일 때만 Higgsfield를 부른다. 이미 같은 스토리보드로 그렸거나 도는 중이면 다시 만들지 않는다. 결과 item은 render.board_image(status running·done·blocked·unavailable 등). 거절 outcome: not_found(다른 회사 기록 포함)·no_storyboard·invalid_input.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeRecordGetInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeRecordAttachOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "creative_record_attach",
       "description": "사람이 화면에서 올린 그림·영상을 제작 기록(input.record_id: CR-…)의 칸(part: sheet_image·board_image·video·final_video)에 붙인다(A attach_creative_file). 파일은 dashboard-api가 미디어 폴더 creative/<기록>/에 먼저 저장하고 asset 이름·sha256만 넘긴다. 저장된 파일의 sha256이 같을 때만 render.<part>를 done·source=upload로 바꾼다. 거절 outcome: not_found·bad_asset·file_missing·in_progress·gate_<상태>.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeRecordAttachInput",

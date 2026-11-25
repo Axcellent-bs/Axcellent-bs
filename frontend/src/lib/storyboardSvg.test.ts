@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). SVG 콘티 보기 · 영상 요약 · 다시 그리기 확인 단계
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isSvgBoard, redrawNext, svgCell, svgDataUri } from "./storyboardSvg.ts";
+import { boardImagePath, isSvgBoard, redrawFailure, redrawNext, svgCell, svgDataUri } from "./storyboardSvg.ts";
 import { videoSummaryLine } from "./creativeVideo.ts";
 import type { StoryboardShot } from "./storyboard.ts";
 
@@ -83,4 +83,17 @@ test("다시 그리기: 누르면 확인 단계, 만들기 전에는 요청 단�
   assert.equal(redrawNext("confirm", "cancel"), "idle");
   assert.equal(redrawNext("running", "click"), "running");
   assert.equal(redrawNext("running", "done"), "idle");
+});
+
+test("다시 그리기는 전용 경로(board-image)로 간다 (스토리보드를 처음부터 다시 만들지 않는다)", () => {
+  assert.equal(boardImagePath("CR-0123456789ab"), "/api/dashboard/marketing/creative-records/CR-0123456789ab/board-image");
+  assert.equal(boardImagePath("CR-a/b"), "/api/dashboard/marketing/creative-records/CR-a%2Fb/board-image");
+});
+
+test("다시 그리기 실패: 404면 버튼을 숨기고, 그 밖은 오류 문장", () => {
+  const notFound = Object.assign(new Error("제작 기록이 없다"), { status: 404 });
+  assert.deepEqual(redrawFailure(notFound), { hide: true, message: null });
+  const busy = Object.assign(new Error("이미 그리는 중이에요"), { status: 409 });
+  assert.deepEqual(redrawFailure(busy), { hide: false, message: "이미 그리는 중이에요" });
+  assert.deepEqual(redrawFailure("x"), { hide: false, message: "그림을 요청하지 못했어요" });
 });
