@@ -1,11 +1,19 @@
 import { TONE } from "@/components/finance/bits";
 import type { TrendReport } from "@/lib/data";
-import { EXCLUDED_REASON, topicView } from "@/lib/trendTopicView";
+import { EXCLUDED_REASON, topicView, type TopicView } from "@/lib/trendTopicView";
 
 /** 보고서 "의뢰 주제로 찾은 근거" (11/26): 확장어 칩 · 근거 표(근거·값·출처) · [뺀 근거 N개] 접기. 주제가 없으면 그리지 않는다 */
 export function TrendTopicEvidence({ report }: { report: TrendReport }) {
   const v = topicView(report);
   if (!v) return null;
+  if (!v.theme) {
+    // 주제 없는 의뢰: 뺀 근거(공지·광고)만 접어서
+    return (
+      <section className="card min-w-0 p-4 sm:p-5 trend-report-section" aria-label="결론에서 뺀 근거">
+        <Excluded v={v} />
+      </section>
+    );
+  }
   return (
     <section className="card min-w-0 space-y-3 p-4 sm:p-5 trend-report-section" aria-label="의뢰 주제로 찾은 근거">
       <div>
@@ -37,16 +45,21 @@ export function TrendTopicEvidence({ report }: { report: TrendReport }) {
       ) : (
         <p className="text-sm text-ink-500">주제와 이어지는 근거를 찾지 못했어요.</p>
       )}
-      {v.excludedTitle && (
-        <details className="border-t border-ink-100 pt-2">
-          <summary className="cursor-pointer text-[13px] text-ink-700">{v.excludedTitle}</summary>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-ink-500">
-            {v.excluded.map((e, i) => (
-              <li key={`${e.evidence_id ?? e.label}-${i}`}><span className="line-through">{e.label} {e.value}</span> — {EXCLUDED_REASON[e.reason] ?? e.reason}</li>
-            ))}
-          </ul>
-        </details>
-      )}
+      <div className="border-t border-ink-100 pt-2 empty:hidden"><Excluded v={v} /></div>
     </section>
+  );
+}
+
+function Excluded({ v }: { v: TopicView }) {
+  if (!v.excludedTitle) return null;
+  return (
+    <details>
+      <summary className="cursor-pointer text-[13px] text-ink-700">{v.excludedTitle}</summary>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-ink-500">
+        {v.excluded.map((e, i) => (
+          <li key={`${e.evidence_id ?? e.label}-${i}`}><span className="line-through">{e.label} {e.value}</span> — {EXCLUDED_REASON[e.reason] ?? e.reason}</li>
+        ))}
+      </ul>
+    </details>
   );
 }

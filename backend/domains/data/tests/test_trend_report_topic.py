@@ -84,7 +84,8 @@ def _report(theme: str | None, related: list[str] | None = None) -> TrendReport:
     rows[1].keyword, rows[1].search_change_pct, rows[1].small_base = "기말고사", 40.0, False
     rows[1].basis = "filtered"
     r.sections.content.posts[0].account = "hyundaicard"
-    r.sections.content.posts[0].caption_excerpt = "연말 카드 혜택 캐러셀"
+    # 11/26 C: 공지 낱말("혜택" 등)이 없는 주제 무관 캡션 (공지·광고는 test_notice_ad.py)
+    r.sections.content.posts[0].caption_excerpt = "연말 카드 캐러셀"
     r.sections.content.posts[0].ratio = 197.0
     return r
 

@@ -1834,6 +1834,8 @@ export interface MegaViews {
 export interface InstagramRadarPost {
   /** 계정 이름·캡션 앞부분에 욕설·성인 표현 → "광고 근거 제외: 표현" (옛 서버에는 없음) */
   ad_excluded?: string | null;
+  /** 브랜드 공지·광고 게시물이면 이유 (11/26, 옛 서버에는 없음). 화면은 칩 "공지·광고"만, 지우지 않는다 */
+  notice_ad?: string | null;
   account_kind?: RadarKind | null;
   audience_ages?: AgeBand[];
   audience_genders?: AudienceGender[];
