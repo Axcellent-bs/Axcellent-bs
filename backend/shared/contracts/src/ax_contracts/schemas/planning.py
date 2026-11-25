@@ -743,6 +743,15 @@ class VideoScene(AxModel):
     visual: str = Field(min_length=1, max_length=200)  # 화면 구성 (사람이 읽는 한국어)
     caption: str = Field(default="", max_length=60)  # 자막 (오버레이, 비면 자막 없음)
     prompt: str = Field(min_length=1, max_length=800)  # 영상 생성 프롬프트 (영문)
+    # 아래는 예전 제작안은 없다 (빈 문자열). 키프레임으로 쓸 만큼 자세한 "무엇을 보여 줄지"
+    # (11/24 멘토링 "첫·끝 화면을 주고 사이 동작을 자세히"). 기획은 모델을 모르고 글만 쓴다.
+    # 그림·영상 프롬프트는 마케팅이 만든다. `prompt`와 같이 글자·실존 인물·실제 브랜드를
+    # 담지 않는다.
+    # 장면 i의 end_frame과 장면 i+1의 start_frame은 같은 순간이다
+    start_frame: str = Field(default="", max_length=200)  # 장면 첫 화면 (한국어)
+    end_frame: str = Field(default="", max_length=200)  # 장면 끝 화면 (한국어)
+    action_en: str = Field(default="", max_length=400)  # 첫→끝 사이 동작 (동사 중심 영문)
+    camera_en: str = Field(default="", max_length=120)  # 샷 크기·카메라 움직임 (영문)
 
     @model_validator(mode="after")
     def _ends_after_start(self) -> VideoScene:
@@ -766,6 +775,14 @@ class VideoPlan(AxModel):
     negative: str = Field(min_length=1, max_length=300)  # 공통 금지 (영문)
     written_by: Literal["llm", "rule", "human"] = "rule"
     media_hints: VideoMediaHints | None = None  # 마케팅 장면 템플릿 힌트 (11/20, 선택)
+    # 아래는 예전 제작안은 없다. 광고 목적 (11/24 멘토링 "광고는 광고답게"):
+    # solution_ad = 우리 솔루션·서비스 소개(문제 → 반전 → 해결 장면 → 행동 문구),
+    # client_offer = 고객 혜택(할인·특가·이벤트·후기,
+    #   혜택 먼저 → 쓰는 장면 → 후기 한 줄 → 행동 문구),
+    # channel_content = 채널 콘텐츠(지금 흐름). None = 정하지 않음(규칙 제작안·예전 제작안)
+    purpose: Literal["solution_ad", "client_offer", "channel_content"] | None = None
+    offer_ko: str = Field(default="", max_length=60)  # 혜택 한 줄 (한국어, 비면 없음)
+    cta_ko: str = Field(default="", max_length=40)  # 마지막 행동 문구 (한국어, 비면 없음)
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:

@@ -11,6 +11,10 @@
 - 마케팅 장면 템플릿 힌트(`media_hints`, 11/20 재헌 님과 맞춤)는 코드 규칙으로만 채운다:
   계절은 제안을 받은 날(한국 시간)의 달, 색감은 고른 방향. 책 분류는 기획이 모르니 비운다.
   마케팅이 검사해 통과한 값만 쓰고 나머지는 자기 추천값을 쓴다
+- 키프레임 칸(11/24 멘토링 "기획이 아주 디테일해야 함"): 장면마다 첫 화면·끝 화면·사이 동작·카메라를
+  글로만 쓴다. 기획은 영상·그림 모델을 모른다(프롬프트는 마케팅). 장면 prompt와 같은 금지를 본다
+- 광고 목적(purpose, "광고는 광고답게"): 제안 글의 낱말로 코드가 정한다(`purpose_of`). LLM은 고르지
+  않고 그 목적의 장면 흐름대로 쓴다. 규칙 제작안은 목적을 비운다(start_frame = visual만 채움)
 """
 
 from __future__ import annotations
@@ -272,6 +276,28 @@ def promo_of(p: Proposal) -> tuple[str, str]:
     )
 
 
+# 광고 목적 (11/24 멘토링 "광고는 광고답게"). 제안의 제목·할 일·인사이트·분류 낱말로 정한다.
+# 혜택 낱말이 먼저다("솔루션 할인 이벤트"는 고객 혜택 광고). 둘 다 없으면 채널 콘텐츠(지금 흐름)
+SOLUTION_AD, CLIENT_OFFER, CHANNEL_CONTENT = "solution_ad", "client_offer", "channel_content"
+OFFER_WORDS = (
+    "할인", "특가", "이벤트", "쿠폰", "세일", "증정", "사은품", "혜택", "후기", "리뷰",
+    "1+1", "무료배송", "무료 배송", "프로모션",
+)  # fmt: skip
+SOLUTION_WORDS = (
+    "솔루션", "우리 서비스", "서비스 소개", "서비스를 소개", "도입 사례", "기능 소개", "신기능",
+)  # fmt: skip
+
+
+def purpose_of(p: Proposal) -> str:
+    """제안 글로 고른 광고 목적. 같은 제안이면 같은 값 (LLM을 쓰지 않는다)."""
+    text = " ".join(x for x in (p.title, p.idea, p.insight, p.content_category or "") if x)
+    if any(w in text for w in OFFER_WORDS):
+        return CLIENT_OFFER
+    if any(w in text for w in SOLUTION_WORDS):
+        return SOLUTION_AD
+    return CHANNEL_CONTENT
+
+
 def fun_timings(duration: int, n: int) -> list[tuple[int, int]]:
     """재미 먼저: 장면 1은 0~2초 훅, 마지막 장면은 3초(15초 미만 2초), 본론은 그 사이를 고르게."""
     last = duration - (3 if duration >= 15 else 2)
@@ -413,7 +439,7 @@ def rule_plan(p: Proposal, promo: tuple[str, str] | None = None) -> VideoPlan:
         ),
     ]
     scenes = [
-        VideoScene(n=i, start_s=start, end_s=end, visual=v, caption=c, prompt=pr)
+        VideoScene(n=i, start_s=start, end_s=end, visual=v, caption=c, prompt=pr, start_frame=v)
         for i, ((start, end), (v, c, pr)) in enumerate(
             zip(timings(d, RULE_SCENES), beats, strict=True), start=1
         )
@@ -477,7 +503,7 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
         ),
     ]
     scenes = [
-        VideoScene(n=i, start_s=start, end_s=end, visual=v, caption=c, prompt=pr)
+        VideoScene(n=i, start_s=start, end_s=end, visual=v, caption=c, prompt=pr, start_frame=v)
         for i, ((start, end), (v, c, pr)) in enumerate(
             zip(fun_timings(d, RULE_SCENES), beats, strict=True), start=1
         )
@@ -512,6 +538,21 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
   - caption: 자막 (한국어, 30자 안팎, 편집 때 화면 위에 얹는다. 없으면 빈 문자열)
   - prompt: 그 장면을 만들 영상 생성 프롬프트 (영어, 500자 이내). 카메라·동작·분위기·배경을
     구체적으로. 등장인물은 {character_ko}, {setting_rule}
+  - start_frame: 장면 첫 화면 (한국어, 200자 이내). 멈춘 한 장면처럼: 인물 수, 위치(왼쪽·가운데·
+    오른쪽, 앞·뒤), 시선 방향, 손에 든 소품, 배경을 적는다
+  - end_frame: 장면 끝 화면 (한국어, 200자 이내). start_frame과 같은 방식으로
+  - action_en: start_frame에서 end_frame까지 일어나는 동작 (영어, 400자 이내, 동사 중심.
+    누가 무엇을 어떻게 하는지 순서대로)
+  - camera_en: 샷 크기와 카메라 움직임 (영어, 120자 이내. 예: medium shot, slow push-in)
+- offer_ko: 혜택·이점 한 줄 (한국어, 60자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
+- cta_ko: 마지막 행동 문구 (한국어, 40자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
+
+키프레임 규칙 (첫·끝 화면을 주고 사이 동작을 자세히 써야 영상이 덜 어색하다):
+- 장면 i의 end_frame과 장면 i+1의 start_frame은 같은 순간이다. 같은 인물·위치·소품으로 이어지게 쓴다
+- 동작은 장면마다 하나만 (여러 동작을 한 장면에 몰지 않는다)
+- 인물이 나오면 몇 명인지, 어디에 있는지, 어디를 보는지 꼭 적는다
+- start_frame·end_frame·action_en·camera_en에도 글자·자막·간판·로고·실존 인물·실제 브랜드·숫자를
+  쓰지 않는다 (글자는 caption에만)
 
 지킬 것:
 - 영상 길이 {d}초, 장면 {n}개. 첫 장면은 3초 안에 시선을 끄는 훅, 마지막 장면은 마무리
@@ -561,21 +602,73 @@ def setting_rule(style_: str, b: dict[str, str]) -> str:
     return f"배경은 {b['setting_ko']}"
 
 
-def direction(style_: str, exposure: str) -> str:
-    """프롬프트의 홍보 방향 줄. product면 브랜드 노출 규칙을 붙이지 않는다."""
-    return DIRECTION[style_] + (EXPOSURE[exposure] if style_ == FUN_FIRST else "")
+PURPOSE_DIRECTION = {
+    SOLUTION_AD: (
+        "- 광고 목적: 우리 솔루션·서비스 소개 광고 (광고는 광고답게). 장면 흐름은\n"
+        "  문제(보는 사람이 겪는 불편) → 반전 → 해결 장면(솔루션을 쓰는 모습) → 행동 문구\n"
+        "  - offer_ko는 솔루션이 주는 이점 한 줄, cta_ko는 마지막 행동 문구. 마지막 장면 caption은 "
+        "cta_ko와 같게\n"
+        "  - 근거(facts)에 없는 숫자·성과를 쓰지 않는다\n"
+    ),
+    CLIENT_OFFER: (
+        "- 광고 목적: 고객 혜택 광고 (광고는 광고답게). 장면 흐름은\n"
+        "  혜택 먼저(첫 3초) → 혜택을 쓰는 장면 → 후기 한 줄 자막 → 행동 문구\n"
+        "  - offer_ko는 혜택 한 줄이고 첫 장면 caption은 offer_ko와 같게. "
+        "cta_ko는 마지막 행동 문구이고 마지막 장면 caption은 cta_ko와 같게\n"
+        "  - 할인율·가격·기간 같은 혜택 숫자는 데이터 블록에 있는 것만 쓴다\n"
+        "  - 후기 자막은 근거(facts·insight)에 있는 고객 반응만 옮긴다. "
+        "없으면 지어내지 않고 쓰는 모습을 설명하는 자막으로 쓴다\n"
+    ),
+}
+
+
+def direction(style_: str, exposure: str, purpose: str = CHANNEL_CONTENT) -> str:
+    """프롬프트의 홍보 방향 줄. 광고 목적이면 그 목적의 장면 흐름, 채널 콘텐츠면 지금 흐름
+    (product면 브랜드 노출 규칙을 붙이지 않는다)."""
+    if purpose in PURPOSE_DIRECTION:
+        return PURPOSE_DIRECTION[purpose]
+    return (
+        DIRECTION[style_]
+        + (EXPOSURE[exposure] if style_ == FUN_FIRST else "")
+        + "- offer_ko·cta_ko는 빈 문자열 (채널 콘텐츠)\n"
+    )
 
 
 class _SceneOut(BaseModel):
     visual: str = Field(min_length=1)
     caption: str = ""
     prompt: str = Field(min_length=1)
+    # 키프레임 칸 (11/25). 비어도 받는다 (예전 답 모양)
+    start_frame: str = ""
+    end_frame: str = ""
+    action_en: str = ""
+    camera_en: str = ""
 
 
 class _PlanOut(BaseModel):
     concept: str = Field(min_length=1)
     script: str = Field(min_length=1)
     scenes: list[_SceneOut] = Field(min_length=1)
+    offer_ko: str = ""
+    cta_ko: str = ""
+
+
+def keyframe_texts(s: _SceneOut) -> list[str]:
+    """장면 prompt와 같은 금지를 보는 키프레임 칸."""
+    return [s.start_frame, s.end_frame, s.action_en, s.camera_en]
+
+
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def invented_number(text: str, known: str) -> bool:
+    """혜택·행동 문구의 숫자가 제안 글(근거 포함)에 없나 (지어낸 할인율·가격을 막는다)."""
+    return any(m.group(0) not in known for m in _NUMBER.finditer(text))
+
+
+def known_text(p: Proposal) -> str:
+    facts = " ".join(f"{f.label} {f.value!s}" for f in p.facts)
+    return " ".join([p.title, p.idea, p.insight, p.why, facts, *p.products])
 
 
 ANGLE_TEXT = {
@@ -616,21 +709,31 @@ def has_real_name(p: Proposal, got: _PlanOut) -> bool:
     if not names:
         return False
     texts = [got.concept, *(s.prompt for s in got.scenes), *(s.visual for s in got.scenes)]
-    folded = [_fold(t) for t in texts]
+    texts += [t for s in got.scenes for t in keyframe_texts(s)]
+    texts += [got.offer_ko, got.cta_ko]
+    folded = [_fold(t) for t in texts if t]
     return any(name in t for name in names for t in folded)
 
 
-def reject_reason(p: Proposal, got: _PlanOut, style_: str = PRODUCT) -> str | None:
+def reject_reason(
+    p: Proposal, got: _PlanOut, style_: str = PRODUCT, purpose: str = CHANNEL_CONTENT
+) -> str | None:
     """LLM 제작안을 버리는 이유 코드 (쓸 수 있으면 None). 이름 같은 값은 담지 않는다."""
     if not MIN_SCENES <= len(got.scenes) <= MAX_SCENES:
         return "scene_count"
     if any(prompt_problems(s.prompt) for s in got.scenes):
         return "prompt_rule"
+    if any(prompt_problems(t) for s in got.scenes for t in keyframe_texts(s) if t):
+        return "keyframe_rule"  # 첫·끝 화면·동작·카메라도 prompt와 같은 금지 (11/25)
     if has_real_name(p, got):
         return "real_name_in_scene"
-    if text_problems(f"{got.concept} {got.script}"):  # 마케팅이 초안 준비를 거절하는 말
+    ad = purpose in PURPOSE_DIRECTION
+    said = f"{got.concept} {got.script}" + (f" {got.offer_ko} {got.cta_ko}" if ad else "")
+    if text_problems(said):  # 마케팅이 초안 준비를 거절하는 말
         return "marketing_word"
-    if style_ == FUN_FIRST and starts_with_product(got.concept, p.products):
+    if ad and invented_number(f"{got.offer_ko} {got.cta_ko}", known_text(p)):
+        return "invented_offer_number"
+    if style_ == FUN_FIRST and not ad and starts_with_product(got.concept, p.products):
         return "concept_starts_with_product"
     words = [got.concept, got.script, *(f"{s.visual} {s.caption}" for s in got.scenes)]
     if any(REPORT_WORD in " ".join(w.split()) for w in words):  # 보고서 이름이 소재로 (PROP-26)
@@ -639,15 +742,23 @@ def reject_reason(p: Proposal, got: _PlanOut, style_: str = PRODUCT) -> str | No
 
 
 def _from_llm(
-    p: Proposal, got: _PlanOut, d: int, b: dict[str, str], style_: str = PRODUCT
+    p: Proposal,
+    got: _PlanOut,
+    d: int,
+    b: dict[str, str],
+    style_: str = PRODUCT,
+    purpose: str = CHANNEL_CONTENT,
 ) -> VideoPlan | None:
-    """LLM 답을 계약 모양으로. 장면 수·프롬프트 규칙·실존 이름에 걸리면 None (이유 코드만 로그)."""
-    reason = reject_reason(p, got, style_)
+    """LLM 답을 계약 모양으로. 장면 수·프롬프트 규칙·실존 이름에 걸리면 None (이유 코드만 로그).
+
+    광고 목적이면 첫 장면을 2초 훅으로(fun_timings) 둔다. 채널 콘텐츠면 혜택·행동 문구를 비운다."""
+    reason = reject_reason(p, got, style_, purpose)
     if reason:
         log.info("LLM 영상 제작안 대신 규칙 제작안: %s", reason)
         return None
     n = len(got.scenes)
-    cuts = fun_timings(d, n) if style_ == FUN_FIRST else timings(d, n)
+    ad = purpose in PURPOSE_DIRECTION
+    cuts = fun_timings(d, n) if style_ == FUN_FIRST or ad else timings(d, n)
     try:
         scenes = [
             VideoScene(
@@ -657,14 +768,20 @@ def _from_llm(
                 visual=_short(s.visual, 200),
                 caption=_short(s.caption, 60),
                 prompt=_short(s.prompt, 800),
+                start_frame=_short(s.start_frame, 200),
+                end_frame=_short(s.end_frame, 200),
+                action_en=_short(s.action_en, 400),
+                camera_en=_short(s.camera_en, 120),
             )  # fmt: skip
             for i, ((start, end), s) in enumerate(zip(cuts, got.scenes, strict=True), start=1)
         ]
         return VideoPlan(
             concept=_short(got.concept, 200), duration_s=d, script=_short(got.script, 800),
-            scenes=scenes, style=style(b, fixed_setting=style_ != FUN_FIRST), 
+            scenes=scenes, style=style(b, fixed_setting=style_ != FUN_FIRST),
             negative=NEGATIVE, written_by="llm",
-            media_hints=media_hints(p),
+            media_hints=media_hints(p), purpose=purpose,
+            offer_ko=_short(got.offer_ko, 60) if ad else "",
+            cta_ko=_short(got.cta_ko, 40) if ad else "",
         )  # fmt: skip
     except ValidationError:
         return None
@@ -693,10 +810,11 @@ async def write(
         "shorts_format": p.shorts_format or "",
     }
     style_, exposure = promo
+    purpose = purpose_of(p)
     prompt = PROMPT.format(
         n=RULE_SCENES, d=d, angle=ANGLE_TEXT.get(p.angle or "", "정하지 않음"),
         character_ko=b["character_ko"], setting_rule=setting_rule(style_, b),
-        direction=direction(style_, exposure),
+        direction=direction(style_, exposure, purpose),
     )  # fmt: skip
     try:
         got = await asyncio.wait_for(
@@ -705,7 +823,23 @@ async def write(
         )
     except Exception:  # noqa: BLE001 - 규칙 제작안으로 대신
         return rule_plan(p, promo)
-    return _from_llm(p, got, d, b, style_) or rule_plan(p, promo)
+    return _from_llm(p, got, d, b, style_, purpose) or rule_plan(p, promo)
+
+
+PURPOSE_LABEL = {
+    SOLUTION_AD: "솔루션 광고",
+    CLIENT_OFFER: "고객 혜택 광고",
+    CHANNEL_CONTENT: "채널 콘텐츠",
+}
+
+
+def keyframe_line(s: VideoScene) -> str:
+    """ "첫 화면 → 끝 화면 · 동작 · 카메라" 한 줄. 끝 화면·동작·카메라가 다 비면 빈 문자열
+    (규칙 제작안은 start_frame = visual뿐이라 줄을 만들지 않는다)."""
+    if not (s.end_frame or s.action_en or s.camera_en):
+        return ""
+    frames = " → ".join(x for x in (s.start_frame, s.end_frame) if x)
+    return " · ".join(x for x in (frames, s.action_en, s.camera_en) if x)
 
 
 def markdown(v: VideoPlan) -> str:
@@ -724,6 +858,13 @@ def markdown(v: VideoPlan) -> str:
     out += [
         f"| {s.n} | {s.start_s}~{s.end_s}초 | {s.visual} | {s.caption or '-'} |" for s in v.scenes
     ]
+    if v.purpose:
+        out += ["", f"**광고 목적**: {PURPOSE_LABEL[v.purpose]}"]
+        out += [f"- {k}: {t}" for k, t in (("혜택", v.offer_ko), ("행동 문구", v.cta_ko)) if t]
+    frames = [(s.n, keyframe_line(s)) for s in v.scenes]
+    if any(line for _, line in frames):
+        out += ["", "**장면별 키프레임** (첫 화면 → 끝 화면 · 동작 · 카메라)", ""]
+        out += [f"{n}. {line}" for n, line in frames if line]
     out += ["", "**장면별 영상 생성 프롬프트** (공통 화풍·금지는 맨 아래)", ""]
     out += [f"{s.n}. {s.prompt}" for s in v.scenes]
     out += ["", f"- 공통 화풍: {v.style}", f"- 공통 금지: {v.negative}"]

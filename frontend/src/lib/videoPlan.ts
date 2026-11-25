@@ -9,6 +9,19 @@ export interface VideoSceneView {
   visual: string // 화면 구성 (한국어)
   caption: string // 자막 (비면 자막 없음)
   prompt: string // 영상 생성 프롬프트 (영문)
+  // 아래 키프레임 칸은 예전 제작안엔 없다 (비면 칸 자체를 두지 않는다). 11/25 계약 VideoScene
+  startFrame?: string // 장면 첫 화면 (한국어)
+  endFrame?: string // 장면 끝 화면 (한국어)
+  actionEn?: string // 첫→끝 사이 동작 (영문)
+  cameraEn?: string // 샷 크기·카메라 움직임 (영문)
+}
+
+/** 광고 목적 (계약 VideoPlan.purpose). 없으면 칩을 그리지 않는다 */
+export type VideoPurpose = 'solution_ad' | 'client_offer' | 'channel_content'
+export const VIDEO_PURPOSE: Record<VideoPurpose, string> = {
+  solution_ad: '솔루션 광고',
+  client_offer: '고객 혜택 광고',
+  channel_content: '채널 콘텐츠',
 }
 
 export interface VideoPlanView {
@@ -21,6 +34,9 @@ export interface VideoPlanView {
   negative: string // 공통 금지
   writtenBy: 'llm' | 'rule' | 'human'
   mediaHints?: { season?: string; colorTheme?: string; category?: string }
+  purpose?: VideoPurpose // 광고 목적 (예전 제작안·규칙 제작안은 없음)
+  offerKo?: string // 혜택 한 줄
+  ctaKo?: string // 마지막 행동 문구
 }
 
 type Json = Record<string, unknown>
@@ -37,8 +53,27 @@ function toScene(raw: unknown): VideoSceneView | null {
   const n = int(o.n), startS = int(pick(o, 'startS', 'start_s')), endS = int(pick(o, 'endS', 'end_s'))
   const visual = str(o.visual), prompt = str(o.prompt)
   if (n === null || startS === null || endS === null || endS <= startS || !visual) return null
-  return { n, startS, endS, visual, caption: str(o.caption), prompt }
+  const frames = {
+    startFrame: str(pick(o, 'startFrame', 'start_frame')),
+    endFrame: str(pick(o, 'endFrame', 'end_frame')),
+    actionEn: str(pick(o, 'actionEn', 'action_en')),
+    cameraEn: str(pick(o, 'cameraEn', 'camera_en')),
+  }
+  const kept = Object.fromEntries(Object.entries(frames).filter(([, v]) => v)) as Partial<typeof frames>
+  return { n, startS, endS, visual, caption: str(o.caption), prompt, ...kept }
 }
+
+/** 장면 키프레임 한 줄 "첫 화면 → 끝 화면 · 동작 · 카메라". 끝 화면·동작·카메라가 다 비면 null
+ *  (규칙 제작안은 첫 화면 = 화면 구성뿐이라 줄을 그리지 않는다. 기획 video_plan.keyframe_line과 같은 규칙) */
+export function sceneKeyframeLine(s: Pick<VideoSceneView, 'startFrame' | 'endFrame' | 'actionEn' | 'cameraEn'>): string | null {
+  if (!s.endFrame && !s.actionEn && !s.cameraEn) return null
+  const frames = [s.startFrame, s.endFrame].filter(Boolean).join(' → ')
+  return [frames, s.actionEn, s.cameraEn].filter(Boolean).join(' · ')
+}
+
+const PURPOSES = new Set<string>(Object.keys(VIDEO_PURPOSE))
+/** 광고 목적 칩 글. 모르는 값·없으면 null */
+export const videoPurposeChip = (v: Pick<VideoPlanView, 'purpose'>): string | null => (v.purpose ? VIDEO_PURPOSE[v.purpose] : null)
 
 /** 응답의 video_plan(또는 videoPlan) → 화면 값. 콘셉트·길이·장면이 없거나 장면 하나라도 모양이 틀리면 undefined */
 export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
@@ -54,12 +89,17 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
   const wb = pick(o, 'writtenBy', 'written_by')
   const h = obj(pick(o, 'mediaHints', 'media_hints'))
   const hints = h ? { season: str(h.season) || undefined, colorTheme: str(pick(h, 'colorTheme', 'color_theme')) || undefined, category: str(h.category) || undefined } : undefined
+  const purpose = str(o.purpose)
+  const offerKo = str(pick(o, 'offerKo', 'offer_ko')), ctaKo = str(pick(o, 'ctaKo', 'cta_ko'))
   return {
     concept, durationS, aspect, script: str(o.script),
     scenes: (scenes as VideoSceneView[]).slice().sort((a, b) => a.n - b.n),
     style: str(o.style), negative: str(o.negative),
     writtenBy: wb === 'llm' || wb === 'human' ? wb : 'rule',
     ...(hints && (hints.season || hints.colorTheme || hints.category) ? { mediaHints: hints } : {}),
+    ...(PURPOSES.has(purpose) ? { purpose: purpose as VideoPurpose } : {}),
+    ...(offerKo ? { offerKo } : {}),
+    ...(ctaKo ? { ctaKo } : {}),
   }
 }
 

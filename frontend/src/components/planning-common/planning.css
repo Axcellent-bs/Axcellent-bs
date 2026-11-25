@@ -1332,6 +1332,9 @@ table.rq-table td { padding-top: 9px; padding-bottom: 9px; }
 .sb-card-top { font-size: 12px; color: var(--text-3); }
 .sb-visual { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
 .sb-caption { align-self: flex-start; font-size: 12px; font-weight: 600; color: rgb(var(--brand-500)); background: color-mix(in srgb, rgb(var(--brand-500)) 10%, transparent); padding: 2px 6px; border-radius: 4px; }
+/* 11/25 키프레임 한 줄(첫 화면 → 끝 화면 · 동작 · 카메라)과 광고 목적 칩. 비면 안 그린다 */
+.sb-keyframe { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-2); }
+.sb-purpose { border-radius: 999px; color: rgb(var(--brand-500)); background: color-mix(in srgb, rgb(var(--brand-500)) 10%, transparent); }
 .sb-fold { border: 1px solid var(--border); border-radius: 10px; margin-top: 8px; }
 .sb-fold > summary { cursor: pointer; list-style: none; padding: 10px 14px; display: flex; align-items: baseline; gap: 8px; font-size: 13.5px; }
 .sb-fold > summary::-webkit-details-marker { display: none; }
