@@ -123,9 +123,10 @@ function Picture({ recordId, part, info, label, onChanged, onError, playPart, ve
 }
 
 /** Higgsfield 웹 구독(Ultra)으로 만들기: 영상 요청과 같은 프롬프트를 복사하고 새 탭으로 Higgsfield를 연다(API 키 없음) */
-function HiggsfieldWeb({ board }: { board: StoryboardResult }) {
-  // 대본을 따라 만든 스토리보드면 장면 흐름·대사 요지·자막·CTA까지(영상 요청과 같은 문장)
-  const prompt = storyboardVideoPrompt(board.style_en, board.script_used ? board.shots : null, board.cta_ko);
+function HiggsfieldWeb({ board, speed, reference }: { board: StoryboardResult; speed?: number | null; reference?: string | null }) {
+  // 대본을 따라 만든 스토리보드면 장면 흐름(시각 × 배속)·대사 요지 + 글자 금지 문장(영상 요청과 같은 문장).
+  // 배속·참조 방식은 기록의 영상 요약(없으면 1.0·스토리보드 그림)
+  const prompt = storyboardVideoPrompt(board.style_en, board.script_used ? board.shots : null, { speed, reference });
   const [copy, setCopy] = useState<"idle" | "ok" | "failed">("idle");
   const go = async () => {
     // 복사를 먼저 한다(새 탭이 먼저 뜨면 이 화면이 포커스를 잃어 복사가 실패한다). 실패해도 새 탭은 연다
@@ -225,7 +226,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
           </button>
         )}
         {!canAsk && !video?.status && render.board_image?.status !== "done" && <p className="text-xs text-ink-500">스토리보드 그림이 끝나면 영상을 요청할 수 있어요.</p>}
-        {rec?.storyboard && <HiggsfieldWeb board={rec.storyboard} />}
+        {rec?.storyboard && <HiggsfieldWeb board={rec.storyboard} speed={video?.summary?.speed} reference={video?.summary?.reference} />}
       </div>
       <div className="border-t border-ink-100 pt-3">
         <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError}
