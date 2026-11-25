@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Notice, SectionHead, StatusChip } from './parts'
 import { DejafixNotConnectedError, currentIncidents, hostList, recentIncidents } from '@/lib/dejafix'
-import { connectedPcs, fromHosts, pcSummary, type PcRow } from '@/lib/connectedPcs'
+import { connectedPcs, fromHosts, pcSummary, type PcLoad } from '@/lib/connectedPcs'
 import { when } from '@/lib/toolForms'
 
 // 회원·서버 관리 › DejaFix 연결 탭: "연결한 PC".
@@ -10,10 +10,10 @@ import { when } from '@/lib/toolForms'
 // 알 수 있어 나머지는 "확인할 수 없음"이다(판정은 lib/connectedPcs.ts). 장애가 없다고 연결됨으로 보지 않는다.
 // 못 읽으면 표 대신 이유를 보여 준다. 0대로 지어내지 않는다.
 
-type Load = { rows: PcRow[]; checkedAt: string; fromIncidents: boolean } | { error: string } | { notConnected: true }
+type Load = PcLoad
 
-/** 두 목록 읽기. busy = 지금 읽는 버튼('all' 또는 PC 이름) */
-function usePcs() {
+/** DejaFix에서 연결한 PC 읽기. busy = 지금 읽는 버튼('all' 또는 PC 이름). 회사 연결 지도도 쓴다 */
+export function usePcs() {
   const [load, setLoad] = useState<Load | null>(null)
   const [busy, setBusy] = useState<string | null>('all')
   const read = useCallback(async (who: string) => {
