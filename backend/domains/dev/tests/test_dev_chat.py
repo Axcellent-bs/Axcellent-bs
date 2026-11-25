@@ -849,3 +849,64 @@ def test_handoff_sends_chat_mode_and_owner(service: PlanningService, adapter) ->
     mine, anon = adapter.tickets.got
     assert (mine.input["mode"], mine.input["requested_by"]) == ("subscription", "u1")
     assert anon.input["mode"] == "agent" and "requested_by" not in anon.input
+
+
+# ---------------------------------------------------------------- PR CI 읽기
+
+
+def test_chat_turn_naming_pr_gets_ci_checks_and_failed_logs(
+    service: PlanningService, adapter
+) -> None:
+    """말에 PR 번호가 있거나 화면이 보는 PR을 보내면 그 PR의 CI·실패 로그를 LLM 데이터로 넣는다."""
+    from dev_agent.vcs.base import CheckRun
+
+    runs = [CheckRun("ci", "failed"), CheckRun("lint", "passed")]
+    n = adapter.seed(title="배너 날짜", checks=runs)
+    log = "2026-11-25T01:02:03.0000000Z ##[error]src/components/Banner.tsx(3,9): error TS2339: "
+    log += "Property 'published_at' does not exist on type 'Banner'."
+    adapter.set_logs(n, {"ci": log})
+    reply = ChatTurn(reply="Banner 타입에 published_at이 없어서 실패했어요.", action="ask")
+    fake = ChatLLM([reply, reply, reply])
+    dev_chat.set_llm(fake)
+    with TestClient(app) as c:
+        th = _post(c, message=f"#{n} CI 실패한 것 확인해").json()["data"]
+        [ci] = fake.calls[0]["pr_ci"]
+        assert ci["number"] == n and ci["state"] == "failed"
+        assert {"name": "ci", "state": "failed"} in ci["checks"]
+        [got] = ci["failed_logs"]
+        assert got["check"] == "ci" and "published_at" in got["log"]
+        assert "2026-11-25T" not in got["log"]  # 시각 표시는 걷어 낸다
+
+        # 화면이 지금 보는 PR (말에 번호가 없어도)
+        _post(c, thread_id=th["id"], message="CI 왜 실패했어?", pr={"number": n})
+        assert fake.calls[1]["pr_ci"][0]["number"] == n
+
+        # PR 이야기가 없으면 CI를 읽지 않는다
+        _post(c, message="배너 문구 바꾸고 싶어")
+        assert "pr_ci" not in fake.calls[2]
+
+        r = _post(c, message="hi", pr={"number": "x"})
+        assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_INPUT"
+
+
+def test_chat_pr_refs_map_ai_pr_id_to_vcs_number(service: PlanningService, adapter) -> None:
+    """AI PR id(PR #45·PR-45)는 그 PR이 형상관리에 열린 번호로 바꾼다."""
+    from ax_workflow.models import PR, ChatThread, PrGate
+
+    service.state.prs.append(
+        PR(
+            id="PR #45", number=45, task="T-X", title="t", branch="gen/x", reviews=[],
+            gate=PrGate(result="통과", lines=1, files=1, paths="x"), merged=False, vcs_number=80,
+        )
+    )  # fmt: skip
+    th = ChatThread.model_validate(
+        {"id": "chat-x", "title": "t", "status": "talking", "messages": [],
+         "created_at": "2026-11-25T00:00:00Z", "updated_at": "2026-11-25T00:00:00Z"}
+    )  # fmt: skip
+    assert dev_chat.pr_refs(service, th, "PR-45 CI 봐 줘") == [(None, 80, "PR #45")]
+    got = dev_chat.pr_refs(service, th, "PR #45랑 #81")
+    assert got == [(None, 80, "PR #45"), (None, 81, "#81")]
+    assert dev_chat.pr_refs(service, th, "배너", {"number": 7, "connection": "c1"}) == [
+        ("c1", 7, "#7")
+    ]
+    assert dev_chat.pr_refs(service, th, "배너 고쳐 줘") == []

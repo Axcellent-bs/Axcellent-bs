@@ -25,11 +25,13 @@ from dev_agent.vcs.base import (
     ISSUE_LIST_LIMIT,
     ISSUE_STATES,
     LIST_LIMIT,
+    MAX_LOG_CHECKS,
     Branch,
     Capabilities,
     Change,
     ChangedFile,
     ChangeSummary,
+    CheckLog,
     CheckRun,
     Checks,
     Comment,
@@ -52,6 +54,7 @@ from dev_agent.vcs.base import (
     check_sha,
     combine_checks,
     decode_text,
+    log_tail,
     match_issue,
     match_query,
     order_commits,
@@ -117,6 +120,7 @@ class MockVcsAdapter:
         # 쓰기 호출 기록 (테스트에서 execute 뒤에만 불렀는지 본다)
         self.writes: list[tuple[str, int]] = []
         self.auto_merge: set[int] = set()  # 자동 머지를 예약한 변경
+        self._logs: dict[int, dict[str, str]] = {}  # 변경 → 검사 이름 → 로그 글 (set_logs)
 
     async def server_info(self) -> ServerInfo:
         """목 부품: 클라우드처럼 본다 (버전 점검 대상 아님)."""
@@ -174,6 +178,10 @@ class MockVcsAdapter:
 
     def set_checks(self, number: int, runs: list[CheckRun]) -> None:
         self._entry(number).runs = list(runs)
+
+    def set_logs(self, number: int, logs: dict[str, str]) -> None:
+        """실패한 검사의 로그 글을 정해 둔다 (검사 이름 → 글). 안 정하면 로그가 없다."""
+        self._logs[number] = dict(logs)
 
     def seed_files(self, files: dict[str, str]) -> None:
         """기준 브랜치에 파일을 넣는다 (`{경로: 글}`)."""
@@ -327,6 +335,11 @@ class MockVcsAdapter:
 
     async def get_checks(self, number: int) -> Checks:
         return combine_checks(self._entry(number).runs)
+
+    async def get_failed_logs(self, number: int) -> list[CheckLog]:
+        self._entry(number)
+        logs = self._logs.get(number, {})
+        return [CheckLog(name=n, text=log_tail(t)) for n, t in logs.items()][:MAX_LOG_CHECKS]
 
     # ---- 내부
 

@@ -12,7 +12,8 @@ import { State } from '@/components/planning-common/parts'
 import { go, toPath, idText } from '@/components/planning-common/links'
 import { Tag } from '@/components/planning-common/parts'
 import { humanizePlanIds } from '@/lib/format'
-import { canClose, chatNotice, mergeThreads, needsTools, pollInterval, sendErrorText, stampKey } from '@/lib/devChatView'
+import { canClose, chatNotice, mergeThreads, needsTools, pollInterval, sendErrorText, stampKey, viewedPr } from '@/lib/devChatView'
+import { useLocation } from 'react-router'
 import { useSession } from '@/demo/session'
 import { InlineConfirm } from '@/components/InlineConfirm'
 
@@ -175,6 +176,9 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
   }, [msgs.length, busy, err])
 
   const repo = cur?.connection ?? conn
+  // 지금 보는 PR (레포 PR·AI PR 화면). 같이 보내면 서버가 그 PR의 CI 상태·실패 로그를 읽어 답한다
+  const loc = useLocation()
+  const pr = viewedPr(loc.pathname, loc.search, s.prs)
   // 작업을 띄운 대화는 그 대화의 모드 그대로, 새 대화는 고른 모드 (이 브라우저에 기억)
   // 내 Claude는 이 화면을 쓰는 사람이 본인 Claude(MCP)를 연결했을 때만 고른다 (그 사람에게 맡긴다).
   // 나를 모르면(사람 토큰 없음) 예전처럼 회사에 연결한 개발자가 있는지로 본다
@@ -193,7 +197,7 @@ export function ChatPanel({ s, chat, connected, onClose, onTools }: { s: S; chat
     setErr(null)
     setDraft('')
     try {
-      const t = await api.send({ ...(cur ? { thread_id: cur.id } : {}), message, ...(repo ? { connection: repo } : {}), mode, account: needAccount(chat.account) })
+      const t = await api.send({ ...(cur ? { thread_id: cur.id } : {}), message, ...(repo ? { connection: repo } : {}), ...(pr ? { pr } : {}), mode, account: needAccount(chat.account) })
       chat.upsert(t)
       chat.select(t.id)
     } catch (x) {

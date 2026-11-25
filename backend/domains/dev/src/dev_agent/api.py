@@ -762,10 +762,11 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
 
     @router.post("/dev-chat", response_model=None, dependencies=CALLER)
     async def post_dev_chat(request: Request) -> dict | JSONResponse:
-        """`{thread_id?, message, connection?, mode?}` → `status: answering`인 대화를 바로 준다.
-        답은 뒤에서 붙는다 (SSE `chats` 또는 GET으로 다시 읽는다).
+        """`{thread_id?, message, connection?, mode?, pr?}` → `status: answering`인 대화를 바로
+        준다. 답은 뒤에서 붙는다 (SSE `chats` 또는 GET으로 다시 읽는다).
 
-        `mode`(agent·subscription)는 이 대화가 띄울 작업을 누가 코딩하나."""
+        `mode`(agent·subscription)는 이 대화가 띄울 작업을 누가 코딩하나.
+        `pr`(`{number, connection?}`)은 지금 보는 PR (형상관리 번호). 그 PR CI를 읽어 답한다."""
         svc = get_service()
         if dev_chat.get_llm() is None:
             return _err(409, "LLM_NOT_CONFIGURED", "LLM 설정이 없다 (DEV_LLM_*·LLM_*)")
@@ -788,6 +789,14 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             return _err(400, "INVALID_INPUT", f"message는 1~{limit}자 문자열이어야 한다")
         if connection is not None and not isinstance(connection, str):
             return _err(400, "INVALID_INPUT", "connection은 문자열이어야 한다")
+        pr = body.get("pr")
+        if pr is not None and (
+            not isinstance(pr, dict)
+            or not isinstance(pr.get("number"), int)
+            or isinstance(pr.get("number"), bool)
+            or not isinstance(pr.get("connection") or "", str)
+        ):
+            return _err(400, "INVALID_INPUT", "pr은 {number, connection?} 객체여야 한다")
         account = _account_of(request, body.get("account"))
         if isinstance(account, JSONResponse):
             return account
@@ -795,7 +804,7 @@ def add_dev_routes(router: APIRouter, get_service: Callable[[], Any]) -> None:
             mode = body.get("mode")
             who = _person(request)
             th = await dev_chat.send(
-                svc, thread_id, message, connection or None, mode, who, SCREEN, account
+                svc, thread_id, message, connection or None, mode, who, SCREEN, account, pr
             )
         except ActionError as exc:
             return _coding_err(exc)
@@ -988,6 +997,7 @@ def _hand_assignee(svc: Any, request: Request, task_id: str) -> str | None:
 def create_dev_router(get_service: Callable[[], Any]) -> APIRouter:
     """개발 서비스 화면 REST (공용 + 개발)."""
     router = APIRouter(prefix="/api/planning", tags=["dev"])
+
     def guard(name: str, body: dict, authorization: str | None) -> JSONResponse | None:
         """세션 모드: 작업·PR을 건드리는 액션은 그 작업 주인(대화를 연 계정)과 관리자만 (#1556)."""
         if name not in scope.TASK_ACTIONS or not session_mode():
@@ -1004,9 +1014,7 @@ def create_dev_router(get_service: Callable[[], Any]) -> APIRouter:
             return None
         return _err(403, "VIEW_ONLY", dev_chat.TASK_OWNER_ONLY)
 
-    add_common_routes(
-        router, get_service, session_actions=DECISION_ACTIONS, action_guard=guard
-    )
+    add_common_routes(router, get_service, session_actions=DECISION_ACTIONS, action_guard=guard)
     add_dev_routes(router, get_service)
     add_settings_routes(router, get_service)
     return router
