@@ -7,6 +7,7 @@
 - 대상: 내보낼 영상(`creative_render.publish_video_part`: 자막·엔드카드를 얹은 영상, 없으면 원본)
 - 검은 화면: `blackdetect=d=0.5:pix_th=0.10` → 구간 (엔드카드 마지막 2초 안은 뺀다)
 - 멈춘 화면: `freezedetect=n=-60dB:d=1.5` → 구간 (엔드카드 마지막 2초 안은 뺀다)
+- 검은·멈춘 화면은 필터를 이어(`BOTH_FILTER`) ffmpeg 한 번으로 디코딩한다(11/26 태윤 님 리뷰)
 - 길이: `creative_overlay.probe_duration` → 목표(기획 제작안 길이, 없으면 기록의 목표 길이) ±1초
 - ffmpeg가 없거나 실패하면 그 검사만 error("확인 못 함"). 흐름은 계속
 - 결과: 기록 `render.qc = {video_sha, part, checks: [{id, status, detail_ko, ranges}], at}`
@@ -134,11 +135,40 @@ def _detect(video: Path, vf: str) -> tuple[str | None, str | None]:
     return err, None
 
 
+# 11/26 태윤 님 리뷰: 검은·멈춘 화면을 따로 두 번 디코딩하지 않고 ffmpeg 한 번으로(필터를 잇는다)
+BOTH_FILTER = f"{BLACK_FILTER},{FREEZE_FILTER}"
+
+
+def _parse_failed(check_id: str, error: Exception) -> dict[str, Any]:
+    logger.warning("creative_qc: %s 결과 읽기 실패 (%s)", check_id, type(error).__name__)
+    return {"id": check_id, "status": "error", "ranges": [],
+            "detail_ko": "ffmpeg 결과를 읽지 못해 확인 못 함"}  # fmt: skip
+
+
+def check_picture(video: Path, duration: float | None) -> list[dict[str, Any]]:
+    """검은 화면·멈춘 화면을 ffmpeg 한 번으로 본다. 한쪽 결과를 읽다 실패해도 다른 쪽은 남는다."""
+    err, why = _detect(video, BOTH_FILTER)
+    out = []
+    for check_id, judge in (("black", _black_result), ("freeze", _freeze_result)):
+        if why:
+            out.append({"id": check_id, "status": "error", "detail_ko": why, "ranges": []})
+            continue
+        try:
+            out.append(judge(err or "", duration))
+        except Exception as error:  # noqa: BLE001 - 한 검사 결과만 error, 다른 검사는 그대로
+            out.append(_parse_failed(check_id, error))
+    return out
+
+
 def check_black(video: Path, duration: float | None) -> dict[str, Any]:
     err, why = _detect(video, BLACK_FILTER)
     if why:
         return {"id": "black", "status": "error", "detail_ko": why, "ranges": []}
-    found = outside_end_card(black_ranges(err or ""), duration, BLACK_MIN_S)
+    return _black_result(err or "", duration)
+
+
+def _black_result(err: str, duration: float | None) -> dict[str, Any]:
+    found = outside_end_card(black_ranges(err), duration, BLACK_MIN_S)
     if found:
         return {"id": "black", "status": "warn", "ranges": found,
                 "detail_ko": f"{_ranges_ko(found)} 검은 화면"}  # fmt: skip
@@ -150,7 +180,11 @@ def check_freeze(video: Path, duration: float | None) -> dict[str, Any]:
     err, why = _detect(video, FREEZE_FILTER)
     if why:
         return {"id": "freeze", "status": "error", "detail_ko": why, "ranges": []}
-    found = outside_end_card(freeze_ranges(err or "", duration), duration, FREEZE_MIN_S)
+    return _freeze_result(err or "", duration)
+
+
+def _freeze_result(err: str, duration: float | None) -> dict[str, Any]:
+    found = outside_end_card(freeze_ranges(err, duration), duration, FREEZE_MIN_S)
     if found:
         return {"id": "freeze", "status": "warn", "ranges": found,
                 "detail_ko": f"{_ranges_ko(found)} 움직임 거의 없음"}  # fmt: skip
@@ -220,8 +254,7 @@ def inspect(record_id: str, cid: str | None) -> dict[str, Any] | None:
                    "ranges": []} for i in ("black", "freeze", "duration")]  # fmt: skip
     else:
         duration = PROBE(video)
-        checks = [check_black(video, duration), check_freeze(video, duration),
-                  check_duration(duration, target_seconds(rec))]  # fmt: skip
+        checks = [*check_picture(video, duration), check_duration(duration, target_seconds(rec))]
     from datetime import UTC, datetime
 
     result = {"video_sha": sha, "part": part, "checks": checks,
