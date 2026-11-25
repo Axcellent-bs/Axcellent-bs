@@ -1,0 +1,65 @@
+{
+ "data": [
+  {
+   "id": "iq_01",
+   "booking_code": "NB-20261110-0001",
+   "member": true,
+   "name": "김*진",
+   "email": "k***@example.com",
+   "category": "booking",
+   "title": "출발 시간 문의",
+   "body": "공항에 몇 시까지 가면 되나요?",
+   "status": "open",
+   "answer": null,
+   "answered_at": null,
+   "created_at": "2026-11-24T01:00:00.000Z",
+   "updated_at": "2026-11-24T01:00:00.000Z"
+  },
+  {
+   "id": "iq_02",
+   "booking_code": null,
+   "member": false,
+   "name": "이*수",
+   "email": "l***@example.com",
+   "category": "product",
+   "title": "상품 문의",
+   "body": "아이 동반 가능한가요?",
+   "status": "open",
+   "answer": null,
+   "answered_at": null,
+   "created_at": "2026-11-24T02:00:00.000Z",
+   "updated_at": "2026-11-24T02:00:00.000Z"
+  },
+  {
+   "id": "iq_03",
+   "booking_code": "NB-20261110-0001",
+   "member": true,
+   "name": "김*진",
+   "email": "k***@example.com",
+   "category": "payment",
+   "title": "결제 문의",
+   "body": "영수증 받을 수 있나요?",
+   "status": "answered",
+   "answer": "보냈어요",
+   "answered_at": "2026-11-24T05:00:00.000Z",
+   "created_at": "2026-11-24T03:00:00.000Z",
+   "updated_at": "2026-11-24T05:00:00.000Z"
+  },
+  {
+   "id": "iq_04",
+   "booking_code": "NB-20261110-0001",
+   "member": true,
+   "name": "김*진",
+   "email": "k***@example.com",
+   "category": "booking",
+   "title": "인원 변경",
+   "body": "한 명 더 갈 수 있나요?",
+   "status": "open",
+   "answer": null,
+   "answered_at": null,
+   "created_at": "2026-11-24T04:00:00.000Z",
+   "updated_at": "2026-11-24T04:00:00.000Z"
+  }
+ ],
+ "next_cursor": null
+}

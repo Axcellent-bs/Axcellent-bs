@@ -29,3 +29,15 @@ customer_label = "고객"
 money_field = "amount"
 money_unit = "원"
 money_label = "결제 실패(미결제) 금액"
+
+# 매출 분석(sales_analysis) 공통 설정 (11/25). 형식: ax_contracts.schemas.data.CatalogSales
+# 사이트 변환기가 예약을 shop-api 판매 기록으로 바꿔 주므로 매출·객단가·재구매율은 업종과 상관없이 같은 식으로 센다.
+# 분류·장르·회원 속성처럼 업종 전용 칸은 두지 않는다. 숫자는 코드가 판매 기록에서 계산한다
+[sales]
+version = "1"
+revenue_definition = "매출 = 결제 완료 예약의 금액 − 할인 − 기간 안 환불"
+min_product_orders = 5
+max_staleness_minutes = 30
+min_period_orders = 20
+min_group_size = 5
+active_days = 365

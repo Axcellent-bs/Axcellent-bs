@@ -58,6 +58,7 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeInstagramDraftInput,
     CreativeInstagramOutput,
     CreativeInstagramRequestInput,
+    CreativeKeyframeRedrawInput,
     CreativeOverlayRedoInput,
     CreativeOverlayRedoOutput,
     CreativeRecordAttachInput,
@@ -124,8 +125,10 @@ from marketing_agent import creative_script as _script
 from marketing_agent import creative_thumbnails as _thumbs
 from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import instagram_post as _instagram
+from marketing_agent import keyframes as _keyframes
 from marketing_agent import render_settings as _render_settings
 from marketing_agent import request_creative as _request_creative
+from marketing_agent import request_script as _request_script
 from marketing_agent import request_video_cover as _request_cover
 from marketing_agent import request_video_youtube as _request_youtube
 from marketing_agent import storyboard as _storyboard
@@ -2167,6 +2170,20 @@ async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentRes
             await _board_svg.draw(rid, request.meta.context_id)
         except Exception:  # noqa: BLE001 - SVG 콘티는 부가 기능이라 영상 준비를 막지 않는다
             _board_svg.logger.exception("의뢰 SVG 콘티를 채우지 못함")
+        # 11/25 대화방 의뢰 하나로: 의뢰문의 대사·목소리를 지킨 대본을 기록에 쓰고 칸에 붙인다
+        try:
+            from marketing_agent.chat import default_llm
+
+            plan = video_draft.PrepareVideoDraftInput.model_validate(request.input).video_plan
+            await _request_script.attach(
+                rid,
+                plan,
+                (request.untrusted or {}).get("request_text"),
+                SCRIPT_LLM or default_llm,
+                request.meta.context_id,
+            )
+        except Exception:  # noqa: BLE001 - 대본은 부가 기능이라 영상 준비를 막지 않는다
+            _request_script.logger.exception("의뢰 대본을 붙이지 못함")
     return result
 
 
@@ -2200,6 +2217,38 @@ async def creative_board_redraw(request: AgentRequest) -> AgentResult:
         output=out.model_dump(mode="json"),
         evidence=_evidence(
             [request.skill], f"스토리보드 그림 다시 그리기 {rid}: {item.get('status')}", [rid]
+        ),
+    )
+
+
+async def creative_keyframe_redraw(request: AgentRequest) -> AgentResult:
+    """키프레임 한 장 [다시 그리기] 전용(read, 11/25). LLM 없이 그림 1장.
+
+    안전 관문(generate_media B)·그림 크레딧 예약·`image_credits_ok`는 지금 그림 규칙 그대로
+    (`keyframes.render_frame`). 다른 회사 기록이면 not_found. 영상을 만들기 시작했으면
+    video_started."""
+    data = _parse(request, CreativeKeyframeRedrawInput)
+    if isinstance(data, AgentResult):
+        return data
+    rid = data.record_id
+    if _creative.store().get(rid) is None:
+        return _not_found(request)
+    why = _keyframes.redraw(STATE.media_ledger, request.meta, rid, data.index)
+    if why:
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome=why,
+            output={"message": f"키프레임을 다시 그릴 수 없다 ({why})"},
+        )
+    item = _creative.store().get_render(rid).get(_keyframes.STATE) or {}
+    out = CreativeRecordAttachOutput(record_id=rid, part=_keyframes.STATE, item=item)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill], f"키프레임 {data.index + 1}번 다시 그리기 {rid}", [rid]
         ),
     )
 
@@ -2768,6 +2817,7 @@ HANDLERS = {
     "creative_records_list": creative_records_list,
     "creative_record_get": creative_record_get,
     "creative_board_redraw": creative_board_redraw,
+    "creative_keyframe_redraw": creative_keyframe_redraw,
     "creative_video_request": creative_video_request,
     "creative_youtube_draft": creative_youtube_draft,
     "creative_youtube_request": creative_youtube_request,

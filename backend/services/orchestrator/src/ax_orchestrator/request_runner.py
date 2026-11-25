@@ -128,6 +128,18 @@ def in_catalog(row: dict[str, Any], spec: dict[str, Any]) -> bool:
     )
 
 
+ASYNC_FAILED_NOTE = "긴 작업이 끝나지 못했다"
+_OUTCOME_CODE = re.compile(r"^[A-Za-z0-9_]{1,60}$")
+
+
+def async_failure_note(output: Any) -> str:
+    """긴 작업 실패 문구. 부서 결과의 outcome이 코드 모양이면 붙인다(부서 문장은 옮기지 않는다)."""
+    outcome = output.get("outcome") if isinstance(output, dict) else None
+    if isinstance(outcome, str) and _OUTCOME_CODE.fullmatch(outcome):
+        return f"{ASYNC_FAILED_NOTE} ({outcome})"
+    return ASYNC_FAILED_NOTE
+
+
 class RequestRunner:
     def __init__(
         self,
@@ -673,11 +685,12 @@ class RequestRunner:
             out = data.get("output")
             self._complete(rid, step_id, spec, out if isinstance(out, dict) else {}, "긴 작업 완료")
         elif not self._video_gate(rid, step_id, data.get("output")):
+            # 11/25 부서가 준 이유 코드(영문·숫자·_ 만)를 붙여 대화방 카드에서 원인을 보게 한다
             self._update(
                 rid,
                 step_id,
                 status="failed",
-                note="긴 작업이 끝나지 못했다",
+                note=async_failure_note(data.get("output")),
                 finished_at=stamp,
             )
         self.start(rid)

@@ -174,6 +174,7 @@ SERVICES: tuple[Service, ...] = (
             "creative_records_list",
             "creative_record_get",
             "creative_board_redraw",
+            "creative_keyframe_redraw",
             "creative_video_request",
             "creative_youtube_draft",
             "creative_youtube_request",

@@ -218,7 +218,20 @@ const vgroupHtml = (PS.videoGroups || []).map((g) => `<div class="vgroup reveal"
 const cvGroups = ((PS.customerVideos && PS.customerVideos.groups) || []).filter((g) => g.items && g.items.length);
 const cvHtml = !cvGroups.length ? "" : `<div class="cvideos reveal"><header class="vgroup-h"><h3>${esc(PS.customerVideos.title)}</h3></header>${cvGroups.map((g) => `<div class="cv-group"><header class="cv-h"><h4>${esc(g.name)}</h4>${(g.badges || []).length ? `<p class="badges">${g.badges.map((b) => `<span class="badge">${esc(b)}</span>`).join("")}</p>` : ""}</header><div class="vposts vposts-two">${g.items.map(postCard).join("")}</div></div>`).join("")}</div>`;
 
-const showPosts = PS.items.length > 0 || igGroups.length > 0 || cvGroups.length > 0 || PS.showEmpty === true;
+// 마케팅 AI가 만든 영상 칸: 세로 영상 줄 + 대표 사례의 제작 과정. 영상이 없으면 칸 전체를 만들지 않는다
+const MK = PS.marketingVideos || {};
+const mkItems = MK.items || [];
+const mkVideo = (v, label) => `<video controls preload="${has(v.poster) ? "none" : "metadata"}" playsinline aria-label="${esc(label)}" ${has(v.poster) ? `poster="${esc(v.poster)}"` : ""}><source src="${esc(v.src)}${has(v.poster) ? "" : "#t=0.1"}"></video>`;
+const mkCard = (it) => `<article class="vpost mk-card reveal"><div class="vpost-media">${mkVideo(it, it.title)}${it.aiMade ? '<span class="ai-mark">AI가 만든 영상</span>' : ""}</div><h3>${esc(it.title)}</h3><p class="badges">${has(it.customer) ? `<span class="badge">${esc(it.customer)}</span>` : ""}${has(it.length) ? `<span class="mk-len">${esc(it.length)}</span>` : ""}</p></article>`;
+const mkFirst = MK.itemsFirst > 0 ? MK.itemsFirst : 0;
+const mkMore = mkFirst && mkItems.length > mkFirst ? `<button type="button" class="posts-more" hidden aria-expanded="false" aria-label="영상 더 보기" data-more="영상 더 보기" data-less="영상 접기"><span aria-hidden="true">›</span></button>` : "";
+const mkp = MK.process;
+const mkStep = (i, media, cls = "") => `<li class="mk-step${cls}"><div class="mk-shot">${media}</div><h5>${i + 1}. ${esc(MK.steps[i].title)}</h5><p>${esc(MK.steps[i].body)}</p></li>`;
+const mkImg = (v) => `<img src="${esc(v.src)}" alt="${esc(v.alt)}" loading="lazy">`;
+const mkProcess = !(mkp && mkp.sheet && mkp.board && mkp.video) ? "" : `<div class="mk-process reveal"><header class="mk-process-h"><h4>${esc(MK.processTitle)}</h4><span>${esc(MK.processNote)}</span></header><ol class="mk-steps">${mkStep(0, mkImg(mkp.sheet))}<li class="mk-link" aria-hidden="true"><span>→</span></li>${mkStep(1, mkImg(mkp.board))}<li class="mk-link mk-approval"><em>${esc(MK.approval)}</em><span aria-hidden="true">→</span></li>${mkStep(2, `${mkVideo(mkp.video, MK.steps[2].title)}<span class="ai-mark">AI가 만든 영상</span>`, " mk-final")}</ol></div>`;
+const mkHtml = !mkItems.length ? "" : `<div class="mkvideos"><header class="vgroup-h reveal"><h3>${esc(MK.title)}</h3></header>${has(MK.lead) ? `<p class="mk-lead reveal">${esc(MK.lead)}</p>` : ""}<div class="posts-wrap mk-wrap"><div class="vposts mk-grid">${mkItems.map(mkCard).join("")}</div>${mkMore}</div>${mkProcess}</div>`;
+
+const showPosts = PS.items.length > 0 || mkItems.length > 0 || igGroups.length > 0 || cvGroups.length > 0 || PS.showEmpty === true;
 const posts = !showPosts ? "" : `
 <section class="sec sec-light" id="posts">
   <div class="wrap">
@@ -227,6 +240,7 @@ const posts = !showPosts ? "" : `
     <p class="posts-lead reveal">${esc(PS.lead)}</p>
     ${brochureCard}
     ${PS.items.length || !igGroups.length ? `${has(PS.itemsTitle) && PS.items.length ? `<header class="vgroup-h reveal"><h3>${esc(PS.itemsTitle)}</h3></header>` : ""}${itemsBlock}` : ""}
+    ${mkHtml}
     ${cvHtml}
     ${igHtml}
     ${vgroupHtml}

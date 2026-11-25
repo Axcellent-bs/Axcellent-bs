@@ -1,8 +1,8 @@
-"""기획이 그리는 SVG 콘티 (11/25 예진).
+"""기획이 그리는 콘티 (11/25 예진, 같은 날 3D 마네킹 콘티로 바꿈).
 
-- 영상 제작안을 쓴 뒤 같은 기획 LLM으로 장면별 첫·끝 화면 SVG를 받아 제작안에 넣는다
-- 받은 SVG는 허용 요소·속성만 남긴다(스크립트·이벤트·외부 주소·DOCTYPE 버림, 8KB 상한)
-- LLM이 없거나 실패하면 SVG 없이 제작안 그대로
+- 영상 제작안을 쓴 뒤 같은 기획 LLM으로 장면별 첫·끝 포즈 숫자를 받아 코드가 SVG로 그려 넣는다
+- SVG는 허용 요소·속성만 남긴다(스크립트·이벤트·외부 주소·DOCTYPE 버림, 16KB 상한)
+- LLM이 없거나 실패하면 포즈·SVG 없이 제작안 그대로
 - 대화 "콘티 다시 그리기"(redraw_storyboard): 사람 말은 데이터 블록에만, 장면 하나만 고칠 수 있다
 """
 
@@ -28,9 +28,11 @@ pytestmark = pytest.mark.role("planning")
 
 GOOD = ('<svg viewBox="0 0 90 160"><text x="45" y="12" font-size="7">지하철에서 졸다</text>'
         '<rect x="4" y="20" width="82" height="22" fill="#e9eef7"/></svg>')  # fmt: skip
+# 11/25 같은 SVG 안 그라데이션 참조 url(#id)는 이제 남긴다(3D 마네킹 콘티). 버려야 할 것은 바깥 주소
 BAD = ('<svg viewBox="0 0 90 160" onload="alert(1)"><script>alert(1)</script>'
        '<image href="https://x.example/a.png"/><rect x="1" y="1" width="5" height="5" '
-       'fill="url(#g)" stroke="#000"/></svg>')  # fmt: skip
+       'fill="url(https://x.example/g)" stroke="#000"/></svg>')  # fmt: skip
+POSE = {"shot": "medium", "yaw": 20, "arm_l": {"raise": 60, "bend": 40}, "label_ko": "돌아봄"}
 
 
 def _prop(**kw: Any) -> Proposal:
@@ -46,11 +48,11 @@ def _plan() -> VideoPlan:
     return vp.rule_plan(_prop(), (vp.FUN_FIRST, vp.END_CARD))
 
 
-def _svg_out(svg: str = GOOD, n: int | None = None) -> sb._SvgOut:
+def _pose_out(pose: dict | None = POSE, n: int | None = None) -> sb._PoseOut:
     plan = _plan()
     ns = [n] if n is not None else [s.n for s in plan.scenes]
-    return sb._SvgOut.model_validate(
-        {"scenes": [{"n": i, "start_svg": svg, "end_svg": svg} for i in ns]}
+    return sb._PoseOut.model_validate(
+        {"scenes": [{"n": i, "start": pose, "end": pose} for i in ns]}
     )
 
 
@@ -67,13 +69,36 @@ def test_sanitize_keeps_shapes_and_text_and_drops_danger() -> None:
     assert sb.sanitize_svg(big) == ""
 
 
+def test_sanitize_keeps_gradients_and_local_url_only() -> None:
+    """11/25 3D 마네킹 콘티: 그라데이션과 같은 SVG 안 url(#id)만 남긴다 (마케팅과 같은 규칙)."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 320"><defs>'
+        '<radialGradient id="sk" cx="35%" cy="30%" r="75%" gradientUnits="objectBoundingBox">'
+        '<stop offset="0%" stop-color="#ffe6c7" stop-opacity="1"/></radialGradient>'
+        '<linearGradient id="bad id" x1="0" y2="1" gradientUnits="javascript:x"/></defs>'
+        '<circle cx="9" cy="9" r="4" fill="url(#sk)" stroke="url( https://evil/x )"/>'
+        '<line x1="0" y1="0" x2="5" y2="5" stroke="#000" stroke-linejoin="round"/>'
+        '<rect width="3" height="3" opacity="url(#sk)" fill="javascript:alert(1)"/>'
+        "<foreignObject><div>x</div></foreignObject><script>alert(1)</script></svg>"
+    )  # fmt: skip
+    out = sb.sanitize_svg(svg)
+    for kept in ("<radialGradient", "<stop", 'stop-color="#ffe6c7"', 'stop-opacity="1"',
+                 'id="sk"', 'gradientUnits="objectBoundingBox"', 'fill="url(#sk)"',
+                 'stroke-linejoin="round"', "<linearGradient"):  # fmt: skip
+        assert kept in out, kept
+    for gone in ("evil", "javascript", "foreignObject", "script", 'opacity="url', "bad id"):
+        assert gone not in out, gone
+    assert sb.MAX_SVG_BYTES == 16384
+
+
 def test_draw_fills_start_and_end_svg_and_sends_only_scene_words() -> None:
-    llm = MockLLMClient(responses={sb._SvgOut: _svg_out()})
+    llm = MockLLMClient(responses={sb._PoseOut: _pose_out()})
     plan, changed = asyncio.run(sb.draw(llm, _plan(), "ctx"))
     assert changed == len(plan.scenes)
     assert all(s.start_svg and s.end_svg for s in plan.scenes)
+    assert all(s.start_pose and s.end_pose for s in plan.scenes)
     sent = llm.calls[0]
-    assert "콘티 작가" in sent and 'viewBox="0 0 90 160"' in sent
+    assert "콘티 작가" in sent and "포즈" in sent and "SVG·그림 원문은 쓰지 않는다" in sent
     assert "자막·회사 이름" in sent  # 코드가 얹는 글은 그리지 않는다
 
 
@@ -82,7 +107,7 @@ def test_draw_without_llm_or_on_failure_keeps_plan() -> None:
     assert asyncio.run(sb.draw(None, plan, "ctx")) == (plan, 0)
     broken = MockLLMClient(responses={})  # 응답 없음 = 실패
     assert asyncio.run(sb.draw(broken, plan, "ctx")) == (plan, 0)
-    junk = MockLLMClient(responses={sb._SvgOut: _svg_out("<div>no</div>")})
+    junk = MockLLMClient(responses={sb._PoseOut: _pose_out(None)})  # 포즈 없는 답
     assert asyncio.run(sb.draw(junk, plan, "ctx")) == (plan, 0)
 
 
@@ -90,14 +115,14 @@ def test_write_draws_svg_after_the_plan() -> None:
     scenes = [{"visual": f"장면 {i}", "caption": "", "prompt": "A woman reading on a calm subway"}
               for i in range(4)]  # fmt: skip
     out = vp._PlanOut.model_validate({"concept": "출근길", "script": "훅 → 공감", "scenes": scenes})
-    llm = MockLLMClient(responses={vp._PlanOut: out, sb._SvgOut: _svg_out()})
+    llm = MockLLMClient(responses={vp._PlanOut: out, sb._PoseOut: _pose_out()})
     plan = asyncio.run(vp.write(llm, _prop(), "ctx", (vp.FUN_FIRST, vp.END_CARD)))
     assert plan.written_by == "llm" and len(llm.calls) == 2
     assert all(s.start_svg for s in plan.scenes)
 
 
 def test_only_one_scene_is_redrawn_with_the_request_in_the_data_block() -> None:
-    llm = MockLLMClient(responses={sb._SvgOut: _svg_out(n=2)})
+    llm = MockLLMClient(responses={sb._PoseOut: _pose_out(n=2)})
     plan, changed = asyncio.run(sb.draw(llm, _plan(), "ctx", "2번 장면 인물을 왼쪽에", 2))
     assert changed == 1
     assert [bool(s.start_svg) for s in plan.scenes] == [s.n == 2 for s in plan.scenes]
@@ -124,7 +149,7 @@ def _service(llm: Any) -> PlanningService:
 
 
 def test_redraw_action_updates_the_saved_plan() -> None:
-    llm = MockLLMClient(responses={sb._SvgOut: _svg_out(n=3)})
+    llm = MockLLMClient(responses={sb._PoseOut: _pose_out(n=3)})
     svc = _service(llm)
     res = asyncio.run(svc.dispatch({"type": "redrawStoryboard", "proposal": "PROP-91",
                                     "scene": 3, "note": "엔드카드 가운데를 비워"}))  # fmt: skip

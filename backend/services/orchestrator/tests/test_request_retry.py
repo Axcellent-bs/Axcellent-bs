@@ -124,3 +124,12 @@ def test_the_video_and_plan_steps_have_no_time_limit() -> None:
     assert steps["make"].skill == "generate_media" and steps["make"].grade == "B"
     plan = request_tasks.plan_of(request_tasks.BY_NAME["promo_video"])
     assert all(p["timeout_s"] is None for p in plan)
+
+
+def test_a_failed_long_task_note_carries_the_outcome_code() -> None:
+    """11/25 대화방 카드에 "긴 작업이 끝나지 못했다"만 보여 원인을 몰랐다. 코드 모양만 붙인다."""
+    note = request_runner.async_failure_note
+    assert note({"outcome": "board_image_failed"}) == "긴 작업이 끝나지 못했다 (board_image_failed)"
+    assert note({"outcome": "부서가 쓴 문장"}) == "긴 작업이 끝나지 못했다"
+    assert note({"outcome": "x" * 61}) == "긴 작업이 끝나지 못했다"
+    assert note(None) == note({}) == "긴 작업이 끝나지 못했다"

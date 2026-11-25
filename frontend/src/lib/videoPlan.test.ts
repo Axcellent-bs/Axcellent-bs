@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 기획 state proposals[].video_plan → 제안 화면 "3 영상 제작안" 값 (lib/videoPlan.ts)
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sceneKeyframeLine, sceneTime, toVideoPlan, videoPlanChip, videoPlanSummary, videoPurposeChip } from "./videoPlan.ts";
+import { sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip } from "./videoPlan.ts";
 
 // 11/20 16:55 서버 PROP-15 모양 (snake_case, 계약 VideoPlan)
 const RAW = {
@@ -112,4 +112,44 @@ test("SVG 콘티: start_svg·end_svg를 읽고(snake·camel), 없으면 칸을 �
   assert.equal(v.scenes[0].endSvg, svg);
   assert.equal("startSvg" in v.scenes[1], false); // 예전 제작안은 칸이 없다 (화면은 지금 색 칸 그대로)
   assert.deepEqual(toVideoPlan(v), v);
+});
+
+test("3D 마네킹 콘티(11/25): 그라데이션·url(#id)가 든 8KB 넘는 SVG도 그대로, 포즈 칸이 와도 깨지지 않는다", () => {
+  const grid = Array.from({ length: 220 }, (_, i) => `<line x1="${i}.5" y1="200" x2="${i}.5" y2="320"/>`).join("");
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 320"><defs><radialGradient id="sk" cx="35%" cy="30%" r="75%">'
+    + '<stop offset="0%" stop-color="#ffe6c7"/></radialGradient></defs>'
+    + `<g stroke="#e6dccd" stroke-width="0.6">${grid}</g><circle cx="90" cy="120" r="12" fill="url(#sk)"/></svg>`;
+  assert.ok(svg.length > 8192 && svg.length <= 16384);
+  const pose = { shot: "medium", x: 0, z: 0, yaw: 35, head: { yaw: -40, pitch: -5 }, arm_l: { raise: 40, bend: 60 }, arm_r: { raise: 30, bend: 80 }, step: 0.15, prop: null, label_ko: "0초 · 놀라 돌아봄" };
+  const v = toVideoPlan({ ...RAW, scenes: RAW.scenes.map((s, i) => (i === 0 ? { ...s, start_svg: svg, end_svg: svg, start_pose: pose, end_pose: pose } : s)) });
+  assert.ok(v);
+  assert.equal(v.scenes[0].startSvg, svg);
+  assert.equal(v.scenes[0].endSvg, svg);
+  assert.equal(v.scenes.length, 4);
+});
+
+test("규칙 초안 이유: 이유마다 칩 옆 한 줄, 칸이 비거나 모르는 값이면 지금 그대로(빈 줄)", () => {
+  const want = {
+    no_llm: "회사 AI가 연결되지 않아 규칙으로 썼어요",
+    timeout: "AI가 제한 시간 안에 답하지 못해 규칙으로 썼어요",
+    bad_format: "AI 답 형식이 맞지 않아 규칙으로 썼어요",
+    rejected: "AI 답이 금지 규칙에 걸려 규칙으로 썼어요",
+    error: "AI 호출이 실패해 규칙으로 썼어요",
+  };
+  for (const [reason, line] of Object.entries(want)) {
+    const v = toVideoPlan({ ...RAW, written_by: "rule", fallback_reason: reason });
+    assert.ok(v);
+    assert.equal(v.fallbackReason, reason);
+    assert.equal(videoFallbackLine(v), line);
+    assert.equal(videoFallbackLine(toVideoPlan({ ...RAW, writtenBy: "rule", fallbackReason: reason })!), line); // camel 같은 값
+    assert.equal(videoPlanChip(v), "규칙 초안 · 15초 · 9:16"); // 칩은 그대로
+  }
+  for (const raw of [{ ...RAW, written_by: "rule" }, { ...RAW, written_by: "rule", fallback_reason: "" }, { ...RAW, written_by: "rule", fallback_reason: "모름" }]) {
+    const v = toVideoPlan(raw);
+    assert.ok(v);
+    assert.equal("fallbackReason" in v, false);
+    assert.equal(videoFallbackLine(v), "");
+  }
+  // LLM 제작안이면 이유 칸이 와도 줄을 그리지 않는다
+  assert.equal(videoFallbackLine(toVideoPlan({ ...RAW, fallback_reason: "timeout" })!), "");
 });

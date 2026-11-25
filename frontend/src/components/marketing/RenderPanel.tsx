@@ -10,7 +10,10 @@ import { YoutubePanel } from "./YoutubePanel";
 import type { StoryboardResult } from "@/lib/storyboard";
 import { canToggleOriginal, overlayVisibleFor, playPartFor, type PlayPart } from "@/lib/videoOverlay";
 import { OverlayControls } from "./OverlayControls";
+import { KeyframePairs } from "./KeyframePairs";
+import { framesOf, keyframesDone } from "@/lib/keyframes";
 import { videoSummaryLine } from "@/lib/creativeVideo";
+import { canAskVideo, usesOriginalReference } from "@/lib/videoAsk";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
@@ -190,7 +193,13 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   const summaryLine = videoSummaryLine(video?.status, video?.summary);
   const thumb = chosenThumb(render.thumbnails); // 인스타 릴스 표지 = 고른 썸네일(안 고르면 첫 장)
   const reelCover = thumb ? { url: thumbUrl(recordId, thumb.media_id), picked: thumb.picked } : null;
-  const canAsk = render.board_image?.status === "done" && !["awaiting_approval", "running", "done"].includes(video?.status ?? "");
+  // 11/25 키프레임 방식이면 스토리보드 그림 대신 키프레임이 모두 그려져야 영상을 요청한다
+  const keyframed = framesOf(render.keyframes).length > 0;
+  const inputReady = keyframed ? keyframesDone(render.keyframes) : render.board_image?.status === "done";
+  // 11/25 AI 가상 인물·그림 캐릭터는 원본을 참조로 써서 스토리보드 그림 없이도 요청할 수 있다(키프레임이 아닐 때)
+  const canAsk = keyframed
+    ? inputReady && !["awaiting_approval", "running", "done"].includes(video?.status ?? "")
+    : canAskVideo(render.board_image?.status, video?.status, rec?.sheet?.kind);
   const ask = async () => {
     setAsking(true);
     setError(null);
@@ -210,8 +219,12 @@ export function RenderPanel({ recordId }: { recordId: string }) {
       <p className="text-xs font-semibold text-ink-900">만든 결과 <span className="font-normal text-ink-500">· Higgsfield AI 생성 또는 직접 올림</span></p>
       <div className="grid gap-3 md:grid-cols-2">
         <Picture recordId={recordId} part="sheet_image" info={render.sheet_image} label="이미지 시트 그림" onChanged={() => void load()} onError={setError} />
-        <Picture recordId={recordId} part="board_image" info={render.board_image} label="스토리보드 그림" onChanged={() => void load()} onError={setError} />
+        {(!keyframed || render.board_image) && <Picture recordId={recordId} part="board_image" info={render.board_image} label="스토리보드 그림" onChanged={() => void load()} onError={setError} />}
       </div>
+      {keyframed && (
+        <KeyframePairs recordId={recordId} state={render.keyframes} scenes={rec?.storyboard?.plan_scenes} videoStatus={video?.status}
+          speed={video?.summary?.speed} onChanged={() => void load()} />
+      )}
       <div className="space-y-2 border-t border-ink-100 pt-3">
         {summaryLine && <p className="text-xs text-ink-700" aria-label="영상 만들기 요약">{summaryLine}</p>}
         <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" onChanged={() => void load()} onError={setError}
@@ -225,7 +238,8 @@ export function RenderPanel({ recordId }: { recordId: string }) {
             {asking ? "요청 중…" : video?.status ? "영상 다시 요청 (사람 승인)" : "영상 만들기 요청 (사람 승인)"}
           </button>
         )}
-        {!canAsk && !video?.status && render.board_image?.status !== "done" && <p className="text-xs text-ink-500">스토리보드 그림이 끝나면 영상을 요청할 수 있어요.</p>}
+        {!canAsk && !video?.status && !inputReady && <p className="text-xs text-ink-500">{keyframed ? "키프레임이 모두 그려지면 영상을 요청할 수 있어요." : "스토리보드 그림이 끝나면 영상을 요청할 수 있어요."}</p>}
+        {!keyframed && canAsk && render.board_image?.status !== "done" && usesOriginalReference(rec?.sheet?.kind) && <p className="text-xs text-ink-500">AI 가상 인물·그림 캐릭터는 올린 원본을 참조로 써서 스토리보드 그림 없이 만들어요.</p>}
         {rec?.storyboard && <HiggsfieldWeb board={rec.storyboard} speed={video?.summary?.speed} reference={video?.summary?.reference} />}
       </div>
       <div className="border-t border-ink-100 pt-3">

@@ -28,10 +28,11 @@ from ax_agent_template import company_connection as store
 from ax_agent_template import company_scope
 from ax_agent_template import tenant as tenants
 from ax_agent_template.companies import canonical_company_id
+from ax_agent_template.llm import LLMNotConfiguredError, LLMResponseError
 from ax_dashboard_api.accounts import require_session_role
 from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
-from ax_dashboard_api.site_adapter import propose, resources, upstream
+from ax_dashboard_api.site_adapter import ai_propose, propose, resources, upstream
 from ax_dashboard_api.site_adapter.mapping import (
     MAPPING_FILE,
     MappingError,
@@ -86,6 +87,10 @@ class ProposeIn(BaseModel):
     products_path: str | None = None
     # 추가 필드 (W4): 신청 받은함 경로. 주면 첫 쪽을 읽어 칸 이름·첫 줄을 `claims_sample`로 준다
     claims_path: str | None = None
+    # 추가 필드 (11/25): 알아서 연결. 경로를 안 줘도 목록 경로에서 고르고, 규칙으로 못 채운 칸은
+    # 회사 AI가 채운 뒤, 빈 칸이 없으면 첫 쪽을 바꿔 보고 바로 저장한다(`ai_propose`)
+    auto: bool = False
+    tenant: str | None = Field(None, max_length=64)
 
     @field_validator("auth_header")
     @classmethod
@@ -218,11 +223,16 @@ def get_state() -> dict:
 
 
 @router.post("/propose", dependencies=EDITORS)
-async def propose_mapping(body: ProposeIn) -> dict:
-    """저장하지 않고 둘러본다. 경로 둘을 다 주면 첫 쪽을 읽어 짝을 제안한다."""
+async def propose_mapping(body: ProposeIn, request: Request) -> dict:
+    """저장하지 않고 둘러본다. 경로 둘을 다 주면 첫 쪽을 읽어 짝을 제안한다.
+
+    `auto`면 알아서 연결한다: 경로를 고르고, 규칙 + 회사 AI로 짝을 채우고, 다 채워지면 저장한다.
+    """
     base = _base(body.base_url)
     headers = upstream.auth_headers(body.auth_header, body.auth_scheme, _token(body.token, base))
     paths, write_paths = await upstream.get_all_paths(base, headers)
+    if body.auto:
+        return await _auto(body, request, base, headers, paths)
     # 추가 칸 (W4): 쓰기 짝 후보 경로, 신청 받은함 첫 쪽
     extra: dict[str, Any] = {"write_paths": write_paths, "claims_sample": None}
     if body.claims_path:
@@ -254,6 +264,67 @@ async def propose_mapping(body: ProposeIn) -> dict:
         "resources": proposed,
     }
     return ok({"paths": paths, "samples": samples, "mapping": mapping, **extra})
+
+
+def _ai_error(exc: Exception) -> ApiError:
+    if isinstance(exc, LLMNotConfiguredError):
+        return ApiError(
+            422,
+            "AI_NOT_CONFIGURED",
+            "회사 AI가 아직 없어요. 시스템 관리 › 회사 연결 › 공통 AI 도구 연결에서 넣어 주세요",
+        )
+    return ApiError(502, "AI_FAILED", "AI가 짝을 고르지 못했어요. 잠시 뒤 다시 해 주세요")
+
+
+async def _auto(
+    body: ProposeIn, request: Request, base: str, headers: dict[str, str], paths: list[str]
+) -> dict:
+    """알아서 연결: 경로 고르기 → 규칙 짝 → AI로 빈 칸 → 빈 칸 없으면 확인·저장."""
+    try:
+        chosen = await ai_propose.pick_paths(paths)
+        if body.orders_path:
+            chosen["orders"] = body.orders_path
+        if body.products_path:
+            chosen["products"] = body.products_path
+        if not (chosen["orders"] and chosen["products"]):
+            raise ApiError(
+                422,
+                "PATHS_NOT_FOUND",
+                "주문·상품 목록 경로를 찾지 못했어요. API 주소와 키를 확인해 주세요",
+            )
+        proposed: dict[str, Any] = {}
+        ai: dict[str, Any] = {}
+        for kind in ("orders", "products"):
+            res = _resource(chosen[kind])
+            try:
+                rows = await upstream.first_page(base + res.path, res.paging, headers)
+            except upstream.UpstreamError as exc:
+                raise _upstream_422(exc) from exc
+            proposed[kind] = _proposal(kind, res.path, rows)
+            ai[kind] = await ai_propose.fill(kind, rows, proposed[kind])
+    except (LLMNotConfiguredError, LLMResponseError) as exc:
+        raise _ai_error(exc) from exc
+    for res in proposed.values():  # 끝내 못 찾은 칸은 저장하지 않고 이유로 알린다
+        res["fields"] = {k: v for k, v in res["fields"].items() if v}
+    mapping = {
+        "version": 1,
+        "auth_header": body.auth_header,
+        "auth_scheme": body.auth_scheme,
+        "resources": proposed,
+    }
+    try:
+        m = SiteMapping.model_validate(keep_extras(mapping))
+        _complete(m)
+    except ApiError as exc:
+        return ok({"saved": False, "reason": exc.message, "mapping": mapping, "ai": ai})
+    except ValidationError:
+        return ok({"saved": False, "reason": "짝 모양이 맞지 않아요", "mapping": mapping, "ai": ai})
+    token = _token(body.token, base)
+    try:
+        result = await _store(base, m, token, body.tenant, request)
+    except ApiError as exc:
+        return ok({"saved": False, "reason": exc.message, "mapping": mapping, "ai": ai})
+    return ok({**result, "saved": True, "mapping": mapping, "ai": ai})
 
 
 def _complete(m: SiteMapping) -> None:
@@ -377,9 +448,19 @@ async def save(body: SaveIn, request: Request) -> dict:
     except ValueError as exc:
         raise ApiError(422, "MAPPING_BROKEN", f"키 헤더: {exc}") from exc
     _complete(m)
-    tenant = pick_tenant(body.tenant, store.read_connection())
     given = (body.token or "").strip()
-    token = _token(given, base)
+    return ok(await _store(base, m, _token(given, base), body.tenant, request))
+
+
+async def _store(
+    base: str, m: SiteMapping, token: str, given_tenant: str | None, request: Request
+) -> dict[str, Any]:
+    """첫 쪽을 바꿔 보고(안 되면 422) 짝·키·연결을 같이 저장한다. 화면 상태 + 읽은 줄 수."""
+    if not store.connection_file():
+        raise ApiError(
+            409, "CONNECTION_NOT_EDITABLE", f"{store.CONNECTION_FILE_ENV}가 없어 저장할 수 없다"
+        )
+    tenant = pick_tenant(given_tenant, store.read_connection())
     counts = await verify(base, m, token)
     human = getattr(request.state, "human", "unknown")
     # 짝·키·연결 셋이 같이 바뀌어야 한다. 연결 저장이 실패하면 짝·키를 전으로 되돌린다
@@ -403,4 +484,4 @@ async def save(body: SaveIn, request: Request) -> dict:
     finally:
         upstream.clear_cache()
     logger.info("사이트 변환기 저장: %s (by %s)", base, human)
-    return ok({**_state(), "counts": counts})
+    return {**_state(), "counts": counts}

@@ -93,15 +93,43 @@ def test_disallowed_elements_are_dropped_with_their_children(bad: str) -> None:
 def test_disallowed_attributes_and_dangerous_values_are_dropped() -> None:
     svg = (
         '<svg xmlns:xlink="http://www.w3.org/1999/xlink" onload="alert(1)">'
+        # 11/25 같은 SVG 안 url(#id)·바른 id는 남긴다(아래 시험). 여기는 바깥 주소·틀린 id
         '<rect width="1" onclick="x()" style="fill:red" href="http://a" xlink:href="#b" '
-        'fill="url(#g)" stroke="  JaVa Script:alert(1)" id="z" opacity="0.5"/>'
+        'fill="url(http://evil/g)" stroke="  JaVa Script:alert(1)" id="z z" opacity="0.5"/>'
         '<path d="M0 0" fill="URL (http://evil)"/></svg>'
     )
     out = sanitize_svg(svg)
     assert out is not None
-    for word in ("onload", "onclick", "style", "href", "url", "javascript", 'id="z"', "evil"):
+    for word in ("onload", "onclick", "style", "href", "url", "javascript", "id=", "evil"):
         assert word.lower() not in out.lower()
     assert 'opacity="0.5"' in out and 'width="1"' in out
+
+
+def test_gradients_and_local_url_are_kept() -> None:
+    """11/25 기획 3D 마네킹 콘티: 그라데이션과 같은 SVG 안 url(#id)만 남긴다."""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 320"><defs>'
+        '<radialGradient id="sk" cx="35%" cy="30%" r="75%" gradientUnits="objectBoundingBox">'
+        '<stop offset="0%" stop-color="#ffe6c7" stop-opacity="1"/>'
+        '<stop offset="100%" stop-color="#d9a77a"/></radialGradient>'
+        '<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1" gradientUnits="javascript:x">'
+        '<stop offset="0%" stop-color="#f3efe7"/></linearGradient></defs>'
+        '<circle cx="9" cy="9" r="4" fill="url(#sk)" stroke="url(#bg)"/>'
+        '<line x1="0" y1="0" x2="5" y2="5" stroke="#000" stroke-linecap="round" '
+        'stroke-linejoin="round"/>'
+        '<rect width="2" height="2" fill="url(#sk) url(http://evil)"/>'
+        '<rect width="3" height="3" opacity="url(#sk)"/>'
+        "<foreignObject><div>x</div></foreignObject><script>alert(1)</script></svg>"
+    )  # fmt: skip
+    out = sanitize_svg(svg)
+    assert out is not None
+    for kept in ("<radialGradient", "<linearGradient", "<stop", 'stop-color="#ffe6c7"',
+                 'stop-opacity="1"', 'offset="100%"', 'id="sk"',
+                 'gradientUnits="objectBoundingBox"', 'fill="url(#sk)"', 'stroke="url(#bg)"',
+                 'stroke-linejoin="round"'):  # fmt: skip
+        assert kept in out, kept
+    for gone in ("evil", "javascript", "foreignObject", "script", 'opacity="url'):
+        assert gone not in out, gone
 
 
 def test_text_is_escaped() -> None:
@@ -125,8 +153,11 @@ def test_unusable_input_is_rejected(bad: Any) -> None:
     assert sanitize_svg(bad) is None
 
 
-def test_size_limit_is_8kb() -> None:
-    rects = "".join('<rect x="1" y="1" width="2" height="2"/>' for _ in range(300))
+def test_size_limit_is_16kb() -> None:
+    # 11/25 상한 8KB → 16KB (기획 3D 마네킹 콘티).
+    # 300개(약 12KB)는 이제 통과해서 500개(약 20KB)로 본다
+    assert MAX_SVG_BYTES == 16384
+    rects = "".join('<rect x="1" y="1" width="2" height="2"/>' for _ in range(500))
     assert sanitize_svg(f"<svg>{rects}</svg>") is None
     small = "".join('<rect x="1" y="1" width="2" height="2"/>' for _ in range(20))
     out = sanitize_svg(f"<svg>{small}</svg>")

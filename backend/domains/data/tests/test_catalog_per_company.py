@@ -34,7 +34,11 @@ def test_company_without_catalog_does_not_borrow_catbooks() -> None:
     with company_scope.using("c-cf2f0d"):
         cat = catalog.current()
         assert cat.id == "common"
-        assert cat.id != "catbooks" and cat.sales is None  # 캣북스 장르·판매 칸 없음
+        assert cat.id != "catbooks"
+        # 매출 분석은 공통 칸만 (11/25). 캣북스 장르·분류·회원 속성·서점 낱말은 없다
+        assert cat.sales is not None and cat.sales.item_noun == "상품"
+        assert not cat.sales.genres and not cat.sales.categories and not cat.sales.attributes
+        assert "배송비" not in cat.sales.revenue_definition
         assert cat.connector == "shop-api"
         assert {m.id for m in cat.metrics} == {"order_count", "inquiry_count"}
 
@@ -45,3 +49,21 @@ def test_company_without_settings_counts_days_in_korea_time() -> None:
 
     with company_scope.using("c-cf2f0d"):
         assert str(tenant_timezone({})) == "Asia/Seoul"
+
+
+def test_site_companies_get_common_sales_section() -> None:
+    """누비투어·스터디온도 매출·객단가·재구매율을 낸다(11/25).
+
+    품목 이름은 기본 "상품", 서점 칸은 없다. 캣북스 매출 설정은 그대로.
+    """
+    expected = {"nubi-tour": "nubi", "studyon": "studyon"}
+    for company, cat_id in expected.items():
+        with company_scope.using(company):
+            cat = catalog.current()
+            assert cat.id == cat_id
+            assert cat.sales is not None and cat.sales.item_noun == "상품"  # 기본 품목 이름
+            assert not cat.sales.genres and not cat.sales.attributes
+            assert "배송비" not in cat.sales.revenue_definition
+    with company_scope.using("catbooks"):
+        sales = catalog.current().sales
+        assert sales is not None and sales.item_noun == "책" and sales.genres
