@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 기획 state proposals[].video_plan → 제안 화면 "3 영상 제작안" 값 (lib/videoPlan.ts)
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip } from "./videoPlan.ts";
+import { sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
 
 // 11/20 16:55 서버 PROP-15 모양 (snake_case, 계약 VideoPlan)
 const RAW = {
@@ -152,4 +152,28 @@ test("규칙 초안 이유: 이유마다 칩 옆 한 줄, 칸이 비거나 모�
   }
   // LLM 제작안이면 이유 칸이 와도 줄을 그리지 않는다
   assert.equal(videoFallbackLine(toVideoPlan({ ...RAW, fallback_reason: "timeout" })!), "");
+});
+
+test("콘티 못 그린 이유(11/25 svg_reason): 이유마다 장면 그림 자리 위 한 줄, 칸이 비거나 모르는 값이면 지금 그대로", () => {
+  const want = {
+    no_llm: "회사 AI가 연결되지 않아 콘티를 못 그렸어요",
+    timeout: "AI가 제한 시간 안에 포즈를 주지 못했어요",
+    bad_format: "AI 포즈 답 형식이 맞지 않았어요",
+    rejected: "포즈 답이 규칙에 걸렸어요",
+    error: "콘티 호출이 실패했어요",
+  };
+  for (const [reason, line] of Object.entries(want)) {
+    const v = toVideoPlan({ ...RAW, svg_reason: reason });
+    assert.ok(v);
+    assert.equal(v.svgReason, reason);
+    assert.equal(videoSvgLine(v), line); // AI 초안이어도 보인다 (PROP-38)
+    assert.equal(videoSvgLine(toVideoPlan({ ...RAW, svgReason: reason })!), line); // camel 같은 값
+    assert.equal(videoFallbackLine(v), ""); // 규칙 초안 줄과 따로
+  }
+  for (const raw of [RAW, { ...RAW, svg_reason: "" }, { ...RAW, svg_reason: "모름" }]) {
+    const v = toVideoPlan(raw);
+    assert.ok(v);
+    assert.equal("svgReason" in v, false);
+    assert.equal(videoSvgLine(v), "");
+  }
 });

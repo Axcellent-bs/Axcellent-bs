@@ -876,6 +876,11 @@ class VideoPlan(AxModel):
     # 예전 제작안은 "". no_llm = 회사 AI 연결 없음, timeout = 제한 시간 초과, bad_format = 답 형식
     # 불일치, rejected = 금지 규칙에 걸림, error = 그 밖의 호출 실패
     fallback_reason: Literal["", "no_llm", "timeout", "error", "bad_format", "rejected"] = ""
+    # 3D 마네킹 콘티(장면 SVG)를 못 그린 이유 (11/25 PROP-38 "장면 그림 자리"만 남은 것이 왜인지
+    # 화면에 보이게). 다 그렸거나 일부라도 그렸거나 예전 제작안은 "". no_llm = 회사 AI 연결 없음,
+    # timeout = 포즈 호출 제한 시간 초과, bad_format = 포즈 답 형식 불일치, rejected = 답은 왔지만
+    # 쓸 포즈가 하나도 없음(정리 규칙 탈락 포함), error = 그 밖의 호출 실패
+    svg_reason: Literal["", "no_llm", "timeout", "bad_format", "rejected", "error"] = ""
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:

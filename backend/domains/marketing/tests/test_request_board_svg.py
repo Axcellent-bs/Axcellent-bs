@@ -49,9 +49,20 @@ def _svg(word: str) -> str:
     )
 
 
+POSE = {"shot": "medium", "yaw": 35, "head": {"yaw": -40}, "arm_l": {"raise": 40, "bend": 60},
+        "label_ko": "돌아봄"}  # fmt: skip
+
+
 def _llm(panels: list[dict[str, Any]]) -> MockLLMClient:
-    read = bs.BoardSvgRead.model_validate({"panels": panels})
-    return MockLLMClient(responses={bs.BoardSvgRead: read})
+    read = bs.BoardPoseRead.model_validate({"panels": panels})
+    return MockLLMClient(responses={bs.BoardPoseRead: read})
+
+
+def _is_mannequin(svg: Any) -> bool:
+    """3D 마네킹 콘티: 구 음영(radialGradient)·바닥 격자(g stroke)·피부 구(url(#sk))."""
+    return bool(svg) and all(
+        p in str(svg) for p in ("<radialGradient", 'stroke="#e6dccd"', 'fill="url(#sk)"')
+    )
 
 
 def _draw(rid: str, factory: Any) -> str:
@@ -70,12 +81,17 @@ def _prepared(env: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 def test_request_flow_asks_the_llm_once_and_fills_only_svg(env: dict[str, Any]) -> None:
     rid, before = _prepared(env)
     assert before["board_source"] == "layout"
-    llm = _llm([{"no": n, "svg": _svg(f"칸{n}")} for n in (1, 2, 3)])
+    # 11/25: LLM은 칸별 포즈 숫자만, 그림은 공용 렌더러 (svg를 적어 보내도 쓰지 않는다)
+    llm = _llm([{"no": n, "pose": POSE, "svg": _svg(f"칸{n}")} for n in (1, 2, 3)])
     assert _draw(rid, lambda: llm) == "svg"
     assert len(llm.calls) == 1
     after = env["store"].get(rid)["storyboard"]
     assert after["board_source"] == "svg"
-    assert all(s["svg"] and "<circle" in s["svg"] for s in after["shots"])
+    assert all(_is_mannequin(s["svg"]) for s in after["shots"])
+    assert not any("칸1" in s["svg"] for s in after["shots"])
+    sent = llm.calls[0]
+    assert "SVG·그림 원문은 쓰지 않는다" in sent and "단순 도형" not in sent
+    assert '"shot_size"' in sent and '"camera"' in sent
     # 칸 문장·구도·프롬프트·길이는 코드 결과 그대로
     for key in ("scene_ko", "composition_ko", "prompt_en", "shot_size", "no"):
         assert [s[key] for s in after["shots"]] == [s[key] for s in before["shots"]]
@@ -90,11 +106,11 @@ def test_request_flow_asks_the_llm_once_and_fills_only_svg(env: dict[str, Any]) 
 
 def test_some_panels_svg_is_still_svg_and_others_stay_empty(env: dict[str, Any]) -> None:
     rid, _ = _prepared(env)
-    bad = '<svg viewBox="0 0 90 160"><script>alert(1)</script></svg>'.replace("<svg", "<div")
-    llm = _llm([{"no": 1, "svg": _svg("훅")}, {"no": 2, "svg": bad}, {"no": 9, "svg": _svg("x")}])
+    # 포즈가 온 칸만 그린다 (포즈 없음·모르는 번호는 빈 칸 = 배치판)
+    llm = _llm([{"no": 1, "pose": POSE}, {"no": 2, "pose": None}, {"no": 9, "pose": POSE}])
     assert _draw(rid, lambda: llm) == "svg"
     shots = env["store"].get(rid)["storyboard"]["shots"]
-    assert shots[0]["svg"] and not shots[1].get("svg") and not shots[2].get("svg")
+    assert _is_mannequin(shots[0]["svg"]) and not shots[1].get("svg") and not shots[2].get("svg")
 
 
 def test_no_llm_keeps_the_layout_and_the_flow(env: dict[str, Any]) -> None:
@@ -119,8 +135,10 @@ def test_llm_failure_or_all_dropped_svg_is_layout(env: dict[str, Any]) -> None:
 
     rid2, _ = Q._prepare(Q._brand(env, note="다른 캐릭터"))  # noqa: SLF001
     assert rid2 and rid2 != rid
-    dropped = _llm([{"no": 1, "svg": "<html>안 됨</html>"}])
+    # LLM이 SVG만 그려 보내고 포즈가 없으면 납작한 SVG를 쓰지 않고 배치판
+    dropped = _llm([{"no": n, "svg": _svg("납작")} for n in (1, 2, 3)])
     assert _draw(rid2, lambda: dropped) == "layout"
+    assert not any(s.get("svg") for s in env["store"].get(rid2)["storyboard"]["shots"])
 
 
 def test_prepare_skill_draws_svg_after_the_storyboard(
@@ -137,7 +155,7 @@ def test_prepare_skill_draws_svg_after_the_storyboard(
             evidence=Evidence(queries=["x"], data_summary="x", collected_at=datetime.now(UTC)),
         )
 
-    llm = _llm([{"no": 1, "svg": _svg("훅")}])
+    llm = _llm([{"no": 1, "pose": POSE}])
     monkeypatch.setattr(video_draft, "prepare_video_draft", fake_prepare)
     monkeypatch.setattr(bs, "LLM", lambda: seen.append("llm") or llm)
     request = AgentRequest(meta=Q._meta(), skill="prepare_video_draft_from_plan", input={})  # noqa: SLF001
@@ -159,6 +177,77 @@ def test_prepare_skill_without_a_record_does_not_call_the_llm(
     assert asyncio.run(handlers.prepare_video_draft_from_plan_skill(request)).status == (
         TaskStatus.COMPLETED
     )
+
+
+def _plan_with(**scene3: Any) -> Any:
+    scenes = [s.model_copy(update=scene3) if s.n == 3 else s for s in Q.PLAN.scenes]
+    return Q.PLAN.model_copy(update={"scenes": scenes})
+
+
+def test_end_card_panel_is_background_only_and_not_sent_to_the_llm(env: dict[str, Any]) -> None:
+    plan = _plan_with(visual="마무리: 채널 이름 엔드 카드")
+    rid, why = request_creative.prepare_storyboard(Q._brand(env), Q.CTX, plan)  # noqa: SLF001
+    assert why is None and rid
+    llm = _llm([{"no": n, "pose": POSE} for n in (1, 2, 3)])
+    assert _draw(rid, lambda: llm) == "svg"
+    assert "엔드 카드" not in llm.calls[0]  # 엔드카드 칸은 포즈를 묻지 않는다
+    shots = env["store"].get(rid)["storyboard"]["shots"]
+    assert all(_is_mannequin(s["svg"]) for s in shots[:2])
+    end = shots[2]["svg"]
+    assert 'fill="url(#bg)"' in end
+    for gone in ("<text", "<circle", "url(#sk)", "채널", '<rect x="4"'):
+        assert gone not in end
+
+
+def test_svg_model_env_changes_only_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ax_agent_template.llm import LLMSettings
+    from marketing_agent import pose_board
+
+    base = LLMSettings(model="mk-model", base_url="https://llm.example/v1", api_key="k-test")
+    made: list[LLMSettings] = []
+    monkeypatch.setattr(pose_board.company_ai, "settings_for", lambda dept: base)
+    monkeypatch.setattr(pose_board, "LLMClient", lambda dept, s: made.append(s) or s)
+    monkeypatch.delenv(pose_board.MODEL_ENV, raising=False)
+    bs.company_llm()
+    monkeypatch.setenv(pose_board.MODEL_ENV, "svg-model")
+    bs.company_llm()
+    assert [m.model for m in made] == ["mk-model", "svg-model"]
+    assert all((m.base_url, m.api_key) == (base.base_url, base.api_key) for m in made)
+
+
+def test_planning_svg_means_zero_marketing_llm_calls(env: dict[str, Any]) -> None:
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 320">'
+           '<rect x="0" y="0" width="180" height="320" fill="#eee"/></svg>')  # fmt: skip
+    scenes = [s.model_copy(update={"start_svg": svg}) for s in Q.PLAN.scenes]
+    plan = Q.PLAN.model_copy(update={"scenes": scenes})
+    rid, why = request_creative.prepare_storyboard(Q._brand(env), Q.CTX, plan)  # noqa: SLF001
+    assert why is None and rid
+    llm = _llm([{"no": 1, "pose": POSE}])
+    assert _draw(rid, lambda: llm) == "skipped" and llm.calls == []
+
+
+@pytest.mark.parametrize(
+    ("extra", "scene", "want"),
+    [
+        ({"fallback_reason": "timeout"}, {}, "fallback_reason=timeout"),
+        ({"svg_reason": "bad_format"}, {}, "svg_reason=bad_format"),
+        ({}, {"start_svg": "<script>alert(1)</script>"}, "sanitize_dropped"),
+        ({}, {}, "unknown"),
+    ],
+)
+def test_missing_planning_svg_logs_only_the_record_and_reason(
+    env: dict[str, Any], caplog: pytest.LogCaptureFixture, extra: dict[str, Any],
+    scene: dict[str, Any], want: str,
+) -> None:  # fmt: skip
+    scenes = [s.model_copy(update=scene) for s in Q.PLAN.scenes]
+    plan = Q.PLAN.model_copy(update={"scenes": scenes, **extra})
+    assert request_creative.plan_svg_missing(plan) == want
+    with caplog.at_level("INFO", logger="marketing.request_creative"):
+        rid, _ = request_creative.prepare_storyboard(Q._brand(env), Q.CTX, plan)  # noqa: SLF001
+    lines = [r.getMessage() for r in caplog.records]
+    line = " ".join(m for m in lines if "기획 콘티 SVG 없음" in m)
+    assert rid and rid in line and want in line
+    assert "책방" not in line and "script" not in line  # 장면 글·SVG 값은 남기지 않는다
 
 
 def test_code_only_storyboard_is_still_layout_before_svg() -> None:

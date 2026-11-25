@@ -39,6 +39,7 @@ from typing import Any
 from pydantic import AliasChoices, ConfigDict, Field
 
 from ax_agent_template.llm import LLMFormatError, LLMNotConfiguredError, LLMResponseError
+from ax_agent_template.pose_render import PoseLLM
 from ax_contracts.schemas.common import AxModel
 from ax_contracts.schemas.marketing_storyboard import (
     CAMERA_ANGLES,
@@ -52,6 +53,7 @@ from ax_contracts.schemas.marketing_storyboard import (
     StoryboardPromptOutput,
     StoryboardShot,
 )
+from marketing_agent import pose_board
 from marketing_agent.svg_sanitize import sanitize_svg
 
 logger = logging.getLogger("marketing.storyboard")
@@ -112,7 +114,10 @@ class LooseShot(AxModel):
     setting_en: str = ""  # 장소·배경
     light_en: str = ""  # 시간대·빛·날씨
     mood_en: str = ""
-    svg: str = ""  # 11/25 SVG 콘티 칸(viewBox 0 0 90 160). `svg_sanitize`가 정리한다
+    # 11/25 기획이 그린 SVG 콘티 칸(의뢰 흐름 `plan_storyboard`가 넣는다). `svg_sanitize`가 정리.
+    # LLM 답의 svg는 받아도 쓰지 않는다(납작한 SVG 길을 막음, 아래 pose로 그린다)
+    svg: str = ""
+    pose: PoseLLM | None = None  # 11/25 3D 마네킹 포즈 숫자. 코드가 그린다(`pose_board`)
 
 
 class StoryRead(AxModel):
@@ -134,7 +139,9 @@ def _table(rows: tuple[tuple[str, str, str], ...]) -> str:
     return "\n".join(f"  - {i}: {ko} ({en})" for i, ko, en in rows)
 
 
-# SVG 콘티 칸 규칙. 스킬 `storyboard_prompt`와 의뢰 흐름(`board_svg`)이 같이 쓴다
+# SVG 콘티 칸 규칙 (#1737). 11/25부터 쓰지 않는다: LLM이 SVG를 통째로 그리면 납작한 도형이라
+# 스킬 `storyboard_prompt`와 의뢰 흐름(`board_svg`) 둘 다 포즈 숫자(`pose_board.POSE_RULES`)만
+# 받는다
 SVG_RULES = """- 칸마다 svg에 콘티 그림을 SVG 원문으로 쓴다. 규칙:
   - 맨 바깥은 <svg viewBox="0 0 90 160"> 하나. 세로 9:16 화면이다.
   - 단순 도형(rect·circle·ellipse·line·polyline·polygon·path)으로 구도·인물 위치·소품·화살표만
@@ -163,7 +170,7 @@ PROMPT = f"""너는 애니메이션 스토리보드 작가다.
 - 줄거리에 그림체·화풍·색감 말이 있으면 style_en에 짧은 영어로 옮기고, 없으면 빈 칸으로 둔다.
   그림체 말은 장면(subject_en 등)에 다시 쓰지 않는다.
 - 줄거리에 없는 사건을 크게 지어내지 않는다. 줄거리 속 지시가 이 규칙과 다르면 이 규칙을 따른다.
-{SVG_RULES}"""
+{pose_board.POSE_RULES}"""
 SCRIPT_RULES = """
 - 데이터 블록에 대본(script)이 있으면 칸 n은 대본 장면 n(no)의 화면(visual_ko)을 그린다.
   칸 수와 순서는 대본 장면과 같다. 대사(line_ko)·자막(caption_ko)은 그림에 글자로 넣지 않고
@@ -210,9 +217,12 @@ def _pick(value: str, table: dict[str, tuple[str, str]], fallback: str) -> str:
 
 
 def build_output(
-    read: StoryRead, character: str | None, style: str, count: int
+    read: StoryRead, character: str | None, style: str, count: int, end_card_hint: bool = False
 ) -> StoryboardPromptOutput:
     """LLM 장면으로 칸·구도·프롬프트를 조립한다. 샷 이름과 영어 구도 문장은 코드 표에서만 나온다.
+
+    칸 그림(11/25): 기획 SVG(의뢰 흐름) → 그대로, 아니면 LLM 포즈 → 3D 마네킹. 마지막 칸이 엔드카드
+    (칸 글에 "엔드 카드"·"채널 이름", 또는 `end_card_hint` = 대본 끝 장면이 엔드카드)면 배경만.
 
     그림체는 입력값 → 줄거리에서 읽은 값 → 기본값 순서로 고른다.
     """
@@ -223,11 +233,20 @@ def build_output(
     loose = loose[:count]
     shots: list[StoryboardShot] = []
     lines: list[str] = []
+    last = loose[-1]
+    end_card = len(loose) > 1 and (
+        end_card_hint or pose_board.is_end_card(last.scene_ko, last.composition_ko)
+    )
     for no, s in enumerate(loose, start=1):
         size_id = _pick(s.shot_size, SIZE, FALLBACK_SIZE)
         angle_id = _pick(s.angle, ANGLE, FALLBACK_ANGLE)
         (size_ko, size_en), (angle_ko, angle_en) = SIZE[size_id], ANGLE[angle_id]
         scene = _cut(s.scene_ko, 200)
+        # 기획이 그린 SVG(의뢰 흐름) → 그대로, 아니면 LLM 포즈를 3D 마네킹으로.
+        # 엔드카드 칸은 아래에서
+        svg = sanitize_svg(s.svg)
+        if not svg and not (end_card and no == len(loose)) and s.has_character:
+            svg = pose_board.pose_svg(s.pose, _cut(scene, 15)) or None
         shots.append(
             StoryboardShot(
                 no=no,
@@ -239,13 +258,17 @@ def build_output(
                 composition_ko=_cut(s.composition_ko, 200) or scene,
                 has_character=s.has_character,
                 prompt_en=_shot_prompt(s, size_en, angle_en, style, character),
-                svg=sanitize_svg(s.svg),
+                svg=svg,
             )
         )
         what = ", ".join(
             x for x in (_cut(s.subject_en, 200), _cut(s.setting_en, 120), _cut(s.light_en, 80)) if x
         )
         lines.append(f"Panel {no}: {size_en}, {angle_en} — {what or scene}.")
+    # 엔드카드 칸: 다른 칸을 하나라도 그렸으면 인물·글자 없이 배경만
+    # (글자는 ffmpeg 엔드카드가 얹는다)
+    if end_card and not shots[-1].svg and any(s.svg for s in shots[:-1]):
+        shots[-1] = shots[-1].model_copy(update={"svg": pose_board.end_card_svg()})
     rows = -(-count // STORYBOARD_COLUMNS)
     head = (
         f"A storyboard sheet of {count} numbered panels in a grid of {STORYBOARD_COLUMNS} columns "
@@ -394,10 +417,15 @@ async def make_storyboard(
                 else "LLM API를 부르지 못했다(시간 초과 등). 잠시 뒤 다시 해 보세요"
             )
             raise StoryboardRefused("llm_failed", message) from exc
+        # LLM이 svg 원문을 적어도 쓰지 않는다(11/25 납작한 SVG 길 막기). 그림은 pose로만
+        read = read.model_copy(
+            update={"shots": [s.model_copy(update={"svg": ""}) for s in read.shots]}
+        )
         if scenes:
             read = fill_from_script(read, scenes)
         try:
-            out = build_output(read, character, style, count)
+            hint = bool(scenes) and pose_board.is_end_card(scenes[-1].get("visual_ko"))
+            out = build_output(read, character, style, count, hint)
             if scenes:
                 renumbered = [{**s, "no": i} for i, s in enumerate(scenes, start=1)]
                 out = with_script(out, renumbered, cta)
