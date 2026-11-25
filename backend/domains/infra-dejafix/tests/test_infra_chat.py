@@ -274,3 +274,22 @@ def test_other_agents_cannot_open_the_chat() -> None:
     }
     res = TestClient(app).post("/a2a", json=body).json()
     assert res["status"] != "completed"
+
+
+def test_chat_threads_are_seen_only_by_their_company() -> None:
+    """누비투어 요청에는 캣북스 대화가 안 보인다(목록·열기·숨기기).
+    요청 밖 정리는 모두 본다 (11/25)."""
+    from ax_agent_template import company_scope
+
+    store = threads.ChatStore()
+    cat = store.create("캣북스 질문", "u1", "catbooks")
+    nubi = store.create("누비 질문", "u2", "nubi-tour")
+    with company_scope.using("nubi-tour"):
+        assert [t["id"] for t in store.list_all()] == [nubi["id"]]
+        assert store.get(cat["id"]) is None
+        assert store.hide(cat["id"], "u2") is False
+        assert store.begin_turn(cat["id"], "몰래")[0] == "missing"
+    with company_scope.using("catbooks"):
+        assert [t["id"] for t in store.list_all()] == [cat["id"]]
+        assert store.get(nubi["id"]) is None
+    assert {t["id"] for t in store.list_all()} == {cat["id"], nubi["id"]}  # 요청 밖

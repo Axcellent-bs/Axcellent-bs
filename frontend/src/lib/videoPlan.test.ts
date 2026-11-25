@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 기획 state proposals[].video_plan → 제안 화면 "3 영상 제작안" 값 (lib/videoPlan.ts)
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sceneTime, toVideoPlan, videoPlanChip, videoPlanSummary } from "./videoPlan.ts";
+import { sceneKeyframeLine, sceneTime, toVideoPlan, videoPlanChip, videoPlanSummary, videoPurposeChip } from "./videoPlan.ts";
 
 // 11/20 16:55 서버 PROP-15 모양 (snake_case, 계약 VideoPlan)
 const RAW = {
@@ -65,4 +65,41 @@ test("toVideoPlan: 없거나 모양이 틀리면 undefined (던지지 않는다)
   ]) {
     assert.equal(toVideoPlan(bad), undefined, JSON.stringify(bad)?.slice(0, 60));
   }
+});
+
+// 11/25 키프레임 칸·광고 목적 (계약 VideoScene.start_frame…camera_en, VideoPlan.purpose·offer_ko·cta_ko)
+const KEYFRAME = {
+  ...RAW,
+  purpose: "client_offer", offer_ko: "겨울 신간 할인", cta_ko: "지금 만나 보세요",
+  scenes: RAW.scenes.map((s, i) => (i === 0
+    ? { ...s, start_frame: "고양이 한 마리가 가운데에서 창문을 본다", end_frame: "고양이가 카메라를 본다", action_en: "The cat turns toward the camera", camera_en: "Medium shot, slow push-in" }
+    : s)),
+};
+
+test("키프레임 한 줄: 첫 화면 → 끝 화면 · 동작 · 카메라 (snake·camel 같은 값)", () => {
+  const v = toVideoPlan(KEYFRAME);
+  assert.ok(v);
+  assert.equal(sceneKeyframeLine(v.scenes[0]), "고양이 한 마리가 가운데에서 창문을 본다 → 고양이가 카메라를 본다 · The cat turns toward the camera · Medium shot, slow push-in");
+  assert.equal(sceneKeyframeLine(v.scenes[1]), null); // 빈 칸이면 줄 없음 (지금 화면 그대로)
+  assert.deepEqual(toVideoPlan(v), v); // camelize 뒤(화면 값 모양)도 같은 값
+  assert.equal(sceneKeyframeLine({ startFrame: "", endFrame: "", actionEn: "The cat waves", cameraEn: "" }), "The cat waves");
+});
+
+test("키프레임: 규칙 제작안처럼 첫 화면만 있으면 줄을 그리지 않는다", () => {
+  assert.equal(sceneKeyframeLine({ startFrame: "나무 책상 클로즈업" }), null);
+});
+
+test("광고 목적 칩: 솔루션 광고 · 고객 혜택 광고 · 채널 콘텐츠, 없거나 모르는 값이면 없음", () => {
+  const v = toVideoPlan(KEYFRAME);
+  assert.ok(v);
+  assert.equal(videoPurposeChip(v), "고객 혜택 광고");
+  assert.equal(v.offerKo, "겨울 신간 할인");
+  assert.equal(v.ctaKo, "지금 만나 보세요");
+  assert.equal(videoPurposeChip(toVideoPlan({ ...RAW, purpose: "solution_ad" })!), "솔루션 광고");
+  assert.equal(videoPurposeChip(toVideoPlan({ ...RAW, purpose: "channel_content" })!), "채널 콘텐츠");
+  const old = toVideoPlan(RAW)!;
+  assert.equal(videoPurposeChip(old), null);
+  assert.equal(old.offerKo, undefined);
+  assert.equal(videoPurposeChip(toVideoPlan({ ...RAW, purpose: "meme" })!), null);
+  assert.deepEqual(Object.keys(old.scenes[0]).sort(), ["caption", "endS", "n", "prompt", "startS", "visual"]); // 예전 제작안은 새 칸 없음
 });

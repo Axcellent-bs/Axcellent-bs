@@ -154,6 +154,21 @@ export function onSessionChange(l: () => void): () => void {
   };
 }
 
+/**
+ * 사람(세션 토큰)이 바뀔 때만 알린다: 로그인·로그아웃·다른 계정으로 바꾸기·만료.
+ * 같은 사람의 계정 값 다시 읽기(창으로 돌아올 때 `/auth/me` → setSession)는 알리지 않는다.
+ * 그때까지 앞 사람 값을 비우면 화면이 "불러오는 중"으로 바뀌었다 다시 그려져 입력하던 칸이 지워졌다(11/25).
+ */
+export function onPersonChange(l: () => void): () => void {
+  let last = getSession()?.token ?? null;
+  return onSessionChange(() => {
+    const now = getSession()?.token ?? null;
+    if (now === last) return;
+    last = now;
+    l();
+  });
+}
+
 export function setSession(next: HumanSession | null): void {
   current = next;
   try {

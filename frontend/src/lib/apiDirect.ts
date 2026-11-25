@@ -11,7 +11,7 @@
 // - 직접 호스트는 토큰을 대신 붙여 주지 않는다(공용 사람 토큰 주입은 같은 출처 nginx 만 한다).
 //   그래서 토큰이 필요한 경로는 로그인 세션 토큰(axs1.)이 있을 때만 직접 보내고, 헤더에 없으면 세션 토큰을 실어 준다.
 //   세션이 없으면(자리표시자만 있으면) 같은 출처 그대로 간다
-// - 토큰이 필요 없는 경로(기획/개발 state)는 헤더를 건드리지 않는다.
+// - 토큰이 필요 없는 경로(로그인 전 공개 두 개)는 헤더를 건드리지 않는다.
 //   Authorization 이 없으면 단순 요청이라 브라우저가 OPTIONS 사전 요청을 보내지 않는다
 // - 직접 호스트에 닿지 못하면(네트워크·CORS 실패) 같은 출처로 한 번 다시 보내고, 잠시(60초) 직접 길을 쉰다
 import { getSession } from "./humanSession.ts";
@@ -43,9 +43,9 @@ export const DIRECT_ROUTES: readonly DirectRoute[] = [
   // 총괄 이슈·안전 실행 기록: 세션 토큰의 회사(cid)로 그 회사 것만 읽는다(11/25 회사 분리, 토큰이 없으면 캣북스로 떨어졌다)
   { service: "orch", auth: "session", path: /^\/api\/incidents$/ },
   { service: "safety", auth: "session", path: /^\/api\/safety\/executions$/ },
-  // 기획·개발 state (사이드바 숫자, 30초마다)
-  { service: "planning", auth: "none", path: /^\/api\/planning\/state$/ },
-  { service: "dev", auth: "none", path: /^\/api\/planning\/state$/ },
+  // 기획·개발 state (사이드바 숫자, 30초마다). 세션 회사 상태를 받으려고 세션 토큰을 싣는다 (11/25 회사 분리)
+  { service: "planning", auth: "session", path: /^\/api\/planning\/state$/ },
+  { service: "dev", auth: "session", path: /^\/api\/planning\/state$/ },
 ];
 
 export interface DirectConfig { base: string; services: ReadonlySet<DirectService> }

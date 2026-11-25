@@ -411,12 +411,20 @@ def _restarted_since(svc: DevService, task_id: str, at: datetime) -> bool:
 _opening: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
 
 
-def _open_lock(task_id: str) -> asyncio.Lock:
+def _key(svc: DevService, item_id: str) -> str:
+    """프로세스 안 표의 열쇠: 회사마다 작업·대화 id(task-1·chat-1 …)가 겹치므로 캣북스가 아닌 회사는
+    회사를 앞에 붙인다 (11/25 회사 분리). 캣북스는 예전 열쇠 그대로."""
+    company = getattr(svc, "company", None)
+    return item_id if not company else f"{company}/{item_id}"
+
+
+def _open_lock(svc: DevService, task_id: str) -> asyncio.Lock:
     loop = asyncio.get_running_loop()
-    got = _opening.get(task_id)
+    key = _key(svc, task_id)
+    got = _opening.get(key)
     if got is None or got[0] is not loop:
         got = (loop, asyncio.Lock())
-        _opening[task_id] = got
+        _opening[key] = got
     return got[1]
 
 
@@ -443,7 +451,7 @@ async def open_for_task(
     if not stuck_task(svc, task_id):
         raise ActionError("NOT_STUCK", f"{task_id}는 멈춘 작업이 아니다 (진행 중·PR 있음·끝남)")
     llm = get_llm()
-    async with _open_lock(task_id):  # 확인과 만들기 사이에 같은 작업 대화가 또 생기지 않게
+    async with _open_lock(svc, task_id):  # 확인과 만들기 사이에 같은 작업 대화가 또 생기지 않게
         found = _open_thread_for(svc, task_id, who, account, origin)
         if found is not None:
             return found
@@ -790,7 +798,7 @@ async def _answer(
 
     이 턴(마지막 사람 말)이 끝난 뒤(갇혀서 `release_stuck`이 되돌렸거나 새 말이 왔으면)에는
     늦게 온 답·오류를 적지 않고, 다른 턴의 answering도 풀지 않는다."""
-    turn = _new_turn(tid)
+    turn = _new_turn(svc, tid)
     try:
         await _reply(svc, llm, tid, text, conns, prev, turn)
     except Exception as exc:  # noqa: BLE001 - 뒤에서 도는 답이라 오류도 대화에 남긴다
@@ -814,14 +822,15 @@ async def _answer(
 _turns: dict[str, int] = {}
 
 
-def _new_turn(tid: str) -> int:
-    _turns[tid] = _turns.get(tid, 0) + 1
-    return _turns[tid]
+def _new_turn(svc: DevService, tid: str) -> int:
+    key = _key(svc, tid)
+    _turns[key] = _turns.get(key, 0) + 1
+    return _turns[key]
 
 
 def _same_turn(svc: DevService, tid: str, turn: int | None) -> bool:
     """아직 이 턴이 대화의 지금 턴인가 (대화가 남아 있고 그 뒤로 새 턴·되돌리기가 없다)."""
-    return svc.chat_of(tid) is not None and (turn is None or _turns.get(tid) == turn)
+    return svc.chat_of(tid) is not None and (turn is None or _turns.get(_key(svc, tid)) == turn)
 
 
 async def _note_error(svc: DevService, tid: str, text: str, status: str | None = None) -> None:
@@ -1519,7 +1528,7 @@ async def release_stuck(svc: DevService) -> list[str]:
         th = svc.chat_of(tid)
         if th is None:
             continue
-        _new_turn(tid)  # 아직 도는 답이 있으면 그 턴을 끝난 것으로 (늦게 와도 버린다)
+        _new_turn(svc, tid)  # 아직 도는 답이 있으면 그 턴을 끝난 것으로 (늦게 와도 버린다)
         await _note_error(
             svc, tid, "답이 너무 오래 걸려 멈췄어요. 다시 보내 주세요.", status=_resting_status(th)
         )

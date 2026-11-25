@@ -33,7 +33,6 @@ test("서비스를 고른 것만 직접 간다", () => {
 });
 
 test("토큰이 필요 없는 읽기는 헤더를 건드리지 않는다", () => {
-  assert.deepEqual(go("/planning-api/api/planning/state"), { url: `${BASE}/planning-api/api/planning/state` });
   assert.deepEqual(go("/dashboard-api/api/dashboard/auth/company"), { url: `${BASE}/dashboard-api/api/dashboard/auth/company` });
 });
 
@@ -81,8 +80,8 @@ test("직접 호스트로 감: 주소·헤더 확인, 세션 토큰 실음", asy
     assert.equal(seen[0].url, `${BASE}/dashboard-api/api/dashboard/office-room`);
     assert.equal(new Headers(seen[0].init?.headers).get("authorization"), `Bearer ${S}`);
     const init = { cache: "no-store" as const };
-    await globalThis.fetch("/planning-api/api/planning/state", init);
-    assert.equal(seen[1].url, `${BASE}/planning-api/api/planning/state`);
+    await globalThis.fetch("/dashboard-api/api/dashboard/auth/company", init);
+    assert.equal(seen[1].url, `${BASE}/dashboard-api/api/dashboard/auth/company`);
     assert.equal(seen[1].init, init); // 헤더를 건드리지 않아 단순 요청 그대로
     await globalThis.fetch("/dashboard-api/api/dashboard/claims");
     assert.equal(seen[2].url, "/dashboard-api/api/dashboard/claims");
@@ -113,11 +112,21 @@ test("중단 신호는 되돌리지 않고 그대로 던진다", async () => {
 });
 
 test("토큰을 안 보는 읽기(tokenFree): 표의 auth none 경로만 참, 쿼리는 무시, 다른 경로·서비스는 거짓", () => {
-  assert.equal(tokenFree("planning", "/api/planning/state?x=1"), true);
-  assert.equal(tokenFree("planning", "/api/planning/state"), true);
-  assert.equal(tokenFree("dev", "/api/planning/state"), true);
+  assert.equal(tokenFree("dashboard", "/api/dashboard/auth/company?x=1"), true);
+  // 총괄 이슈·안전 실행 기록·기획/개발 state는 세션 토큰(회사)을 싣는다 (11/25 회사 분리)
+  assert.equal(tokenFree("safety", "/api/safety/executions"), false);
+  assert.equal(tokenFree("orch", "/api/incidents?limit=5"), false);
+  assert.equal(tokenFree("planning", "/api/planning/state"), false);
+  assert.equal(tokenFree("dev", "/api/planning/state"), false);
   assert.equal(tokenFree("safety", "/api/safety/reviews"), false);
   assert.equal(tokenFree("orch", "/api/requests"), false);
   assert.equal(tokenFree("planning", "/api/planning/review-queue"), false);
   assert.equal(tokenFree("dashboard", "/api/dashboard/auth/me"), false);
+});
+
+test("기획·개발 state는 세션이 있을 때만 세션 토큰을 실어 직접 간다 (11/25 회사 분리)", () => {
+  const u = "/planning-api/api/planning/state";
+  assert.equal(go(u), null); // 세션 없음 → 같은 출처 nginx로
+  assert.deepEqual(go(u, { session: "axs1.abc" }), { url: `${BASE}${u}`, authorization: "Bearer axs1.abc" });
+  assert.deepEqual(go("/dev-api/api/planning/state", { auth: "Bearer axs1.abc" }), { url: `${BASE}/dev-api/api/planning/state` });
 });

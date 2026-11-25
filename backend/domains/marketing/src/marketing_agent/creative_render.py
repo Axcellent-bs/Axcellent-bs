@@ -866,7 +866,9 @@ async def request_video(
     credits: float | None = None
     if via == MCP:
         try:
-            credits = await _mcp_preflight(cid, "video", _video_mcp_params(rec, seconds, cid))
+            credits = await _mcp_preflight(
+                cid, "video", _video_mcp_params(rec, seconds, cid, speed)
+            )
         except _ERRORS as error:
             raise RenderError(_code(error)) from None
     key = f"{meta.context_id}:{VIDEO_ACTION}:{record_id}"
@@ -1003,61 +1005,101 @@ def _secs(x: Any) -> str:
     return str(int(v)) if v == int(v) else str(v)
 
 
-def _scene_line(shot: dict[str, Any]) -> str:
-    line = f"Scene {shot.get('no')} ({_secs(shot.get('start_s'))}-{_secs(shot.get('end_s'))}s): "
-    line += _one(shot.get("scene_ko"))
+# 11/25 예진 님 지적: 영상 모델에 글자를 그리라고 하지 않는다. 자막·CTA는 #1742가 코드로 얹는다
+NO_TEXT = "No on-screen text, captions, subtitles, logos or signs; text is added later."
+# 첫 문장은 참조 방식(`render.video.summary.reference`)에 맞춘다
+REF_STORYBOARD = "storyboard_image"  # 스토리보드 그림을 start_image로
+REF_CHARACTER = "character_original"  # 가상 인물 원본을 image_references로 (스토리보드 그림 없음)
+OPENING = {
+    REF_STORYBOARD: (
+        "Animate this storyboard as one continuous short film, panel by panel in order, "
+        "keeping the same characters, outfits and art style."
+    ),
+    REF_CHARACTER: (
+        "Make one continuous short film of the same person as the reference images, "
+        "keeping face, hair and outfit consistent."
+    ),
+}
+
+
+def _scene_line(shot: dict[str, Any], speed: float = 1.0) -> str:
+    """장면 한 줄. 시각 = 기획 시각 × 배속(만든 영상 기준). 자막은 넣지 않고, 대사는 따옴표 없이
+    장면이 전하는 내용으로만 남긴다(입 모양·글자를 그리게 하지 않는다)."""
+    start = float(shot.get("start_s") or 0) * speed
+    end = float(shot.get("end_s") or 0) * speed
+    line = f"Scene {shot.get('no')} ({_secs(start)}-{_secs(end)}s): " + _one(shot.get("scene_ko"))
     said = _one(shot.get("line_ko"))
     if said:
-        who = _one(shot.get("speaker_ko"))
-        line += f' / {who + ": " if who else "narration: "}"{said}"'
-    caption = _one(shot.get("caption_ko"))
-    if caption:
-        line += f' / on-screen text "{caption}"'
+        line += f" / the action conveys: {said}"
     return line + "."
 
 
-def script_flow(shots: list[dict[str, Any]] | None, cta: str | None, room: int) -> str:
-    """대본을 따라 만든 스토리보드의 장면 흐름·대사 요지·자막. `room` 글자 안에 맞춘다.
+def script_flow(shots: list[dict[str, Any]] | None, room: int, speed: float = 1.0) -> str:
+    """대본을 따라 만든 스토리보드의 장면 흐름·대사 요지. `room` 글자 안에 맞춘다.
 
-    장면마다 같은 몫(남은 길이 ÷ 장면 수)까지만 쓰고, 끝 CTA는 늘 남긴다."""
+    장면마다 같은 몫(남은 길이 ÷ 장면 수)까지만 쓰고, 끝의 글자 금지 문장(`NO_TEXT`)은 늘 남긴다."""
     rows = [s for s in (shots or []) if s.get("start_s") is not None]
     if not rows:
         return ""
-    tail = f' End with the call to action "{_one(cta)[:100]}".' if _one(cta) else ""
+    tail = f" {NO_TEXT}"
     share = max(0, (room - len(SCRIPT_HEAD) - len(tail)) // len(rows) - 1)
-    body = " ".join(_scene_line(s)[:share] for s in rows)
+    body = " ".join(_scene_line(s, speed)[:share] for s in rows)
     return f"{SCRIPT_HEAD} {body}{tail}"
 
 
 def storyboard_video_prompt(
     style_en: str | None,
     shots: list[dict[str, Any]] | None = None,
-    cta: str | None = None,
+    *,
+    speed: float = 1.0,
+    reference: str = REF_STORYBOARD,
 ) -> str:
-    """스토리보드 영상 프롬프트(스토리보드 그림을 시작 이미지로 쓴다).
+    """영상 프롬프트.
 
-    대본을 따라 만든 스토리보드면(칸에 시간이 있으면) 장면 흐름·대사 요지·자막·CTA를 붙이고
-    `VIDEO_PROMPT_MAX` 안에 맞춘다(11/23).
+    첫 문장은 참조 방식(`reference`)에 맞춘다: 스토리보드 그림(start_image)이면 "Animate this
+    storyboard…", 가상 인물 원본(image_references)이면 "Make one continuous short film of the same
+    person…". 대본을 따라 만든 스토리보드면(칸에 시간이 있으면) 장면 흐름(시각 × `speed`)·대사
+    요지와 글자 금지 문장을 붙이고 `VIDEO_PROMPT_MAX` 안에 맞춘다. 자막·CTA는 넣지 않는다.
     화면의 [영상 프롬프트 복사 + Higgsfield 열기]가 같은 문장을 만든다
     (`frontend/src/lib/higgsfieldWeb.ts`의 `storyboardVideoPrompt`). 바꾸면 둘 다 바꾼다.
     """
-    base = (
-        "Animate this storyboard as one continuous short film, panel by panel in order, "
-        "keeping the same characters, outfits and art style. "
-        f"{style_en or ''}"
-    ).strip()[:VIDEO_PROMPT_MAX]
-    flow = script_flow(shots, cta, VIDEO_PROMPT_MAX - len(base) - 1)
+    opening = OPENING.get(reference, OPENING[REF_STORYBOARD])
+    base = f"{opening} {style_en or ''}".strip()[:VIDEO_PROMPT_MAX]
+    flow = script_flow(shots, VIDEO_PROMPT_MAX - len(base) - 1, speed)
     return f"{base} {flow}"[:VIDEO_PROMPT_MAX] if flow else base
 
 
-def _video_prompt(rec: dict[str, Any]) -> str:
+def video_speed(rec: dict[str, Any]) -> float:
+    """기록의 실제 배속(`render.video.speed` → `summary.speed`). 없으면 1.0."""
+    video = (rec.get("render") or {}).get("video") or {}
+    raw = video.get("speed")
+    if raw is None:
+        raw = (video.get("summary") or {}).get("speed")
+    return speed_value(raw)
+
+
+def _video_prompt(
+    rec: dict[str, Any], speed: float | None = None, reference: str = REF_STORYBOARD
+) -> str:
     board = rec.get("storyboard") or {}
     shots = board.get("shots") if board.get("script_used") else None
-    return storyboard_video_prompt(board.get("style_en"), shots, board.get("cta_ko"))
+    return storyboard_video_prompt(
+        board.get("style_en"),
+        shots,
+        speed=video_speed(rec) if speed is None else speed,
+        reference=reference,
+    )
 
 
-def _video_mcp_params(rec: dict[str, Any], seconds: int, cid: str | None = None) -> dict[str, Any]:
-    return _mcp.video_params(mcp_video_model(cid), _video_prompt(rec), video_aspect(cid), seconds)
+def _video_mcp_params(
+    rec: dict[str, Any], seconds: int, cid: str | None = None, speed: float | None = None
+) -> dict[str, Any]:
+    model = mcp_video_model(cid)
+    # 참조 방식은 영상을 만들 때 고르는 것(`video_reference`)과 같다
+    part, _ = video_reference(rec, model)
+    reference = REF_CHARACTER if part == "sheet_image" else REF_STORYBOARD
+    prompt = _video_prompt(rec, speed, reference)
+    return _mcp.video_params(model, prompt, video_aspect(cid), seconds)
 
 
 async def _render_video(

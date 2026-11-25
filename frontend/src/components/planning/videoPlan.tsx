@@ -7,7 +7,7 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Tag } from '@/components/planning-common/parts'
 import { usePrinting } from '@/lib/print'
-import { sceneTime, videoPlanChip, type VideoPlanView } from '@/lib/videoPlan'
+import { sceneKeyframeLine, sceneTime, videoPlanChip, videoPurposeChip, type VideoPlanView } from '@/lib/videoPlan'
 import { sceneRole, sceneShares } from '@/lib/videoStoryboard'
 import { orchestrator } from '@/lib/orchestrator'
 import { proposalOfRequest, requestActionError, stepRows } from '@/lib/requestCards'
@@ -29,15 +29,18 @@ export interface StoryBasis { report: string | null; points: string[] }
 
 export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlanView; audience?: string | null; basis?: StoryBasis; children?: ReactNode }) {
   const shares = sceneShares(v.scenes)
+  const purpose = videoPurposeChip(v)
   return (
     <section className="pp-part sb" aria-label="영상 제작안">
-      <h3 className="pp-part-h">영상 제작안<Tag>{videoPlanChip(v)}</Tag></h3>
+      <h3 className="pp-part-h">영상 제작안<Tag>{videoPlanChip(v)}</Tag>{purpose && <span className="chip sb-purpose" title="광고 목적">{purpose}</span>}</h3>
       <p className="sb-concept">{v.concept}</p>
       <dl className="sb-meta">
         <div><dt>길이</dt><dd>{v.durationS}초</dd></div>
         <div><dt>비율</dt><dd>{v.aspect}</dd></div>
         <div><dt>장면</dt><dd>{v.scenes.length}</dd></div>
         {audience && <div><dt>대상</dt><dd>{audience}</dd></div>}
+        {v.offerKo && <div><dt>혜택</dt><dd>{v.offerKo}</dd></div>}
+        {v.ctaKo && <div><dt>행동 문구</dt><dd>{v.ctaKo}</dd></div>}
         {basis && (basis.report || basis.points.length > 0) && (
           <div className="sb-basis"><dt>근거</dt><dd>{[basis.report ? `보고서 ${basis.report}` : null, ...basis.points].filter(Boolean).join(' · ')}</dd></div>
         )}
@@ -48,16 +51,20 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
         ))}
       </ol>
       <ol className="sb-cards" style={{ '--n': v.scenes.length } as CSSProperties}>
-        {v.scenes.map((s, i) => (
-          <li key={s.n} className="sb-card">
-            <div className={`sb-shot sb-c${i % 4}`} aria-hidden="true"><span>장면 그림 자리</span></div>
-            <div className="sb-card-body">
-              <div className="sb-card-top">{s.n} · {sceneRole(i, v.scenes.length)} · {sceneTime(s)}</div>
-              <p className="sb-visual">{s.visual}</p>
-              {s.caption && <span className="sb-caption">자막: {s.caption}</span>}
-            </div>
-          </li>
-        ))}
+        {v.scenes.map((s, i) => {
+          const keyframe = sceneKeyframeLine(s)
+          return (
+            <li key={s.n} className="sb-card">
+              <div className={`sb-shot sb-c${i % 4}`} aria-hidden="true"><span>장면 그림 자리</span></div>
+              <div className="sb-card-body">
+                <div className="sb-card-top">{s.n} · {sceneRole(i, v.scenes.length)} · {sceneTime(s)}</div>
+                <p className="sb-visual">{s.visual}</p>
+                {keyframe && <p className="sb-keyframe" title="첫 화면 → 끝 화면 · 동작 · 카메라">{keyframe}</p>}
+                {s.caption && <span className="sb-caption">자막: {s.caption}</span>}
+              </div>
+            </li>
+          )
+        })}
       </ol>
       {v.script && (
         <Fold title="대본 전체" note={`${v.script.length}자`}>
