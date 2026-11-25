@@ -52,13 +52,19 @@ def fallback_catalog(env: Mapping[str, str] | None = None) -> str:
 
 def _company_catalog(company: str) -> str:
     """캣북스가 아닌 회사의 카탈로그 이름: 그 회사 폴더 설정 → `catalogs/<회사>.toml` →
-    회사 ID 앞부분(`nubi-tour` → `nubi`). 설치 환경변수(캣북스 것)는 보지 않는다."""
+    회사 ID 앞부분(`nubi-tour` → `nubi`) → 틀 기본값(`config/frame`, 공통 카탈로그, 11/25).
+    설치 환경변수(캣북스 것)는 보지 않는다."""
+    from ax_agent_template import tenant
+
+    named = tenant.current() is not None  # 회사 설정이 정해진 회사(아니면 아래 값은 틀 기본값)
     own = tenant_setting(CATALOG_ENV)
-    if own:
+    if own and named:
         return own
     for name in (company, company.split("-")[0]):
         if (CATALOG_DIR / f"{name}.toml").is_file():
             return name
+    if own:
+        return own  # 가입만 한 회사: 틀 기본 카탈로그(다른 회사·캣북스 것으로 가지 않음)
     return company  # 파일이 없으면 아래에서 이유를 적어 알린다(다른 회사 것으로 갈음하지 않음)
 
 

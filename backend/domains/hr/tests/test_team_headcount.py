@@ -155,3 +155,15 @@ def test_other_company_gets_no_example_roster(svc, org, client, monkeypatch) -> 
     assert sum(r.headcount for r in out.rows) == 0
     assert out.example is True  # 등록 전이라 재무가 예산을 확정하지 못하게
     assert out.basis == "등록한 직원 없음(발령 기록 0건), 2026-11-01 소속"
+
+
+def test_company_without_settings_uses_frame_teams_and_no_people(svc, org, client) -> None:
+    """가입만 한 회사(c-cf2f0d, 회사 설정 없음)는 틀 기본 업무 배정의 부서로 세고 인원은 0명(11/25).
+    캣북스 예시 인원(6명)·캣북스 조직도(AX_ORG_CONFIG)는 보이지 않는다."""
+    body = _body()
+    body["meta"]["tenant_id"] = "c-cf2f0d"
+    res = client.post("/a2a", json=body).json()
+    assert res["status"] == "completed"
+    out = TeamHeadcountOutput.model_validate(res["output"])
+    assert out.rows and sum(r.headcount for r in out.rows) == 0
+    assert out.example is True
