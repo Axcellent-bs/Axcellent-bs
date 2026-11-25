@@ -5,19 +5,20 @@ import { shortDateTime } from "@/lib/format";
 import { RECORD_ID, getCreativeRecord, listCreativeRecords, redrawBoardImage, thumbSrc, type CreativeRecord, type CreativeRecordSummary } from "@/lib/creativeRecords";
 import { thumbChip } from "@/lib/creativeThumbnails";
 import { listRequestVideos } from "@/lib/requestVideos";
-import { REQUEST_VIDEOS_PATH, statusKo, type RequestVideo } from "@/lib/requestVideoView";
+import { statusKo, type RequestVideo } from "@/lib/requestVideoView";
 import { SheetBoard } from "./SheetBoard";
 import { StoryboardView } from "./StoryboardMaker";
 import { PromptBox } from "./PromptParts";
 import { RenderPanel } from "./RenderPanel";
-import { RequestVideos } from "./RequestVideos";
+import { RequestVideos, VideoCard } from "./RequestVideos";
 import { ScriptPanel } from "./ScriptPanel";
 import { RecordBoardFromScript, RecordScriptWrite } from "./RecordScriptStart";
 import { boardBehindScript, nearestCount, stageChips } from "@/lib/creativeScript";
 
 // 마케팅 › 제작 기록 (/marketing/records). 탭 세 개:
 // - 전체(시간순, 기본): 이미지 시트·스토리보드 기록과 의뢰로 만든 영상을 만든 시각 하나로 모아 최신순으로 본다
-//   (11/25, 두 길이 둘로 나뉘어 보이던 것을 합침). 영상 줄을 누르면 의뢰로 만든 영상 탭으로 가 그 영상에 스크롤한다
+//   (11/25, 두 길이 둘로 나뉘어 보이던 것을 합침). 영상 줄을 누르면(페이지 이동 없이, 11/25 두 번째 수정)
+//   그 줄 아래로 영상이 펼쳐져 바로 재생·썸네일 고르기·유튜브·인스타 올리기까지 된다(RequestVideos의 VideoCard 재사용)
 // - 이미지 시트 · 스토리보드: SNS·미디어 탭에서 만든 이미지 시트와 이어 만든 대본·스토리보드를 기록마다 다시 본다.
 //   상세의 대본은 고쳐서 저장하거나 AI로 다시 쓸 수 있다(11/23). 목록에는 단계 칩(대본·스토리보드)
 //   목록을 누르면 ?id=CR-… 로 상세가 열린다(상세의 RenderPanel에서 영상·유튜브 올리기)
@@ -109,11 +110,15 @@ function Row({ r }: { r: CreativeRecordSummary }) {
   );
 }
 
-/** 전체(시간순) 목록의 영상 줄. 의뢰로 만든 영상 탭으로 가 그 영상에 스크롤·테두리 표시한다(RequestVideos의 기존 동작, 11/23) */
-function VideoRow({ v }: { v: RequestVideo }) {
+/**
+ * 전체(시간순) 목록의 영상 줄. 누르면 페이지를 옮기지 않고 그 자리에서 펼쳐 영상을 바로 재생하고(VideoCard),
+ * 썸네일 고르기·유튜브·인스타 올리기도 그대로 한다(11/25, 예전의 "의뢰로 만든 영상" 탭으로 이동하던 방식을 바꿈)
+ */
+function VideoRow({ v, expanded, onToggle, onChanged }: { v: RequestVideo; expanded: boolean; onToggle: () => void; onChanged: () => void }) {
   return (
     <li>
-      <Link to={`${REQUEST_VIDEOS_PATH}&request=${encodeURIComponent(v.request_id)}`} className="flex items-center gap-4 rounded-2xl px-3 py-3 hover:bg-ink-50">
+      <button type="button" onClick={onToggle} aria-expanded={expanded}
+        className="flex w-full items-center gap-4 rounded-2xl px-3 py-3 text-left hover:bg-ink-50">
         <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-surface text-xs text-ink-500 ring-1 ring-ink-100">영상</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-ink-900">{v.caption_ko ?? v.request_id}</span>
@@ -123,7 +128,8 @@ function VideoRow({ v }: { v: RequestVideo }) {
           <span className="chip bg-ink-50 text-ink-700">{statusKo(v.status)}</span>
           <span className="tabular-nums text-ink-500">{shortDateTime(v.created_at)}</span>
         </span>
-      </Link>
+      </button>
+      {expanded && <VideoCard v={v} onChanged={onChanged} />}
     </li>
   );
 }
@@ -155,6 +161,8 @@ export function CreativeRecords() {
   // 전체(시간순) 탭에서 합칠 의뢰 영상 목록. 이미지 시트·스토리보드와 오류를 따로 가진다(하나가 막혀도 나머지는 본다)
   const [videos, setVideos] = useState<RequestVideo[] | null>(null);
   const [videosError, setVideosError] = useState<string | null>(null);
+  // 전체(시간순) 목록에서 펼쳐 놓은 영상(한 번에 하나). 다른 줄을 누르면 그쪽으로 옮긴다
+  const [expandedVideo, setExpandedVideo] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
       setItems(await listCreativeRecords(100));
@@ -193,7 +201,10 @@ export function CreativeRecords() {
               <ul className="divide-y divide-ink-100" aria-label="제작 기록 전체(시간순)">
                 {mergeByTime(items, videos).map((row) => row.kind === "record"
                   ? <Row key={`r-${row.r.record_id}`} r={row.r} />
-                  : <VideoRow key={`v-${row.v.post_draft_id}`} v={row.v} />)}
+                  : <VideoRow key={`v-${row.v.post_draft_id}`} v={row.v}
+                      expanded={expandedVideo === row.v.post_draft_id}
+                      onToggle={() => setExpandedVideo((cur) => (cur === row.v.post_draft_id ? null : row.v.post_draft_id))}
+                      onChanged={() => void load()} />)}
               </ul>
             )
           )
