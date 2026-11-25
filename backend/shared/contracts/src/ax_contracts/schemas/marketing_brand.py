@@ -16,7 +16,7 @@ from __future__ import annotations
 from pydantic import Field
 
 from ax_contracts.schemas.common import AxModel
-from ax_contracts.schemas.marketing_character import CharacterUploadKind
+from ax_contracts.schemas.marketing_character import CharacterReference, CharacterUploadKind
 from ax_contracts.schemas.marketing_creative import RECORD_ID_PATTERN
 
 BRAND_CHARACTERS_LIST_SKILL = "brand_characters_list"
@@ -38,6 +38,8 @@ class BrandCharacter(AxModel):
     rights_confirmed_at: str | None = None
     # 11/24 올린 이미지 종류 (CharacterUploadKind, 옛 기록은 real_photo)
     kind: CharacterUploadKind = "real_photo"
+    # 11/25 참조 이미지 목록(0번 대표). 옛 기록은 빈 목록 = 대표만
+    references: list[CharacterReference] = Field(default_factory=list)
 
 
 class BrandCharactersListInput(AxModel):

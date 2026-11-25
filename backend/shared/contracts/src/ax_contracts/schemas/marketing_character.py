@@ -56,6 +56,30 @@ class CharacterSheetImage(AxModel):
     data_base64: str = Field(min_length=1, max_length=MAX_CHARACTER_IMAGE_BASE64)
 
 
+# 11/25 참조 여러 장: 대표 한 장에 더해 같은 인물 추가 이미지 최대 3장(가상 인물·일러스트만).
+# 업로드는 `untrusted.extra_images`(`CharacterExtraImage` 목록), 기록에는 `references`로 남는다
+MAX_EXTRA_IMAGES = 3
+ExtraImageLabel = Literal["full", "side", "face", "other"]
+ReferenceLabel = Literal["front", "full", "side", "face", "other"]  # front는 대표(0번)
+
+
+class CharacterExtraImage(AxModel):
+    """추가 참조 이미지 한 장 (`untrusted.extra_images[i]`). PNG·JPEG만 저장한다."""
+
+    media_type: Literal["image/png", "image/jpeg", "image/webp"]
+    data_base64: str = Field(min_length=1, max_length=MAX_CHARACTER_IMAGE_BASE64)
+    label: ExtraImageLabel = "other"
+
+
+class CharacterReference(AxModel):
+    """기록에 남는 참조 이미지 한 장. 0번이 대표(`front`). 크기는 머리글 값(모르면 None)."""
+
+    index: int = Field(ge=0, le=MAX_EXTRA_IMAGES)
+    label: ReferenceLabel
+    width: int | None = None
+    height: int | None = None
+
+
 class CharacterSheetInput(AxModel):
     """입력 칸은 없다. 이미지와 메모는 `untrusted`로 받는다."""
 
@@ -103,3 +127,5 @@ class CharacterSheetPromptOutput(AxModel):
     negative_prompt_en: str = Field(min_length=1, max_length=1000)
     record_id: str | None = None  # 제작 기록 번호(CR-…). 기록을 못 남기면 None
     kind: CharacterUploadKind = "real_photo"  # 11/24 올린 이미지 종류 (옛 기록은 real_photo)
+    # 11/25 참조 이미지(0번 대표 front + 추가 최대 3장). 옛 기록·real_photo는 빈 목록 = 대표만
+    references: list[CharacterReference] = Field(default_factory=list)

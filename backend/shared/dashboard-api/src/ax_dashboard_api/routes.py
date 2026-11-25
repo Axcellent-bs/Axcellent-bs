@@ -50,7 +50,10 @@ from ax_contracts.schemas.hr import (
     SetOrgRosterCompleteOutput,
     TeamHeadcountOutput,
 )
-from ax_contracts.schemas.marketing_character import MAX_CHARACTER_IMAGE_BASE64
+from ax_contracts.schemas.marketing_character import (
+    MAX_CHARACTER_IMAGE_BASE64,
+    MAX_EXTRA_IMAGES,
+)
 from ax_contracts.schemas.marketing_storyboard import (
     DEFAULT_SHOTS,
     MAX_CHARACTER_EN,
@@ -1416,8 +1419,17 @@ class CharacterSheetImageBody(BaseModel):
     data_base64: str = Field(min_length=1, max_length=MAX_CHARACTER_IMAGE_BASE64)
 
 
+class CharacterExtraImageBody(CharacterSheetImageBody):
+    # 11/25 같은 인물 추가 이미지 한 장의 용도
+    label: Literal["full", "side", "face", "other"] = "other"
+
+
 class CharacterSheetBody(BaseModel):
     image: CharacterSheetImageBody
+    # 11/25 참조 여러 장: 대표 외 추가 최대 3장(가상 인물·일러스트만). 한 장씩 2MB라 요청 전체는
+    # base64로 최대 약 11MB(앞단 nginx client_max_body_size 필요). 앱 자체 본문 한도는 없다
+    extra_images: list[CharacterExtraImageBody] = Field(default_factory=list,
+                                                        max_length=MAX_EXTRA_IMAGES)  # fmt: skip
     note: str | None = Field(default=None, max_length=200)
     # 제작 기록에 남길 작은 미리보기(긴 변 256px JPEG base64).
     # 없거나 이상하면 미리보기 없이 기록한다
@@ -1432,6 +1444,8 @@ class CharacterSheetBody(BaseModel):
     def _virtual_needs_confirm(self) -> CharacterSheetBody:
         if self.kind == "virtual_human" and not self.virtual_confirmed:
             raise ValueError("AI 가상 인물은 실존 인물이 아니고 쓸 권리가 있다는 확인이 필요하다")
+        if self.extra_images and self.kind == "real_photo":
+            raise ValueError("추가 이미지는 AI 가상 인물·일러스트만 올릴 수 있다")
         return self
 
 
@@ -1449,6 +1463,7 @@ async def marketing_character_sheet(body: CharacterSheetBody) -> dict:
         await marketing_client.character_sheet_call(
             body.image.model_dump(), note, body.thumbnail_base64 or None,
             kind=body.kind, virtual_confirmed=body.virtual_confirmed,
+            extra_images=[e.model_dump() for e in body.extra_images],
         )  # fmt: skip
     )
 

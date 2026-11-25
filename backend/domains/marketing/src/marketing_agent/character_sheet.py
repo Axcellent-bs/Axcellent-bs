@@ -32,9 +32,11 @@ from ax_contracts.schemas.common import AxModel
 from ax_contracts.schemas.marketing_character import (
     MAX_CHARACTER_IMAGE_BYTES,
     MAX_CHARACTER_NOTE,
+    MAX_EXTRA_IMAGES,
     REFERENCE_KINDS,
     SHEET_EXPRESSIONS,
     SHEET_VIEWS,
+    CharacterReference,
     CharacterSheetImage,
     CharacterSheetPanel,
     CharacterSheetPromptOutput,
@@ -172,6 +174,79 @@ def decode_image(raw: Any) -> ImageInput:
     except LLMInputError as exc:
         raise CharacterSheetRefused("invalid_image", str(exc)) from exc
     return item
+
+
+def image_size(data: bytes) -> tuple[int, int] | None:
+    """PNG·JPEG 머리글에서 (가로, 세로). 읽을 수 없으면 None (의존성 없이)."""
+    if data.startswith(b"\x89PNG") and len(data) >= 24:
+        return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+    if data.startswith(b"\xff\xd8"):
+        i = 2
+        while i + 4 <= len(data):
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            marker = data[i + 1]
+            if marker == 0xFF:
+                i += 1
+                continue
+            if marker in (0x01, 0xD8) or 0xD0 <= marker <= 0xD7:
+                i += 2
+                continue
+            length = int.from_bytes(data[i + 2 : i + 4], "big")
+            if marker in range(0xC0, 0xD0) and marker not in (0xC4, 0xC8, 0xCC):
+                if i + 9 <= len(data):
+                    return (int.from_bytes(data[i + 7 : i + 9], "big"),
+                            int.from_bytes(data[i + 5 : i + 7], "big"))  # fmt: skip
+                return None
+            i += 2 + max(length, 2)
+    return None
+
+
+def decode_extra_images(raw: Any, kind: str) -> list[tuple[ImageInput, str]]:
+    """`untrusted.extra_images`를 한 장씩 지금 검사(형식·2MB)로 확인한다. (이미지, 라벨) 목록.
+
+    가상 인물·일러스트만 받는다(real_photo는 원본을 저장하지 않으므로 거절). 최대 3장.
+    추가 이미지는 저장하므로 PNG·JPEG만."""
+    if raw is None or raw == []:
+        return []
+    if kind not in REFERENCE_KINDS:
+        raise CharacterSheetRefused(
+            "extra_images_not_allowed", "추가 이미지는 AI 가상 인물·일러스트만 올릴 수 있다"
+        )
+    if not isinstance(raw, list) or len(raw) > MAX_EXTRA_IMAGES:
+        raise CharacterSheetRefused(
+            "too_many_images", f"추가 이미지는 최대 {MAX_EXTRA_IMAGES}장이다"
+        )
+    out: list[tuple[ImageInput, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise CharacterSheetRefused("invalid_image", "추가 이미지를 읽을 수 없다")
+        label = str(item.get("label") or "other")
+        if label not in ("full", "side", "face", "other"):
+            raise CharacterSheetRefused("invalid_image", "모르는 추가 이미지 라벨")
+        image = decode_image({k: v for k, v in item.items() if k != "label"})
+        if image.mime_type not in ("image/png", "image/jpeg"):
+            raise CharacterSheetRefused("invalid_image", "추가 이미지는 PNG·JPEG만 받는다")
+        magic = b"\x89PNG" if image.mime_type == "image/png" else b"\xff\xd8"
+        if not image.data.startswith(magic):  # 저장할 수 있는 파일만(기록에는 저장된 것만 남긴다)
+            raise CharacterSheetRefused("invalid_image", "추가 이미지 파일이 깨졌다")
+        out.append((image, label))
+    return out
+
+
+def build_references(
+    front: ImageInput, extras: list[tuple[ImageInput, str]]
+) -> list[CharacterReference]:
+    """기록에 남길 참조 목록: 0번 대표(front) + 추가 순서대로."""
+    refs: list[CharacterReference] = []
+    for index, (image, label) in enumerate([(front, "front"), *extras]):
+        size = image_size(image.data)
+        refs.append(CharacterReference(
+            index=index, label=label,  # type: ignore[arg-type]
+            width=size[0] if size else None, height=size[1] if size else None,
+        ))  # fmt: skip
+    return refs
 
 
 def clean_note(raw: Any) -> str | None:
