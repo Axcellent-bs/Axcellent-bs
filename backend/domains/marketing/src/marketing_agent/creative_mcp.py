@@ -41,7 +41,7 @@ VIDEO_START_ROLE = "start_image"
 # - kling_4_0_flash: medias role start_image·image_references(최대 10)·video_references, 3~20초
 # - kling3_0_turbo: start_image만
 VIDEO_MODELS: dict[str, dict[str, Any]] = {
-    "kling_4_0_flash": {"image_references": True, "max_s": 20},
+    "kling_4_0_flash": {"image_references": True, "max_image_references": 10, "max_s": 20},
     "kling3_0_turbo": {"image_references": False},
 }
 WAIT_TIMEOUT_S = 15  # jobs_wait 상한
@@ -311,11 +311,36 @@ def takes_image_references(model: str) -> bool:
     return bool(VIDEO_MODELS.get(model.strip(), {}).get("image_references"))
 
 
+# models_explore로 알아낸 영상 모델 길이 상한 (render_settings가 채운다. 아는 모델 표가 먼저)
+EXPLORED_MAX_S: dict[str, int] = {}
+
+
 def video_max_seconds(model: str) -> int | None:
-    """영상 모델 길이 상한(아는 모델만)."""
-    value = VIDEO_MODELS.get(model.strip(), {}).get("max_s")
+    """영상 모델 길이 상한(아는 모델·models_explore로 알아낸 모델만)."""
+    value = VIDEO_MODELS.get(model.strip(), {}).get("max_s") or EXPLORED_MAX_S.get(model.strip())
     return int(value) if value else None
+
+
+async def explore_models(hf: Higgsfield, kind: str) -> list[dict[str, Any]]:
+    """회사 계정의 모델 목록(`models_explore` list, 읽기라 크레딧을 쓰지 않는다). 항목 그대로."""
+    out = await hf.call("models_explore", {"action": "list", "type": kind, "limit": 100})
+    for key in ("items", "models", "results"):
+        rows = out.get(key)
+        if isinstance(rows, list):
+            return [r for r in rows if isinstance(r, dict)]
+    return []
 
 
 def with_media(params: dict[str, Any], media_id: str, role: str) -> dict[str, Any]:
     return {**params, "medias": [{"value": media_id, "role": role}]}
+
+
+def with_medias(params: dict[str, Any], media_ids: list[str], role: str) -> dict[str, Any]:
+    """같은 역할로 여러 장(순서 그대로)."""
+    return {**params, "medias": [{"value": m, "role": role} for m in media_ids]}
+
+
+def max_image_references(model: str) -> int:
+    """영상 모델이 받는 `image_references` 최대 장수. 아는 값이 없으면 1(대표 한 장)."""
+    value = VIDEO_MODELS.get(model.strip(), {}).get("max_image_references")
+    return int(value) if value else 1

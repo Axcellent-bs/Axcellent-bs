@@ -40,7 +40,12 @@
 - 실패해도 서버는 안 죽고 다음 회차에 다시 한다. 같은 오류가 연달아 나면 로그는 한 줄만.
   잘림(`UPSTREAM_TRUNCATED` 503) 등 실패한 회차는 커서를 옮기지 않는다
 - `GET /api/dashboard/change-detector/status`(사람 토큰): 켜짐·그림자 여부·마지막 성공 시각·
-  마지막 오류·커서 시각·건너뜀 건수
+  마지막 오류·커서 시각·건너뜀 건수. `companies`에 회사별 같은 칸
+- 회사별(로드맵 7단계, 11/25): 한 주기마다 연결된 회사를 모두 돈다. 캣북스는 예전 그대로
+  (상태 파일 `state.json`, 회사 값 `tenant.current()`). 다른 회사는 회사 연결이 켜져 있을 때만,
+  그 회사 범위(`company_scope.using`) 안에서 그 회사 사이트(변환기 `/site-adapter/<회사>`)를
+  읽고, 상태 파일 `state.<회사>.json`·이벤트 회사 값 `<회사 ID>`로 따로 둔다. 한 회사가 실패해도
+  다른 회사는 돈다
 """
 
 from __future__ import annotations
@@ -59,8 +64,9 @@ from fastapi import APIRouter, Depends
 from pydantic import ValidationError
 
 from ax_agent_template import company_connection as store
-from ax_agent_template import config, events
+from ax_agent_template import company_scope, config, events
 from ax_agent_template import tenant as tenants
+from ax_agent_template.companies import company_ids
 from ax_contracts.data_access.shop_sales import SalesOrderRow, ShopSalesExportResult
 from ax_contracts.schemas import EventEnvelope, EventType
 from ax_contracts.schemas.event import OrderCancelledData, PaymentRefundedData
@@ -92,7 +98,7 @@ TOKEN_NOT_SET = "dashboard-api 토큰이 없어 사이트 서버를 부를 수 �
 TRANSPORT: httpx.AsyncBaseTransport | None = None
 
 _lock = asyncio.Lock()
-_last_logged: dict[str, Any] = {"error": None, "count": 0}
+_last_logged: dict[str, dict[str, Any]] = {}
 
 
 class DetectorError(Exception):
@@ -129,9 +135,13 @@ def max_calls() -> int:
 # ------------------------------------------------------------------ 상태 파일
 
 
-def _state_path() -> Path:
+def _state_path(company_id: str = company_scope.CATBOOKS) -> Path:
+    """회사별 상태 파일. 캣북스는 예전 이름(`state.json`), 다른 회사는 `state.<회사>.json`."""
     raw = (os.getenv(DIR_ENV) or "").strip()
-    return (Path(raw) if raw else DEFAULT_DIR) / STATE_FILE
+    folder = Path(raw) if raw else DEFAULT_DIR
+    if company_id == company_scope.CATBOOKS:
+        return folder / STATE_FILE
+    return folder / f"state.{company_id}.json"
 
 
 def _fresh(fingerprint: str | None) -> dict[str, Any]:
@@ -151,8 +161,8 @@ def _fresh(fingerprint: str | None) -> dict[str, Any]:
     }
 
 
-def _load() -> dict[str, Any]:
-    path = _state_path()
+def _load(company_id: str = company_scope.CATBOOKS) -> dict[str, Any]:
+    path = _state_path(company_id)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -166,8 +176,8 @@ def _load() -> dict[str, Any]:
     return state
 
 
-def _save(state: dict[str, Any]) -> None:
-    path = _state_path()
+def _save(state: dict[str, Any], company_id: str = company_scope.CATBOOKS) -> None:
+    path = _state_path(company_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
@@ -275,7 +285,8 @@ class _Shop:
     ) -> None:
         self.client = client
         self.base = base.rstrip("/")
-        self.headers = {"Authorization": f"Bearer {token}"}
+        # 부르는 회사 머리글: 변환기는 경로의 회사와 부르는 회사가 다르면 막는다(#1717)
+        self.headers = {"Authorization": f"Bearer {token}", **store.caller_headers()}
         self.calls = 0
         self.details = details  # 주문 상세로 결제 id를 찾을지 (변환기 고객사는 아니다)
 
@@ -367,56 +378,83 @@ def _fingerprint(connection: store.Connection | None, tenant: str) -> str:
     return f"{kind}|{config.agent_url('shop-api')}|{tenant}"
 
 
-def _log_error(error: str | None) -> None:
-    """같은 오류가 연달아 나면 한 줄만. 바뀌거나 회복하면 몇 번 연속이었는지 적는다."""
-    last, count = _last_logged["error"], _last_logged["count"]
+def _log_error(error: str | None, company_id: str = company_scope.CATBOOKS) -> None:
+    """같은 오류가 연달아 나면 한 줄만(회사마다). 바뀌거나 회복하면 몇 번 연속이었는지 적는다."""
+    seen = _last_logged.setdefault(company_id, {"error": None, "count": 0})
+    last, count = seen["error"], seen["count"]
     if error == last:
-        _last_logged["count"] = count + 1
+        seen["count"] = count + 1
         return
     if last is not None and count > 1:
-        logger.warning("변화 감지기: 앞 오류가 %d번 연속이었다 (%s)", count, last)
+        logger.warning("변화 감지기(%s): 앞 오류가 %d번 연속이었다 (%s)", company_id, count, last)
     if error is not None:
-        logger.warning("변화 감지기 실패: %s", error)
+        logger.warning("변화 감지기 실패(%s): %s", company_id, error)
     elif last is not None:
-        logger.info("변화 감지기 회복")
-    _last_logged["error"], _last_logged["count"] = error, 1
+        logger.info("변화 감지기 회복(%s)", company_id)
+    seen["error"], seen["count"] = error, 1
 
 
-def _fail(state: dict[str, Any], result: RunResult, message: str) -> RunResult:
+def _fail(
+    state: dict[str, Any], result: RunResult, message: str, company_id: str = company_scope.CATBOOKS
+) -> RunResult:
     result.error = message
     state["last_attempt_at"] = _iso(result.attempted_at)
     state["last_error"] = message
     try:
-        _save(state)
+        _save(state, company_id)
     except OSError:
-        logger.warning("변화 감지기 상태를 저장하지 못했다", exc_info=True)
-    _log_error(message)
+        logger.warning("변화 감지기 상태를 저장하지 못했다(%s)", company_id, exc_info=True)
+    _log_error(message, company_id)
     return result
 
 
-async def run_once(now: datetime | None = None) -> RunResult:
-    """커서부터 끝까지(또는 호출 상한까지) 읽고 바뀐 것을 이벤트로 만든다. 예외를 내지 않는다."""
+def watched_companies() -> list[str]:
+    """이번 주기에 읽을 회사: 캣북스(예전 그대로) + 회사 연결이 켜진 다른 회사."""
+    out = [company_scope.CATBOOKS]
+    for cid in company_ids():
+        cid = company_scope.scope_id(cid)
+        if cid in out:
+            continue
+        found = store.read_connection(cid)
+        if found is not None and found.enabled:
+            out.append(cid)
+    return out
+
+
+async def run_once(now: datetime | None = None, company_id: str | None = None) -> RunResult:
+    """한 회사(기본 캣북스)를 커서부터 끝까지(또는 호출 상한까지) 읽고 바뀐 것을 이벤트로 만든다.
+
+    예외를 내지 않는다.
+    """
+    cid = company_scope.scope_id(company_id)
     async with _lock:
-        return await _run(now)
+        with company_scope.using(cid):
+            return await _run(now, cid)
 
 
-async def _run(now: datetime | None) -> RunResult:
+async def run_all(now: datetime | None = None) -> dict[str, RunResult]:
+    """연결된 회사를 모두 한 번씩. 한 회사가 실패해도 다음 회사는 돈다."""
+    return {cid: await run_once(now, cid) for cid in watched_companies()}
+
+
+async def _run(now: datetime | None, cid: str = company_scope.CATBOOKS) -> RunResult:
     attempted = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
     result = RunResult(attempted)
-    state = _load()
-    connection = store.read_connection()
+    state = _load(cid)
+    connection = store.read_connection(cid)
     adapter = connection is not None and connection.kind == "adapter"
-    tenant = tenants.current()
+    # 캣북스는 예전 회사 값(설치 회사) 그대로, 다른 회사는 그 회사 ID
+    tenant = tenants.current() if cid == company_scope.CATBOOKS else cid
     if not tenant:
-        return _fail(state, result, NO_TENANT)
+        return _fail(state, result, NO_TENANT, cid)
     try:
         token = config.agent_token(TOKEN_NAME)
     except RuntimeError:
-        return _fail(state, result, TOKEN_NOT_SET)
+        return _fail(state, result, TOKEN_NOT_SET, cid)
     fingerprint = _fingerprint(connection, tenant)
     if state.get("fingerprint") != fingerprint:
         if state.get("fingerprint") is not None:
-            logger.info("회사 연결이 바뀌어 변화 감지기 상태를 새로 채운다")
+            logger.info("회사 연결이 바뀌어 변화 감지기 상태를 새로 채운다(%s)", cid)
         state = _fresh(fingerprint)
     result.baseline = state.get("baseline_at") is None
     publish = publishing()
@@ -425,17 +463,17 @@ async def _run(now: datetime | None) -> RunResult:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=TRANSPORT) as client:
             shop = _Shop(client, config.agent_url("shop-api"), token, details=not adapter)
             try:
-                await _pages(shop, state, result, tenant, publish, limit)
+                await _pages(shop, state, result, tenant, publish, limit, cid)
             finally:
                 result.calls = shop.calls
     except DetectorError as error:
-        return _fail(state, result, str(error))
+        return _fail(state, result, str(error), cid)
     except Exception as error:  # noqa: BLE001 - 감지기는 어떤 오류에도 다음 회차를 돈다
-        return _fail(state, result, f"변화 감지 중 오류 ({type(error).__name__})")
+        return _fail(state, result, f"변화 감지 중 오류 ({type(error).__name__})", cid)
     state["last_attempt_at"] = state["last_success_at"] = _iso(attempted)
     state["last_error"] = None
-    _save(state)
-    _log_error(None)
+    _save(state, cid)
+    _log_error(None, cid)
     return result
 
 
@@ -446,6 +484,7 @@ async def _pages(
     tenant: str,
     publish: bool,
     limit: int,
+    cid: str = company_scope.CATBOOKS,
 ) -> None:
     orders: dict[str, Any] = state["orders"]
     while shop.calls < limit:
@@ -474,11 +513,11 @@ async def _pages(
             result.finished = True
             if result.baseline:
                 state["baseline_at"] = _iso(result.attempted_at)
-            _save(state)
+            _save(state, cid)
             return
         if not page.next_cursor or page.next_cursor == cursor:
             raise DetectorError("사이트 서버가 더 있다면서 다음 커서를 주지 않았어요")
-        _save(state)
+        _save(state, cid)
 
 
 async def _emit(state: dict[str, Any], found: list[EventEnvelope], publish: bool) -> None:
@@ -501,15 +540,15 @@ async def loop() -> None:
     if every <= 0:
         return
     while True:
-        await run_once()
+        await run_all()
         await asyncio.sleep(every)
 
 
 # ------------------------------------------------------------------ 상태 주소
 
 
-def status() -> dict[str, Any]:
-    state = _load()
+def _company_status(cid: str) -> dict[str, Any]:
+    state = _load(cid)
     return {
         "enabled": interval_seconds() > 0,
         "interval_seconds": interval_seconds(),
@@ -525,6 +564,13 @@ def status() -> dict[str, Any]:
         "shadow_total": int(state.get("shadow_total") or 0),
         "shadow": list(state.get("shadow") or []),
     }
+
+
+def status() -> dict[str, Any]:
+    """캣북스 칸은 예전 그대로 맨 위에, 회사별은 `companies`에."""
+    out = _company_status(company_scope.CATBOOKS)
+    out["companies"] = {cid: _company_status(cid) for cid in watched_companies()}
+    return out
 
 
 router = APIRouter(prefix="/api/dashboard/change-detector", dependencies=[Depends(require_human)])

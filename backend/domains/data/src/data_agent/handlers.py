@@ -1965,7 +1965,8 @@ async def data_sources(request: AgentRequest) -> AgentResult:
     data = _parse(request, DataSourcesRequest)
     if isinstance(data, AgentResult):
         return data
-    result = await list_sources(os.environ, recheck=data.recheck)
+    tenant = sales_tenant(TENANT_ID_DEFAULT, request.meta.tenant_id)
+    result = await list_sources(os.environ, recheck=data.recheck, tenant_id=tenant)
     return _result(
         request,
         TaskStatus.COMPLETED,

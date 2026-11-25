@@ -1,12 +1,6 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
-import { CampaignEffect } from "@/components/data/CampaignEffect";
-import { VideoPerformance } from "@/components/data/VideoPerformance";
-import { PromoConcepts } from "@/components/data/PromoConcepts";
-import { InsightBrief } from "@/components/data/InsightBrief";
-import { DataSources } from "@/components/data/DataSources";
-import { TrendRequest } from "@/components/data/TrendRequest";
 import { PlanningHandoff, proposalsOf, usePlanningProposals } from "@/components/data/PlanningHandoff";
 import { PlanningProposals, ReportInsights, useInsightReports } from "@/components/data/ReportInsights";
 import { FilterButton, TrendHeadline, materialOf } from "@/components/data/TrendPopular";
@@ -15,10 +9,7 @@ import { VideoExplorer } from "@/components/data/VideoExplorer";
 import { TrendMemes } from "@/components/data/TrendMemes";
 import { KeywordSummaryCards, KeywordTrend } from "@/components/data/KeywordTrend";
 import { IgAudioSummaryCard, InstagramAudio, KEY_LATER, igKeyMissing } from "@/components/data/InstagramAudio";
-import { InstagramRadar } from "@/components/data/InstagramRadar";
-import InstagramRadarSetup from "@/components/data/InstagramRadarSetup";
 import YoutubeMemeKeywordsSetup from "@/components/data/YoutubeMemeKeywordsSetup";
-import { InstagramMemo } from "@/components/data/InstagramMemo";
 import { okOut, useSkill, type SkillState } from "@/components/data/useSkill";
 import { Basis, Sources, when } from "@/components/data/Sources";
 import { PROBE_STATUS, TREND_TABS, trendTabFromHash, trendTabHash, type LoopProbe, type TrendTab } from "@/lib/contentLoop";
@@ -27,6 +18,17 @@ import {
   DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
   type A2AResult, type KeywordWindow, type PromoConceptsOutput, type TrendInsightBriefOutput, type TrendPopularOutput, type TrendScanOutput, type TrendVerdict,
 } from "@/lib/data";
+
+// 감지 탭이 아닌 하위 탭·인스타 칩 칸은 처음 열 때 받는다. 첫 화면(감지)은 이 코드 없이 먼저 그린다 (11/25 Lighthouse)
+const CampaignEffect = lazy(() => import("@/components/data/CampaignEffect").then((m) => ({ default: m.CampaignEffect })));
+const VideoPerformance = lazy(() => import("@/components/data/VideoPerformance").then((m) => ({ default: m.VideoPerformance })));
+const PromoConcepts = lazy(() => import("@/components/data/PromoConcepts").then((m) => ({ default: m.PromoConcepts })));
+const InsightBrief = lazy(() => import("@/components/data/InsightBrief").then((m) => ({ default: m.InsightBrief })));
+const DataSources = lazy(() => import("@/components/data/DataSources").then((m) => ({ default: m.DataSources })));
+const TrendRequest = lazy(() => import("@/components/data/TrendRequest").then((m) => ({ default: m.TrendRequest })));
+const InstagramRadar = lazy(() => import("@/components/data/InstagramRadar").then((m) => ({ default: m.InstagramRadar })));
+const InstagramRadarSetup = lazy(() => import("@/components/data/InstagramRadarSetup"));
+const InstagramMemo = lazy(() => import("@/components/data/InstagramMemo").then((m) => ({ default: m.InstagramMemo })));
 
 // 트렌드&콘텐츠 화면 (/data/trend, 11/20 v3): 하위 탭 감지 → 분석 의뢰 → 인사이트 → 기획 전달 → 성과 + 탭 줄 오른쪽 끝 "⚙ 데이터 출처" (정의는 lib/contentLoop.ts 한 곳).
 // - 주소에 하위 탭을 남긴다: /data/trend#detect · #request(보고서는 #request?id=<report_id>) · #recommend(필터 ?from=report|brief) · #handoff · #result · #sources.
@@ -216,6 +218,7 @@ function PlatformViews({ searchExtra }: { searchExtra?: ReactNode }) {
         </>
       )}
       {view === "instagram" && (
+        <Suspense fallback={<Waiting />}>
         <section aria-label="인스타그램" className="space-y-4">
           {igKeyLine !== null ? (
             <p className="card p-4 text-sm text-ink-700">
@@ -232,6 +235,7 @@ function PlatformViews({ searchExtra }: { searchExtra?: ReactNode }) {
           <InstagramRadarSetup />
           <InstagramMemo />
         </section>
+        </Suspense>
       )}
       {view === "search" && (
         <>
@@ -269,7 +273,9 @@ function InsightsTab({ brief, examples, examplesCount }: { brief: SkillState<Tre
           <ReportInsights load={reports} />
         </section>
       )}
-      {filter !== "report" && <InsightBrief state={brief} examplesCount={examplesCount} examples={examples} />}
+      {filter !== "report" && (
+        <Suspense fallback={<Waiting />}><InsightBrief state={brief} examplesCount={examplesCount} examples={examples} /></Suspense>
+      )}
     </div>
   );
 }
@@ -354,7 +360,7 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
                 {kpiLive && <TrendHeadline popular={popularRes.state} />}
                 {kpiLive ? <PlatformViews searchExtra={detect} /> : detect}
               </div>
-            ) : !seen.has(t.key) ? null : t.key === "recommend" ? (
+            ) : !seen.has(t.key) ? null : <Suspense fallback={<Waiting />}>{t.key === "recommend" ? (
               // 처음 열 때 그리고, 그 뒤에는 하위 탭을 오가도 남도록 숨기기만 한다
               <InsightsTab brief={briefRes.state} examplesCount={promoOut ? promoOut.concepts.length : null}
                 examples={<PromoConcepts state={promoRes.state} popular={popularOut} onRegenerate={promoRes.reload} />} />
@@ -373,7 +379,7 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
                 <VideoPerformance />
                 <CampaignEffect onProbe={setCampaignProbe} />
               </div>
-            )}
+            )}</Suspense>}
           </div>
         ))}
       </div>

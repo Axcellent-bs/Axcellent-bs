@@ -720,6 +720,8 @@ CHARACTER_SHEET_REFUSALS = {
     "no_image": (422, "NO_IMAGE"),
     "invalid_image": (422, "INVALID_IMAGE"),
     "image_too_large": (413, "IMAGE_TOO_LARGE"),
+    "extra_images_not_allowed": (422, "EXTRA_IMAGES_NOT_ALLOWED"),
+    "too_many_images": (422, "TOO_MANY_IMAGES"),
     "no_character": (422, "NO_CHARACTER"),
     "virtual_unconfirmed": (422, "VIRTUAL_UNCONFIRMED"),
     "llm_not_configured": (409, "LLM_NOT_CONFIGURED"),
@@ -732,6 +734,7 @@ CHARACTER_SHEET_DEADLINE_SECONDS = 120  # 이미지를 읽는 LLM 호출이라 �
 async def character_sheet_call(
     image: dict[str, Any], note: str | None, thumbnail: str | None = None, *,
     kind: str = "real_photo", virtual_confirmed: bool = False,
+    extra_images: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:  # fmt: skip
     """캐릭터 시트 프롬프트 skill.
 
@@ -742,6 +745,8 @@ async def character_sheet_call(
     untrusted: dict[str, Any] = {"image": image}
     if note:
         untrusted["note"] = note
+    if extra_images:  # 11/25 같은 인물 추가 참조 이미지(없으면 키 자체를 안 보낸다)
+        untrusted["extra_images"] = extra_images
     if thumbnail:  # 제작 기록에 남길 작은 미리보기(원본은 저장하지 않는다)
         untrusted["thumbnail"] = thumbnail
     request = AgentRequest(
@@ -845,13 +850,37 @@ async def higgsfield_status_call() -> dict[str, Any]:
     raise ApiError(502, "UPSTREAM_FAILED", f"마케팅이 요청을 처리하지 못했다 ({result.outcome})")
 
 
-async def _creative_read(skill: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def render_settings_options_call() -> dict[str, Any]:
+    """만들기 설정 화면용 모델 목록·서버 설정 기본값 skill(read, 크레딧 안 씀)."""
+    config.set_agent_name(AGENT_NAME)
+    request = AgentRequest(
+        meta=RequestMeta(
+            context_id=f"ctx_rsopts_{uuid.uuid4().hex[:12]}",
+            token=config.agent_token(AGENT_NAME),
+            deadline=datetime.now(UTC) + timedelta(seconds=45),
+            idempotency_key=f"ui:rsopts:{uuid.uuid4().hex}",
+            **tenant_meta(),
+        ),
+        skill="render_settings_options",
+        input={},
+    )
+    result = await SEND(TARGET, request)
+    if result.status == TaskStatus.COMPLETED:
+        return result.output or {}
+    if result.status == TaskStatus.CANCELED:
+        raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
+    raise ApiError(502, "UPSTREAM_FAILED", f"마케팅이 요청을 처리하지 못했다 ({result.outcome})")
+
+
+async def _creative_read(
+    skill: str, payload: dict[str, Any], deadline_s: int = 20
+) -> dict[str, Any]:
     config.set_agent_name(AGENT_NAME)
     request = AgentRequest(
         meta=RequestMeta(
             context_id=f"ctx_creative_{uuid.uuid4().hex[:12]}",
             token=config.agent_token(AGENT_NAME),
-            deadline=datetime.now(UTC) + timedelta(seconds=20),
+            deadline=datetime.now(UTC) + timedelta(seconds=deadline_s),
             idempotency_key=f"ui:creative:{uuid.uuid4().hex}",
             **tenant_meta(),
         ),
@@ -923,6 +952,7 @@ CREATIVE_FILES = {
     "board_image": ("board.jpg", "image/jpeg"),
     "video": ("video.mp4", "video/mp4"),
     "final_video": ("final.mp4", "video/mp4"),
+    "overlay_video": ("overlay.mp4", "video/mp4"),  # 자막·엔드카드를 얹은 영상(읽기 전용)
 }
 # 사람이 올린 PNG 그림은 PNG 그대로 둔다
 CREATIVE_ALT_FILES = {
@@ -944,6 +974,19 @@ async def creative_video_call(record_id: str, who: str | None) -> dict[str, Any]
     if who:
         payload["who"] = who
     return await _creative_read("creative_video_request", payload)
+
+
+OVERLAY_DEADLINE_SECONDS = 120  # ffmpeg로 자막을 얹는 시간까지 기다린다
+
+
+async def creative_overlay_call(
+    record_id: str, captions: list[dict[str, Any]], who: str | None
+) -> dict[str, Any]:
+    """사람이 고친 자막으로 최신 영상에 다시 얹는다(마케팅 `creative_overlay_redo`, read)."""
+    payload: dict[str, Any] = {"record_id": record_id, "captions": captions}
+    if who:
+        payload["who"] = who
+    return await _creative_read("creative_overlay_redo", payload, OVERLAY_DEADLINE_SECONDS)
 
 
 SCRIPT_REFUSALS = {
