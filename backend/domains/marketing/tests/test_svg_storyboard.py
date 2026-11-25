@@ -251,6 +251,35 @@ def test_redraw_from_script_draws_mannequins_and_end_card_background() -> None:
     assert 'fill="url(#bg)"' in str(out.shots[3].svg)
 
 
+def test_redraw_from_script_labels_use_scene_start_and_scene_words_add_props() -> None:
+    """11/26 J: 대본대로 다시 만들기도 칸 라벨 시각은 코드가(#1859와 같은 pose_svg 인자).
+
+    LLM이 "0초 · …"를 베껴도 대본 장면 시작 초로, 칸 글의 "마이크"로 소품을 보충한다."""
+    times = [(0, 4), (4, 8), (8, 15)]
+    scenes = [{"no": i, "visual_ko": f"대본 장면 {i}", "line_ko": "", "caption_ko": "",
+               "start_s": a, "end_s": b} for i, (a, b) in enumerate(times, start=1)]  # fmt: skip
+    copied = POSE | {"label_ko": "0초 · 돌아봄"}
+    shots = [S._shot(i, has_character=True, pose=copied) for i in range(1, 4)]  # noqa: SLF001
+    shots[1] = shots[1] | {"scene_ko": "마이크를 들고 노래"}
+    llm = MockLLMClient(responses={sb.StoryRead: S._read(3, shots=shots)})  # noqa: SLF001
+    out = asyncio.run(
+        sb.make_storyboard({"story": S.STORY}, lambda: llm, script_scenes=scenes, cta="")
+    )
+    import re
+
+    labels = [re.search(r"<text[^>]*>([^<]*)</text>", str(s.svg)).group(1) for s in out.shots]  # type: ignore[union-attr]
+    assert labels == ["0초 · 돌아봄", "4초 · 돌아봄", "8초 · 돌아봄"]
+    assert "#8a8f99" in str(out.shots[1].svg)  # 마이크(칸 글에서 보충)
+    assert "#8a8f99" not in str(out.shots[0].svg)
+
+
+def test_script_starts_only_when_rising() -> None:
+    assert sb.script_starts([{"start_s": 0}, {"start_s": 3.5}]) == {1: 0.0, 2: 3.5}
+    assert sb.script_starts([{"start_s": 0}, {"start_s": 0}]) is None
+    assert sb.script_starts([{"start_s": 0}, {}]) is None
+    assert sb.script_starts([]) is None
+
+
 def test_old_records_read_with_defaults() -> None:
     old = {k: v for k, v in S._shot(1).items() if k in ("scene_ko",)}  # noqa: SLF001
     shot = StoryboardShot(

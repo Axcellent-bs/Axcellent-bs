@@ -310,9 +310,13 @@ def _pick(value: str, table: dict[str, tuple[str, str]], fallback: str) -> str:
 
 def build_output(
     read: StoryRead, character: str | None, style: str, count: int, end_card_hint: bool = False,
-    aspect: str | None = None,
+    aspect: str | None = None, starts: dict[int, float] | None = None,
 ) -> StoryboardPromptOutput:
     """LLM 장면으로 칸·구도·프롬프트를 조립한다. 샷 이름과 영어 구도 문장은 코드 표에서만 나온다.
+
+    11/26 `starts`(칸 번호 → 칸 시작 초, 대본대로 만들 때)를 주면 마네킹 라벨 시각은 코드가
+    붙인다(LLM이 적은 "0초 · …"는 버림, #1859와 같은 `pose_svg` 인자). 칸 글(장면·구도)의 마이크
+    같은 낱말은 소품으로 보충한다.
 
     칸 그림(11/25): 기획 SVG(의뢰 흐름) → 그대로, 아니면 LLM 포즈 → 3D 마네킹. 마지막 칸이 엔드카드
     (칸 글에 "엔드 카드"·"채널 이름", 또는 `end_card_hint` = 대본 끝 장면이 엔드카드)면 배경만.
@@ -339,7 +343,9 @@ def build_output(
         # 엔드카드 칸은 아래에서
         svg = sanitize_svg(s.svg)
         if not svg and not (end_card and no == len(loose)) and s.has_character:
-            svg = pose_board.pose_svg(s.pose, _cut(scene, 15)) or None
+            text = " ".join(x for x in (scene, _cut(s.composition_ko, 200)) if x)
+            at = (starts or {}).get(no)
+            svg = pose_board.pose_svg(s.pose, _cut(scene, 15), at, text) or None
         shots.append(
             StoryboardShot(
                 no=no,
@@ -456,6 +462,20 @@ def fill_from_script(read: StoryRead, scenes: list[dict[str, Any]]) -> StoryRead
     return read.model_copy(update={"shots": filled})
 
 
+def script_starts(scenes: list[dict[str, Any]]) -> dict[int, float] | None:
+    """대본 장면 n의 시작 초 → 칸 n (11/26 라벨 시각). 시각이 빠졌거나 앞뒤로 맞지 않으면 None
+    (그때 라벨은 지금처럼 LLM 글). 의뢰 흐름 `board_svg.panel_starts`의 첫 출처와 같은 규칙."""
+    starts: list[float] = []
+    for s in scenes:
+        v = s.get("start_s")
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return None
+        starts.append(float(v))
+    if not starts or any(a >= b for a, b in zip(starts, starts[1:], strict=False)):
+        return None
+    return {i: v for i, v in enumerate(starts, start=1)}
+
+
 def _script_story(scenes: list[dict[str, Any]]) -> str:
     return _cut(" ".join(str(s.get("visual_ko") or "") for s in scenes), MAX_STORY)
 
@@ -524,7 +544,8 @@ async def make_storyboard(
             read = fill_from_script(read, scenes)
         try:
             hint = bool(scenes) and pose_board.is_end_card(scenes[-1].get("visual_ko"))
-            out = build_output(read, character, style, count, hint)
+            out = build_output(read, character, style, count, hint,
+                               starts=script_starts(scenes))  # fmt: skip
             if scenes:
                 renumbered = [{**s, "no": i} for i, s in enumerate(scenes, start=1)]
                 out = with_script(out, renumbered, cta)
