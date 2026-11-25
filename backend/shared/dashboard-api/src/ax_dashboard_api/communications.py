@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from ax_agent_template import common_log
 from ax_contracts.data_access.common_log import CommonLogQuery, CommonLogResult, LogRecord
-from ax_dashboard_api.envelope import ApiError, is_mock
+from ax_dashboard_api.envelope import ApiError, is_mock, meta_tenant_id
 
 CommunicationOutcome = Literal[
     "completed", "rejected", "failed", "held", "needs_human", "in_progress"
@@ -258,6 +258,7 @@ def list_communications(
         context_ids=[context_id] if context_id else [],
         kinds=kinds,  # type: ignore[arg-type]
         limit=min(max(limit, 1), MAX_LIMIT),
+        tenant_id=meta_tenant_id(),  # 로그인 회사의 소통 줄만(11/25 회사 분리, 캣북스는 shop-demo)
     )
     result = _read(query)
     records = [r for r in result.records if r.kind in kinds]

@@ -28,13 +28,11 @@ test("꺼져 있으면 fetch 를 바꾸지 않는다", () => {
 
 test("서비스를 고른 것만 직접 간다", () => {
   const only = readDirectConfig({ VITE_API_DIRECT_BASE: BASE, VITE_API_DIRECT_SERVICES: "orch" }) as DirectConfig;
-  assert.equal(routeDirect({ url: "/orch/api/incidents", method: "GET", authorization: null, sessionToken: null, cfg: only })?.url, `${BASE}/orch/api/incidents`);
-  assert.equal(routeDirect({ url: "/safety-api/api/safety/executions", method: "GET", authorization: null, sessionToken: null, cfg: only }), null);
+  assert.equal(routeDirect({ url: "/orch/api/incidents", method: "GET", authorization: null, sessionToken: S, cfg: only })?.url, `${BASE}/orch/api/incidents`);
+  assert.equal(routeDirect({ url: "/safety-api/api/safety/executions", method: "GET", authorization: null, sessionToken: S, cfg: only }), null);
 });
 
 test("토큰이 필요 없는 읽기는 헤더를 건드리지 않는다", () => {
-  assert.deepEqual(go("/orch/api/incidents"), { url: `${BASE}/orch/api/incidents` });
-  assert.deepEqual(go("/safety-api/api/safety/executions"), { url: `${BASE}/safety-api/api/safety/executions` });
   assert.deepEqual(go("/planning-api/api/planning/state"), { url: `${BASE}/planning-api/api/planning/state` });
   assert.deepEqual(go("/dashboard-api/api/dashboard/auth/company"), { url: `${BASE}/dashboard-api/api/dashboard/auth/company` });
 });
@@ -46,6 +44,16 @@ test("dashboard 읽기는 세션 토큰이 있을 때만 직접 간다", () => {
   assert.equal(go(u, { auth: "Bearer human-via-nginx", session: S }), null);
   assert.deepEqual(go(u, { auth: `Bearer ${S}` }), { url: `${BASE}${u}` });
   assert.deepEqual(go(u, { session: S }), { url: `${BASE}${u}`, authorization: `Bearer ${S}` });
+});
+
+test("총괄 이슈·안전 실행 기록은 세션 토큰(회사)을 싣고 간다 (11/25 회사 분리)", () => {
+  for (const u of ["/orch/api/incidents", "/safety-api/api/safety/executions"]) {
+    assert.equal(go(u), null); // 세션이 없으면 같은 출처
+    assert.deepEqual(go(u, { session: S }), { url: `${BASE}${u}`, authorization: `Bearer ${S}` });
+    assert.deepEqual(go(u, { auth: `Bearer ${S}` }), { url: `${BASE}${u}` });
+  }
+  assert.equal(tokenFree("orch", "/api/incidents"), false);
+  assert.equal(tokenFree("safety", "/api/safety/executions"), false);
 });
 
 test("쓰기 메서드와 허용 밖 경로는 같은 출처", () => {
@@ -73,8 +81,8 @@ test("직접 호스트로 감: 주소·헤더 확인, 세션 토큰 실음", asy
     assert.equal(seen[0].url, `${BASE}/dashboard-api/api/dashboard/office-room`);
     assert.equal(new Headers(seen[0].init?.headers).get("authorization"), `Bearer ${S}`);
     const init = { cache: "no-store" as const };
-    await globalThis.fetch("/orch/api/incidents", init);
-    assert.equal(seen[1].url, `${BASE}/orch/api/incidents`);
+    await globalThis.fetch("/planning-api/api/planning/state", init);
+    assert.equal(seen[1].url, `${BASE}/planning-api/api/planning/state`);
     assert.equal(seen[1].init, init); // 헤더를 건드리지 않아 단순 요청 그대로
     await globalThis.fetch("/dashboard-api/api/dashboard/claims");
     assert.equal(seen[2].url, "/dashboard-api/api/dashboard/claims");
@@ -85,7 +93,7 @@ test("직접 호스트 실패(TypeError)면 같은 출처로 다시 보내고 �
   const calls: string[] = [];
   let t = 1000;
   const f = (async (u: unknown) => { calls.push(String(u)); if (String(u).startsWith(BASE)) throw new TypeError("Failed to fetch"); return new Response("{}"); }) as typeof fetch;
-  const restore = installApiDirect(cfg, { fetch: f, now: () => t, sessionToken: () => null })!;
+  const restore = installApiDirect(cfg, { fetch: f, now: () => t, sessionToken: () => S })!;
   try {
     await globalThis.fetch("/orch/api/incidents");
     assert.deepEqual(calls, [`${BASE}/orch/api/incidents`, "/orch/api/incidents"]);
@@ -100,13 +108,12 @@ test("직접 호스트 실패(TypeError)면 같은 출처로 다시 보내고 �
 
 test("중단 신호는 되돌리지 않고 그대로 던진다", async () => {
   const f = (async () => { throw new DOMException("aborted", "AbortError"); }) as typeof fetch;
-  const restore = installApiDirect(cfg, { fetch: f })!;
+  const restore = installApiDirect(cfg, { fetch: f, sessionToken: () => S })!;
   try { await assert.rejects(globalThis.fetch("/orch/api/incidents"), { name: "AbortError" }); } finally { restore(); }
 });
 
 test("토큰을 안 보는 읽기(tokenFree): 표의 auth none 경로만 참, 쿼리는 무시, 다른 경로·서비스는 거짓", () => {
-  assert.equal(tokenFree("safety", "/api/safety/executions"), true);
-  assert.equal(tokenFree("orch", "/api/incidents?limit=5"), true);
+  assert.equal(tokenFree("planning", "/api/planning/state?x=1"), true);
   assert.equal(tokenFree("planning", "/api/planning/state"), true);
   assert.equal(tokenFree("dev", "/api/planning/state"), true);
   assert.equal(tokenFree("safety", "/api/safety/reviews"), false);

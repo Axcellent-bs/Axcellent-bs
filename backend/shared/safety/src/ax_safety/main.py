@@ -114,7 +114,7 @@ def _log_refusal(request: ExecuteRequest, reason_code: str) -> None:
 
 
 def _review_scope(authorization: str | None) -> Any:
-    """승인 대기를 회사로 거르는 함수(11/24 회사 격리, 격리 시험 5번).
+    """승인 대기·실행 기록을 회사로 거르는 함수(11/24 회사 격리, 격리 시험 5번. 실행 기록 11/25).
 
     - 다른 회사 로그인 세션: 그 회사 건만
     - 캣북스 세션: 다른 회사로 등록된 건만 빼고(예전 건은 회사 값이 기본값이라 그대로 캣북스)
@@ -253,15 +253,21 @@ def create_app(
         return _ok([n.model_dump(mode="json") for n in gate.store.list_connection_holds()])
 
     @app.get("/api/safety/executions")
-    def list_executions(context_id: str | None = None) -> dict:
+    def list_executions(
+        context_id: str | None = None, authorization: str | None = Header(default=None)
+    ) -> dict:
+        """실행 기록. 로그인 세션이면 그 회사 것만(승인 대기와 같은 규칙, 11/25 회사 분리)."""
+        sees = _review_scope(authorization)
         records = gate.store.list_executions(context_id)
-        return _ok([r.model_dump(mode="json") for r in records])
+        return _ok([r.model_dump(mode="json") for r in records if sees(r.request.tenant_id)])
 
     @app.get("/api/safety/executions/{execution_id}", response_model=None)
-    def get_execution(execution_id: str) -> dict | JSONResponse:
-        """실행 기록 하나 (목록과 같은 모양). 없으면 404 `NOT_FOUND`."""
+    def get_execution(
+        execution_id: str, authorization: str | None = Header(default=None)
+    ) -> dict | JSONResponse:
+        """실행 기록 하나 (목록과 같은 모양). 없거나 다른 회사 것이면 404 `NOT_FOUND`."""
         record = gate.store.get_execution(execution_id)
-        if record is None:
+        if record is None or not _review_scope(authorization)(record.request.tenant_id):
             return _error(404, "NOT_FOUND", "실행 기록이 없다")
         return _ok(record.model_dump(mode="json"))
 

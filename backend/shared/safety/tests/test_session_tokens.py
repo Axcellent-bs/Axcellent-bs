@@ -114,3 +114,35 @@ def test_pending_approvals_are_kept_per_session_company(
         account_id="acc-x", name="끊긴회원", role="member", no_company=True
     )[0]
     assert ids(_bearer(no_company)) == []  # 소속 없는 계정은 아무것도 못 본다
+
+
+def test_executions_are_kept_per_session_company(
+    client: Any, coupon: Any, session: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실행 기록(AI 대화방·안전 화면이 3초마다 읽음)도 회사별(11/25 회사 분리).
+
+    누비투어 세션은 누비투어 실행만, 캣북스 세션은 캣북스 실행만 목록·상세에서 본다."""
+    cat = coupon(1, 1000, key="cat-1").model_dump(mode="json")
+    nubi_req = coupon(1, 1000, key="nubi-1").model_copy(update={"tenant_id": "nubi"})
+    cat_id = client.post("/api/safety/executions", json=cat, headers=MARKETING).json()["data"][
+        "execution_id"
+    ]
+    nubi_id = client.post(
+        "/api/safety/executions", json=nubi_req.model_dump(mode="json"), headers=MARKETING
+    ).json()["data"]["execution_id"]
+    nubi = human_auth.issue_session(
+        account_id="acc-n", name="누비관리", role="admin", company_id="nubi", company_role="admin"
+    )[0]
+
+    def ids(headers: dict[str, str]) -> set[str]:
+        rows = client.get("/api/safety/executions", headers=headers).json()["data"]
+        return {r["execution_id"] for r in rows}
+
+    assert ids(_bearer(nubi)) == {nubi_id}
+    assert cat_id in ids(_bearer(session))  # 캣북스 세션은 캣북스 기록을 본다
+    assert client.get(f"/api/safety/executions/{cat_id}", headers=_bearer(nubi)).status_code == 404
+    assert client.get(f"/api/safety/executions/{nubi_id}", headers=_bearer(nubi)).status_code == 200
+    no_company = human_auth.issue_session(
+        account_id="acc-x", name="끊긴회원", role="member", no_company=True
+    )[0]
+    assert ids(_bearer(no_company)) == set()
