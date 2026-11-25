@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from infra_agent.handlers import switched_off
 from infra_agent.main import app
 
-PAST = {"component": "payment", "past_case_id": "card_past", "similarity": 0.92}
+PAST = {"component": "payment", "past_case_id": "card_past", "similarity": 0.97}
 
 
 def _call(a2a_body, payload: dict, **kw) -> dict:
@@ -114,3 +114,18 @@ def test_site_adapter_pending_human_is_not_a_release() -> None:
     pending = {"released": False, "applied": "pending_human", "handoff_task_id": "hof_1"}
     assert switched_off({"active": True}, pending) is False
     assert switched_off(None, pending) is False  # 되돌리기 길도 성공으로 보지 않는다
+
+
+def test_below_the_floor_releases_nothing_even_if_called_directly(a2a_body, gate, runtime) -> None:
+    """총괄을 거치지 않은 호출자가 낮은 유사도로 불러도 infra가 하한을 다시 본다."""
+    fake = gate("executed")
+    result = _call(a2a_body, {**PAST, "similarity": 0.9})
+    assert (result["status"], result["outcome"]) == ("failed", "not_similar_enough")
+    assert fake.calls == [] and runtime.shop.released == 0
+
+
+def test_nan_similarity_is_rejected_before_anything_runs(a2a_body, gate, runtime) -> None:
+    fake = gate("executed")
+    result = _call(a2a_body, {**PAST, "similarity": "NaN"})
+    assert result["status"] == "failed"
+    assert fake.calls == [] and runtime.shop.released == 0

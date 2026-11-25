@@ -18,6 +18,17 @@ from pydantic import Field
 
 from ax_contracts.schemas.common import AxModel, UtcDatetime
 
+# 같은 유형 과거 장애의 처리 방식을 사람 확인 없이 다시 할 때 필요한 유사도 하한.
+# 총괄(scenario_a)과 실제로 해제하는 infra `release_fault`가 같은 값을 본다
+PAST_FIX_MIN_SIMILARITY = 0.95
+
+
+def meets_past_fix_floor(similarity: object) -> bool:
+    """유사도가 수치이고 0~1 범위이며 하한 이상일 때만 참. NaN·None·문자열·bool은 거짓."""
+    if isinstance(similarity, bool) or not isinstance(similarity, int | float):
+        return False
+    return PAST_FIX_MIN_SIMILARITY <= similarity <= 1
+
 
 class SuspectDeployment(AxModel):
     service: str

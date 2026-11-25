@@ -113,7 +113,7 @@ def test_post_check_needs_v2_before_and_v1_after(
 def test_release_fault_does_not_touch_a_bad_deploy(bad_deploy, a2a_body, gate, runtime) -> None:
     client, _ = bad_deploy
     fake = gate("executed")
-    past = {"component": "payment", "past_case_id": "card_past", "similarity": 0.92}
+    past = {"component": "payment", "past_case_id": "card_past", "similarity": 0.97}
     out = _a2a(client, a2a_body, "release_fault", past)
     assert (out["status"], out["outcome"]) == ("completed", "not_needed")
     assert fake.calls == [] and runtime.shop.state["payment_version"] == "v2"

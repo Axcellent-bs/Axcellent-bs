@@ -25,12 +25,14 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from ax_contracts.schemas.infra import (
+    PAST_FIX_MIN_SIMILARITY,
     DiagnoseIncidentInput,
     ReleaseFaultOutput,
     ReleaseFaultParams,
     RollbackDeploymentParams,
     VerifyRecoveryInput,
     VerifyRecoveryOutput,
+    meets_past_fix_floor,
 )
 from infra_agent import deploy_tools
 from infra_agent.deploy_run import HANDLERS as DEPLOY_HANDLERS
@@ -625,6 +627,14 @@ async def release_fault(request: AgentRequest) -> AgentResult:
         inp = ReleaseFaultParams.model_validate(request.input)
     except ValidationError as exc:
         return _failed(request, "invalid_input", str(exc))
+    if not meets_past_fix_floor(inp.similarity):
+        # 총괄 말고 다른 호출자가 낮은 유사도로 불러도 해제하지 않는다(하한은 계약에 한 곳)
+        return _failed(
+            request,
+            "not_similar_enough",
+            f"과거 장애와 덜 비슷함({round(inp.similarity * 100)}%, "
+            f"기준 {round(PAST_FIX_MIN_SIMILARITY * 100)}%)",
+        )
     rt = get_runtime()
     key = f"{request.meta.context_id}:{RELEASE_ACTION}:{inp.component}"
     if (done := rt.releases.get(key)) and done["status"] == "executed":
@@ -632,9 +642,7 @@ async def release_fault(request: AgentRequest) -> AgentResult:
     try:
         state = await rt.shop.fault_state()
     except Exception as exc:  # noqa: BLE001 - 상태를 모르면 해제하지 않는다(fail-closed)
-        return _failed(
-            request, "server_unknown", f"사이트 상태 조회 실패: {type(exc).__name__}"
-        )
+        return _failed(request, "server_unknown", f"사이트 상태 조회 실패: {type(exc).__name__}")
     if server_state(state) != "fault":
         return _release_not_needed(request, state, "결제 서버가 지금 이상이 아니라 해제하지 않았다")
     if not state.get("active", False):
