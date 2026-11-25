@@ -67,7 +67,7 @@ function Detail({ id }: { id: string }) {
           {rec.script && boardBehindScript(rec) && (
             <div className="mt-3">
               <RecordBoardFromScript recordId={rec.record_id} story={rec.story ?? rec.script.title_ko} characterEn={rec.sheet.consistency_en}
-                scenes={rec.script.scenes.length} onBoard={(storyboard) => setRec({ ...rec, storyboard, storyboard_at: new Date().toISOString() })} />
+                scenes={rec.script.scenes.length} onRecord={setRec} />
             </div>
           )}
         </div>

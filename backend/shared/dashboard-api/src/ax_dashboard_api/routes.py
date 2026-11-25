@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -137,6 +138,7 @@ from ax_dashboard_api.schemas import (
 
 HR_LIST_LIMIT = 200  # hr 조회 skill의 최대 건수
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dashboard", dependencies=[Depends(require_human)])
 # 목 모드는 메모리 데이터, 실제 모드는 shop-api·support에서 읽는다 (`live_views.py`).
 # 지식 조각·후기는 아직 실제 출처가 없어 실제 모드에서는 빈 목록이다 (지어내지 않는다).
@@ -1461,8 +1463,11 @@ async def marketing_character_sheet(body: CharacterSheetBody) -> dict:
     note = (body.note or "").strip() or None
     return ok(
         await marketing_client.character_sheet_call(
-            body.image.model_dump(), note, body.thumbnail_base64 or None,
-            kind=body.kind, virtual_confirmed=body.virtual_confirmed,
+            body.image.model_dump(),
+            note,
+            body.thumbnail_base64 or None,
+            kind=body.kind,
+            virtual_confirmed=body.virtual_confirmed,
             extra_images=[e.model_dump() for e in body.extra_images],
         )  # fmt: skip
     )
@@ -1482,6 +1487,29 @@ class StoryboardBody(BaseModel):
     style_en: str | None = Field(default=None, max_length=MAX_STYLE_EN)
     shots: Literal[6, 9, 12] = DEFAULT_SHOTS
     record_id: str | None = Field(default=None, pattern=r"^CR-[0-9a-f]{12}$")  # 이어 붙일 제작 기록
+    # 11/25 true면 바로 답하고 뒤에서 만든다(record_id 필수, 끝나면 기록에 붙는다).
+    # 화면은 기록을 다시 읽는다.
+    # 대본을 따르는 6칸 이상 스토리보드는 60초를 넘겨 nginx에서 502로 끊기고 결과도 버려졌다
+    background: StrictBool = False
+
+
+_STORYBOARD_TASKS: set[asyncio.Task[Any]] = set()
+
+
+async def _storyboard_in_background(
+    story: str, character_en: str | None, style_en: str | None, shots: int, record_id: str
+) -> None:
+    try:
+        await marketing_client.storyboard_call(
+            story,
+            character_en,
+            style_en,
+            shots,
+            record_id,
+            deadline_s=marketing_client.STORYBOARD_BACKGROUND_DEADLINE_SECONDS,
+        )
+    except Exception:  # noqa: BLE001 - 화면은 기록을 다시 읽어 실패(안 바뀜)를 안다
+        logger.exception("스토리보드(뒤에서 만들기) 실패: %s", record_id)
 
 
 @router.post("/marketing/storyboard")
@@ -1496,6 +1524,21 @@ async def marketing_storyboard(body: StoryboardBody) -> dict:
     story = body.story.strip()
     if not story:
         raise ApiError(422, "NO_STORY", "줄거리를 적어 주세요")
+    if body.background:
+        if not body.record_id:
+            raise ApiError(422, "NO_RECORD", "뒤에서 만들 때는 제작 기록(record_id)이 필요하다")
+        task = asyncio.create_task(
+            _storyboard_in_background(
+                story,
+                (body.character_en or "").strip() or None,
+                (body.style_en or "").strip() or None,
+                body.shots,
+                body.record_id,
+            )
+        )
+        _STORYBOARD_TASKS.add(task)  # 끝나기 전에 가비지 수집되지 않게 잡아 둔다
+        task.add_done_callback(_STORYBOARD_TASKS.discard)
+        return ok({"record_id": body.record_id, "started": True})
     return ok(
         await marketing_client.storyboard_call(
             story,

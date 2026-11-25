@@ -482,9 +482,7 @@ def inspect(token: str, agent: str | None) -> PersonalMcpCheckOutput:
     limit = usage["limit_tokens"]
     if limit is not None and usage["used_tokens"] >= limit:
         message = f"이번 달 회사 예산 중 내 몫({settings.monthly_share_percent}%)을 다 썼어요"
-        return PersonalMcpCheckOutput(
-            allowed=False, code="LIMIT_REACHED", message=message, **base
-        )
+        return PersonalMcpCheckOutput(allowed=False, code="LIMIT_REACHED", message=message, **base)
     return PersonalMcpCheckOutput(allowed=True, code="OK", **base)
 
 

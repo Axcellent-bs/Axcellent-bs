@@ -46,9 +46,7 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.delenv("DASHBOARD_MOCK", raising=False)
     monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
     monkeypatch.setenv("DASHBOARD_HUMAN_TOKENS", "공용:shared-test-token")
-    monkeypatch.setenv(
-        "AX_AGENT_TOKENS", "orchestrator=orch-agent-token,dev=dev-agent-token"
-    )
+    monkeypatch.setenv("AX_AGENT_TOKENS", "orchestrator=orch-agent-token,dev=dev-agent-token")
     monkeypatch.setenv(cc.CONNECTION_FILE_ENV, str(tmp_path / "company_connection.json"))
     monkeypatch.setattr(cc, "_cache", None)
     monkeypatch.setenv(tenants.TENANT_ENV, "catbooks")
@@ -155,11 +153,16 @@ def test_paths_fit_the_proxy_rule_and_name_no_account(client: TestClient, people
 
     paths = {p: ops for p, ops in app.openapi()["paths"].items() if p.startswith(ME)}
     assert sorted(paths) == [
-        ME, f"{ME}/mcp", CHECK, f"{ME}/settings", f"{ME}/token", f"{ME}/token/delete",
+        ME,
+        f"{ME}/mcp",
+        CHECK,
+        f"{ME}/settings",
+        f"{ME}/token",
+        f"{ME}/token/delete",
         f"{ME}/token/reissue",
     ]
     for p in paths:
-        rest = p[len(ME):]
+        rest = p[len(ME) :]
         assert re.fullmatch(r"(/[A-Za-z0-9_-]+){0,3}", rest), p
     assert {m for ops in paths.values() for m in ops} <= {"get", "head", "post"}
     assert _settings(client, people["a-3"], agents=["dev"], account_id="a-1").status_code == 422
@@ -189,8 +192,11 @@ def test_issue_shows_the_token_once_and_stores_only_a_hash(
     again = _issue(client, people["a-3"])
     assert again.status_code == 409 and again.json()["error"]["code"] == "TOKEN_EXISTS"
     # 원문은 다시 보이지 않는다: 보기 응답·파일·로그 어디에도 없다
-    files = [p.read_text(encoding="utf-8") for p in env.rglob("*") if p.is_file()
-             and p.suffix in (".json", ".jsonl")]
+    files = [
+        p.read_text(encoding="utf-8")
+        for p in env.rglob("*")
+        if p.is_file() and p.suffix in (".json", ".jsonl")
+    ]
     text = "\n".join([client.get(ME, headers=people["a-3"]).text, *files]) + caplog.text
     assert token not in text
     assert personal_mcp.token_hash(token) in "\n".join(files)
@@ -253,9 +259,7 @@ def test_token_is_tied_to_the_session_company(
     assert got["settings"]["agents"] == []
 
 
-def test_account_gone_means_the_token_stops(
-    client: TestClient, people: Any, env: Path
-) -> None:
+def test_account_gone_means_the_token_stops(client: TestClient, people: Any, env: Path) -> None:
     _settings(client, people["a-3"], agents=["dev"])
     token = _issue(client, people["a-3"]).json()["data"]["token"]
     rows = [r for r in ROWS if r["id"] != "a-3"]
@@ -298,8 +302,16 @@ def test_only_chosen_ai_employees_pass(client: TestClient, people: Any) -> None:
 def test_choosable_agents_are_the_ten_ai_employees(client: TestClient, people: Any) -> None:
     got = client.get(ME, headers=people["a-3"]).json()["data"]
     assert got["agents_available"] == [
-        "orchestrator", "support", "finance", "data", "hr",
-        "marketing", "planning", "dev", "infra", "archive",
+        "orchestrator",
+        "support",
+        "finance",
+        "data",
+        "hr",
+        "marketing",
+        "planning",
+        "dev",
+        "infra",
+        "archive",
     ]
 
 
@@ -333,9 +345,7 @@ def test_my_usage_is_shown_against_the_company_budget(
     assert u["percent_of_limit"] == 25.0
 
 
-def test_over_my_share_is_blocked_with_a_reason(
-    client: TestClient, people: Any, env: Path
-) -> None:
+def test_over_my_share_is_blocked_with_a_reason(client: TestClient, people: Any, env: Path) -> None:
     _budget(env, 10_000)
     _settings(client, people["a-3"], agents=["dev"], monthly_share_percent=10)
     token = _issue(client, people["a-3"]).json()["data"]["token"]
@@ -358,9 +368,7 @@ def test_no_share_or_no_budget_means_no_personal_limit(client: TestClient, peopl
     assert u["limit_tokens"] is None and u["percent_of_budget"] is None
 
 
-def test_company_cap_blocks_mcp_too(
-    client: TestClient, people: Any, env: Path
-) -> None:
+def test_company_cap_blocks_mcp_too(client: TestClient, people: Any, env: Path) -> None:
     _budget(env, 10_000, pct=50)
     _settings(client, people["a-3"], agents=["dev"])
     token = _issue(client, people["a-3"]).json()["data"]["token"]
