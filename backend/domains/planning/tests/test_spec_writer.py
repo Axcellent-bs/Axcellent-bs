@@ -83,3 +83,78 @@ def test_llm_timeout_falls_back() -> None:
 
 def test_mock_mode_has_no_writer(service) -> None:
     assert service._spec_writer is None
+
+
+class LeakLLM(FakeLLM):
+    """근거의 원인 후보 설명(공지 시각·채널)을 요구사항으로 옮겨 오는 LLM (11/25 SPEC-30 R2)."""
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+        self.calls.append({"prompt": prompt, "untrusted": untrusted, "context_id": context_id})
+        return schema(
+            problem="payment 장애 원인이 확정되지 않았다",
+            goal="운영자가 원인을 확인해 확정한다",
+            requirements=[
+                "장애 상세 화면에 원인 후보를 신뢰도와 함께 표시한다",
+                "후보의 근거로 공지 게시 시각(2026-11-13T07:01:44Z)과 게시 채널(banner)을 표시한다",
+            ],
+            done_criteria=[
+                "화면에 공지 게시 시각 2026-11-13T07:01:44Z와 채널 banner가 표시된다",
+                "운영자가 원인을 저장하면 확정 상태로 바뀐다",
+            ],
+        )
+
+
+EVIDENCE = ("원인 후보 1개 · 사람 확인 필요 / 후보(low): 이상 직전 게시 중이던 공지와 관련 있을 수 "
+            "있음 — 공지 게시 2026-11-13T07:01:44Z (채널 banner)")  # fmt: skip
+
+
+def test_evidence_values_do_not_become_requirements() -> None:
+    llm = LeakLLM()
+    got = run(SpecWriter(llm).draft(title="payment 장애 원인 확인", evidence=EVIDENCE,
+                                    requester="orchestrator", context_id="ctx"))  # fmt: skip
+    assert got is not None
+    assert got.requirements == ["장애 상세 화면에 원인 후보를 신뢰도와 함께 표시한다"]
+    assert got.done_criteria == ["운영자가 원인을 저장하면 확정 상태로 바뀐다"]
+    assert "요구사항·완료 기준으로 옮기지 않는다" in llm.calls[0]["prompt"]
+
+
+def test_time_asked_in_title_is_kept() -> None:
+    """제목이 그 시각을 바라면 요청한 것이라 둔다."""
+    llm = LeakLLM()
+    got = run(SpecWriter(llm).draft(title="2026-11-13T07:01:44Z 공지 시각 표시", evidence=EVIDENCE,
+                                    requester="orchestrator", context_id="ctx"))  # fmt: skip
+    assert got is not None and len(got.requirements) == 2
+
+
+class RuleLLM(FakeLLM):
+    """제약 문장을 요구사항에 넣는 LLM (11/25 SPEC-26 R1 → 작업 T-28)."""
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+        self.calls.append({"prompt": prompt, "untrusted": untrusted, "context_id": context_id})
+        return schema(
+            problem="README 끝에 시험 줄이 없다",
+            goal="README 끝에 시험 줄이 생긴다",
+            requirements=["다른 파일은 수정하지 않는다.", "README.md 맨 끝에 시험 줄을 추가한다"],
+            done_criteria=["README.md 마지막 줄이 시험 줄이다"],
+        )
+
+
+def test_constraint_requirement_moves_to_done_criteria() -> None:
+    llm = RuleLLM()
+    got = run(SpecWriter(llm).draft(title="README 끝에 시험 줄 추가", evidence="개발 요청",
+                                    requester="dev", context_id="ctx"))  # fmt: skip
+    assert got is not None
+    assert got.requirements == ["README.md 맨 끝에 시험 줄을 추가한다"]
+    assert got.done_criteria == [
+        "README.md 마지막 줄이 시험 줄이다",
+        "다른 파일은 수정하지 않는다.",
+    ]
+    assert "제약·금지는 요구사항이 아니라 완료 기준에" in llm.calls[0]["prompt"]
+
+
+def test_is_constraint() -> None:
+    from planning_agent.spec_writer import is_constraint
+
+    assert is_constraint("버튼의 동작, 스타일, 레이아웃과 다른 문구는 변경하지 않는다.")
+    assert is_constraint("상단 메뉴의 로그인 링크 문구는 대상에서 제외하고 그대로 둔다.")
+    assert not is_constraint("로그인 제출 버튼 텍스트를 '시작하기'로 변경한다.")
