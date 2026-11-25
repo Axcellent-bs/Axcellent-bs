@@ -398,6 +398,54 @@ def test_real_photo_uses_the_layout_only(kenv: dict[str, Any]) -> None:
     assert all(d.startswith(b"\x89PNG") for d, _ in kenv["uploads"])
 
 
+def test_brief_path_starts_keyframes_from_maybe_start_board(kenv: dict[str, Any]) -> None:
+    # #1804 기획안 → 제작 기록: 캐릭터 없는 기록에 스토리보드를 붙이고 maybe_start_board만 부른다
+    with company_scope.using("catbooks"):
+        store = cr.store()
+        empty = {"summary_ko": "캐릭터 없음", "prompt_en": "", "negative_prompt_en": ""}
+        rid = store.add_sheet(empty, None, None)
+        board = request_creative.plan_storyboard(_plan(SCENES), {})
+        store.attach_storyboard(rid, "대본", len(board["shots"]), board)
+    M._run(lambda: _start(kenv, rid))  # noqa: SLF001
+    state = kenv["store"].get_render(rid)
+    assert state["keyframes"]["status"] == "done" and "board_image" not in state
+    images = [args["requests"][0]["params"] for n, args in kenv["hf"].tools
+              if n == "generate_image_batch"]  # fmt: skip
+    assert [len(p.get("medias") or []) for p in images] == [1, 1, 1, 0]  # 구도만
+    # 그 뒤 영상 승인 요청은 키프레임으로
+    video = M._run(lambda: rr.request_video(kenv["ledger"], M.META, rid, "gaon"))  # noqa: SLF001
+    assert video["summary"]["reference"] == "keyframes"
+
+
+async def _start(env: dict[str, Any], rid: str) -> None:
+    rr.maybe_start_board(env["ledger"], M.META, rid)
+
+
+def test_two_starts_at_once_draw_each_frame_once(kenv: dict[str, Any]) -> None:
+    rid = _record(kenv, SCENES)
+
+    async def both() -> Any:
+        rr.maybe_start_board(kenv["ledger"], M.META, rid)  # 뒤에서 ensure
+        return await request_creative.make_video(_request(rid), kenv["ledger"])
+
+    out = M._run(both)  # noqa: SLF001
+    assert out.outcome == request_creative.VIDEO_HELD
+    assert len(_image_gates(kenv)) == 4  # 같은 장을 두 번 그리지 않는다
+
+
+def test_stale_running_frame_becomes_failed(kenv: dict[str, Any]) -> None:
+    rid = _record(kenv, SCENES)
+    with company_scope.using("catbooks"):
+        kf.prepare(rid, "catbooks")
+        render = cr.store().get_render(rid)
+        old = "2026-01-01T00:00:00+00:00"
+        render["keyframes"]["frames"][1].update(status="running", at=old)
+        cr.store().set_render(rid, render)
+        rr.expire_stale(rid)
+    frame = kenv["store"].get_render(rid)["keyframes"]["frames"][1]
+    assert (frame["status"], frame["error"]) == ("failed", "interrupted")
+
+
 def test_plan_svg_is_used_as_is_and_board_svg_llm_is_not_called(kenv: dict[str, Any]) -> None:
     rid = _record(kenv, SCENES)
     board = kenv["store"].get(rid)["storyboard"]

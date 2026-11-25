@@ -618,6 +618,15 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
     render = rec.get("render") or {}
     sheet = render.get("sheet_image") or {}
     board = render.get("board_image") or {}
+    if not force:
+        # 11/25 키프레임 방식이면 스토리보드 그림 대신 키프레임을 그린다(기획안 → 제작 기록 길
+        # #1804도 여기로 그림을 시작한다). 캐릭터 없는 기록은 시트 그림 없이 구도만으로 그린다
+        from marketing_agent import keyframes as _kf
+
+        kcid = cid or sheet.get("company_id") or request_company(meta)
+        if _kf.active(rec, route(kcid), kcid):
+            _spawn(_kf.ensure(ledger, meta, record_id, kcid))
+            return
     if board.get("status") in ("running", "done") and board.get("story_sha") == _story_sha(rec):
         return
     if sheet.get("status") != "done":
@@ -1238,6 +1247,19 @@ def expire_stale(record_id: str) -> None:
         if age > STALE_S and not _tasks:
             cur.update(status="failed", error="interrupted")
             render[part] = cur
+            changed = True
+    # 11/25 키프레임 장도 같은 규칙(끊긴 장은 실패 → [다시 그리기]로 고친다)
+    kfs = render.get("keyframes") or {}
+    for frame in kfs.get("frames") or []:
+        if not isinstance(frame, dict) or frame.get("status") != "running" or not frame.get("at"):
+            continue
+        try:
+            age = (_now() - datetime.fromisoformat(frame["at"])).total_seconds()
+        except ValueError:
+            continue
+        if age > STALE_S and not _tasks:
+            frame.update(status="failed", error="interrupted")
+            kfs["status"] = "failed"
             changed = True
     if changed:
         _creative.store().set_render(record_id, render)

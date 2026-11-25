@@ -438,9 +438,20 @@ async def ensure(
     """프레임을 모두 그린다(이미 done인 장은 다시 안 그림). 하나라도 못 그리면 이유 코드."""
     cur = prepare(record_id, cid)
     for frame in cur.get("frames") or []:
-        if frame.get("status") in ("done", "running"):
+        index = int(frame.get("index") or 0)
+        # 같이 도는 다른 ensure(시트 그림이 끝나며 부른 것 등)가 그리는 장은 건너뛴다.
+        # 그때그때 다시 읽는다
+        now = (frames_of(_creative.store().get(record_id) or {}) or [{}] * (index + 1))
+        if index < len(now) and now[index].get("status") in ("done", "running"):
             continue
-        await render_frame(ledger, meta, record_id, int(frame.get("index") or 0), cid)
+        await render_frame(ledger, meta, record_id, index, cid)
+    waited = 0.0
+    while waited <= _render.JOB_TIMEOUT_S:  # 다른 쪽이 그리는 장이 끝나기를 기다린다
+        rec = _creative.store().get(record_id) or {}
+        if not any(f.get("status") == "running" for f in frames_of(rec)):
+            break
+        await _render.SLEEP(_render.POLL_S)
+        waited += _render.POLL_S
     rec = _creative.store().get(record_id) or {}
     bad = [f for f in frames_of(rec) if f.get("status") != "done"]
     if bad:
