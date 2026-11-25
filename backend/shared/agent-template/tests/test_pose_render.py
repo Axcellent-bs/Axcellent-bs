@@ -34,14 +34,18 @@ SAMPLES = [
      "head": {"yaw": 20, "pitch": 0}, "arm_l": {"raise": 25, "bend": 20},
      "arm_r": {"raise": -20, "bend": 15}, "step": 0.45},
 ]  # fmt: skip
-# 옮기기 전 기획 렌더러(dev 5ce647db의 planning_agent.pose_render.render)로 찍은 값 (길이, sha256)
+# 고정 포즈 출력 (길이, sha256). 11/26 바뀐 기대값: 카메라(CAMERAS) 높이·초점을 인물이 칸 높이의
+# 55~70%가 되게 바꿔서(예전 45~54%) 다시 찍었다. 그 밖의 그리기는 같다(소품 없는 포즈는
+# 새 소품 0개).
+# 예전 값(옮기기 전 기획 렌더러 dev 5ce647db): (6875, bfe291de…) (6973, f335290d…) (7033, 22ae5b54…)
+# (6917, 3d94cb9d…), 16:9 (6921, bebfa489…)
 OLD_PLANNING = [
-    (6875, "bfe291de3533075582a610946d086ec8f4865860302f0173a70e20d6f540c09d"),
-    (6973, "f335290dd19ac8e039f5cdacedf162bd005392caf89e60728ed37dbe8721f0e3"),
-    (7033, "22ae5b54843b7ed550bfc9fb1588ae2ca7004e24f3d9426dce20f243e9244cc1"),
-    (6917, "3d94cb9d24927eb38070329b6e86b89bd9a3a40bacd1e7128da0c7ede258ce08"),
+    (6861, "7db32ac6ae599acc92db48e9ff6fcad302b22aeb917a01ff1b694b9c6a775a51"),
+    (7026, "beb6a47794c9219d9c6965f767480184f11087a5fe0a4992eef6bc6a3e0f1608"),
+    (7011, "4a41a76f86d5d1dd7462af02dc1947f4e46396ea1d4b7581adca6f9e3a78726b"),
+    (6944, "ac6dbc2d2f3bdbb96c0dd46c3c4019d156e68167320a26d657e78f86061f5473"),
 ]
-OLD_PLANNING_16_9 = (6921, "bebfa4899c1012a9cfb1a323a79095094c02d70da8fea5c7d383e603bc519c77")
+OLD_PLANNING_16_9 = (6784, "e17b19265f217f19ce0d5a4078433b2b82ce832b90429c81989b8c1a89f0047e")
 PROP_COLORS = {"book": "#e2552f", "desk": "#c9a27a", "phone": "#2b2f36", "shelf": "#b98d63",
                "cup": "#f4f1ea"}  # fmt: skip
 EYE = 'fill="#333"'
@@ -127,3 +131,60 @@ def test_backdrop_is_gradient_only(aspect: str, box: str) -> None:
     assert "<linearGradient" in svg and 'fill="url(#bg)"' in svg
     for absent in ("<text", "<circle", "<line ", "<ellipse", "<polygon", "url(#sk)"):
         assert absent not in svg
+
+
+# ---------------------------------------------------------------- 11/26 시각 라벨·소품·인물 크기
+
+
+def test_llm_time_in_the_label_is_replaced_by_the_panel_time() -> None:
+    got = pr.PoseLLM.model_validate({"label_ko": "0초 · 마이크 들고 노래"})
+    assert pr.key_pose(got, "x", at_s=4).label_ko == "4초 · 마이크 들고 노래"  # type: ignore[union-attr]
+    assert pr.time_label("12.5초 놀라 돌아봄", 8) == "8초 · 놀라 돌아봄"
+    assert pr.time_label("손 흔듦", 2.5) == "2.5초 · 손 흔듦"
+    assert pr.time_label("0초", 12) == "12초"
+    assert pr.time_label("0초 · 돌아봄", None) == "0초 · 돌아봄"  # 시각을 모르면 받은 글 그대로
+    assert '"0초' not in pr.POSE_FIELDS and "동작만 짧게" in pr.POSE_FIELDS
+
+
+def test_extra_props_are_drawn_and_unknown_ones_dropped() -> None:
+    got = pr.PoseLLM.model_validate({"extra_props": ["mic", "sword", "mic", "spotlight", "bag"]})
+    p = pr.key_pose(got, "x")
+    assert p is not None and p.extra_props == ["mic", "spotlight"]  # 목록 밖 버림, 최대 2개
+    plain = pr.render(_pose())
+    for ex, color in (("mic", "#8a8f99"), ("spotlight", "rgba(255,236,170,.35)"),
+                      ("screen", "#5b6fd6"), ("laptop", "#9aa3b2"), ("bag", "#b0703c"),
+                      ("sign_blank", 'fill="#fdfbf7" stroke="#8a7a66"')):  # fmt: skip
+        svg = pr.render(_pose(extra_props=[ex]))
+        assert color in svg and color not in plain
+        assert "<text" not in svg  # 소품에 글자 없음 (라벨 없는 포즈)
+        assert len(svg.encode()) <= pr.MAX_BYTES
+
+
+def test_words_in_the_scene_add_a_prop_even_if_the_llm_did_not() -> None:
+    got = pr.PoseLLM.model_validate({})
+    p = pr.key_pose(got, "x", text="보라 LED 무대에서 마이크를 들고 노래한다")
+    assert p is not None and p.extra_props == ["mic"]
+    assert pr.props_from_text("a woman opens her laptop under a spotlight") == ["laptop",
+                                                                               "spotlight"]
+    assert pr.props_from_text("design signage") == []  # 영문은 낱말 경계 (sign ≠ signage)
+    assert pr.key_pose(pr.PoseLLM.model_validate({"prop": "book"}), "x").prop == "book"  # type: ignore[union-attr]
+
+
+def test_old_prop_is_unchanged_and_hands_do_not_collide() -> None:
+    both = pr.render(_pose(prop="phone", extra_props=["mic"]))
+    assert PROP_COLORS["phone"] in both and "#8a8f99" in both  # 휴대폰 오른손, 마이크는 왼손
+
+
+@pytest.mark.parametrize("shot", ["close", "medium", "full"])
+def test_figure_is_55_to_70_percent_of_the_panel(shot: str) -> None:
+    for aspect in ("9:16",):
+        w, h = pr.SIZES[aspect]
+        c, j = pr._Camera(shot, w, h), pr.skeleton(_pose(shot=shot))  # noqa: SLF001
+        hd, ft = c.project(j["head"]), c.project(j["ft_l"])
+        top, bottom = hd.y - 0.11 * hd.s, ft.y + 0.07 * ft.s
+        ratio = (min(bottom, h) - max(top, 0)) / h
+        low, high = pr.FIGURE_RATIO
+        assert low <= ratio <= high, (shot, ratio)
+        assert top > 20  # 위쪽 라벨 줄과 겹치지 않는다
+        if shot == "full":
+            assert bottom <= h  # 온몸 샷은 발까지 보인다

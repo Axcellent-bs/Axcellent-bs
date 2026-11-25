@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -266,6 +267,36 @@ def test_planning_svg_becomes_the_panel_svg() -> None:
     first = board["shots"][0]["svg"]
     assert "<rect" in first and "onload" not in first
     assert all(not s["svg"] for s in board["shots"][1:])
+
+
+def test_panel_labels_use_the_panel_time_and_scene_words_add_props(env: dict[str, Any]) -> None:
+    """11/26 운영 콘티 4칸 라벨이 전부 "0초 · …"였고 마이크·무대 조명이 없었다."""
+    times = [(0, 4), (4, 8), (8, 15)]
+    scenes = [
+        s.model_copy(update={"start_s": a, "end_s": b})
+        for s, (a, b) in zip(Q.PLAN.scenes, times, strict=True)
+    ]
+    scenes[1] = scenes[1].model_copy(update={"visual": "무대 조명 아래 마이크를 들고 노래"})
+    plan = Q.PLAN.model_copy(update={"scenes": scenes})
+    rid, why = request_creative.prepare_storyboard(Q._brand(env), Q.CTX, plan)  # noqa: SLF001
+    assert why is None and rid
+    copied = POSE | {"label_ko": "0초 · 돌아봄"}  # LLM이 지시문 예시 시각을 베낀 답
+    assert _draw(rid, lambda: _llm([{"no": n, "pose": copied} for n in (1, 2, 3)])) == "svg"
+    shots = env["store"].get(rid)["storyboard"]["shots"]
+    labels = [re.search(r"<text[^>]*>([^<]*)</text>", s["svg"]).group(1) for s in shots]  # type: ignore[union-attr]
+    assert labels == ["0초 · 돌아봄", "4초 · 돌아봄", "8초 · 돌아봄"]
+    assert "#8a8f99" in shots[1]["svg"] and "rgba(255,236,170" in shots[1]["svg"]  # 마이크·조명
+    assert "#8a8f99" not in shots[0]["svg"]
+
+
+def test_panel_starts_fall_back_to_an_even_split_of_the_plan_length() -> None:
+    board = {"shots": [{"no": 1}, {"no": 2}, {"no": 3}], rr.PLAN_DURATION_KEY: 15,
+             "plan_scenes": [{"start_s": 0}, {"start_s": 0}, {"start_s": 0}]}  # fmt: skip
+    assert bs.panel_starts(board) == {1: 0.0, 2: 5.0, 3: 10.0}  # 기획 시각이 모두 0이면 고르게
+    assert bs.panel_starts({"shots": [{"no": 1, "start_s": 0}, {"no": 2, "start_s": 3}]}) == {
+        1: 0.0, 2: 3.0,
+    }  # fmt: skip
+    assert bs.panel_starts({"shots": [{"no": 1}, {"no": 2}]}) == {}
 
 
 def test_planning_mannequin_svg_keeps_gradients_in_the_panel() -> None:

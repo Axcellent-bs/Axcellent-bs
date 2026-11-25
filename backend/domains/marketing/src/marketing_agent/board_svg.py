@@ -25,6 +25,7 @@ from collections.abc import Callable
 from typing import Any
 
 from marketing_agent import creative_records as _creative
+from marketing_agent import creative_render as _render
 from marketing_agent import keyframes as _keyframes
 from marketing_agent import pose_board
 from marketing_agent.pose_board import BoardPoseRead
@@ -88,6 +89,39 @@ def _panels(board: dict[str, Any], skip: int | None) -> list[dict[str, Any]]:
     ]
 
 
+def panel_starts(board: dict[str, Any]) -> dict[int, float]:
+    """칸 번호 → 칸 시작 초 (11/26 라벨 시각). 칸 start_s(대본을 붙였으면) → 기획 장면 start_s
+    → 기획 길이를 칸 수로 고르게 나눈 시각. 시각이 앞뒤로 맞지 않으면 다음 출처로."""
+    plan = [r for r in board.get(_keyframes.PLAN_SCENES_KEY) or [] if isinstance(r, dict)]
+    shots = [s for s in board.get("shots") or [] if isinstance(s, dict)]
+    nos = [s.get("no") for s in shots]
+
+    def num(v: Any) -> float | None:
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    def rising(xs: list[float | None]) -> bool:
+        return all(x is not None for x in xs) and all(
+            a < b for a, b in zip(xs, xs[1:], strict=False)  # type: ignore[operator]
+        )
+
+    tries = [[num(s.get("start_s")) for s in shots]]
+    if len(plan) >= len(shots):
+        tries.append([num(r.get("start_s")) for r in plan[: len(shots)]])
+    total = num(board.get(_render.PLAN_DURATION_KEY))
+    if total and shots:
+        tries.append([round(total * i / len(shots), 1) for i in range(len(shots))])
+    for starts in tries:
+        if rising(starts):
+            return {no: at for no, at in zip(nos, starts, strict=True)
+                    if isinstance(no, int) and at is not None}  # fmt: skip
+    return {}
+
+
+def panel_text(panel: dict[str, Any]) -> str:
+    """소품 낱말을 찾을 칸 글."""
+    return " ".join(str(panel.get(k) or "") for k in ("scene_ko", "composition_ko", "camera"))
+
+
 async def _ask(llm: Any, data: dict[str, Any], context_id: str | None) -> BoardPoseRead:
     return await llm.structured(PROMPT, BoardPoseRead, untrusted=data, context_id=context_id)
 
@@ -124,11 +158,13 @@ async def draw(
         except Exception as exc:  # noqa: BLE001 - 시간 초과·형식 오류여도 흐름은 멈추지 않는다
             logger.warning("의뢰 마네킹 콘티 실패: %s (%s)", record_id, type(exc).__name__)
         else:
-            nos = {p["no"] for p in panels}
+            by_no = {p["no"]: p for p in panels}
+            starts = panel_starts(board)
             for panel in read.panels:
-                if panel.no not in nos or panel.no in svgs:
+                if panel.no not in by_no or panel.no in svgs:
                     continue
-                clean = pose_board.pose_svg(panel.pose, f"{panel.no}번 칸")
+                at, text = starts.get(panel.no), panel_text(by_no[panel.no])
+                clean = pose_board.pose_svg(panel.pose, f"{panel.no}번 칸", at, text)
                 if clean:
                     svgs[panel.no] = clean
     if svgs and end_no is not None:

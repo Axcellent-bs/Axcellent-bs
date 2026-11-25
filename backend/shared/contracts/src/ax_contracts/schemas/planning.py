@@ -797,6 +797,9 @@ class KeyPose(AxModel):
     step: float = 0.0
     prop: Literal["book", "desk", "phone", "shelf", "cup"] | None = None
     label_ko: str = Field(default="", max_length=30)
+    # 아래는 예전 포즈는 없다. 책방 밖 소품 (11/26 무대 의뢰에 마이크·조명을 못 그렸다). id는
+    # agent-template pose_render.EXTRA_PROPS(mic·laptop·bag·spotlight·screen·sign_blank)만 쓴다
+    extra_props: list[str] = Field(default_factory=list, max_length=2)
 
     @model_validator(mode="before")
     @classmethod
