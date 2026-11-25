@@ -5,8 +5,9 @@
 
 회사 칸(여러 회사 설계 1-6, 2026-11-20): 줄마다 `tenant_id`(회사 ID). 옛 DB는 켤 때
 `ALTER TABLE ... DEFAULT 'catbooks'`로 칸을 붙여 기존 줄은 캣북스가 된다. 새 대화는 요청 메타의
-회사(별칭은 정식 id로, 맞지 않으면 캣북스). 읽기는 아직 회사로 거르지 않는다(회사가 캣북스 하나,
-회사 확인 강제는 4단계).
+회사(별칭은 정식 id로, 맞지 않으면 캣북스). 읽기·바꾸기·숨기기는 지금 요청의 회사(`company_scope`)
+건만 본다(11/25: 누비투어 화면에 캣북스 대화가 보였다). 요청 밖(30분 자동 끝내기·재시작 정리)은
+모든 회사를 본다.
 
 status: `talking`(말 걸 수 있음) · `answering`(AI 답을 만드는 중) · `closed`(끝남, 더는 못 보냄).
 기획·마케팅·고객지원 직접 대화와 같다. 30분 동안 말이 없으면 자동으로 끝낸다.
@@ -22,6 +23,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from ax_agent_template import company_scope
 from ax_agent_template.companies import canonical_company_id
 from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 
@@ -86,6 +88,14 @@ class ChatStore:
             return [dict(r) for r in self._db.execute(sql, args).fetchall()]
 
     @staticmethod
+    def _mine() -> tuple[str, tuple[str, ...]]:
+        """지금 요청의 회사 조건(요청 밖이면 조건 없음)."""
+        company = company_scope.active()
+        if company is None:
+            return "1 = 1", ()
+        return "tenant_id = ?", (company,)
+
+    @staticmethod
     def _view(row: dict[str, Any]) -> dict[str, Any]:
         return {
             "id": row["id"],
@@ -102,16 +112,19 @@ class ChatStore:
         }
 
     def get(self, thread_id: str) -> dict[str, Any] | None:
+        where, args = self._mine()
         rows = self._rows(
-            "SELECT * FROM infra_chat_threads WHERE id = ? AND removed_at IS NULL", (thread_id,)
+            f"SELECT * FROM infra_chat_threads WHERE id = ? AND removed_at IS NULL AND {where}",  # noqa: S608
+            (thread_id, *args),
         )
         return self._view(rows[0]) if rows else None
 
     def list_all(self, limit: int = 100) -> list[dict[str, Any]]:
+        where, args = self._mine()
         rows = self._rows(
-            "SELECT * FROM infra_chat_threads WHERE removed_at IS NULL"
+            f"SELECT * FROM infra_chat_threads WHERE removed_at IS NULL AND {where}"  # noqa: S608
             " ORDER BY updated_at DESC, seq DESC LIMIT ?",
-            (limit,),
+            (*args, limit),
         )
         return [self._view(r) for r in rows]
 
@@ -221,11 +234,12 @@ class ChatStore:
 
         답하는 중이어도 숨긴다. 뒤늦은 답은 `_update`가 `get`으로 못 찾아 무시한다.
         """
+        where, args = self._mine()
         with self._lock:
             cur = self._db.execute(
                 "UPDATE infra_chat_threads SET removed_at = ?, removed_by = ?"
-                " WHERE id = ? AND removed_at IS NULL",
-                (self.clock().isoformat(), by, thread_id),
+                f" WHERE id = ? AND removed_at IS NULL AND {where}",  # noqa: S608
+                (self.clock().isoformat(), by, thread_id, *args),
             )
             self._db.commit()
             return cur.rowcount > 0
