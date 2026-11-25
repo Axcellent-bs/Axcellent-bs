@@ -41,6 +41,7 @@ from ax_contracts.schemas.marketing_character import VIRTUAL_HUMAN_LABEL
 from ax_contracts.schemas.marketing_storyboard import MAX_CHARACTER_EN, MAX_STYLE_EN
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
+from marketing_agent import keyframes as _keyframes
 from marketing_agent import storyboard as _storyboard
 from marketing_agent.character_sheet import VIRTUAL_STYLE_EN
 from marketing_agent.media.ledger import MediaLedger
@@ -136,6 +137,8 @@ def plan_storyboard(plan: Any, sheet: dict[str, Any]) -> dict[str, Any] | None:
     # 영상 길이는 기획 제작안 길이 (상한은 서버 설정)
     if isinstance(duration, int) and duration > 0:
         board[_render.PLAN_DURATION_KEY] = duration
+    # 11/25 키프레임: 기획 장면의 첫·끝 화면 글·SVG·동작·카메라 (keyframes.plan_frames가 고른다)
+    board[_keyframes.PLAN_SCENES_KEY] = _keyframes.plan_scenes(plan)
     return board
 
 
@@ -238,7 +241,12 @@ async def _ensure_images(
         if sheet.get("status") != "done":
             return f"sheet_image_{sheet.get('status') or 'failed'}"
     rec = _creative.store().get(record_id) or rec
-    if not _render.board_needed(rec, _render.route(cid)):
+    via = _render.route(cid)
+    if _keyframes.active(rec, via, cid):
+        # 11/25 키프레임 방식: 장면 경계마다 실사 그림 1장(스토리보드 그림은 만들지 않는다).
+        # 하나라도 못 그리면 영상을 요청하지 않는다
+        return await _keyframes.ensure(ledger, meta, record_id, cid)
+    if not _render.board_needed(rec, via, cid):
         return None  # 11/25 가상 인물 원본이 영상 참조: 스토리보드 그림(크레딧)을 만들지 않는다
     _render.maybe_start_board(ledger, meta, record_id, cid)  # 이미 만들었거나 도는 중이면 안 한다
     board = await _wait_part(record_id, "board_image")

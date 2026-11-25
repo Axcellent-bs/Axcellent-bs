@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { KeyframePairs } from "@/components/marketing/KeyframePairs";
 import { SheetBoard } from "@/components/marketing/SheetBoard";
+import { framesOf } from "@/lib/keyframes";
 import { StoryboardView } from "@/components/marketing/StoryboardMaker";
 import { approvalLink } from "@/lib/briefMedia";
 import { getCreativeRecord, redrawBoardImage, thumbSrc, type CreativeRecord } from "@/lib/creativeRecords";
@@ -13,7 +15,9 @@ import type { WorkRequestRow } from "@/lib/workRequests";
 // - 제작 기록이 없는 의뢰(캐릭터 없이)는 [스토리보드]만 두고, 기획 제작안 장면 글을 칸으로 보여 준다(그림 없음)
 // - "영상 승인 대기"면 [승인 화면 열기]. 승인은 지금 승인 화면에서만 한다(여기서 바로 승인하지 않는다)
 
-type Tab = "sheet" | "storyboard";
+// 11/25 키프레임 영상이면 [키프레임] 탭(프레임마다 SVG 구도 | 실사 키프레임 쌍 · 다시 그리기)이 더 생긴다
+type Tab = "sheet" | "storyboard" | "keyframes";
+const KEYFRAME_POLL_MS = 5_000;
 
 const records = new Map<string, Promise<CreativeRecord>>();
 function loadRecord(id: string, version: string): Promise<CreativeRecord> {
@@ -32,21 +36,30 @@ function Panel({ recordId, plan, tab, setTab, version }: {
 }) {
   const [rec, setRec] = useState<CreativeRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0); // 키프레임 다시 그리기·그리는 중이면 다시 읽는다
   useEffect(() => {
     if (!recordId) return;
     let live = true;
-    loadRecord(recordId, version).then((r) => live && setRec(r), (e: unknown) => live && setError(e instanceof Error ? e.message : "기록을 읽지 못했어요"));
+    loadRecord(recordId, `${version}:${nonce}`).then((r) => live && setRec(r), (e: unknown) => live && setError(e instanceof Error ? e.message : "기록을 읽지 못했어요"));
     return () => { live = false; };
-  }, [recordId, version]);
+  }, [recordId, version, nonce]);
+  const keyframes = rec?.render?.keyframes;
+  const keyframed = framesOf(keyframes).length > 0;
+  const drawing = framesOf(keyframes).some((f) => f.status === "running");
+  useEffect(() => {
+    if (!drawing) return;
+    const t = window.setTimeout(() => setNonce((n) => n + 1), KEYFRAME_POLL_MS);
+    return () => window.clearTimeout(t);
+  }, [drawing, nonce]);
 
-  const tabs: Tab[] = recordId ? ["sheet", "storyboard"] : ["storyboard"];
+  const tabs: Tab[] = recordId ? ["sheet", "storyboard", ...(keyframed ? ["keyframes" as const] : [])] : ["storyboard"];
   return (
     <section aria-label="이미지 시트·스토리보드" className="w-full overflow-hidden rounded-xl border border-ink-100 bg-surface">
       <div role="tablist" className="flex border-b border-ink-100 text-[12.5px]">
         {tabs.map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
             className={`border-b-2 px-3 py-1.5 ${tab === t ? "border-brand-600 font-semibold text-brand-700" : "border-transparent text-ink-500"}`}>
-            {t === "sheet" ? "이미지 시트" : "스토리보드"}
+            {t === "sheet" ? "이미지 시트" : t === "keyframes" ? "키프레임" : "스토리보드"}
           </button>
         ))}
       </div>
@@ -57,6 +70,11 @@ function Panel({ recordId, plan, tab, setTab, version }: {
         {recordId && rec && tab === "storyboard" && (rec.storyboard
           ? <StoryboardView r={rec.storyboard} onRedraw={async () => { await redrawBoardImage(rec.record_id); }} />
           : <p className="text-xs text-ink-500">스토리보드를 아직 붙이지 않았어요</p>)}
+        {recordId && rec && tab === "keyframes" && (
+          <KeyframePairs recordId={recordId} state={keyframes} scenes={rec.storyboard?.plan_scenes}
+            videoStatus={rec.render?.video?.status} summary={rec.render?.video?.summary} speed={rec.render?.video?.summary?.speed}
+            onChanged={() => setNonce((n) => n + 1)} />
+        )}
         {!recordId && plan && (
           <ol className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
             {sceneCells(plan).map((c) => (

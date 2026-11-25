@@ -1006,6 +1006,31 @@ async def creative_board_redraw_call(record_id: str) -> dict[str, Any]:
         raise
 
 
+KEYFRAME_PART = re.compile(r"keyframe_([0-9])")
+KEYFRAME_REFUSALS = {
+    "no_keyframes": (409, "NO_KEYFRAMES", "키프레임이 없는 기록이다"),
+    "bad_index": (404, "NOT_FOUND", "그 번호의 키프레임이 없다"),
+    "in_progress": (409, "IN_PROGRESS", "그 키프레임을 그리는 중이다"),
+    "video_started": (409, "VIDEO_STARTED", "영상을 만들기 시작해서 키프레임을 바꿀 수 없다"),
+}
+
+
+async def creative_keyframe_redraw_call(record_id: str, index: int) -> dict[str, Any]:
+    """키프레임 한 장 [다시 그리기](마케팅 `creative_keyframe_redraw`, read). LLM 없이 그림 1장.
+
+    다른 회사 기록이면 마케팅이 not_found → 404."""
+    try:
+        return await _creative_read(
+            "creative_keyframe_redraw", {"record_id": record_id, "index": index}
+        )
+    except ApiError as error:
+        if error.status_code == 502:
+            for code, (status, api_code, message) in KEYFRAME_REFUSALS.items():
+                if f"({code})" in error.message:
+                    raise ApiError(status, api_code, message) from error
+        raise
+
+
 SCRIPT_REFUSALS = {
     "not_found": (404, "NOT_FOUND"),
     "no_story": (422, "NO_STORY"),
@@ -1143,10 +1168,18 @@ async def creative_asset(record_id: str, part: str) -> tuple[Path, str]:
     """제작 기록의 Higgsfield 결과 파일(경로, Content-Type). 기록된 sha256과 같은 파일만 내준다."""
     missing = ApiError(404, "NOT_FOUND", "결과 파일이 없다")
     rec = await creative_record_call(record_id)
-    item = ((rec.get("render") or {}).get(part)) or {}
+    render = rec.get("render") or {}
+    if (kf := KEYFRAME_PART.fullmatch(part)) is not None:
+        # 11/25 키프레임 그림: render.keyframes.frames[번호] (파일 keyframe_<번호>.jpg)
+        index = int(kf.group(1))
+        frames = (render.get("keyframes") or {}).get("frames") or []
+        item = frames[index] if index < len(frames) and isinstance(frames[index], dict) else {}
+        allowed = [(f"keyframe_{index}.jpg", "image/jpeg")]
+    else:
+        item = render.get(part) or {}
+        allowed = [f for f in (CREATIVE_FILES.get(part), CREATIVE_ALT_FILES.get(part)) if f]
     name, sha = item.get("asset"), item.get("sha256")
     raw_root = (os.getenv(MEDIA_DIR_ENV) or "").strip()
-    allowed = [f for f in (CREATIVE_FILES.get(part), CREATIVE_ALT_FILES.get(part)) if f]
     expected = next((f for f in allowed if f[0] == name), None)
     if not (expected and isinstance(sha, str) and raw_root):
         raise missing

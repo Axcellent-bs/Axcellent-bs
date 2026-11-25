@@ -535,7 +535,12 @@ async def _gate_image(
         return None, None, "quota_exceeded"
     if res.row is None or res.outcome != "reserved":
         return None, None, "in_progress"
-    label = "이미지 시트" if part == "sheet_image" else "스토리보드"
+    if part == "sheet_image":
+        label = "이미지 시트"
+    elif part.startswith("keyframe_"):  # 11/25 키프레임 (keyframe_<번호>_<시도>)
+        label = f"키프레임 {int(part.split('_')[1]) + 1}번"
+    else:
+        label = "스토리보드"
     billing = image_billing(via)  # 11/24: 무제한이면 unlim("Higgsfield 무제한")
     params = {
         "media_kind": "image",
@@ -789,11 +794,14 @@ async def _mcp_render(
     ref: bytes | None,
     role: str | None = None,
     extra_refs: list[bytes] | None = None,
+    target: Path | None = None,
+    uploaded: list[str] | None = None,
 ) -> str:
     """회사 계정으로: 참조 올리기 → 만들기 → 기다리기 → 내려받기. 돌려주는 값은 sha256.
 
     `role`을 주면 그 역할로(11/24 영상 image_references), 아니면 그림은 image_references·영상은
-    start_image."""
+    start_image. `target`을 주면 그 파일로 받고 render.<part>는 건드리지 않는다(11/25 키프레임).
+    `uploaded`를 주면 올린 참조 media id를 순서대로 담는다."""
     if not cid:
         raise McpAuthError("not_connected")
     hf = _mcp.Higgsfield(client, cid)
@@ -810,16 +818,19 @@ async def _mcp_render(
                                          "image/png" if png_x else "image/jpeg"))  # fmt: skip
         params = (_mcp.with_medias(params, ids, role) if len(ids) > 1
                   else _mcp.with_media(params, media, role))  # fmt: skip
+        if uploaded is not None:  # 11/25 키프레임: 올린 참조 media id(순서대로)를 부른 쪽에 남긴다
+            uploaded.extend(ids)
     try:
         job = await _mcp.submit(hf, kind, params)
-        _set(record_id, part, request_id=job)
+        if target is None:
+            _set(record_id, part, request_id=job)
         url = await _mcp.wait(hf, job, SLEEP)
     except McpError as error:
         # 11/24: 무제한으로 만들던 그림이 무제한이 안 된다면 크레딧으로 다시 시도하지 않고 멈춘다
         if _mcp.uses_unlim(params) and (no := _mcp.unlim_unavailable(error)) is not None:
             raise no from error
         raise
-    return await _download(client, url, asset_path(record_id, part, cid))
+    return await _download(client, url, target or asset_path(record_id, part, cid))
 
 
 # ---------------------------------------------------------------- 영상 (사람 승인)
@@ -841,7 +852,13 @@ async def request_video(
     board = render.get("board_image") or {}
     cid = cid or board.get("company_id") or request_company(meta)
     via = route(cid)
-    if board.get("status") != "done" and board_needed(rec, via):
+    from marketing_agent import keyframes as _kf
+
+    # 11/25 키프레임 방식(Kling 4.0 + 기획 키프레임 칸): 키프레임이 모두 그려져야 승인에 올린다
+    keyframed = _kf.active(rec, via, cid)
+    if keyframed and not _kf.all_done(rec):
+        raise RenderError("keyframes_not_ready")
+    if board.get("status") != "done" and board_needed(rec, via, cid):
         raise RenderError("board_image_not_ready")
     _log_route(via, cid, "video", record_id)
     why = configured("video", via, cid)
@@ -865,10 +882,10 @@ async def request_video(
         raise RenderError("quota_not_configured")
     credits: float | None = None
     if via == MCP:
+        preview = (_kf.video_params(rec, seconds, cid, speed) if keyframed
+                   else _video_mcp_params(rec, seconds, cid, speed))  # fmt: skip
         try:
-            credits = await _mcp_preflight(
-                cid, "video", _video_mcp_params(rec, seconds, cid, speed)
-            )
+            credits = await _mcp_preflight(cid, "video", preview)
         except _ERRORS as error:
             raise RenderError(_code(error)) from None
     key = f"{meta.context_id}:{VIDEO_ACTION}:{record_id}"
@@ -906,10 +923,17 @@ async def request_video(
         "generated_seconds": seconds,
     }
     extra_ko = f", {model or '모델 미정'}, 비율 {aspect}"
+    if keyframed:
+        summary["reference"] = _kf.REFERENCE
+        summary.update(_kf.summary(rec))
+        kf_credits = summary.get("keyframe_credits")
+        extra_ko += f", 키프레임 {summary['keyframes']}장"
+        if kf_credits is not None:
+            extra_ko += f"(그림 {kf_credits:g} 크레딧 썼음)"
     if speed > 1.0:
         extra_ko += f", {speed:g}배속으로 틀어 {planned}초"
     if credits is not None:
-        extra_ko += f", 예상 {credits:g} 크레딧"
+        extra_ko += f", 예상 {'영상 ' if keyframed else ''}{credits:g} 크레딧"
     params: dict[str, Any] = {
         "record_id": record_id,
         "provider": _provider(via),
@@ -918,7 +942,7 @@ async def request_video(
         "usage_amount": seconds,
         "ai_generated": True,
         "requested_by": (who or "")[:80],
-        "summary": f"스토리보드 영상 {seconds}초 만들기: {title} "
+        "summary": f"{'키프레임' if keyframed else '스토리보드'} 영상 {seconds}초 만들기: {title} "
         f"({_billing_ko(via)}{extra_ko}, AI 생성)",
     }
     if via == MCP:
@@ -944,6 +968,8 @@ async def request_video(
         "speed": speed,
         "plan_seconds": planned,
     }
+    if keyframed:
+        base["keyframes"] = True  # 승인 뒤에도 같은 방식으로 만든다
     if clamped is not None:
         base["seconds_clamped_from"] = clamped
     if decision.status == "held":
@@ -1111,7 +1137,19 @@ async def _render_video(
     via = MCP if video.get("route") == MCP else API  # 승인받은 길 그대로
     cid = video.get("company_id")  # 승인에 올릴 때 정한 회사 그대로
     try:
-        if via == MCP:
+        if via == MCP and video.get("keyframes"):  # 11/25 키프레임 방식 (승인받은 방식 그대로)
+            from marketing_agent import keyframes as _kf
+
+            if not cid or not _mcp_auth.connected(cid):
+                raise McpAuthError("not_connected")
+            if not _kf.all_done(rec):
+                raise RenderError("keyframes_not_ready")
+            _kf.mark_approved(record_id)
+            params = _kf.video_params(rec, seconds, cid, video_speed(rec))
+            await _mcp_preflight(cid, "video", params)
+            async with CLIENT() as client:
+                sha = await _kf.render_video(client, cid, record_id, rec, params)
+        elif via == MCP:
             if not cid or not _mcp_auth.connected(cid):
                 raise McpAuthError("not_connected")  # 키 길로 바꾸지 않는다
             # 11/24 가상 인물 원본(image_references를 받는 모델) 또는 스토리보드 그림(start_image)
@@ -1293,15 +1331,19 @@ def video_reference(rec: dict[str, Any], model: str) -> tuple[str, str]:
     return "board_image", _mcp.VIDEO_START_ROLE
 
 
-def board_needed(rec: dict[str, Any], via: str) -> bool:
+def board_needed(rec: dict[str, Any], via: str, cid: str | None = None) -> bool:
     """영상 입력으로 Higgsfield 스토리보드 그림이 필요한가(11/25).
 
     회사 계정(MCP)으로 만들고 영상 모델이 `image_references`를 받으며 캐릭터가 올린 원본이면
-    그 원본을 참조로 쓰므로 필요 없다. 그 밖(start_image 모델·real_photo·캐릭터 없음·키 길)은
-    지금처럼."""
+    그 원본을 참조로 쓰므로 필요 없다. 키프레임 방식(`keyframes.active`)이면 키프레임이 영상
+    입력이라 필요 없다. 그 밖(start_image 모델·real_photo·캐릭터 없음·키 길)은 지금처럼."""
     if via != MCP:
         return True
-    return video_reference(rec, mcp_video_model())[0] != "sheet_image"
+    from marketing_agent import keyframes as _kf
+
+    if _kf.active(rec, via, cid):
+        return False
+    return video_reference(rec, mcp_video_model(cid))[0] != "sheet_image"
 
 
 def plan_seconds(plan_s: Any, model: str, setting: Any = "plan") -> tuple[int, int | None]:

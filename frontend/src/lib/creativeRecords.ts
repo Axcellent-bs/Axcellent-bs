@@ -9,6 +9,7 @@ import type { CreativeScript } from "./creativeScript";
 import type { OverlayState, PlayPart } from "./videoOverlay";
 import type { CreativeVideoSummary } from "./creativeVideo";
 import { boardImagePath } from "./storyboardSvg";
+import { keyframeRedrawPath, type KeyframePart, type KeyframesState } from "./keyframes";
 
 // 마케팅 › 제작 기록. 이미지 시트를 만들 때마다 남은 기록과 이어 만든 스토리보드를 읽는다.
 // dashboard-api GET /marketing/creative-records(목록) · /marketing/creative-records/{id}(상세)
@@ -63,7 +64,7 @@ export interface CreativeRecord {
   /** 영상 대본(11/23). 옛 기록은 없다 */
   script?: CreativeScript | null;
   /** Higgsfield 그림·영상 */
-  render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState; thumbnails?: ThumbnailsState; instagram?: InstagramPostState; overlay?: OverlayState };
+  render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState; thumbnails?: ThumbnailsState; instagram?: InstagramPostState; overlay?: OverlayState; keyframes?: KeyframesState };
 }
 
 const PATH = "/api/dashboard/marketing/creative-records";
@@ -83,7 +84,7 @@ export const listCreativeRecords = (limit = 50) =>
 export const getCreativeRecord = (id: string) => get<CreativeRecord>(`${PATH}/${encodeURIComponent(id)}`, "제작 기록을 읽지 못했어요");
 
 /** Higgsfield 결과 파일 주소(사람 토큰이 필요해 useAuthedMedia로 읽는다). `version`은 sha256 앞자리 */
-export const assetUrl = (id: string, part: RenderPartKey | PlayPart, version: string | null) =>
+export const assetUrl = (id: string, part: RenderPartKey | PlayPart | KeyframePart, version: string | null) =>
   `${DASHBOARD_API_URL}${PATH}/${encodeURIComponent(id)}/asset/${part}${version ? `?v=${encodeURIComponent(version.slice(0, 12))}` : ""}`;
 
 /** 스토리보드 그림으로 영상 만들기를 사람 승인에 올린다(POST, C 등급). 승인 전에는 만들지 않는다 */
@@ -111,6 +112,20 @@ export async function redrawBoardImage(id: string): Promise<{ record_id: string;
   const parsed: unknown = await res.json().catch(() => undefined);
   if (!res.ok) throw failureError(parsed, res.status, "그림을 요청하지 못했어요");
   return (parsed as { data: { record_id: string; part: string; item: RenderPart } }).data;
+}
+
+/** 키프레임 한 장 [다시 그리기] (POST, 그림 1장·그림 크레딧·관문 그대로). 결과 item은 render.keyframes.
+ *  서버가 아직 이 경로를 모르거나 다른 회사 기록이면 404(ApiError.status) */
+export async function redrawKeyframe(id: string, index: number): Promise<{ record_id: string; part: string; item: KeyframesState }> {
+  const res = await fetch(`${DASHBOARD_API_URL}${keyframeRedrawPath(id, index)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
+    body: "{}",
+    cache: "no-store",
+  });
+  const parsed: unknown = await res.json().catch(() => undefined);
+  if (!res.ok) throw failureError(parsed, res.status, "키프레임을 다시 그리지 못했어요");
+  return (parsed as { data: { record_id: string; part: string; item: KeyframesState } }).data;
 }
 
 /** 자막을 고쳐서 다시 얹는다(POST). 서버가 아직 이 경로를 모르면 404(ApiError.status)로 온다 */

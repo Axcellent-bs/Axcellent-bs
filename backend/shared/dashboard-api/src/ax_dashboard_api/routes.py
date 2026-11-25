@@ -1597,6 +1597,20 @@ async def marketing_creative_board_image(
     return ok(await marketing_client.creative_board_redraw_call(record_id))
 
 
+@router.post("/marketing/creative-records/{record_id}/keyframes/{index}/redraw")
+async def marketing_creative_keyframe_redraw(
+    record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
+    index: int = Path(ge=0, le=9),
+) -> dict:
+    """키프레임 한 장 [다시 그리기] (11/25). 마케팅 `creative_keyframe_redraw`(read)를 부른다.
+
+    LLM을 부르지 않는다. 안전 관문·그림 크레딧 예약은 지금 그림 규칙 그대로(그림 1장).
+    다른 회사 기록은 404. 결과 `item`은 기록의 `render.keyframes`."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    return ok(await marketing_client.creative_keyframe_redraw_call(record_id, index))
+
+
 class CreativeScriptBody(BaseModel):
     story: str | None = Field(default=None, max_length=MAX_STORY)  # 비우면 기록의 줄거리
     scenes: Literal[6, 9, 12] = 6  # 스토리보드 칸 수와 같다
@@ -1780,9 +1794,11 @@ async def marketing_brand_character_unmark(
 @router.get("/marketing/creative-records/{record_id}/asset/{part}")
 async def marketing_creative_asset(
     record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
-    part: str = Path(pattern=r"^(sheet_image|board_image|video|final_video|overlay_video)$"),
+    part: str = Path(
+        pattern=r"^(sheet_image|board_image|video|final_video|overlay_video|keyframe_[0-9])$"
+    ),
 ) -> FileResponse:
-    """제작 기록의 Higgsfield 결과 파일(시트 그림·스토리보드 그림·영상).
+    """제작 기록의 Higgsfield 결과 파일(시트 그림·스토리보드 그림·영상·키프레임 그림).
 
     기록된 sha256과 같을 때만 내준다.
     """

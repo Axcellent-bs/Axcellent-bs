@@ -58,6 +58,7 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeInstagramDraftInput,
     CreativeInstagramOutput,
     CreativeInstagramRequestInput,
+    CreativeKeyframeRedrawInput,
     CreativeOverlayRedoInput,
     CreativeOverlayRedoOutput,
     CreativeRecordAttachInput,
@@ -123,6 +124,7 @@ from marketing_agent import creative_script as _script
 from marketing_agent import creative_thumbnails as _thumbs
 from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import instagram_post as _instagram
+from marketing_agent import keyframes as _keyframes
 from marketing_agent import render_settings as _render_settings
 from marketing_agent import request_creative as _request_creative
 from marketing_agent import request_video_cover as _request_cover
@@ -2203,6 +2205,38 @@ async def creative_board_redraw(request: AgentRequest) -> AgentResult:
     )
 
 
+async def creative_keyframe_redraw(request: AgentRequest) -> AgentResult:
+    """키프레임 한 장 [다시 그리기] 전용(read, 11/25). LLM 없이 그림 1장.
+
+    안전 관문(generate_media B)·그림 크레딧 예약·`image_credits_ok`는 지금 그림 규칙 그대로
+    (`keyframes.render_frame`). 다른 회사 기록이면 not_found. 영상을 만들기 시작했으면
+    video_started."""
+    data = _parse(request, CreativeKeyframeRedrawInput)
+    if isinstance(data, AgentResult):
+        return data
+    rid = data.record_id
+    if _creative.store().get(rid) is None:
+        return _not_found(request)
+    why = _keyframes.redraw(STATE.media_ledger, request.meta, rid, data.index)
+    if why:
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome=why,
+            output={"message": f"키프레임을 다시 그릴 수 없다 ({why})"},
+        )
+    item = _creative.store().get_render(rid).get(_keyframes.STATE) or {}
+    out = CreativeRecordAttachOutput(record_id=rid, part=_keyframes.STATE, item=item)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill], f"키프레임 {data.index + 1}번 다시 그리기 {rid}", [rid]
+        ),
+    )
+
+
 async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
     """의뢰 영상 목록. 유튜브 승인 대기는 관문을 다시 묻고, 항목마다 유튜브 상태를 붙인다."""
     await _request_youtube.refresh(request.meta, STATE.sns)
@@ -2760,6 +2794,7 @@ HANDLERS = {
     "creative_records_list": creative_records_list,
     "creative_record_get": creative_record_get,
     "creative_board_redraw": creative_board_redraw,
+    "creative_keyframe_redraw": creative_keyframe_redraw,
     "creative_video_request": creative_video_request,
     "creative_youtube_draft": creative_youtube_draft,
     "creative_youtube_request": creative_youtube_request,

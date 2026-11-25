@@ -1,5 +1,6 @@
 import { storyboardFailure } from "./storyboardError";
 import { DASHBOARD_API_URL, dashboardAuth } from "./env";
+import type { PlanScene } from "./keyframes";
 
 // 마케팅 › SNS·미디어 › 스토리보드. 줄거리와 이미지 시트의 캐릭터 고정 문장(consistency_en)으로
 // 장면마다 샷 크기·카메라 앵글·화면 배치를 정한 스토리보드 칸과 이미지 프롬프트를 만든다.
@@ -40,6 +41,8 @@ export interface StoryboardResult {
   cta_ko?: string;
   /** 칸 그림의 출처. 없으면 "higgsfield"(지금 화면) */
   board_source?: "svg" | "higgsfield" | "layout";
+  /** 11/25 의뢰 기록: 기획 장면의 키프레임 칸(동작·카메라 문장). 없으면 지금 화면 */
+  plan_scenes?: PlanScene[] | null;
 }
 
 export const SHOT_COUNTS = [6, 9, 12] as const;

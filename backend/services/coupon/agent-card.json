@@ -185,6 +185,18 @@
       "priority": "optional"
     },
     {
+      "id": "creative_keyframe_redraw",
+      "description": "키프레임 한 장 [다시 그리기] 전용(11/25). 제작 기록(input.record_id: CR-…)의 render.keyframes.frames[input.index](0부터)를 LLM 없이 그림 1장으로 다시 그린다. 참조는 [구도 PNG(기획 SVG를 그린 것), 가상 인물 원본, 추가 참조] 순서. 안전 관문(B generate_media, media_kind=image)·그림 크레딧 예약·회사 image_credits_ok는 지금 그림 규칙 그대로이고 executed일 때만 Higgsfield를 부른다. 뒤에서 그리고 바로 돌려준다(그 장은 running). 결과 item은 render.keyframes. 거절 outcome: not_found(다른 회사 기록 포함)·no_keyframes·bad_index·in_progress·video_started·invalid_input.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeKeyframeRedrawInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeRecordAttachOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "creative_record_attach",
       "description": "사람이 화면에서 올린 그림·영상을 제작 기록(input.record_id: CR-…)의 칸(part: sheet_image·board_image·video·final_video)에 붙인다(A attach_creative_file). 파일은 dashboard-api가 미디어 폴더 creative/<기록>/에 먼저 저장하고 asset 이름·sha256만 넘긴다. 저장된 파일의 sha256이 같을 때만 render.<part>를 done·source=upload로 바꾼다. 거절 outcome: not_found·bad_asset·file_missing·in_progress·gate_<상태>.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeRecordAttachInput",
