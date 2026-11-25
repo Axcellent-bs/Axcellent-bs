@@ -104,6 +104,23 @@ def _pairs(  # noqa: PLR0913
         hidden = [p for p in s.hidden_pairs(level, f, k, MAX_PAIRS * 4 + 20)
                   if known(p[0]) and known(p[1])]  # fmt: skip
         slots = min(len(hidden), MAX_PAIRS - len(top))
+    if not top and slots:
+        # 보이는 쌍이 없고 숨긴 자리만 있으면 code 없는 표시 줄 하나에 자리 수를 남긴다
+        # (줄이 없으면 화면이 숨긴 자리를 못 채워 원본과 달라진다, 11/25 지난 날짜 비교)
+        return [
+            PairRow(
+                **base,
+                level=level,
+                attr_cell=f,
+                code_a="",
+                code_b="",
+                together_buyers=0,
+                a_buyers=0,
+                b_buyers=0,
+                overall_buyers=overall,
+                hidden_slots=slots,
+            )
+        ]
     return [
         PairRow(**base, level=level, attr_cell=f, code_a=a, code_b=b, together_buyers=n,
                 a_buyers=items[a], b_buyers=items[b], overall_buyers=overall, hidden_slots=slots)

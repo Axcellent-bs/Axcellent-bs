@@ -185,6 +185,7 @@ def from_snapshot(  # noqa: PLR0913 - 입력 칸 그대로
 
     - 조건은 없음·속성 하나만 저장돼 있다(부르는 쪽이 둘 이상이면 원본으로 간다)
     - 숨긴 쌍은 저장하지 않고 자리 수만 남기므로 code·이름 없이 `suppressed` 쌍으로 채운다
+      (보이는 쌍이 없으면 code 없는 줄 하나가 자리 수를 담는다)
       (설계 3.6·6.2: 비교는 상위 순서와 수)
     - 상품 이름은 같은 기간 구매자 스냅샷 상품 줄의 이름(쌍에 든 상품은 그 기간 구매자가 k 이상)
     - 쌍이 없고 그 조건 구매자 수를 스냅샷에서 알 수 없으면(숨긴 칸) None(원본 경로)
@@ -207,7 +208,7 @@ def from_snapshot(  # noqa: PLR0913 - 입력 칸 그대로
             return None
         overall = found[0]["buyers"] or 0
     ranked = sorted(
-        rows,
+        (r for r in rows if r["code_a"]),  # code 없는 줄은 숨긴 자리 수만 담는다
         key=lambda r: (-_lift(r), -r["together_buyers"], r["code_a"], r["code_b"]),
     )[:max_pairs]
     titles = {r["dim_code"]: r["title"] for r in buyers
