@@ -19,8 +19,9 @@ LLM 답 파싱(`PoseLLM` → `key_pose`)·포즈 숫자 지시문(`POSE_FIELDS`)
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable
-from typing import Final
+from typing import Any, Final
 from xml.sax.saxutils import escape
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,12 +33,15 @@ Attrs = dict[str, float | int | str]
 MAX_BYTES: Final = 16384
 SVG_NS: Final = "http://www.w3.org/2000/svg"
 
-# 샷 크기별 카메라: 위치·바라보는 점·초점 거리 (시안 cam())
+# 샷 크기별 카메라: 위치·바라보는 점·초점 거리 (시안 cam()).
+# 11/26 인물이 칸 높이의 55~70%가 되게 높이·초점을 맞췄다(예전 값은 45~54%로 칸 아래쪽에 작았다:
+# close (1.6, 1.55, 520) · medium (1.3, 1.0, 470) · full (1.3, 0.85, 560))
 CAMERAS: Final = {
-    "close": ((0.0, 1.6, -1.6), (0.0, 1.55, 0.0), 520.0),
-    "medium": ((0.0, 1.3, -2.6), (0.0, 1.0, 0.0), 470.0),
-    "full": ((0.0, 1.3, -3.6), (0.0, 0.85, 0.0), 560.0),
+    "close": ((0.0, 1.5, -1.6), (0.0, 1.5, 0.0), 560.0),
+    "medium": ((0.0, 1.2, -2.6), (0.0, 1.0, 0.0), 620.0),
+    "full": ((0.0, 1.1, -3.6), (0.0, 0.85, 0.0), 780.0),
 }
+FIGURE_RATIO: Final = (0.55, 0.70)  # 칸 높이에서 보이는 인물 비율 (시험이 본다)
 SIZES: Final = {"9:16": (180, 320), "1:1": (180, 180), "16:9": (320, 180)}
 
 PANTS, BODY, SLEEVE, SKIN_LINE, SHOE = "#3a5590", "#4f7fe0", "#5b8ae6", "#f0c69c", "#222"
@@ -47,6 +51,19 @@ BG_TOP, BG_BOTTOM = "#f3efe7", "#fbf8f2"
 
 SHOTS: Final = ("close", "medium", "full")
 PROPS: Final = ("book", "desk", "phone", "shelf", "cup")
+# 11/26 책방 밖 소품 (계약 KeyPose.extra_props, 칸당 최대 2개). 단순 도형만, 글자 없음
+EXTRA_PROPS: Final = ("mic", "laptop", "bag", "spotlight", "screen", "sign_blank")
+MAX_EXTRA_PROPS: Final = 2
+# 장면·칸 글에 이 낱말이 있으면 LLM 답에 없어도 그 소품을 넣는다 (영문은 소문자로 비교)
+PROP_WORDS: Final = (
+    ("마이크", "mic"), ("microphone", "mic"), ("mic", "mic"),
+    ("노트북", "laptop"), ("laptop", "laptop"),
+    ("가방", "bag"), ("bag", "bag"),
+    ("스포트라이트", "spotlight"), ("조명", "spotlight"), ("spotlight", "spotlight"),
+    ("스크린", "screen"), ("전광판", "screen"), ("screen", "screen"),
+    ("팻말", "sign_blank"), ("피켓", "sign_blank"), ("sign", "sign_blank"),
+)  # fmt: skip
+_TIME_HEAD = re.compile(r"^\s*\d+(?:\.\d+)?\s*초\s*·?\s*")
 
 # 포즈 숫자 지시문 (기획·마케팅 같은 문장). 앞에 "무엇을 보고 shot을 고르나" 한 줄을 붙여 쓴다
 POSE_FIELDS = """  - x: 좌우 위치 -1.5~1.5 (m, + = 화면 오른쪽), z: 카메라에서 먼 정도 0~3 (m)
@@ -56,8 +73,10 @@ POSE_FIELDS = """  - x: 좌우 위치 -1.5~1.5 (m, + = 화면 오른쪽), z: 카
   - step: 걸음 폭 0~0.6 (0 = 서 있음, 0.4 넘으면 크게 걷거나 뜀)
   - prop: 없으면 null. "book"(왼손 책)·"desk"(앞 책상)·"phone"(오른손 휴대폰)·"shelf"(뒤 책장)·
     "cup"(오른손 컵) 중 하나
-  - label_ko: 칸 위 한 줄 (한국어 15자 안팎, 예: "0초 · 놀라 돌아봄").
-    자막·회사 이름·행동 문구는 쓰지 않는다
+  - extra_props: 그 밖의 소품 0~2개 목록. "mic"(손 마이크)·"laptop"(앞 노트북)·"bag"(손 가방)·
+    "spotlight"(뒤 무대 조명)·"screen"(뒤 큰 화면)·"sign_blank"(손 빈 팻말) 중에서만
+  - label_ko: 칸 위 한 줄, 동작만 짧게 (한국어 12자 안팎, 예: "놀라 돌아봄"). 시각은 코드가
+    붙이니 쓰지 않는다. 자막·회사 이름·행동 문구도 쓰지 않는다
 """
 
 
@@ -92,11 +111,53 @@ class PoseLLM(BaseModel):
     arm_r: ArmLLM = Field(default_factory=ArmLLM)
     step: float = 0.0
     prop: str | None = None
+    extra_props: list[str] = Field(default_factory=list)
     label_ko: str = ""
 
 
-def key_pose(got: PoseLLM, label: str) -> KeyPose | None:
-    """LLM 포즈 → 계약 KeyPose (범위는 자른다). 모르는 shot은 medium, 모르는 prop은 없음."""
+def secs_label(at_s: float) -> str:
+    """칸 시각 "4초" (소수는 한 자리)."""
+    r = round(float(at_s), 1)
+    return f"{int(r)}초" if r == int(r) else f"{r:.1f}초"
+
+
+def time_label(label: str, at_s: float | None) -> str:
+    """칸 위 글: "N초 · 동작". LLM이 앞에 적은 시각("0초 · ")은 지우고 코드 시각을 붙인다
+    (11/26 LLM이 지시문 예시 "0초"를 베껴 모든 칸이 0초였다). 시각을 모르면 받은 글 그대로."""
+    if at_s is None:
+        return " ".join((label or "").split())
+    text = _TIME_HEAD.sub("", " ".join((label or "").split()))
+    return f"{secs_label(at_s)} · {text}" if text else secs_label(at_s)
+
+
+def props_from_text(text: str) -> list[str]:
+    """장면·칸 글의 낱말로 고른 소품 id (표 순서, 중복 없음)."""
+    low = (text or "").lower()
+    out: list[str] = []
+    for word, pid in PROP_WORDS:
+        if pid not in out and (word in low if not word.isascii() else re.search(
+            rf"\b{re.escape(word)}\b", low)):  # fmt: skip
+            out.append(pid)
+    return out
+
+
+def extra_props_of(got: Any, text: str = "") -> list[str]:
+    """목록 안의 LLM 소품 + 글 낱말로 보충한 소품 (최대 2개). 목록 밖 id는 버린다."""
+    raw = getattr(got, "extra_props", None) or []
+    out = [p for p in dict.fromkeys(str(x) for x in raw) if p in EXTRA_PROPS]
+    for pid in props_from_text(text):
+        if pid not in out:
+            out.append(pid)
+    return out[:MAX_EXTRA_PROPS]
+
+
+def key_pose(
+    got: PoseLLM, label: str, at_s: float | None = None, text: str = ""
+) -> KeyPose | None:
+    """LLM 포즈 → 계약 KeyPose (범위는 자른다). 모르는 shot은 medium, 모르는 prop은 없음.
+
+    11/26 `at_s`(칸 시각)를 주면 라벨 시각은 코드가 붙인다. `text`(장면·칸 글)에 마이크 같은
+    낱말이 있으면 그 소품을 넣는다."""
     try:
         return KeyPose.model_validate({
             "shot": got.shot if got.shot in SHOTS else "medium",
@@ -105,7 +166,8 @@ def key_pose(got: PoseLLM, label: str) -> KeyPose | None:
             "arm_l": {"raise": got.arm_l.raise_, "bend": got.arm_l.bend},
             "arm_r": {"raise": got.arm_r.raise_, "bend": got.arm_r.bend},
             "step": got.step, "prop": got.prop if got.prop in PROPS else None,
-            "label_ko": got.label_ko.strip() or label,
+            "extra_props": extra_props_of(got, text),
+            "label_ko": time_label(got.label_ko.strip() or label, at_s),
         })  # fmt: skip
     except ValueError:
         return None
@@ -243,8 +305,10 @@ class _Frame:
     def svg(self) -> str:
         self.background()
         self.props_behind()
+        self.extras_behind()
         self.figure()
         self.props_in_hand()
+        self.extras_in_hand()
         self.items.sort(key=lambda it: -it[0])  # 먼 것부터 (안정 정렬, 시안과 같은 순서)
         for _, draw in self.items:
             draw()
@@ -297,6 +361,52 @@ class _Frame:
                 a, b = self.at((0.6, k, 0.8)), self.at((1.3, k, 0.8))
                 attrs = _line(a, b, stroke="#7a5a3c", **{"stroke-width": 0.8})
                 self.put(front - 0.001, _tag("line", attrs))
+
+    def extras_behind(self) -> None:
+        """11/26 인물 뒤·바닥 소품: 무대 조명(spotlight)·큰 화면(screen)·앞 노트북(laptop)."""
+        extra = self.pose.extra_props
+        if "screen" in extra:  # 인물 뒤 벽의 빈 화면 (테두리 + 밝은 면, 글자 없음)
+            self.box([(-1.1, 0.9, 1.2), (1.1, 0.9, 1.2), (1.1, 2.2, 1.2), (-1.1, 2.2, 1.2)],
+                     "#2b2f45", "#151827", 0.02)  # fmt: skip
+            self.box([(-1.0, 1.0, 1.19), (1.0, 1.0, 1.19), (1.0, 2.1, 1.19), (-1.0, 2.1, 1.19)],
+                     "#5b6fd6", "#3a49a0", 0.01)  # fmt: skip
+        if "spotlight" in extra:  # 위에서 비추는 조명 원뿔 (반투명) + 조명 머리
+            top, left, right = self.at((-0.7, 2.6, 0.9)), self.at((-0.2, 0, 0.3)), self.at(
+                (0.6, 0, 0.3))  # fmt: skip
+            cone = f"{_n(top.x)},{_n(top.y)} {_n(left.x)},{_n(left.y)} {_n(right.x)},{_n(right.y)}"
+            head = {"cx": top.x, "cy": top.y, "r": 0.08 * top.s, "fill": "#3a3a46"}
+            light = {"points": cone, "fill": "rgba(255,236,170,.35)"}
+            self.put(top.z + 0.5, _tag("polygon", light) + _tag("circle", head))
+        if "laptop" in extra:  # 인물 앞 허리 높이 노트북 (바닥 판 + 화면 판)
+            self.box([(-0.18, 0.8, -0.45), (0.18, 0.8, -0.45), (0.18, 0.8, -0.2),
+                      (-0.18, 0.8, -0.2)], "#9aa3b2", "#5c6370", -0.05)  # fmt: skip
+            self.box([(-0.18, 0.8, -0.2), (0.18, 0.8, -0.2), (0.18, 1.02, -0.18),
+                      (-0.18, 1.02, -0.18)], "#2b2f36", "#111", -0.06)  # fmt: skip
+
+    def extras_in_hand(self) -> None:
+        """11/26 손 소품: 마이크(mic)·가방(bag)·빈 팻말(sign_blank). 손이 차 있으면 다른 손."""
+        extra, prop = self.pose.extra_props, self.pose.prop
+        right_busy, left_busy = prop in ("phone", "cup"), prop == "book"
+        if "mic" in extra:
+            hand = "hd_l" if right_busy else "hd_r"
+            p = self.c.project(self.j[hand])
+            body = self.held(hand, (0.03, 0.02, 0.12), "#2b2f36", "#111")
+            ball = {"cx": p.x, "cy": p.y - 0.05 * p.s, "r": 0.035 * p.s, "fill": "#8a8f99",
+                    "stroke": "#444", "stroke-width": 0.6}  # fmt: skip
+            self.put(p.z - 0.1, body + _tag("circle", ball))
+            right_busy, left_busy = right_busy or hand == "hd_r", left_busy or hand == "hd_l"
+        if "bag" in extra:
+            hand = "hd_r" if left_busy and not right_busy else "hd_l"
+            p = self.c.project(self.j[hand])
+            self.put(p.z - 0.1, self.held(hand, (0.2, -0.02, 0.16), "#b0703c", "#6e4423"))
+            right_busy, left_busy = right_busy or hand == "hd_r", left_busy or hand == "hd_l"
+        if "sign_blank" in extra:
+            hand = "hd_r" if left_busy and not right_busy else "hd_l"
+            p = self.c.project(self.j[hand])
+            board = self.held(hand, (0.3, 0.32, 0.22), "#fdfbf7", "#8a7a66")
+            stick = _line(p, _Pt(p.x, p.y - 0.1 * p.s, p.z, p.s), stroke="#8a6a4a",
+                          **{"stroke-width": 0.02 * p.s})  # fmt: skip
+            self.put(p.z - 0.1, _tag("line", stick) + board)
 
     def limb(self, a: str, b: str, width: float, color: str) -> None:
         pa, pb = self.c.project(self.j[a]), self.c.project(self.j[b])

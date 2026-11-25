@@ -136,8 +136,12 @@ def test_llm_poses_fill_svg_and_pose_with_one_call() -> None:
     drawn, changed = asyncio.run(sb.draw(llm, plan, "ctx"))
     assert changed == len(plan.scenes) and len(llm.calls) == 1
     for i, s in enumerate(drawn.scenes):
-        assert s.start_pose == KeyPose.model_validate(SAMPLES[i % 4])
-        assert s.end_pose == KeyPose.model_validate(SAMPLES[(i + 1) % 4])
+        # 11/26 바뀐 기대값: 라벨 시각은 LLM 글(예 "0초 · …")이 아니라 장면 시각으로 코드가 붙인다
+        def timed(raw: dict, at: int) -> KeyPose:
+            return KeyPose.model_validate({**raw, "label_ko": pr.time_label(raw["label_ko"], at)})
+
+        assert s.start_pose == timed(SAMPLES[i % 4], s.start_s)
+        assert s.end_pose == timed(SAMPLES[(i + 1) % 4], s.end_s)
         assert s.start_svg == sb.sanitize_svg(pr.render(s.start_pose, plan.aspect))
         assert "<radialGradient" in s.start_svg and s.end_svg
     # 장면 글은 그대로
@@ -260,3 +264,24 @@ def test_svg_model_env_changes_only_the_pose_call(monkeypatch: pytest.MonkeyPatc
     assert made.model == "pose-model"  # 모델만 바뀌고
     assert (made.base_url, made.api_key) == (base.base_url, base.api_key)  # 주소·키는 그대로
     assert all(s.start_pose and s.start_svg for s in plan.scenes)
+
+
+def test_copied_zero_second_labels_become_scene_times_and_scene_words_add_props() -> None:
+    """11/26 운영 콘티 4칸 라벨이 전부 "0초 · …"였고 마이크가 없었다."""
+    plan = _plan()
+    stage = plan.scenes[1].model_copy(update={"visual": "무대에서 마이크를 들고 노래한다"})
+    plan = plan.model_copy(update={"scenes": [plan.scenes[0], stage, *plan.scenes[2:]]})
+    zero = {"label_ko": "0초 · 돌아봄", "shot": "medium"}
+    got = sb._PoseOut.model_validate(  # noqa: SLF001
+        {"scenes": [{"n": s.n, "start": zero, "end": zero} for s in plan.scenes]}
+    )
+    drawn, _ = sb.apply(plan, got)
+    starts = [s.start_pose.label_ko for s in drawn.scenes if s.start_pose]
+    assert starts == [f"{s.start_s}초 · 돌아봄" for s in plan.scenes]
+    assert [s.end_pose.label_ko for s in drawn.scenes if s.end_pose][-1] == (
+        f"{plan.scenes[-1].end_s}초 · 돌아봄"
+    )
+    assert drawn.scenes[1].start_pose and drawn.scenes[1].start_pose.extra_props == ["mic"]
+    assert drawn.scenes[0].start_pose and drawn.scenes[0].start_pose.extra_props == []
+    assert "#8a8f99" in drawn.scenes[1].start_svg  # 마이크가 그려진다
+    assert "<text" in drawn.scenes[1].start_svg and "0초 · " not in drawn.scenes[1].start_svg

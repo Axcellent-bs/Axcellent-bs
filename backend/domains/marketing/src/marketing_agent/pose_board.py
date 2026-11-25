@@ -66,11 +66,16 @@ def is_end_card(*texts: Any) -> bool:
     return any(w in joined for w in END_CARD_WORDS)
 
 
-def pose_svg(got: PoseLLM | None, label: str) -> str:
-    """LLM 포즈 → 정리까지 마친 3D 마네킹 SVG. 포즈가 없거나 못 쓰면 빈 문자열."""
+def pose_svg(
+    got: PoseLLM | None, label: str, at_s: float | None = None, text: str = ""
+) -> str:
+    """LLM 포즈 → 정리까지 마친 3D 마네킹 SVG. 포즈가 없거나 못 쓰면 빈 문자열.
+
+    11/26 `at_s`(칸 시작 초)를 주면 라벨은 "N초 · 동작"(LLM이 적은 시각은 버림), `text`(칸 글)의
+    마이크 같은 낱말은 소품으로 넣는다."""
     if got is None:
         return ""
-    pose = pose_render.key_pose(got, label)
+    pose = pose_render.key_pose(got, label, at_s, text)
     return (sanitize_svg(pose_render.render(pose, ASPECT)) or "") if pose else ""
 
 

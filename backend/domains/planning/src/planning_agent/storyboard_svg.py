@@ -238,8 +238,10 @@ def apply(plan: VideoPlan, got: _PoseOut, only: int | None = None) -> tuple[Vide
         if f is None or (only is not None and s.n != only):
             scenes.append(s)
             continue
-        start = key_pose(f.start, f"{s.start_s}초") if f.start else None
-        end = key_pose(f.end, f"{s.end_s}초") if f.end else None
+        # 11/26 라벨 시각은 장면 시각으로 코드가 붙이고, 장면 글의 마이크 같은 낱말은 소품으로
+        head = f"{s.visual} {s.prompt}"
+        start = key_pose(f.start, "", s.start_s, f"{head} {s.start_frame}") if f.start else None
+        end = key_pose(f.end, "", s.end_s, f"{head} {s.end_frame}") if f.end else None
         update: dict[str, Any] = {}
         for key, pose in (("start", start), ("end", end)):
             svg = drawn(pose, plan.aspect) if pose else ""
