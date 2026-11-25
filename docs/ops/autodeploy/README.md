@@ -133,9 +133,11 @@ ax-autodeploy-watchdog --notify      # 상태가 바뀔 때만 슬랙
 ax-autodeploy-watchdog --notify --heartbeat   # 위 + 정상일 때 하루 1회 하트비트 (유닛이 쓰는 형태)
 ```
 
+**주기 건너뜀 반복(`skip-cycle-repeat`)·fetch 실패(`fetch-failed-repeat`)**: 자동 배포는 판정이 불확실하면 그 주기를 건너뛰고 종료 코드 0 으로 끝나서, last-run 은 새롭고 서비스도 정상인데 배포만 안 되는 일이 생긴다(11/25~26 토큰 처리 버그로 PR 조회가 매번 실패한 사례). 로그의 `backend: skip-cycle` 줄 또는 `error: git fetch` 줄이 줄 사이 5분 이하로 끊김 없이 이어지고 지금도 진행 중이면, 시작부터의 길이가 `AX_WD_SKIP_S`(기본 600초)를 넘을 때 경고, 3배를 넘으면 심각으로 알린다. 승인된 정지 중에는 보지 않는다.
+
 알림 규칙: 상태가 바뀌면 바로 1회, 같은 이상 상태는 1시간(`AX_WD_REPEAT_S`)에 1회만 반복, 정상 복귀 때 복구 알림 1회, `--heartbeat` 는 정상이 이어질 때 하루 1회. 전송에 실패하면 기록을 갱신하지 않아 다음 주기에 다시 보낸다. 문구는 한국어, `[watchdog]` 접두. 웹훅 주소는 파일(`AX_WD_SLACK_HOOK`, 기본 `/etc/ax-autodeploy/slack-webhook`)에서만 읽고 어디에도 출력하지 않으며 curl 명령줄에도 싣지 않는다(표준 입력으로 전달).
 
-시험용 환경 변수: `AX_STATE_DIR AX_ENV_FILE AX_PAUSE_FILE AX_WD_NOW AX_WD_STALE_S AX_WD_WAIT_S AX_WD_LOG_FILE AX_WD_TIMER_STATE AX_WD_SERVICE_STATE AX_WD_SERVICE_RESULT AX_WD_LOCK_HELD AX_WD_SLACK_HOOK AX_WD_CURL AX_WD_NOTIFIED_FILE` 등(스크립트 머리 주석 참고). 단위 시험: `python -m unittest discover -s docs/ops/autodeploy/tests -p test_watchdog.py -v`.
+시험용 환경 변수: `AX_STATE_DIR AX_ENV_FILE AX_PAUSE_FILE AX_WD_NOW AX_WD_STALE_S AX_WD_WAIT_S AX_WD_SKIP_S AX_WD_LOG_FILE AX_WD_TIMER_STATE AX_WD_SERVICE_STATE AX_WD_SERVICE_RESULT AX_WD_LOCK_HELD AX_WD_SLACK_HOOK AX_WD_CURL AX_WD_NOTIFIED_FILE` 등(스크립트 머리 주석 참고). 단위 시험: `python -m unittest discover -s docs/ops/autodeploy/tests -p test_watchdog.py -v`.
 
 ### 설치 (서버 책임자, sudo 필요)
 
