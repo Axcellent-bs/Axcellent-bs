@@ -32,6 +32,9 @@ READ_GRADE = "read"
 MEDIA_TIMEOUT_S = (
     300.0  # 영상 제작은 공급자가 몇십 초~몇 분 걸린다(마케팅이 긴 작업으로 바뀌기 전까지)
 )
+# 11/25 기획 영상 제작안: #1763(키프레임 수준 제작안)·#1780(SVG 콘티)로 LLM이 길게 써서 기본 30초를
+# 넘겨 "응답 대기 시간 초과"로 끝났다(wr_6bee360821·wr_1a9abce3c2). 기획 LLM 응답 제한 여유를 둔다
+PLAN_TIMEOUT_S = 240.0
 HUMAN_GRADE = "C"  # 총괄이 사람 승인을 먼저 받는 등급(`human_gate`가 있는 단계도 같다)
 BRAND_CHARACTER_KEY = "brand_character_record_id"  # 홍보 영상에 쓸 회사 대표 캐릭터 (11/23)
 # 11/24: 홍보 영상은 회사 캐릭터 답을 먼저 받는다. 이 사람 단계는 사람 확인(승인·거절)이 아니라
@@ -176,6 +179,7 @@ PROMO_VIDEO = TaskDef(
             carry_keys=("proposal_id", "video_plan"),
             # 11/23: 고객 문장의 길이("30초 이내")를 기획이 제작안 길이로 쓴다 (문장은 데이터로만)
             text_key="request_text",
+            timeout_s=PLAN_TIMEOUT_S,
         ),
         TaskStep("confirm", None, "human_check", "사람 확인", None, after=("plan",), kind="human"),
         # 사람이 제작안을 확인한 뒤: 마케팅이 제작안으로 SNS 초안·장면 템플릿을 정하고(읽기),

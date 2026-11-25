@@ -104,4 +104,7 @@ def test_the_video_step_waits_long_and_is_a_paid_b_grade_step() -> None:
     assert make_step.timeout_s == request_tasks.MEDIA_TIMEOUT_S >= 300
     plan = request_tasks.plan_of(request_tasks.BY_NAME["promo_video"])
     assert next(p for p in plan if p["step_id"] == "make")["timeout_s"] == 300.0
-    assert all(p["timeout_s"] is None for p in plan if p["step_id"] != "make")
+    # 11/25 기획 제작안도 길게 기다린다(SVG 콘티까지 쓰면 30초를 넘는다). 그 밖은 기본값
+    assert next(p for p in plan if p["step_id"] == "plan")["timeout_s"] == 240.0
+    assert request_tasks.PLAN_TIMEOUT_S >= 180
+    assert all(p["timeout_s"] is None for p in plan if p["step_id"] not in ("make", "plan"))
