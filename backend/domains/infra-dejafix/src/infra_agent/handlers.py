@@ -7,6 +7,7 @@ release_fault(같은 유형 과거 장애의 처리 방식 다시 하기: 장애
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 from datetime import timedelta
 from typing import Any
@@ -25,12 +26,14 @@ from ax_contracts.schemas import (
     TaskStatus,
 )
 from ax_contracts.schemas.infra import (
+    PAST_FIX_MIN_SIMILARITY,
     DiagnoseIncidentInput,
     ReleaseFaultOutput,
     ReleaseFaultParams,
     RollbackDeploymentParams,
     VerifyRecoveryInput,
     VerifyRecoveryOutput,
+    meets_past_fix_floor,
 )
 from infra_agent import deploy_tools
 from infra_agent.deploy_run import HANDLERS as DEPLOY_HANDLERS
@@ -614,6 +617,22 @@ def _release_not_needed(request: AgentRequest, state: dict[str, Any], message: s
     )
 
 
+def _not_similar_enough(request: AgentRequest, similarity: float) -> AgentResult:
+    # 반올림하면 0.949999가 "95%"로 보여 기준과 모순되므로 소수 첫째 자리에서 내림한다
+    shown = math.floor(similarity * 1000) / 10
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.FAILED,
+        outcome="not_similar_enough",
+        output={
+            "message": (
+                f"과거 장애와 덜 비슷함({shown:g}%, 기준 {PAST_FIX_MIN_SIMILARITY * 100:g}% 이상)"
+            ),
+            "retryable": False,
+        },
+    )
+
+
 async def release_fault(request: AgentRequest) -> AgentResult:
     """같은 유형 과거 장애를 푼 처리 방식(장애 상태 해제)을 다시 한다.
 
@@ -621,10 +640,18 @@ async def release_fault(request: AgentRequest) -> AgentResult:
     관문(`execute("release_fault")`)에 올리고, 실행되면 쇼핑몰 장애 상태를 해제한다.
     등급은 safety 기준표가 정한다(미등록이면 C, 사람 승인 뒤 같은 요청을 다시 보내면 실행).
     """
+    raw = request.input.get("similarity") if isinstance(request.input, dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        # 값 검증이 true·"0.97"을 숫자로 바꾸기 전에 막는다(true가 1.0으로 하한을 넘지 않게)
+        return _failed(request, "invalid_input", "similarity는 0~1 숫자로 보내야 한다")
     try:
         inp = ReleaseFaultParams.model_validate(request.input)
     except ValidationError as exc:
         return _failed(request, "invalid_input", str(exc))
+    if not meets_past_fix_floor(inp.similarity):
+        # 총괄 말고 다른 호출자가 낮은 유사도로 불러도 해제하지 않는다(하한은 계약에 한 곳).
+        # 잘못된 호출 방어일 뿐 보안 통제가 아니다. 진짜 방어선은 안전 관문 등급·승인이다
+        return _not_similar_enough(request, inp.similarity)
     rt = get_runtime()
     key = f"{request.meta.context_id}:{RELEASE_ACTION}:{inp.component}"
     if (done := rt.releases.get(key)) and done["status"] == "executed":
@@ -632,9 +659,7 @@ async def release_fault(request: AgentRequest) -> AgentResult:
     try:
         state = await rt.shop.fault_state()
     except Exception as exc:  # noqa: BLE001 - 상태를 모르면 해제하지 않는다(fail-closed)
-        return _failed(
-            request, "server_unknown", f"사이트 상태 조회 실패: {type(exc).__name__}"
-        )
+        return _failed(request, "server_unknown", f"사이트 상태 조회 실패: {type(exc).__name__}")
     if server_state(state) != "fault":
         return _release_not_needed(request, state, "결제 서버가 지금 이상이 아니라 해제하지 않았다")
     if not state.get("active", False):

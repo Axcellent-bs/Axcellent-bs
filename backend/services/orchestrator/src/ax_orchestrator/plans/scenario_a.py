@@ -31,6 +31,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
+from ax_contracts.schemas.infra import PAST_FIX_MIN_SIMILARITY, meets_past_fix_floor
 from ax_orchestrator.draft import kst_text
 from ax_orchestrator.models import WAITING_RECOVERY, Incident, Plan, Step, iso, now
 from ax_orchestrator.naming import plain_terms
@@ -159,11 +160,18 @@ def _end_notice_gate(inc: Incident) -> tuple[str, str, str] | None:
     return None
 
 
-# 같은 유형 과거 장애의 처리 방식을 다시 할 때 필요한 유사도 하한
-PAST_FIX_MIN_SIMILARITY = 0.95
 # 다시 할 수 있는 처리 방식 → 인프라 skill. 이전 버전으로 되돌리기는 원인 배포가 있어야 해서
 # 진단이 원인 배포를 찾은 경우(아래 rollback 단계)에만 한다
 REPLAYABLE = {"release_fault"}
+
+
+def _finite(value: object) -> bool:
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and value == value
+        and abs(value) != float("inf")
+    )
 
 
 def _past_fix_gate(inc: Incident) -> tuple[str, str, str] | None:
@@ -187,9 +195,15 @@ def _past_fix_gate(inc: Incident) -> tuple[str, str, str] | None:
         )
     if rec.get("action_code") not in REPLAYABLE:
         return ("skipped", "not_replayable", "과거 처리 방식을 AI가 다시 할 수 없음")
-    if (rec.get("similarity") or 0) < PAST_FIX_MIN_SIMILARITY:
-        pct = round((rec.get("similarity") or 0) * 100)
-        return ("skipped", "not_similar_enough", f"과거 장애와 덜 비슷함({pct}%)")
+    sim = rec.get("similarity")
+    if not meets_past_fix_floor(sim):
+        # NaN·None·문자열·범위 밖 값도 여기서 건너뛴다(`< 기준` 비교는 NaN을 통과시킨다)
+        pct = f"{round(sim * 100)}%" if _finite(sim) else "알 수 없음"
+        return (
+            "skipped",
+            "not_similar_enough",
+            f"과거 장애와 덜 비슷함({pct}, 기준 {round(PAST_FIX_MIN_SIMILARITY * 100)}%)",
+        )
     return None
 
 
