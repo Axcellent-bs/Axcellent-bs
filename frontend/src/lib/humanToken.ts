@@ -36,6 +36,19 @@ export function sessionAuth(): Record<string, string> {
   return s ? { Authorization: `Bearer ${s.token}` } : {};
 }
 
+/** 회사 고르기용 세션 머리 이름. 서버는 Authorization이 세션 토큰이 아니면 이 머리로 회사만 고른다(권한은 Authorization) */
+export const SESSION_HEADER = "X-AX-Session";
+
+/**
+ * 읽기(GET)용 머리: 세션이 있으면 Authorization과 X-AX-Session 둘 다 싣는다(11/25 회사 분리).
+ * 같은 출처 nginx는 읽기의 Authorization을 공용 토큰으로 바꿔 붙여서, 서버가 세션 회사를 못 보고 캣북스로 읽었다.
+ * 직접 호스트(apiDirect)로 갈 때는 거기서 X-AX-Session을 뗀다(직접 호스트는 바꿔 붙이지 않고 CORS가 이 머리를 허용하지 않는다).
+ */
+export function sessionReadAuth(): Record<string, string> {
+  const s = getSession();
+  return s ? { Authorization: `Bearer ${s.token}`, [SESSION_HEADER]: s.token } : {};
+}
+
 export const humanTokenSetNow = (): boolean => HUMAN_TOKEN_SET;
 
 /** 쓰기 버튼 켜짐·꺼짐이 바뀔 때 부른다. 돌려준 함수로 그만 듣는다 */

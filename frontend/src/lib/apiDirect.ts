@@ -143,10 +143,12 @@ export function installApiDirect(cfg: DirectConfig | null, deps: InstallDeps = {
     const r = routeDirect({ url: input, method: init?.method ?? "GET", authorization: headers.get("authorization"), sessionToken: token(), cfg });
     if (!r) return original(input, init);
     let next = init;
-    if (r.authorization) {
-      headers.set("Authorization", r.authorization);
-      next = { ...init, headers };
-    }
+    if (r.authorization) headers.set("Authorization", r.authorization);
+    // 회사 고르기 머리(X-AX-Session)는 같은 출처 nginx가 Authorization을 공용 토큰으로 바꿔 붙일 때만 필요하다.
+    // 직접 호스트는 바꿔 붙이지 않고 CORS 허용 머리에도 없어서 뗀다(11/25)
+    const hadSession = headers.has("x-ax-session");
+    headers.delete("x-ax-session");
+    if (r.authorization || hadSession) next = { ...init, headers };
     try {
       return await original(r.url, next);
     } catch (e) {
