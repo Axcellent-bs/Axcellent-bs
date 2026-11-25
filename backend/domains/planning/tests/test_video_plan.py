@@ -45,6 +45,11 @@ def _llm_out(n: int = 4, prompt: str = "The cat mascot reads under a warm lamp, 
     )
 
 
+def plan_calls(llm: MockLLMClient) -> list[str]:
+    """제작안을 쓴 호출만 (11/25부터 같은 LLM으로 SVG 콘티도 한 번 더 부른다)."""
+    return [c for c in llm.calls if "콘티 작가" not in c]
+
+
 def _mock(out) -> MockLLMClient:
     return MockLLMClient(responses={vp._PlanOut: out})
 
@@ -261,7 +266,7 @@ def test_orchestrator_request_returns_video_plan_without_asking_others() -> None
         asyncio.run(svc.receive_insight(requester="orchestrator", inp=_insight())).output
     )
     assert again.outcome == "duplicate" and again.video_plan == out.video_plan
-    assert len(writer.llm.calls) == 1  # 다시 넘겨도 제작안을 또 쓰지 않는다
+    assert len(plan_calls(writer.llm)) == 1  # 다시 넘겨도 제작안을 또 쓰지 않는다
 
 
 def test_make_plan_reuses_video_plan_from_orchestrator() -> None:
@@ -272,7 +277,7 @@ def test_make_plan_reuses_video_plan_from_orchestrator() -> None:
     asyncio.run(svc.dispatch({"type": "makePlan", "proposal": pid}))
     p = next(x for x in svc.state.proposals if x.id == pid)
     assert p.video_plan is not None and p.video_plan.model_dump() == res.output["video_plan"]
-    assert len(writer.llm.calls) == 1
+    assert len(plan_calls(writer.llm)) == 1
 
 
 def test_data_request_still_has_no_video_plan_at_receive() -> None:
@@ -351,7 +356,7 @@ def test_orchestrator_request_length_sets_video_plan_duration() -> None:
     assert out.video_plan.scenes[-1].end_s == 30
     p = next(x for x in svc.state.proposals if x.id == out.proposal_id)
     assert p.format == "숏폼 30초"
-    sent = writer.llm.calls[-1]
+    sent = plan_calls(writer.llm)[-1]
     assert "30초 이내" not in str(sent)  # 고객 문장은 LLM에 넘기지 않는다 (숫자만 코드로)
 
 
@@ -446,7 +451,7 @@ def test_llm_fun_first_prompt_and_timing() -> None:
     llm = _mock(_llm_out())
     plan = asyncio.run(vp.write(llm, _prop(format="숏폼 15초"), "ctx"))
     assert [(s.start_s, s.end_s) for s in plan.scenes] == [(0, 2), (2, 7), (7, 12), (12, 15)]
-    sent = str(llm.calls[-1])
+    sent = str(plan_calls(llm)[-1])
     assert "재미 먼저, 브랜드는 끝에" in sent and "엔드 카드" in sent
     assert "상품 홍보" not in sent
 
@@ -486,11 +491,11 @@ def test_fun_first_does_not_pin_company_setting() -> None:
 def test_fun_first_llm_prompt_frees_setting() -> None:
     llm = _mock(_llm_out())
     plan = asyncio.run(vp.write(llm, _prop(), "ctx"))
-    sent = str(llm.calls[-1])
+    sent = str(plan_calls(llm)[-1])
     assert "묶지 않는다" in sent and vp.tenant.brand()["setting_en"] not in plan.style
     llm2 = _mock(_llm_out())
     asyncio.run(vp.write(llm2, _prop(), "ctx", PRODUCT))
-    assert f"배경은 {vp.tenant.brand()['setting_ko']}" in str(llm2.calls[-1])
+    assert f"배경은 {vp.tenant.brand()['setting_ko']}" in str(plan_calls(llm2)[-1])
 
 
 def test_shorts_format_keeps_only_video_formats() -> None:

@@ -17,6 +17,11 @@ from planning_agent import video_plan as vp
 
 pytestmark = pytest.mark.role("planning")
 
+
+def plan_call(llm) -> str:  # noqa: ANN001
+    """마지막 제작안 호출 (11/25부터 SVG 콘티 호출이 뒤에 한 번 더 붙는다)."""
+    return [c for c in llm.calls if "콘티 작가" not in c][-1]
+
 PRODUCT = (vp.PRODUCT, vp.END_CARD)
 
 
@@ -115,15 +120,15 @@ def test_offer_words_win_over_solution_words() -> None:
 def test_prompt_follows_purpose_structure() -> None:
     llm = _mock(_out(offer="신간 할인", cta="지금 만나 보세요"))
     asyncio.run(vp.write(llm, _prop(title="겨울 특가 이벤트"), "ctx"))
-    sent = llm.calls[-1]
+    sent = plan_call(llm)
     assert "고객 혜택 광고" in sent and "혜택 먼저(첫 3초)" in sent
     assert "재미 먼저, 브랜드는 끝에" not in sent  # 광고면 채널 콘텐츠 흐름을 쓰지 않는다
     llm = _mock(_out())
     asyncio.run(vp.write(llm, _prop(title="우리 솔루션 소개"), "ctx"))
-    assert "문제(보는 사람이 겪는 불편) → 반전 → 해결 장면" in llm.calls[-1]
+    assert "문제(보는 사람이 겪는 불편) → 반전 → 해결 장면" in plan_call(llm)
     llm = _mock(_out())
     asyncio.run(vp.write(llm, _prop(), "ctx"))
-    sent = llm.calls[-1]
+    sent = plan_call(llm)
     assert "재미 먼저, 브랜드는 끝에" in sent and "- 광고 목적:" not in sent
     assert "offer_ko·cta_ko는 빈 문자열 (채널 콘텐츠)" in sent
 
@@ -131,7 +136,7 @@ def test_prompt_follows_purpose_structure() -> None:
 def test_prompt_asks_for_keyframe_fields_and_rules() -> None:
     llm = _mock(_out())
     asyncio.run(vp.write(llm, _prop(), "ctx"))
-    sent = llm.calls[-1]
+    sent = plan_call(llm)
     for word in ("start_frame", "end_frame", "action_en", "camera_en", "offer_ko", "cta_ko"):
         assert word in sent
     assert "장면 i의 end_frame과 장면 i+1의 start_frame은 같은 순간" in sent

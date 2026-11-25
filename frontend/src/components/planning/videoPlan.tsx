@@ -7,6 +7,7 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Tag } from '@/components/planning-common/parts'
 import { usePrinting } from '@/lib/print'
+import { svgDataUri } from '@/lib/storyboardSvg'
 import { sceneKeyframeLine, sceneTime, videoPlanChip, videoPurposeChip, type VideoPlanView } from '@/lib/videoPlan'
 import { sceneRole, sceneShares } from '@/lib/videoStoryboard'
 import { orchestrator } from '@/lib/orchestrator'
@@ -55,7 +56,17 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
           const keyframe = sceneKeyframeLine(s)
           return (
             <li key={s.n} className="sb-card">
-              <div className={`sb-shot sb-c${i % 4}`} aria-hidden="true"><span>장면 그림 자리</span></div>
+              {s.startSvg || s.endSvg ? (
+                <div className="sb-svgs" aria-label={`장면 ${s.n} 콘티`}>
+                  {([['첫 화면', s.startSvg], ['끝 화면', s.endSvg]] as const).map(([label, svg]) => svg ? (
+                    <figure key={label}><img src={svgDataUri(svg)} alt={`장면 ${s.n} ${label} 콘티`} /><figcaption>{label}</figcaption></figure>
+                  ) : (
+                    <figure key={label} className="sb-svg-empty"><figcaption>{label} 없음</figcaption></figure>
+                  ))}
+                </div>
+              ) : (
+                <div className={`sb-shot sb-c${i % 4}`} aria-hidden="true"><span>장면 그림 자리</span></div>
+              )}
               <div className="sb-card-body">
                 <div className="sb-card-top">{s.n} · {sceneRole(i, v.scenes.length)} · {sceneTime(s)}</div>
                 <p className="sb-visual">{s.visual}</p>

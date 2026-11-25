@@ -33,6 +33,7 @@ from ax_agent_template import tenant
 from ax_agent_template.llm import LLMClient
 from ax_contracts.schemas.planning import VideoMediaHints, VideoPlan, VideoScene
 from ax_workflow.models import Proposal
+from planning_agent import storyboard_svg
 
 log = logging.getLogger("ax.planning")
 
@@ -874,7 +875,10 @@ async def write(
         )
     except Exception:  # noqa: BLE001 - 규칙 제작안으로 대신
         return rule_plan(p, promo)
-    return _from_llm(p, got, d, b, style_, purpose) or rule_plan(p, promo)
+    plan = _from_llm(p, got, d, b, style_, purpose) or rule_plan(p, promo)
+    # 11/25 예진: 장면별 첫·끝 화면 SVG 콘티를 같은 LLM으로 그려 함께 넘긴다(실패해도 그대로)
+    drawn, _ = await storyboard_svg.draw(llm, plan, context_id)
+    return drawn
 
 
 PURPOSE_LABEL = {

@@ -752,6 +752,12 @@ class VideoScene(AxModel):
     end_frame: str = Field(default="", max_length=200)  # 장면 끝 화면 (한국어)
     action_en: str = Field(default="", max_length=400)  # 첫→끝 사이 동작 (동사 중심 영문)
     camera_en: str = Field(default="", max_length=120)  # 샷 크기·카메라 움직임 (영문)
+    # 아래는 예전 제작안은 없다 (빈 문자열). 기획이 그린 SVG 콘티(11/25): 장면 첫·끝 화면의 구도를
+    # 단순 도형으로 그린 SVG 원문(viewBox 0 0 90 160, 9:16). 기획이 허용 요소·속성만 남겨 정리한
+    # 값이다. 화면은 <img src="data:image/svg+xml;base64,…">로만 보여 준다. 마케팅은 스토리보드
+    # 칸의 SVG로 그대로 쓸 수 있다
+    start_svg: str = Field(default="", max_length=8192)
+    end_svg: str = Field(default="", max_length=8192)
 
     @model_validator(mode="after")
     def _ends_after_start(self) -> VideoScene:

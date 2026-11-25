@@ -45,7 +45,7 @@ from ax_workflow.models import (
     Spec,
     State,
 )
-from planning_agent import idea_options, video_plan
+from planning_agent import idea_options, storyboard_svg, video_plan
 from planning_agent import proposals as ext
 
 PULL_CTX = "ctx_proposals"
@@ -271,6 +271,7 @@ class ProposalMixin:
     # 잠금 밖에서 다른 부서·LLM을 부르는 액션 (dispatch가 따로 받는다)
     OUTSIDE_LOCK = {
         "pull_insights", "proposal_to_request", "measure_proposal", "choose_angle", "make_plan",
+        "redraw_storyboard",
     }  # fmt: skip
 
     # ---- 받아오기 (data promo_concepts → 인사이트 → 제안)
@@ -548,6 +549,41 @@ class ProposalMixin:
                 getattr(writer, "llm", None), p, _ctx(p)
             )
         return await self._apply(self._make_plan, proposal=proposal, video=video)
+
+    async def redraw_storyboard(
+        self: Any, proposal: str, scene: int | None = None, note: str = ""
+    ) -> ActionResult:
+        """대화·버튼 "콘티 다시 그리기"(11/25): 영상 제작안의 SVG 콘티를 기획 LLM으로 다시 그린다.
+
+        scene이 있으면 그 장면만, note는 사람이 고쳐 달라고 한 말(untrusted, 데이터 블록에만).
+        LLM은 잠금 밖에서 부르고, 바뀐 제작안만 잠금 안에서 넣는다. 이미 마케팅에 넘긴 제안은
+        마케팅 쪽 복사본이 바뀌지 않는다(다시 넘겨야 한다)."""
+        p = _find(self.state, proposal)
+        if p is None:
+            raise ActionError("NOT_FOUND", f"{proposal} 제안이 없어요")
+        if p.video_plan is None:
+            raise ActionError(
+                "NO_VIDEO_PLAN", "영상 제작안이 아직 없어요 (먼저 기획안으로 만들어 주세요)"
+            )
+        if scene is not None and scene not in {s.n for s in p.video_plan.scenes}:
+            raise ActionError("INVALID_ACTION", f"{scene}번 장면이 없어요")
+        llm = getattr(self._proposal_writer, "llm", None)
+        if llm is None:
+            raise ActionError("LLM_NOT_CONFIGURED", "기획 LLM이 없어 콘티를 그릴 수 없어요")
+        drawn, changed = await storyboard_svg.draw(llm, p.video_plan, _ctx(p), note, scene)
+        if not changed:
+            raise ActionError("SVG_FAILED", "콘티를 다시 그리지 못했어요 (잠시 뒤 다시 해 주세요)")
+
+        async def put(s: State) -> ActionResult | None:
+            q = _find(s, proposal)
+            if q is None or q.video_plan is None:
+                return None
+            q.video_plan = drawn
+            sent = q.status in ("마케팅 전달", "진행 중", "성과 확인")
+            out = {"proposal_id": proposal, "scenes": changed, "sent": sent}
+            return ActionResult(changed=True, output=out)
+
+        return await self._apply(put)
 
     async def _make_plan(
         self: Any, s: State, proposal: str, video: VideoPlan | None = None
@@ -1028,6 +1064,15 @@ class ProposalMixin:
             if not isinstance(pid, str):
                 raise ActionError("INVALID_ACTION", "proposal이 없다")
             return await self.make_plan(pid)
+        if name == "redraw_storyboard":
+            pid, scene, note = action.get("proposal"), action.get("scene"), action.get("note")
+            if not isinstance(pid, str):
+                raise ActionError("INVALID_ACTION", "proposal이 없다")
+            return await self.redraw_storyboard(
+                pid,
+                scene if isinstance(scene, int) and not isinstance(scene, bool) else None,
+                note if isinstance(note, str) else "",
+            )
         if name == "measure_proposal":
             pid = action.get("proposal")
             if not isinstance(pid, str):
