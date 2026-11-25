@@ -43,7 +43,7 @@ from ax_contracts.schemas.planning import (
     VideoScene,
 )
 from ax_workflow.models import Proposal
-from planning_agent import plan_checks, storyboard_svg
+from planning_agent import plan_checks, plan_format, storyboard_svg
 
 log = logging.getLogger("ax.planning")
 
@@ -818,6 +818,8 @@ class _SceneOut(BaseModel):
     # 11/26 제작 검사 칸 (사실대로). 화면에 보이는 인물 수(회사 캐릭터 포함)·꼭 보이는 소품
     people: int = 1
     props: list[str] = Field(default_factory=list)
+    # 11/26 형식 카드에서 이 장면이 맡은 비트 이름 (형식을 안 쓰면 빈 문자열)
+    beat_ko: str = ""
 
 
 class _AdjOut(BaseModel):
@@ -1018,12 +1020,27 @@ def _checked(
     n = len(got.scenes)
     ad = purpose in PURPOSE_DIRECTION
     cuts = fun_timings(d, n) if style_ == FUN_FIRST or ad else timings(d, n)
+    rules = _rules(p, got)
+    # 11/26 보고서 추천 형식 카드: LLM이 비트를 적었고 의뢰 지시를 다 지켰을 때만 (형식보다 먼저)
+    card = plan_format.card_for(p)
+    kept = all(r["kept"] for r in plan_checks.check_rules(rules, _check_scenes(got), got.script))
+    use_card = card is not None and kept and all(s.beat_ko.strip() for s in got.scenes)
+    if use_card and card is not None and not even:
+        fun = style_ == FUN_FIRST or ad
+        hook, last = (cuts[0][1], cuts[-1][0]) if fun else (None, None)
+        beat = plan_format.beat_cuts(card, d, n, hook, last)
+        if beat and plan_checks.cuts_ok(beat, d, n):  # 지금 규칙과 부딪히면 지금 규칙
+            cuts = beat
     if even:
         cuts = plan_checks.even_cuts(d, n)
     if not plan_checks.cuts_ok(cuts, d, n):  # 11/26 장면 n개 = 구간 n개 (어긋나면 고르게 다시 나눔)
         log.info("영상 제작안 구간 %d개 ≠ 장면 %d개 → 고르게 나눔", len(cuts), n)
         cuts = plan_checks.even_cuts(d, n)
-    rules = _rules(p, got)
+    formatted: dict[str, str] = (
+        {"format_id": card.id, "format_name": card.name[:40],
+         "situation_ko": plan_format.situation_for(p, card)}
+        if use_card and card is not None else {}
+    )  # fmt: skip
     try:
         scenes = [
             VideoScene(
@@ -1034,6 +1051,9 @@ def _checked(
                 caption=_short(s.caption, 60),
                 prompt=_short(s.prompt, 800),
                 **_keyframes(i, s),
+                **({"beat_ko": _short(s.beat_ko, 20),
+                    "beat_punch": card is not None and i - 1 < len(card.beats)
+                    and card.beats[i - 1].punch} if formatted else {}),  # fmt: skip
             )  # fmt: skip
             for i, ((start, end), s) in enumerate(zip(cuts, got.scenes, strict=True), start=1)
         ]
@@ -1048,7 +1068,7 @@ def _checked(
             media_hints=media_hints(p, got.category), purpose=purpose,
             offer_ko=_short(got.offer_ko, 60) if ad else "",
             cta_ko=_short(got.cta_ko, 40) if ad else "", **cast_fields(p),
-            request_rules=plan_checks.check_rules(rules, checked, script),
+            request_rules=plan_checks.check_rules(rules, checked, script), **formatted,
         )  # fmt: skip
     except ValidationError:
         log.info("LLM 영상 제작안 형식 → 규칙 제작안: ValidationError %.1fs", elapsed)
@@ -1179,14 +1199,20 @@ def _plan_prompt(
         }
     if p.request_text:  # 11/26 의뢰문(고객 글)은 데이터 칸으로만. 지시문에는 붙이지 않는다
         data["request_text"] = p.request_text[:REQUEST_TEXT_MAX]
+    situations = plan_format.situations(p)
+    if situations:  # 11/26 보고서 웃음 재료 상황(요약, untrusted)은 데이터 칸으로만
+        data["humor_situations"] = situations
+    card = plan_format.card_for(p)  # 11/26 보고서 추천 형식 카드 (우리가 쓴 카드라 지시문에)
     style_, exposure = promo
     purpose = purpose_of(p)
     prompt = PROMPT.format(
-        n=RULE_SCENES, d=d, angle=ANGLE_TEXT.get(p.angle or "", "정하지 않음"),
+        n=len(card.beats) if card else RULE_SCENES, d=d,
+        angle=ANGLE_TEXT.get(p.angle or "", "정하지 않음"),
         character_ko=COMPANY_CHARACTER_KO if company else b["character_ko"],
         setting_rule=setting_rule(style_, b),
         direction=direction(style_, exposure, purpose) + (CHARACTER_RULE if company else "")
-        + (REQUEST_RULE if p.request_text else ""),
+        + (REQUEST_RULE if p.request_text else "")
+        + (plan_format.prompt_block(card) if card else ""),
     )  # fmt: skip
     return prompt, data, d, b, style_, purpose
 

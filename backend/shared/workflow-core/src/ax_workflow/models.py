@@ -680,6 +680,13 @@ class CompanyCharacter(DomainModel):
     photo: bool = False  # 실사 그대로 (가상 인물, 그림체로 바꾸지 않은 사진)
 
 
+class HumorSituation(DomainModel):
+    """보고서 웃음 재료 상황 한 줄 (데이터가 요약·검사한 값 그대로, 11/26)."""
+
+    text_ko: str
+    format_id: str = ""
+
+
 class Proposal(DomainModel):
     id: str  # PROP-n
     title: str
@@ -733,6 +740,10 @@ class Proposal(DomainModel):
     # 11/26 총괄 의뢰의 고객 문장 그대로(untrusted). 제작안 LLM에 데이터 칸으로만 넘겨 연출 지시
     # (대사·장면·배경·소품·동작·외형)를 뽑아 지키게 한다. 지시문에는 붙이지 않는다
     request_text: str | None = None
+    # 11/26 데이터 보고서가 추천한 형식 카드 id(점수 순)와 웃음 재료 상황(요약, untrusted).
+    # 제작안 형식(카드 비트)과 데이터 칸 상황에 쓴다. 예전 제안은 비어 있다
+    format_ids: list[str] = Field(default_factory=list)
+    humor_situations: list[HumorSituation] = Field(default_factory=list)
 
 
 class DeletedProposal(DomainModel):

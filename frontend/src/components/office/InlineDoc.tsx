@@ -66,6 +66,8 @@ export function InlinePlan({ plan, open }: { plan: VideoPlanView | null | undefi
           <p className="text-[13px] font-semibold text-ink-900">{v.concept}</p>
           <p className="text-ink-500">{v.meta}</p>
           {v.lead && <p className="text-ink-700">주인공 · {v.lead}</p>}
+          {v.format && <p className="text-ink-700">형식 · <span className="chip bg-brand-50 text-[11px] text-brand-700">{v.format}</span></p>}
+          {v.situation && <p className="text-ink-700">상황 · {v.situation}</p>}
           {v.fallback && <p className="text-amber-800">규칙 초안 · {v.fallback}</p>}
           {missing && <p className="text-amber-800">{missing}</p>}
           {v.svgWhy && <p className="text-amber-800">{v.svgWhy}</p>}
@@ -76,6 +78,7 @@ export function InlinePlan({ plan, open }: { plan: VideoPlanView | null | undefi
             {v.scenes.map((s) => (
               <li key={s.key} className="min-w-0 space-y-1 rounded-lg border border-ink-100 bg-ink-50 p-2">
                 <b className="block text-ink-900">{s.title}</b>
+                {s.beat && <span className={`chip text-[11px] font-bold ${s.punch ? "bg-brand-600 text-white" : "bg-brand-50 text-brand-700"}`} title={s.punch ? "펀치라인 비트" : "형식 비트"}>{s.beat}</span>}
                 {(s.thumb || s.thumbEnd) && (
                   <span className="flex gap-1.5">
                     {s.thumb && <img src={s.thumb} alt={`${s.title} 첫 화면 3D 콘티`} className="w-1/2 rounded-md bg-surface ring-1 ring-ink-100" />}

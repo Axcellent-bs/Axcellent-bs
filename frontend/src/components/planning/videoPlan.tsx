@@ -9,7 +9,7 @@ import { Tag } from '@/components/planning-common/parts'
 import { CheckLog, RequestRules } from '@/components/planning/PlanChecks'
 import { usePrinting } from '@/lib/print'
 import { svgDataUri } from '@/lib/storyboardSvg'
-import { characterLine, versionChip, sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoPurposeChip, videoSvgLine, type VideoPlanView } from '@/lib/videoPlan'
+import { characterLine, formatChip, versionChip, sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoPurposeChip, videoSvgLine, type VideoPlanView } from '@/lib/videoPlan'
 import { sceneRole, sceneShares } from '@/lib/videoStoryboard'
 import { orchestrator } from '@/lib/orchestrator'
 import { proposalOfRequest, requestActionError, stepRows } from '@/lib/requestCards'
@@ -44,6 +44,8 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
         <div><dt>비율</dt><dd>{v.aspect}</dd></div>
         <div><dt>장면</dt><dd>{v.scenes.length}</dd></div>
         {lead && <div className="sb-lead"><dt>주인공</dt><dd>{lead}</dd></div>}
+        {formatChip(v) && <div className="sb-format"><dt>형식</dt><dd><span className="chip sb-format-chip">{formatChip(v)}</span></dd></div>}
+        {v.formatId && v.situationKo && <div className="sb-situation"><dt>상황</dt><dd>{v.situationKo}</dd></div>}
         {audience && <div><dt>대상</dt><dd>{audience}</dd></div>}
         {v.offerKo && <div><dt>혜택</dt><dd>{v.offerKo}</dd></div>}
         {v.ctaKo && <div><dt>행동 문구</dt><dd>{v.ctaKo}</dd></div>}
@@ -77,6 +79,7 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
               )}
               <div className="sb-card-body">
                 <div className="sb-card-top">{s.n} · {sceneRole(i, v.scenes.length)} · {sceneTime(s)}</div>
+                {s.beatKo && <span className={`sb-beat${s.beatPunch ? ' sb-beat-punch' : ''}`} title={s.beatPunch ? '펀치라인 비트' : '형식 비트'}>{s.beatKo}</span>}
                 <p className="sb-visual">{s.visual}</p>
                 {keyframe && <p className="sb-keyframe" title="첫 화면 → 끝 화면 · 동작 · 카메라">{keyframe}</p>}
                 {s.caption && <span className="sb-caption">자막: {s.caption}</span>}

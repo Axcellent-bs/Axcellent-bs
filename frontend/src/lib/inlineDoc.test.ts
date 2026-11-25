@@ -81,6 +81,22 @@ test("주인공 줄: 회사 캐릭터면 그 외형과 실사 그대로, 예전 
   assert.match(src, /\{v\.lead && <p[^>]*>주인공 · \{v\.lead\}<\/p>\}/);
 });
 
+test("형식 칩·상황 줄·장면 비트 라벨 (펀치 강조) · 형식이 없으면 줄 없음", () => {
+  const v = inlinePlan(plan([scene(1, { beatKo: "기대" }), scene(2, { beatKo: "펀치 리액션", beatPunch: true })],
+    { formatId: "F-02", formatName: "기대 vs 현실", situationKo: "시험 전날 계획 vs 새벽 3시" }));
+  assert.equal(v.format, "F-02 기대 vs 현실 · 보고서 추천");
+  assert.equal(v.situation, "시험 전날 계획 vs 새벽 3시");
+  assert.deepEqual(v.scenes.map((s) => [s.beat, s.punch]), [["기대", false], ["펀치 리액션", true]]);
+  const old = inlinePlan(plan([scene(1)], { situationKo: "형식 없는 상황" }));
+  assert.equal(old.format, null);
+  assert.equal(old.situation, null); // 형식이 없으면 상황 줄도 없다 (지금 화면)
+  assert.equal(old.scenes[0].beat, null);
+  const src = readFileSync(new URL("../components/office/InlineDoc.tsx", import.meta.url), "utf8");
+  assert.match(src, /\{v\.format && <p[^>]*>형식 · /);
+  assert.match(src, /\{v\.situation && <p[^>]*>상황 · \{v\.situation\}<\/p>\}/);
+  assert.match(src, /\{s\.beat && <span className=\{`chip[^`]*\$\{s\.punch \?/);
+});
+
 test("카드 안 그림은 <img src={data URI}>로만 그린다 (SVG 글을 화면에 직접 넣지 않는다)", () => {
   const src = readFileSync(new URL("../components/office/InlineDoc.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(src, /dangerouslySetInnerHTML|innerHTML|<svg\b|<object\b|<iframe\b|<embed\b/);

@@ -17,6 +17,8 @@ export interface VideoSceneView {
   // 기획이 그린 SVG 콘티 (11/25 계약 VideoScene.start_svg·end_svg). 화면은 <img data URI>로만 그린다
   startSvg?: string // 장면 첫 화면 구도
   endSvg?: string // 장면 끝 화면 구도
+  beatKo?: string // 11/26 형식 카드 비트 이름 (계약 VideoScene.beat_ko). 형식이 없으면 칸 없음
+  beatPunch?: boolean // 그 비트가 펀치라인 비트 (화면 강조)
 }
 
 /** 광고 목적 (계약 VideoPlan.purpose). 없으면 칩을 그리지 않는다 */
@@ -48,6 +50,9 @@ export interface VideoPlanView {
   characterLook?: 'photo' | 'illustration'
   requestRules?: RequestRuleView[] // 11/26 의뢰 연출 지시와 지켰는지 (계약 VideoPlan.request_rules). 없으면 칸 없음
   version?: number // 11/26 제작안 판 (계약 VideoPlan.version). 1판·예전 제작안은 칸 없음
+  formatId?: string // 11/26 따른 형식 카드 (계약 VideoPlan.format_id·format_name). 없으면 칸 없음
+  formatName?: string
+  situationKo?: string // 보고서 웃음 재료 상황 한 줄
   checkLog?: CheckAttemptView[] // 11/26 제작 검사 기록 (계약 VideoPlan.check_log). 예전 제작안은 없음
   adjustments?: PlanAdjustmentView[] // 11/26 제작 검사 때문에 의뢰와 달라진 점
 }
@@ -76,6 +81,9 @@ export function versionChip(v: Pick<VideoPlanView, 'version' | 'checkLog'>): str
   const byMarketing = (v.checkLog ?? []).some((a) => a.by === 'marketing')
   return `${v.version}판${byMarketing ? '(마케팅 요청으로 고침)' : ''}`
 }
+/** 형식 칩 "F-02 기대 vs 현실 · 보고서 추천". 형식이 없으면 '' (지금 화면) */
+export const formatChip = (v: Pick<VideoPlanView, 'formatId' | 'formatName'>): string =>
+  v.formatId ? `${[v.formatId, v.formatName].filter(Boolean).join(' ')} · 보고서 추천` : ''
 /** "의뢰와 달라진 점" 한 줄 */
 export const adjustmentLine = (a: PlanAdjustmentView) => `"${a.ruleTextKo}" → ${a.changedToKo} (${a.whyKo})`
 function toCheckLog(raw: unknown): CheckAttemptView[] {
@@ -187,7 +195,9 @@ function toScene(raw: unknown): VideoSceneView | null {
     endSvg: str(pick(o, 'endSvg', 'end_svg')),
   }
   const kept = Object.fromEntries(Object.entries(frames).filter(([, v]) => v)) as Partial<typeof frames>
-  return { n, startS, endS, visual, caption: str(o.caption), prompt, ...kept }
+  const beatKo = str(pick(o, 'beatKo', 'beat_ko'))
+  const beat = beatKo ? { beatKo, ...(pick(o, 'beatPunch', 'beat_punch') === true ? { beatPunch: true } : {}) } : {}
+  return { n, startS, endS, visual, caption: str(o.caption), prompt, ...kept, ...beat }
 }
 
 /** 장면 키프레임 한 줄 "첫 화면 → 끝 화면 · 동작 · 카메라". 끝 화면·동작·카메라가 다 비면 null
@@ -226,6 +236,9 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
   const rules = toRules(pick(o, 'requestRules', 'request_rules'))
   const checkLog = toCheckLog(pick(o, 'checkLog', 'check_log'))
   const adjustments = toAdjustments(o.adjustments)
+  const formatId = str(pick(o, 'formatId', 'format_id'))
+  const formatName = str(pick(o, 'formatName', 'format_name'))
+  const situationKo = str(pick(o, 'situationKo', 'situation_ko'))
   return {
     concept, durationS, aspect, script: str(o.script),
     scenes: (scenes as VideoSceneView[]).slice().sort((a, b) => a.n - b.n),
@@ -242,6 +255,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     ...(source === 'company_character' && (look === 'photo' || look === 'illustration') ? { characterLook: look } : {}),
     ...(rules.length ? { requestRules: rules } : {}),
     ...((int(o.version) ?? 1) >= 2 ? { version: int(o.version) as number } : {}),
+    ...(formatId ? { formatId, ...(formatName ? { formatName } : {}), ...(situationKo ? { situationKo } : {}) } : {}),
     ...(checkLog.length ? { checkLog } : {}),
     ...(adjustments.length ? { adjustments } : {}),
   }
