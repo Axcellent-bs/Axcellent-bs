@@ -153,16 +153,32 @@ def _cut_words(text: str | None, n: int) -> str:
 
 
 # LLM이 장면(subject_en 등)에 쓴 샷 크기·화면 비율 말. 칸 샷 크기는 코드 표(size_en) 하나만 쓴다
-_SHOT_WORDS = re.compile(
-    r"\b(?:extreme\s+|very\s+|medium\s+|full\s+)?"
+# 11/26 태윤 님 리뷰: 샷 낱말이 일반 명사로 쓰인 경우("wide view of the sea", "insert the key")는
+# 남긴다. 지우는 것: (1) 크기 + shot/frame/angle 어디서든 (앞 관사·뒤 "of"까지 같이),
+# (2) 문장(또는 쉼표 구절) 맨 앞에서 쉼표·대시·"of"가 따라오는
+#     close-up·full body·insert·establishing
+_SHOT_SIZE = (
+    r"(?:extreme\s+|very\s+|medium\s+|full\s+)?"
     r"(?:wide|medium|long|close[- ]?up|closeup|full[- ]body|full|insert|establishing|"
-    r"over[- ]the[- ]shoulder|cowboy|two)\s+(?:shot|view|frame|angle)s?\b"
-    r"|\b(?:extreme\s+)?close[- ]?ups?\b|\bfull[- ]body\b|\binsert\b",
+    r"over[- ]the[- ]shoulder|cowboy|two)"
+)
+_SHOT_WORDS = re.compile(
+    rf"(?:\b(?:a|an|the)\s+)?\b{_SHOT_SIZE}\s+(?:shot|frame|angle)s?\b(?:\s+of\b)?"
+    r"|(?:^|(?<=[.!?;,—]))\s*(?:(?:a|an|the)\s+)?"
+    r"(?:extreme\s+)?(?:close[- ]?ups?|closeup|full[- ]body|insert|establishing)"
+    r"(?=\s*(?:[,—:]|$)|\s+of\b)(?:\s+of\b)?",
     re.IGNORECASE,
 )
+# 비율: 방향 낱말(vertical 등)에 붙었거나 뒤에 ratio가 오거나,
+# 알려진 영상 비율(9:16·16:9·1:1·4:5)만.
+# "시계가 10:30"·"3x4 타일"은 장면 내용이라 남긴다
+_RATIO = r"\d{1,2}\s*[:x×]\s*\d{1,2}"
+_KNOWN_RATIO = r"(?:9\s*[:x×]\s*16|16\s*[:x×]\s*9|1\s*[:x×]\s*1|4\s*[:x×]\s*5)"
+_RATIO_TAIL = r"(?:\s+(?:short\s+)?(?:video|frame|format|aspect(?:\s+ratio)?|ratio))?"
 _ASPECT_WORDS = re.compile(
-    r"\b(?:vertical|horizontal|portrait|landscape|square)?\s*\d{1,2}\s*[:x×]\s*\d{1,2}\b"
-    r"(?:\s+(?:short\s+)?(?:video|frame|format|aspect(?:\s+ratio)?))?"
+    rf"\b(?:vertical|horizontal|portrait|landscape)\s+{_RATIO}\b{_RATIO_TAIL}"
+    rf"|\b{_RATIO}\s+(?:aspect(?:\s+ratio)?|ratio)\b"
+    rf"|(?:\b(?:square)\s+)?(?<![\d:x×])\b{_KNOWN_RATIO}\b(?![:x×]?\d){_RATIO_TAIL}"
     r"|\b(?:vertical|horizontal)\s+(?:short\s+)?(?:video|format)\b|\bshort video\b",
     re.IGNORECASE,
 )

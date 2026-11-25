@@ -77,5 +77,33 @@ def test_scene_is_cut_on_word_boundary() -> None:
     assert sb._cut_words("short", 100) == "short"
 
 
+def test_scene_content_numbers_and_nouns_stay() -> None:
+    """11/26 태윤 님 리뷰: 장면 내용의 시각·크기·일반 명사까지 지우던 것."""
+    assert "10:30" in sb.scene_words("시계가 10:30을 가리킨다", 200)
+    assert "3x4" in sb.scene_words("3x4 타일 바닥", 200)
+    assert sb.scene_words("wide view of the sea", 200) == "wide view of the sea"
+    assert sb.scene_words("she will insert the key", 200) == "she will insert the key"
+    assert sb.scene_words("a clock at 1:10 on the wall", 200) == "a clock at 1:10 on the wall"
+
+
+def test_shot_and_aspect_phrases_go_without_holes() -> None:
+    got = sb.scene_words("Vertical 9:16 short video, wide shot of the beach at dawn", 200)
+    assert got == "the beach at dawn", got
+    for text, want in (
+        ("a close-up shot of the face", "the face"),
+        ("girl smiling, a wide shot of the crowd", "girl smiling, the crowd"),
+        ("Close-up of the hands, soft light", "the hands, soft light"),
+        ("Insert, the key turning", "the key turning"),
+        ("cafe table, 16:9 format", "cafe table"),
+        ("portrait 4:5 frame of a cat", "a cat"),
+        ("square 1:1 photo of a cup", "photo of a cup"),
+    ):
+        got = sb.scene_words(text, 200)
+        assert got == want, (text, got)
+        low = f" {got.lower()} "
+        for hole in (" a of ", " an of ", " the of ", " of of ", " ,", ",,"):
+            assert hole not in low, (text, got)
+
+
 def test_llm_rule_forbids_shot_size_in_subject() -> None:
     assert "샷 크기" in sb.PROMPT and "subject_en·setting_en·light_en·mood_en에는" in sb.PROMPT
