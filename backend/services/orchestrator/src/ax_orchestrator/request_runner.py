@@ -402,7 +402,8 @@ class RequestRunner:
                 finished_at=stamp(),
             )
             return
-        for key in spec.get("row_input") or []:  # 사람이 화면에서 정한 의뢰 기록 값(번호)만
+        # 사람이 화면에서 정한 의뢰 기록 값(번호)만. pass_row는 값만 더한다(준비 단계 표시 아님)
+        for key in [*(spec.get("row_input") or []), *(spec.get("pass_row") or [])]:
             if row.get(key):
                 payload = {**payload, key: row[key]}
         # 11/26 캐릭터를 바꿔 다시 준비하면 예전 의뢰 기록 번호를 같이 넘긴다(마케팅이 멈춤 표시)

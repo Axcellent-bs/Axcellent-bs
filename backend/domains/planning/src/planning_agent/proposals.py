@@ -27,6 +27,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
+from ax_agent_template import company_scope
 from ax_agent_template import config as template_config
 from ax_agent_template.client import call_agent
 from ax_agent_template.llm import LLMClient, LLMSettings
@@ -58,7 +59,7 @@ from ax_contracts.schemas.planning import (
     ReceiveInsightInput,
 )
 from ax_workflow.hr_link import AgentCaller
-from ax_workflow.models import IdeaOption, Proposal
+from ax_workflow.models import CompanyCharacter, IdeaOption, Proposal
 from planning_agent import video_plan
 from planning_agent.video_plan import company_info
 
@@ -742,6 +743,46 @@ class MarketingBrief:
             return ChannelFollowersOutput.model_validate(out.output or {})
         except ValidationError:
             return f"{CHANNEL_FOLLOWERS_SKILL} 출력이 계약과 다름"
+
+    async def character(self, ctx: str, record_id: str) -> CompanyCharacter | str:
+        """의뢰에서 고른 회사 캐릭터의 외형 (마케팅 `creative_record_get`, read, 11/26).
+        요청 회사(company_scope)의 기록만 읽는다. 못 읽으면 이유(문자열) — 기획은 회사 브랜드로."""
+        req = AgentRequest(
+            meta=_meta(ctx, company_scope.active() or self.tenant_id, self.timeout),
+            skill=CREATIVE_RECORD_GET_SKILL,
+            input={"record_id": record_id},
+        )
+        out = await _ask(self._call, "marketing", req, self.timeout)
+        if isinstance(out, str):
+            return out
+        return character_of((out.output or {}).get("sheet")) or "시트에 외형 없음"
+
+
+CREATIVE_RECORD_GET_SKILL = "creative_record_get"
+SHEET_KINDS = ("real_photo", "virtual_human", "illustration")
+
+
+def character_of(sheet: Any) -> CompanyCharacter | None:
+    """마케팅 시트(CharacterSheetPromptOutput 모양) → 주인공. 외형 글이 없으면 None.
+
+    실사 그대로(photo): AI 가상 인물, 또는 그림체로 바꾸지 않은 사진(stylized_from_photo=False)."""
+    if not isinstance(sheet, dict):
+        return None
+    def text(k: str) -> str:
+        return " ".join(str(sheet.get(k) or "").split())
+
+    parts = (text("appearance_en"), text("outfit_en"))
+    look = text("consistency_en") or " ".join(x for x in parts if x)
+    if not look:
+        return None
+    kind = sheet.get("kind") if sheet.get("kind") in SHEET_KINDS else "real_photo"
+    unstyled = kind == "real_photo" and sheet.get("stylized_from_photo") is False
+    return CompanyCharacter(
+        kind=kind,
+        look_en=look[:1500],
+        summary_ko=text("summary_ko")[:300],
+        photo=kind == "virtual_human" or unstyled,
+    )
 
 
 FINANCE_ADVICE = "category_budget_advice"  # 재무가 낸 숫자의 출처 (facts.source)

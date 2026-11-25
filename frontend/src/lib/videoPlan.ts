@@ -42,6 +42,19 @@ export interface VideoPlanView {
   ctaKo?: string // 마지막 행동 문구
   fallbackReason?: VideoFallbackReason // 규칙 초안이 된 이유 (11/25, 예전 제작안·LLM 제작안은 없음)
   svgReason?: VideoFallbackReason // 3D 마네킹 콘티를 못 그린 이유 (11/25, 그렸거나 예전 제작안은 없음)
+  // 11/26 주인공 (계약 VideoPlan.character_source·character_ko·character_look). 예전 제작안은 없음
+  characterSource?: 'company_character' | 'brand'
+  characterKo?: string // 회사 캐릭터 외형 요약 (마케팅 시트 summary_ko)
+  characterLook?: 'photo' | 'illustration'
+}
+
+const LOOK_LABEL: Record<'photo' | 'illustration', string> = { photo: '실사 그대로', illustration: '그림체 그대로' }
+/** "주인공" 줄 (기획 video_plan.character_line과 같은 문구). 예전 제작안(칸 없음)은 '' (줄을 그리지 않는다) */
+export function characterLine(v: Pick<VideoPlanView, 'characterSource' | 'characterKo' | 'characterLook'>): string {
+  if (!v.characterSource) return ''
+  if (v.characterSource !== 'company_character') return '회사 브랜드 기본 캐릭터'
+  const head = v.characterKo ? `회사 캐릭터 (${v.characterKo})` : '회사 캐릭터'
+  return [head, v.characterLook ? LOOK_LABEL[v.characterLook] : ''].filter(Boolean).join(' · ')
 }
 
 /** "장면 그림 자리" 위 이유 한 줄 (계약 VideoPlan.svg_reason) */
@@ -125,6 +138,9 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
   const offerKo = str(pick(o, 'offerKo', 'offer_ko')), ctaKo = str(pick(o, 'ctaKo', 'cta_ko'))
   const fallback = str(pick(o, 'fallbackReason', 'fallback_reason'))
   const svgWhy = str(pick(o, 'svgReason', 'svg_reason'))
+  const source = str(pick(o, 'characterSource', 'character_source'))
+  const characterKo = str(pick(o, 'characterKo', 'character_ko'))
+  const look = str(pick(o, 'characterLook', 'character_look'))
   return {
     concept, durationS, aspect, script: str(o.script),
     scenes: (scenes as VideoSceneView[]).slice().sort((a, b) => a.n - b.n),
@@ -136,6 +152,9 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     ...(ctaKo ? { ctaKo } : {}),
     ...(FALLBACKS.has(fallback) ? { fallbackReason: fallback as VideoFallbackReason } : {}),
     ...(FALLBACKS.has(svgWhy) ? { svgReason: svgWhy as VideoFallbackReason } : {}),
+    ...(source === 'company_character' || source === 'brand' ? { characterSource: source } : {}),
+    ...(source === 'company_character' && characterKo ? { characterKo } : {}),
+    ...(source === 'company_character' && (look === 'photo' || look === 'illustration') ? { characterLook: look } : {}),
   }
 }
 

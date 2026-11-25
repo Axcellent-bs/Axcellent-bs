@@ -52,9 +52,26 @@ HUMAN_WAIT_SECONDS = 40.0
 # 모든 장면에 공통으로 붙는 화풍·금지. 화풍·주인공·배경은 회사 설정 [brand](tenant.brand())
 # 11/22: 고양이·책방 고정을 없앴다(회사가 바뀌어도 같던 문제). 캣북스는 [brand]에 고양이·책방
 STYLE_TEMPLATE = (
-    "Short vertical 9:16 animated clip, {style}, {character} as the main character, {setting}, "
+    "Short vertical 9:16 {clip}, {style}, {character} as the main character, {setting}, "
     "gentle camera movement"
 )
+ANIMATED_CLIP = "animated clip"
+PHOTO_CLIP = "live-action style clip"  # 실사 회사 캐릭터는 animated clip이라 쓰지 않는다 (11/26)
+# 11/26 의뢰에서 고른 회사 캐릭터의 그림체. 시트에 그림체 칸이 따로 없어 참조 그림을 따르게 쓴다
+PHOTO_STYLE_EN = "photorealistic, same person as the reference"
+ILLUSTRATION_STYLE_EN = "same illustrated character and drawing style as the reference image"
+COMPANY_CHARACTER_KO = "데이터 블록 main_character의 회사 캐릭터(외형은 그대로)"
+CHARACTER_RULE = (
+    "- 주인공 외형은 위 회사 캐릭터(main_character) 그대로. 귀·꼬리·안경·모자·옷 바꾸기처럼 "
+    "없는 외형을 더하지 않는다\n"
+)
+LOOK_EN_MAX = 300
+# 캐릭터 설명에 없으면 "지어낸 외형"으로 보는 낱말 (11/26 wr_012c98d9d9: 고양이 귀). 영문은 경계
+EXTRA_LOOK_WORDS = (
+    "고양이 귀", "고양이귀", "동물 귀", "토끼 귀", "꼬리", "안경", "선글라스", "모자", "가면",
+    "날개", "뿔", "cat ear", "cat ears", "animal ears", "bunny ears", "tail", "glasses",
+    "sunglasses", "hat", "cap", "mask", "wings", "horns",
+)  # fmt: skip
 STYLE_MAX = 300  # 계약 VideoPlan.style 상한
 FAN_THEME = "fan culture with glowing light sticks, photo cards and stage lights"
 NEGATIVE = (
@@ -107,8 +124,63 @@ def style(b: dict[str, str] | None = None, *, fixed_setting: bool = True) -> str
     (11/24 재현 님 PROP-23: 재미 먼저인데 장면이 책장·책 더미로만 나왔다)."""
     b = b or tenant.brand()
     setting = b["setting_en"] if fixed_setting else FREE_SETTING_EN
-    text = STYLE_TEMPLATE.format(style=b["style_en"], character=b["character_en"], setting=setting)
+    clip = b.get("clip") or ANIMATED_CLIP
+    text = STYLE_TEMPLATE.format(
+        clip=clip, style=b["style_en"], character=b["character_en"], setting=setting
+    )
     return _short(text, STYLE_MAX)
+
+
+# ---------------------------------------------------------------- 주인공 (11/26)
+def cast(p: Proposal) -> dict[str, str]:
+    """제작안에 쓸 [brand] 값. 의뢰에서 고른 회사 캐릭터(p.company_character)가 있으면
+    주인공·그림체를 그 캐릭터로 바꾸고 회사 브랜드는 배경(setting)에만 쓴다.
+    없으면 tenant.brand() 그대로."""
+    b = dict(tenant.brand())
+    c = p.company_character
+    if c is None or not c.look_en.strip():
+        return b
+    b["character_en"] = _short(c.look_en, LOOK_EN_MAX)
+    b["character_ko"] = "회사 캐릭터"  # 규칙 초안 화면 글. LLM 지시문은 COMPANY_CHARACTER_KO
+    b["style_en"] = PHOTO_STYLE_EN if c.photo else ILLUSTRATION_STYLE_EN
+    b["clip"] = PHOTO_CLIP if c.photo else ANIMATED_CLIP
+    return b
+
+
+def cast_fields(p: Proposal) -> dict[str, str]:
+    """VideoPlan 주인공 칸 (회사 캐릭터가 없으면 빈 dict = 예전과 같은 제작안)."""
+    c = p.company_character
+    if c is None or not c.look_en.strip():
+        return {}
+    return {
+        "character_source": "company_character",
+        "character_ko": _short(c.summary_ko, 300),
+        "character_look": "photo" if c.photo else "illustration",
+    }
+
+
+def _has_word(text: str, word: str) -> bool:
+    if re.fullmatch(r"[a-z ]+", word):
+        return re.search(rf"(?i)\b{re.escape(word)}\b", text) is not None
+    return word in text
+
+
+def look_problems(p: Proposal, scenes: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """(장면 번호, 낱말): 회사 캐릭터 설명에 없는 외형 낱말이 장면 글에 나온 곳.
+
+    캐릭터가 없으면 []."""
+    c = p.company_character
+    if c is None or not c.look_en.strip():
+        return []
+    known = f"{c.look_en} {c.summary_ko}".casefold()
+    extra = [w for w in EXTRA_LOOK_WORDS if not _has_word(known, w.casefold())]
+    out: list[tuple[int, str]] = []
+    for n, text in scenes:
+        low = text.casefold()
+        found = [w for w in extra if _has_word(low, w.casefold())]
+        # "고양이 귀"가 걸렸으면 같은 뜻의 짧은 낱말은 한 번만
+        out += [(n, w) for w in found if not any(w != o and w in o for o in found)]
+    return out
 
 
 def _company() -> dict[str, str]:
@@ -453,7 +525,7 @@ def rule_plan(p: Proposal, promo: tuple[str, str] | None = None) -> VideoPlan:
     if style_ == FUN_FIRST:
         return fun_rule_plan(p, exposure)
     d = duration_of(p)
-    b = tenant.brand()
+    b = cast(p)  # 11/26 회사 캐릭터를 골랐으면 그 캐릭터가 주인공
     who, where, who_ko = b["character_en"], b["setting_en"], b["character_ko"]
     theme = _theme(p)
     tone = TONE.get(p.angle or "", "warm and friendly")
@@ -498,6 +570,7 @@ def rule_plan(p: Proposal, promo: tuple[str, str] | None = None) -> VideoPlan:
     return VideoPlan(
         concept=concept, duration_s=d, script=_short(script, 800), scenes=scenes,
         style=style(b), negative=NEGATIVE, written_by="rule", media_hints=media_hints(p),
+        **cast_fields(p),
     )  # fmt: skip
 
 
@@ -530,7 +603,7 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     prop: 본론 둘째 장면에 상품이 소품으로 잠깐.
     caption: 화면엔 안 넣는다(회사 이름은 엔드카드로 얹는다). 마지막 장면 자막은 늘 비운다."""
     d = duration_of(p)
-    b = tenant.brand()
+    b = cast(p)  # 11/26 회사 캐릭터를 골랐으면 그 캐릭터가 주인공
     who, where, who_ko = b["character_en"], FREE_SETTING_EN, b["character_ko"]  # 배경 묶지 않음
     theme = _theme(p)
     tone = TONE.get(p.angle or "", "warm and friendly")
@@ -587,7 +660,7 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     return VideoPlan(
         concept=concept, duration_s=d, script=_short(script, 800), scenes=scenes,
         style=style(b, fixed_setting=False), negative=NEGATIVE, written_by="rule",
-        media_hints=media_hints(p),
+        media_hints=media_hints(p), **cast_fields(p),
     )  # fmt: skip
 
 
@@ -897,7 +970,7 @@ def _checked(
             negative=NEGATIVE, written_by="llm",
             media_hints=media_hints(p, got.category), purpose=purpose,
             offer_ko=_short(got.offer_ko, 60) if ad else "",
-            cta_ko=_short(got.cta_ko, 40) if ad else "",
+            cta_ko=_short(got.cta_ko, 40) if ad else "", **cast_fields(p),
         )  # fmt: skip
     except ValidationError:
         log.info("LLM 영상 제작안 형식 → 규칙 제작안: ValidationError %.1fs", elapsed)
@@ -915,6 +988,20 @@ def fallback_of(exc: BaseException) -> str:
     if isinstance(exc, FORMAT_ERRORS):
         return "bad_format"
     return "error"
+
+
+FIX_HEAD = "\n\n고칠 점 (앞 답에서 코드 검사에 걸린 것. 이번 답에서 고친다):\n"
+
+
+def plan_fixes(p: Proposal, got: _PlanOut) -> list[str]:
+    """LLM 제작안을 버리지는 않지만 한 번 다시 쓰게 할 문제 (사람이 읽는 한 줄씩, 값은 코드 글).
+
+    11/26: 회사 캐릭터 설명에 없는 외형 낱말(고양이 귀 등)이 장면 visual·prompt에 나온 장면."""
+    texts = [(i, f"{s.visual} {s.prompt}") for i, s in enumerate(got.scenes, start=1)]
+    return [
+        f"장면 {n}: 회사 캐릭터에 없는 외형 '{w}'을 빼고 main_character 외형 그대로 쓴다"
+        for n, w in look_problems(p, texts)
+    ]
 
 
 def _rule(p: Proposal, promo: tuple[str, str], reason: str) -> VideoPlan:
@@ -936,7 +1023,8 @@ async def write(
     if llm is None:
         return _rule(p, promo, "no_llm")
     d = duration_of(p)
-    b = tenant.brand()
+    b = cast(p)  # 11/26 회사 캐릭터를 골랐으면 주인공·그림체는 그 캐릭터, 회사 브랜드는 배경에만
+    company = bool(cast_fields(p))
     data = {
         "company": _company(),
         **topic_of(p),
@@ -951,23 +1039,41 @@ async def write(
         "shorts_format": p.shorts_format or "",
         "categories": list(company_categories()),
     }
+    if company and p.company_character is not None:  # 마케팅 시트 값(데이터로만)
+        data["main_character"] = {
+            "look_en": b["character_en"],
+            "summary_ko": p.company_character.summary_ko,
+            "photorealistic": p.company_character.photo,
+        }
     style_, exposure = promo
     purpose = purpose_of(p)
     prompt = PROMPT.format(
         n=RULE_SCENES, d=d, angle=ANGLE_TEXT.get(p.angle or "", "정하지 않음"),
-        character_ko=b["character_ko"], setting_rule=setting_rule(style_, b),
-        direction=direction(style_, exposure, purpose),
+        character_ko=COMPANY_CHARACTER_KO if company else b["character_ko"],
+        setting_rule=setting_rule(style_, b),
+        direction=direction(style_, exposure, purpose) + (CHARACTER_RULE if company else ""),
     )  # fmt: skip
     started = time.monotonic()
-    try:
-        got = await asyncio.wait_for(
-            llm.structured(prompt, _PlanOut, untrusted=data, context_id=context_id),
-            timeout,
+
+    async def ask(text: str) -> _PlanOut:
+        return await asyncio.wait_for(
+            llm.structured(text, _PlanOut, untrusted=data, context_id=context_id), timeout
         )
+
+    try:
+        got = await ask(prompt)
     except Exception as exc:  # noqa: BLE001 - 규칙 제작안으로 대신 (종류·경과 초만 로그)
         elapsed = time.monotonic() - started
         log.warning("LLM 영상 제작안 실패 → 규칙 제작안: %s %.1fs", type(exc).__name__, elapsed)
         return _rule(p, promo, fallback_of(exc))
+    # 11/26 코드 검사에 걸린 것이 있으면 그 목록을 붙여 한 번만 다시 쓴다 (LLM 호출 최대 2회)
+    fixes = plan_fixes(p, got)
+    if fixes:
+        log.info("영상 제작안 다시 쓰기 1회: %d건", len(fixes))
+        try:
+            got = await ask(prompt + FIX_HEAD + "".join(f"- {f}\n" for f in fixes))
+        except Exception as exc:  # noqa: BLE001 - 다시 쓰기 실패면 첫 답으로 계속
+            log.warning("영상 제작안 다시 쓰기 실패 → 첫 답: %s", type(exc).__name__)
     elapsed = time.monotonic() - started
     plan, reason = _checked(p, got, d, b, style_, purpose, elapsed)
     if plan is None:
@@ -993,6 +1099,19 @@ def keyframe_line(s: VideoScene) -> str:
     return " · ".join(x for x in (frames, s.action_en, s.camera_en) if x)
 
 
+COMPANY = "company_character"
+LOOK_LABEL = {"photo": "실사 그대로", "illustration": "그림체 그대로"}
+
+
+def character_line(v: VideoPlan) -> str:
+    """주인공 한 줄 (화면 lib/videoPlan.ts characterLine과 같은 문구)."""
+    if v.character_source != COMPANY:
+        return "회사 브랜드 기본 캐릭터"
+    look = LOOK_LABEL.get(v.character_look, "")
+    head = f"회사 캐릭터 ({v.character_ko})" if v.character_ko else "회사 캐릭터"
+    return " · ".join(x for x in (head, look) if x)
+
+
 def markdown(v: VideoPlan) -> str:
     """기획안(기획서) 본문에 붙이는 사람용 표."""
     who = {"llm": "AI 초안", "rule": "규칙 초안", "human": "사람"}[v.written_by]
@@ -1003,6 +1122,7 @@ def markdown(v: VideoPlan) -> str:
         "",
         f"**대본**: {v.script}",
         "",
+        *([f"**주인공**: {character_line(v)}", ""] if v.character_source == COMPANY else []),
         "| 장면 | 시간 | 화면 구성 | 자막 |",
         "| --- | --- | --- | --- |",
     ]

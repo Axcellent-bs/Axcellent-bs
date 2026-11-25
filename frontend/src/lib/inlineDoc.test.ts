@@ -72,6 +72,15 @@ test("콘티 실패 이유 한 줄: 기획 화면과 같은 문구(VIDEO_SVG_LIN
   assert.match(src, /\{v\.svgWhy && <p className="text-amber-800">\{v\.svgWhy\}<\/p>\}[\s\S]*<ol/);
 });
 
+test("주인공 줄: 회사 캐릭터면 그 외형과 실사 그대로, 예전 제작안은 줄 없음", () => {
+  const mine = inlinePlan(plan([scene(1)], { characterSource: "company_character", characterKo: "검은 긴 생머리", characterLook: "photo" }));
+  assert.equal(mine.lead, "회사 캐릭터 (검은 긴 생머리) · 실사 그대로");
+  assert.equal(inlinePlan(plan([scene(1)], { characterSource: "brand" })).lead, "회사 브랜드 기본 캐릭터");
+  assert.equal(inlinePlan(plan([scene(1)])).lead, null);
+  const src = readFileSync(new URL("../components/office/InlineDoc.tsx", import.meta.url), "utf8");
+  assert.match(src, /\{v\.lead && <p[^>]*>주인공 · \{v\.lead\}<\/p>\}/);
+});
+
 test("카드 안 그림은 <img src={data URI}>로만 그린다 (SVG 글을 화면에 직접 넣지 않는다)", () => {
   const src = readFileSync(new URL("../components/office/InlineDoc.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(src, /dangerouslySetInnerHTML|innerHTML|<svg\b|<object\b|<iframe\b|<embed\b/);

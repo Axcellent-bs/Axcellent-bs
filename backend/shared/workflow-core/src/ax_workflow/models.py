@@ -671,6 +671,15 @@ class IdeaOption(DomainModel):
     reason: str | None = None  # 추천 이유 (코드 문장)
 
 
+class CompanyCharacter(DomainModel):
+    """의뢰에서 고른 회사 캐릭터의 외형 (마케팅 시트 값 그대로, 기획은 만들지 않는다, 11/26)."""
+
+    kind: Literal["real_photo", "virtual_human", "illustration"] = "real_photo"
+    look_en: str = ""  # 외형 (시트 consistency_en, 없으면 appearance_en + outfit_en)
+    summary_ko: str = ""  # 외형 요약 (시트 summary_ko)
+    photo: bool = False  # 실사 그대로 (가상 인물, 그림체로 바꾸지 않은 사진)
+
+
 class Proposal(DomainModel):
     id: str  # PROP-n
     title: str
@@ -716,6 +725,11 @@ class Proposal(DomainModel):
     angle: IdeaAngle | None = None
     # 영상 제작안 (11/19). 기획안으로 만들 때 쓰고 마케팅 전달 때 같이 넘긴다
     video_plan: VideoPlan | None = None
+    # 11/26 의뢰에서 사람이 고른 회사 캐릭터 번호(마케팅 제작 기록 CR-…)와, 받을 때 마케팅
+    # creative_record_get으로 읽은 주인공. 제작안 다시 쓰기·규칙 초안·고치기에서도 같은 주인공.
+    # 못 읽었으면 company_character는 None(회사 브랜드 기본 캐릭터, 지금 동작)
+    brand_character_record_id: str | None = None
+    company_character: CompanyCharacter | None = None
 
 
 class DeletedProposal(DomainModel):

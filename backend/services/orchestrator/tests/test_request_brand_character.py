@@ -32,6 +32,7 @@ from ax_orchestrator.plans.scenario_a import scenario_a
 from ax_orchestrator.registry import SkillEntry
 from ax_orchestrator.request_intake import RequestIntake
 from ax_orchestrator.request_runner import (
+    REPLACED_RECORD_KEY,
     VIDEO_APPROVAL,
     VIDEO_REJECT_NOTE,
     VIDEO_WAIT_NOTE,
@@ -427,3 +428,38 @@ async def test_plan_step_gets_the_request_text_with_the_insight() -> None:
     assert plan.input["insight_id"] == INSIGHT["insight_id"]  # 인사이트는 그대로
     insight = next(c[1] for c in fake.calls if c[1].skill == "trend_report_insight")
     assert "request_text" not in insight.input  # 문장 칸이 없는 단계에는 안 붙는다
+
+
+# ---------------------------------------------------------------- 기획에 고른 캐릭터 (11/26)
+
+
+@pytest.mark.asyncio
+async def test_plan_step_gets_the_chosen_character_number() -> None:
+    fake = Fake()
+    await until_confirm(fake, first=BRAND)
+    plan = next(c[1] for c in fake.calls if c[1].skill == "receive_insight")
+    assert plan.input["brand_character_record_id"] == BRAND
+    assert plan.input["insight_id"] == INSIGHT["insight_id"]
+    assert plan.input["request_text"] == "신간 소개 영상 만들어 주세요"
+    assert REPLACED_RECORD_KEY not in plan.input  # 준비 단계 칸은 안 붙는다
+    for c in fake.calls:
+        if c[1].skill != "receive_insight":
+            assert "brand_character_record_id" not in c[1].input
+
+
+@pytest.mark.asyncio
+async def test_no_character_answer_sends_no_number_to_planning() -> None:
+    fake = Fake()
+    await until_confirm(fake)
+    plan = next(c[1] for c in fake.calls if c[1].skill == "receive_insight")
+    assert "brand_character_record_id" not in plan.input
+
+
+def test_only_the_prepare_step_is_the_character_prepare_step() -> None:
+    """pass_row는 값만 넘긴다: 캐릭터 바꾸기·넘겨받은 값 남기기가 찾는 단계(row_input)는 그대로."""
+    plan = request_tasks.plan_of(request_tasks.PROMO_VIDEO)
+    key = request_tasks.BRAND_CHARACTER_KEY
+    assert [p["step_id"] for p in plan if key in (p.get("row_input") or [])] == ["prepare"]
+    assert [p["step_id"] for p in plan if key in (p.get("pass_row") or [])] == ["plan"]
+    other = request_tasks.plan_of(request_tasks.BY_NAME["trend_report"])
+    assert all("pass_row" not in p for p in other)  # 다른 일의 계획 모양은 그대로

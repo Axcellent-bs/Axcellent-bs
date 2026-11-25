@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 기획 state proposals[].video_plan → 제안 화면 "3 영상 제작안" 값 (lib/videoPlan.ts)
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
+import { characterLine, sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
 
 // 11/20 16:55 서버 PROP-15 모양 (snake_case, 계약 VideoPlan)
 const RAW = {
@@ -176,4 +176,18 @@ test("콘티 못 그린 이유(11/25 svg_reason): 이유마다 장면 그림 자
     assert.equal("svgReason" in v, false);
     assert.equal(videoSvgLine(v), "");
   }
+});
+
+test("주인공 줄 (계약 character_source·character_ko·character_look, 기획 character_line과 같은 문구)", () => {
+  const mine = toVideoPlan({ ...RAW, character_source: "company_character", character_ko: "검은 긴 생머리·흰 반팔", character_look: "photo" });
+  assert.ok(mine);
+  assert.equal(characterLine(mine), "회사 캐릭터 (검은 긴 생머리·흰 반팔) · 실사 그대로");
+  const drawn = toVideoPlan({ ...RAW, character_source: "company_character", character_look: "illustration" });
+  assert.equal(characterLine(drawn!), "회사 캐릭터 · 그림체 그대로");
+  const brand = toVideoPlan({ ...RAW, character_source: "brand", character_ko: "", character_look: "" });
+  assert.equal(characterLine(brand!), "회사 브랜드 기본 캐릭터");
+  const old = toVideoPlan(RAW);
+  assert.ok(old);
+  assert.equal("characterSource" in old, false);
+  assert.equal(characterLine(old), ""); // 예전 제작안은 줄 없음 (지금 화면 그대로)
 });

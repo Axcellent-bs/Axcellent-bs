@@ -8,7 +8,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Tag } from '@/components/planning-common/parts'
 import { usePrinting } from '@/lib/print'
 import { svgDataUri } from '@/lib/storyboardSvg'
-import { sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoPurposeChip, videoSvgLine, type VideoPlanView } from '@/lib/videoPlan'
+import { characterLine, sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoPurposeChip, videoSvgLine, type VideoPlanView } from '@/lib/videoPlan'
 import { sceneRole, sceneShares } from '@/lib/videoStoryboard'
 import { orchestrator } from '@/lib/orchestrator'
 import { proposalOfRequest, requestActionError, stepRows } from '@/lib/requestCards'
@@ -33,6 +33,7 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
   const purpose = videoPurposeChip(v)
   const why = videoFallbackLine(v)
   const svgWhy = videoSvgLine(v)
+  const lead = characterLine(v)
   return (
     <section className="pp-part sb" aria-label="영상 제작안">
       <h3 className="pp-part-h">영상 제작안<Tag>{videoPlanChip(v)}</Tag>{why && <span className="sb-fallback">{why}</span>}{purpose && <span className="chip sb-purpose" title="광고 목적">{purpose}</span>}</h3>
@@ -41,6 +42,7 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
         <div><dt>길이</dt><dd>{v.durationS}초</dd></div>
         <div><dt>비율</dt><dd>{v.aspect}</dd></div>
         <div><dt>장면</dt><dd>{v.scenes.length}</dd></div>
+        {lead && <div className="sb-lead"><dt>주인공</dt><dd>{lead}</dd></div>}
         {audience && <div><dt>대상</dt><dd>{audience}</dd></div>}
         {v.offerKo && <div><dt>혜택</dt><dd>{v.offerKo}</dd></div>}
         {v.ctaKo && <div><dt>행동 문구</dt><dd>{v.ctaKo}</dd></div>}
