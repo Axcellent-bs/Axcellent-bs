@@ -28,7 +28,7 @@ from data_agent.aggregate.build_snapshots import DAY_PERIODS, Window, shown, win
 from data_agent.sales_store import SalesStore
 from data_agent.skills import basket_pairs, channel_value, retention
 from data_agent.skills import segment_analysis as seg
-from data_agent.skills.sales_analysis import NO_CATEGORY, NO_PRODUCT
+from data_agent.skills.sales_analysis import NO_PRODUCT, category_label
 
 MAX_PAIRS = 20  # 화면 입력 max_pairs 상한
 TOP_ITEMS = 20  # 즐겨 사는 것 입력 top 상한
@@ -155,7 +155,7 @@ def _favorites(  # noqa: PLR0913
     titles = s.titles(ids=seg.products_to_name(bought, segment_n, overall_n, k, TOP_ITEMS))
     names: dict[str, Callable[[str], str | None]] = {
         "genre": cfg.genres.get,
-        "category": lambda c: cfg.categories.get(c, NO_CATEGORY),
+        "category": lambda c: category_label(cfg, c),
         "product": lambda c: titles.get(c, NO_PRODUCT),
     }
     out: list[SegmentProfileRow] = [size]
