@@ -14,6 +14,9 @@ export interface VideoSceneView {
   endFrame?: string // 장면 끝 화면 (한국어)
   actionEn?: string // 첫→끝 사이 동작 (영문)
   cameraEn?: string // 샷 크기·카메라 움직임 (영문)
+  // 기획이 그린 SVG 콘티 (11/25 계약 VideoScene.start_svg·end_svg). 화면은 <img data URI>로만 그린다
+  startSvg?: string // 장면 첫 화면 구도
+  endSvg?: string // 장면 끝 화면 구도
 }
 
 /** 광고 목적 (계약 VideoPlan.purpose). 없으면 칩을 그리지 않는다 */
@@ -58,6 +61,8 @@ function toScene(raw: unknown): VideoSceneView | null {
     endFrame: str(pick(o, 'endFrame', 'end_frame')),
     actionEn: str(pick(o, 'actionEn', 'action_en')),
     cameraEn: str(pick(o, 'cameraEn', 'camera_en')),
+    startSvg: str(pick(o, 'startSvg', 'start_svg')),
+    endSvg: str(pick(o, 'endSvg', 'end_svg')),
   }
   const kept = Object.fromEntries(Object.entries(frames).filter(([, v]) => v)) as Partial<typeof frames>
   return { n, startS, endS, visual, caption: str(o.caption), prompt, ...kept }

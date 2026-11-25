@@ -103,3 +103,13 @@ test("광고 목적 칩: 솔루션 광고 · 고객 혜택 광고 · 채널 콘�
   assert.equal(videoPurposeChip(toVideoPlan({ ...RAW, purpose: "meme" })!), null);
   assert.deepEqual(Object.keys(old.scenes[0]).sort(), ["caption", "endS", "n", "prompt", "startS", "visual"]); // 예전 제작안은 새 칸 없음
 });
+
+test("SVG 콘티: start_svg·end_svg를 읽고(snake·camel), 없으면 칸을 두지 않는다", () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 160"><rect x="1" y="1" width="5" height="5"/></svg>';
+  const v = toVideoPlan({ ...RAW, scenes: RAW.scenes.map((s, i) => (i === 0 ? { ...s, start_svg: svg, end_svg: svg } : s)) });
+  assert.ok(v);
+  assert.equal(v.scenes[0].startSvg, svg);
+  assert.equal(v.scenes[0].endSvg, svg);
+  assert.equal("startSvg" in v.scenes[1], false); // 예전 제작안은 칸이 없다 (화면은 지금 색 칸 그대로)
+  assert.deepEqual(toVideoPlan(v), v);
+});

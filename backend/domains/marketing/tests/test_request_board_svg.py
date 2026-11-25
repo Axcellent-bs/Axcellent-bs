@@ -166,6 +166,19 @@ def test_code_only_storyboard_is_still_layout_before_svg() -> None:
     assert board is not None and board["board_source"] == "layout"
 
 
+def test_planning_svg_becomes_the_panel_svg() -> None:
+    """기획이 그린 SVG 콘티(장면 첫 화면)는 정리를 거쳐 칸 SVG가 된다 (11/25, LLM 없이 svg)."""
+    svg = ('<svg viewBox="0 0 90 160" onload="x()"><text x="45" y="12">지하철</text>'
+           '<rect x="4" y="20" width="82" height="22"/></svg>')  # fmt: skip
+    scenes = [s.model_copy(update={"start_svg": svg}) if s.n == 1 else s for s in Q.PLAN.scenes]
+    plan = Q.PLAN.model_copy(update={"scenes": scenes})
+    board = request_creative.plan_storyboard(plan, Q.SHEET_FULL)
+    assert board is not None and board["board_source"] == "svg"
+    first = board["shots"][0]["svg"]
+    assert "<rect" in first and "onload" not in first
+    assert all(not s["svg"] for s in board["shots"][1:])
+
+
 # ---------------------------------------------------------------- 다시 그리기 전용 스킬
 
 

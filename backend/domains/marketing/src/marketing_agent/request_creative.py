@@ -113,6 +113,9 @@ def plan_storyboard(plan: Any, sheet: dict[str, Any]) -> dict[str, Any] | None:
             composition_ko=_cut(getattr(s, "visual", None) or "", 200),
             has_character=True,
             subject_en=_cut(s.prompt, 300),
+            # 11/25: 기획이 그린 SVG 콘티(장면 첫 화면)가 있으면 칸 SVG로 그대로 쓴다
+            # (build_output이 다시 정리한다. 칸에 SVG가 있으면 board_svg는 LLM을 부르지 않는다)
+            svg=getattr(s, "start_svg", "") or "",
         )
         for i, s in enumerate(scenes)
     ]

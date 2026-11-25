@@ -48,8 +48,9 @@ ACTIONS: dict[str, str] = {
     "make_plan": "기획안 만들기",
     "approve_proposal": "마케팅으로 넘기기",
     "proposal_to_request": "개발로 넘기기",
+    "redraw_storyboard": "콘티 다시 그리기",
 }
-ActionType = Literal["make_plan", "approve_proposal", "proposal_to_request"]
+ActionType = Literal["make_plan", "approve_proposal", "proposal_to_request", "redraw_storyboard"]
 
 SYSTEM_PROMPT = (
     "너는 회사의 기획 AI다. 사람이 받은 요청·기획서·결정·기획 제안의 상태를 물으면 "
@@ -58,8 +59,12 @@ SYSTEM_PROMPT = (
     "모르면 모른다고 하고 기획 화면 어디서 확인하는지 알려 준다.\n"
     "- 사람이 마지막 말에서 기획 제안에 대한 일을 분명히 시키면 actions에 동작을 넣는다. "
     "동작은 make_plan(제안을 기획안으로 만들기), approve_proposal(제안·기획안을 마케팅으로 "
-    "넘기기), proposal_to_request(제안을 개발 요청으로 넘기기) 셋뿐이고 시킨 순서대로 넣는다. "
+    "넘기기), proposal_to_request(제안을 개발 요청으로 넘기기), redraw_storyboard(콘티 다시 "
+    "그리기) 넷뿐이고 시킨 순서대로 넣는다. "
     '"기획안으로 만들어서 마케팅에 넘겨"면 make_plan 다음 approve_proposal이다.\n'
+    "- redraw_storyboard는 영상 제작안의 SVG 콘티(장면별 첫·끝 화면 그림)를 다시 그린다. "
+    "사람이 콘티·장면 그림을 고쳐 달라고 하면 쓴다. scene은 장면 번호(모르면 null = 전부), "
+    'note는 사람이 고쳐 달라고 한 내용 한두 줄(예: "3번 장면 인물을 왼쪽에")이다.\n'
     '- proposal은 facts.proposals.recent의 id만 쓴다. "방금 데이터분석에서 넘어온 제안"처럼 '
     "말하면 from_label·created_at·status로 찾는다(가장 최근에 받은 확인 대기 제안). 맞는 제안이 "
     "없거나 둘 이상이라 고를 수 없으면 actions를 비우고 어느 제안인지 되묻는다.\n"
@@ -77,6 +82,8 @@ SYSTEM_PROMPT = (
 class ChatAction(BaseModel):
     type: ActionType
     proposal: str = Field(min_length=1, max_length=40)
+    scene: int | None = Field(default=None, ge=1, le=8)  # redraw_storyboard: 고칠 장면(없으면 전부)
+    note: str = Field(default="", max_length=300)  # redraw_storyboard: 사람이 고쳐 달라고 한 말
 
 
 class ChatOut(BaseModel):
@@ -92,6 +99,13 @@ def _done_line(a: ChatAction, out: dict[str, Any]) -> str:
     if a.type == "make_plan":
         spec = out.get("spec_id")
         return f"✔ {a.proposal}를 기획안{f' {spec}' if spec else ''}으로 만들었어요."
+    if a.type == "redraw_storyboard":
+        where = f"{a.scene}번 장면" if a.scene else "장면"
+        again = " 이미 마케팅에 넘긴 제안이라 마케팅에는 다시 넘겨야 반영돼요."
+        tail = again if out.get("sent") else ""
+        return (
+            f"✔ {a.proposal}의 {where} 콘티를 다시 그렸어요. 기획 제안 화면에서 볼 수 있어요.{tail}"
+        )
     if a.type == "approve_proposal":
         return f"✔ {a.proposal}를 마케팅에 넘겼어요. 전달 결과는 기획 제안 화면에 보여요."
     req = out.get("request_id")
@@ -108,9 +122,10 @@ async def run_actions(actions: list[ChatAction], known: set[str], act: Act) -> l
             break
         why: str | None = None
         try:
-            res = await asyncio.wait_for(
-                act({"type": a.type, "proposal": a.proposal}), ACTION_TIMEOUT_SEC
-            )
+            req: dict[str, Any] = {"type": a.type, "proposal": a.proposal}
+            if a.type == "redraw_storyboard":
+                req |= {"scene": a.scene, "note": a.note}
+            res = await asyncio.wait_for(act(req), ACTION_TIMEOUT_SEC)
             if not res.changed:
                 why = "지금 상태에서는 할 수 없는 일이에요"
         except ActionError as exc:
