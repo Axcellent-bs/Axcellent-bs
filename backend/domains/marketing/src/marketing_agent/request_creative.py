@@ -165,6 +165,9 @@ def plan_storyboard(plan: Any, sheet: dict[str, Any]) -> dict[str, Any] | None:
         board[_render.PLAN_DURATION_KEY] = duration
     # 11/25 키프레임: 기획 장면의 첫·끝 화면 글·SVG·동작·카메라 (keyframes.plan_frames가 고른다)
     board[_keyframes.PLAN_SCENES_KEY] = _keyframes.plan_scenes(plan)
+    # 11/26 제작안을 쓴 쪽도 남긴다(규칙 초안이면 키프레임 0장). 값이 없으면 남기지 않는다
+    if written_by := _keyframes.plan_written_by(plan):
+        board[_keyframes.PLAN_WRITTEN_BY_KEY] = written_by
     return board
 
 
