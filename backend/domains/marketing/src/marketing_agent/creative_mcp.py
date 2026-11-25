@@ -40,10 +40,19 @@ VIDEO_START_ROLE = "start_image"
 # 모르는 모델은 지금 동작 = start_image·기존 상한
 # - kling_4_0_flash: medias role start_image·image_references(최대 10)·video_references, 3~20초
 # - kling3_0_turbo: start_image만
+# - 11/25 Kling 4.x(kling_4_0_flash·kling4_0)는 `mode`(text-to-video 기본·image-to-video·
+#   reference-to-video·video-edit)가 있다. 넣지 않으면 글만 보고 만들 수 있어 미디어에 맞춰 넣는다
 VIDEO_MODELS: dict[str, dict[str, Any]] = {
-    "kling_4_0_flash": {"image_references": True, "max_image_references": 10, "max_s": 20},
+    "kling_4_0_flash": {
+        "image_references": True,
+        "max_image_references": 10,
+        "max_s": 20,
+        "modes": True,
+    },
+    "kling4_0": {"image_references": True, "modes": True, "max_s": 30},
     "kling3_0_turbo": {"image_references": False},
 }
+MODE_BY_ROLE = {IMAGE_REF_ROLE: "reference-to-video", VIDEO_START_ROLE: "image-to-video"}
 WAIT_TIMEOUT_S = 15  # jobs_wait 상한
 MAX_WAITS = 40  # 15초 × 40 = 10분
 FAILED = {"failed", "nsfw", "canceled", "ip_detected", "submission_failed"}
@@ -331,13 +340,30 @@ async def explore_models(hf: Higgsfield, kind: str) -> list[dict[str, Any]]:
     return []
 
 
+def video_mode(model: str, roles: list[str]) -> str | None:
+    """`mode`가 있는 영상 모델(Kling 4.x)에 넣을 mode. 참조 이미지가 있으면 reference-to-video,
+    시작 그림만이면 image-to-video. 미디어가 없거나 mode 없는 모델·모르는 모델이면 None."""
+    if not VIDEO_MODELS.get(str(model).strip(), {}).get("modes"):
+        return None
+    for role in (IMAGE_REF_ROLE, VIDEO_START_ROLE):
+        if role in roles:
+            return MODE_BY_ROLE[role]
+    return None
+
+
+def _with_mode(params: dict[str, Any]) -> dict[str, Any]:
+    roles = [m.get("role") for m in params.get("medias") or [] if isinstance(m, dict)]
+    mode = video_mode(str(params.get("model") or ""), [r for r in roles if isinstance(r, str)])
+    return {**params, "mode": mode} if mode else params
+
+
 def with_media(params: dict[str, Any], media_id: str, role: str) -> dict[str, Any]:
-    return {**params, "medias": [{"value": media_id, "role": role}]}
+    return _with_mode({**params, "medias": [{"value": media_id, "role": role}]})
 
 
 def with_medias(params: dict[str, Any], media_ids: list[str], role: str) -> dict[str, Any]:
     """같은 역할로 여러 장(순서 그대로)."""
-    return {**params, "medias": [{"value": m, "role": role} for m in media_ids]}
+    return _with_mode({**params, "medias": [{"value": m, "role": role} for m in media_ids]})
 
 
 def max_image_references(model: str) -> int:
