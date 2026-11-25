@@ -61,25 +61,13 @@ export function ipMatches(ip: string, rule: string) {
   return Math.floor(toNum(ip) / 2 ** shift) === Math.floor(toNum(base) / 2 ** shift)
 }
 
-// 데모: 이 PC의 IP. ?ip=192.168.10.31 로 열면 그 IP로 기억한다 (실제로는 서버가 요청 IP로 안다)
-const IP_KEY = 'axcellent-demo-this-ip'
-const DEFAULT_IP = '192.168.10.88'
-export function thisPcIp(): string {
-  try {
-    const q = new URLSearchParams(window.location.search).get('ip')
-    if (q && validRule(q) && !q.includes('/')) {
-      localStorage.setItem(IP_KEY, q)
-      return q
-    }
-    return localStorage.getItem(IP_KEY) ?? DEFAULT_IP
-  } catch {
-    return DEFAULT_IP
-  }
-}
-
 export const ipLinked = (ip: string, l = links) => l.ips.some((r) => ipMatches(ip, r))
-/** 일반회원이 회사에 연결돼 있나: 계정(이메일)이 묶였거나 이 PC IP가 묶였거나 */
-export const memberLinked = (email: string, ip = thisPcIp(), l = links) => l.emails.includes(norm(email)) || ipLinked(ip, l)
+/**
+ * 일반회원이 회사에 연결돼 있나: 계정(이메일)이 묶였는지만 본다.
+ * PC IP로 묶기는 서버가 요청 IP를 알려 주고 접속 허용 규칙을 저장할 곳이 생길 때까지 "준비 중"이다
+ * (브라우저가 지어낸 IP로 판단하지 않는다).
+ */
+export const memberLinked = (email: string, l = links) => l.emails.includes(norm(email))
 
 // ---------------------------------------------------------------- 회원 부서·확인 권한
 // 데모 로그인 전용: 관리자가 회원·서버 관리(/system/members)에서 바꾼 부서·확인 권한. 이메일을 열쇠로 기억하고 데모 계정에도 덮어쓴다.

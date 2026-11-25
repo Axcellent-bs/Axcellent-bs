@@ -3,11 +3,11 @@ import { Link, useNavigate } from 'react-router'
 import { AuthAside, DemoLoginNotice } from './LoginPage'
 import { homeOf, registerAccount, useSession } from './session'
 import { useCompany } from './company'
-import { memberLinked, thisPcIp, useLinks } from './members'
+import { memberLinked, useLinks } from './members'
 import { DeptPicker } from './DeptPicker'
 
 // 일반회원 가입. 관리자(회사 계정)는 운영자에게 받은 키로 따로 가입한다(/setup).
-// 이 PC IP나 이메일이 회사에 연결돼 있으면 그 회사 회원으로 바로 들어가고, 아니면 "연결 전"으로 가입해
+// 이메일이 회사에 연결돼 있으면 그 회사 회원으로 바로 들어가고, 아니면 "연결 전"으로 가입해
 // 관리자가 회원·서버 관리(/system/members)에서 묶어 줄 때까지 기다린다.
 // 데모 로그인(서버 로그인이 꺼져 있을 때)에서는 계정을 이 브라우저에만 저장하고 비밀번호는 저장하지 않는다(session.tsx).
 // 서버 로그인이 켜져 있으면 스스로 가입하는 서버 경로가 없다(설계: 일반회원은 관리자가 초대). 관리자가 회원·서버 관리에서
@@ -26,8 +26,7 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null)
   const [waiting, setWaiting] = useState(false)
 
-  const ip = thisPcIp()
-  const linkedTo = company && memberLinked(email, ip, links) ? company.name : null
+  const linkedTo = company && memberLinked(email, links) ? company.name : null
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -65,10 +64,7 @@ export default function SignupPage() {
           {mode !== 'server' && (
           <dl className="rounded-xl border border-ink-100 bg-surface px-3 py-2 text-sm">
             <dt className="text-xs text-ink-500">가입할 회사</dt>
-            <dd className="mt-0.5 flex items-center justify-between gap-2">
-              <span className="font-medium">{linkedTo ?? '연결 전'}</span>
-              <span className="font-mono text-xs text-ink-500">이 PC {ip}</span>
-            </dd>
+            <dd className="mt-0.5 font-medium">{linkedTo ?? '연결 전'}</dd>
           </dl>
           )}
 
