@@ -16,6 +16,7 @@ from ax_dashboard_api import (
     company_ai,
     company_connection,
     handoffs,
+    incident_causes,
     mcp_gateway,
     office_room,
     personal_mcp,
@@ -158,6 +159,8 @@ app.include_router(handoffs.intake)
 app.include_router(handoffs.inbox)
 # 오피스 단톡방 대화 목록 (단톡방 대화는 모두에게 보인다, 읽기·쓰기 모두 사람 토큰)
 app.include_router(office_room.router)
+# 장애 상세의 확정 원인 (사람이 적는 기록, AXcellent에 저장. DejaFix에는 쓰지 않는다)
+app.include_router(incident_causes.router)
 # 시스템 관리 > 회사 연결 (고객사 판매 서버 주소, 읽기·쓰기 모두 사람 토큰)
 app.include_router(company_connection.router)
 app.include_router(connection_keys_router)
