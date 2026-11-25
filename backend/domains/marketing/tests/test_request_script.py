@@ -101,11 +101,14 @@ def test_the_request_script_keeps_the_first_line_and_voice(store: cr.CreativeRec
     first = script["scenes"][0]
     assert first["line_ko"] == "엑설런트, 얼마나 좋아!!" and first["speaker_ko"] == "여자"
     assert all(s["speaker_ko"] == "여자" for s in script["scenes"])  # 내레이션도 여자 목소리
-    assert "의뢰자 요청" in (llm.data or {})["story"]  # 의뢰문은 데이터로만 간다
+    story = (llm.data or {})["story"]
+    assert story.startswith("의뢰자 요청")  # 의뢰 연출을 먼저(기획 장면은 참고)
+    assert rs.REAL_PERSON_NOTE in story  # AI 가상 인물은 실사라고 알려 준다
     board = rec["storyboard"]
     assert board["script_used"] is True and board["cta_ko"] == "회사 AI 협업, 엑설런트!"
     assert board["shots"][0]["line_ko"] == "엑설런트, 얼마나 좋아!!"
     assert board["shots"][0]["speaker_ko"] == "여자"
+    assert [sh["scene_ko"] for sh in board["shots"]] == ["장면 1", "장면 2", "장면 3", "장면 4"]
     assert board[rr.PLAN_DURATION_KEY] == 15  # 기획 길이는 그대로 남는다
     # 영상 프롬프트에 대사가 들어간다
     assert "엑설런트, 얼마나 좋아!!" in rr._video_prompt(rec)  # noqa: SLF001
@@ -135,3 +138,17 @@ def test_mismatched_panel_count_keeps_the_board() -> None:
     short = rs.plan_script(_plan(2))
     assert short is not None
     assert rs.board_with_script(board, short) == board
+
+
+def test_a_role_speaker_gets_the_requested_voice() -> None:
+    """11/25 "직장인"처럼 역할만 적히면 목소리가 빠졌다. "여자 직장인"으로 붙인다."""
+    base = rs.plan_script(_plan(3))
+    assert base is not None
+    rows = [
+        base.scenes[0].model_copy(update={"line_ko": "안녕", "speaker_ko": "직장인"}),
+        base.scenes[1].model_copy(update={"line_ko": "네", "speaker_ko": "여자 직원"}),
+        base.scenes[2],  # 대사 없음
+    ]
+    out = rs.apply_request(base.model_copy(update={"scenes": rows}), ASK)
+    assert [s.speaker_ko for s in out.scenes] == ["여자 직장인", "여자 직원", ""]
+    assert out.scenes[0].line_ko == "엑설런트, 얼마나 좋아!!"
