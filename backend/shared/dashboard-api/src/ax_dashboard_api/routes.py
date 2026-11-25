@@ -1098,6 +1098,23 @@ async def prepare_brief_media(
     )
 
 
+@router.post("/marketing/briefs/{proposal_id}/creative-record")
+async def prepare_brief_creative(
+    request: Request, proposal_id: str = Path(pattern=_PROPOSAL_ID)
+) -> dict:
+    """넘어온 기획안의 영상 제작안으로 제작 기록(CR-…)을 만든다. 본문은 없다. 사람 토큰이 필요하다.
+
+    돌려주는 값: `record_id`(제작 기록 화면으로 이동), `character_record_id`(대표 캐릭터,
+    없으면 null), `reused`(이미 만든 기록). 같은 기획안은 몇 번 불러도 기록 하나다.
+    영상은 만들지 않는다: 제작 기록의 영상 만들기(사람 승인)로 한다.
+    404 기획안 없음 · 409 `NO_VIDEO_PLAN`(영상 제작안 없음)·`NO_SCENES`(쓸 장면 없음).
+    """
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "제작 기록은 실제 모드에서만 된다")
+    human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.brief_creative_call(proposal_id))
+
+
 class BriefAudioBody(BaseModel):
     """영상 소리 선택. `keep`은 그대로 쓰기, `bgm`은 배경음악 따로 만들기."""
 
