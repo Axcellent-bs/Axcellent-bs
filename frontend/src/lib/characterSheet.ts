@@ -36,6 +36,8 @@ export interface CharacterSheetResult {
   prompt_en: string;
   negative_prompt_en: string;
   record_id?: string | null; // 제작 기록 번호(CR-…)
+  /** 올린 이미지 종류(11/24). 옛 기록은 없다 = 실제 사람 사진 */
+  kind?: UploadKind | null;
 }
 
 /** 올리기 전에 긴 변을 이 크기로 줄인다(서버 한도 2MB, 앞단 요청 크기도 작게) */

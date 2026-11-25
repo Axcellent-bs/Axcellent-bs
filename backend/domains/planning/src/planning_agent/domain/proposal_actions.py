@@ -546,7 +546,10 @@ class ProposalMixin:
         if p is not None and p.status == "확인 대기":
             writer = self._proposal_writer  # 테스트 가짜는 llm이 없다 → 규칙 제작안
             video = p.video_plan or await video_plan.write(  # 총괄 의뢰 때 쓴 초안은 이어 쓴다
-                getattr(writer, "llm", None), p, _ctx(p)
+                getattr(writer, "llm", None),
+                p,
+                _ctx(p),
+                timeout=video_plan.HUMAN_WAIT_SECONDS,  # 사람이 버튼을 누르고 기다린다
             )
         return await self._apply(self._make_plan, proposal=proposal, video=video)
 

@@ -13,6 +13,7 @@ import { OverlayControls } from "./OverlayControls";
 import { KeyframePairs } from "./KeyframePairs";
 import { framesOf, keyframesDone } from "@/lib/keyframes";
 import { videoSummaryLine } from "@/lib/creativeVideo";
+import { canAskVideo, usesOriginalReference } from "@/lib/videoAsk";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
@@ -195,7 +196,10 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   // 11/25 키프레임 방식이면 스토리보드 그림 대신 키프레임이 모두 그려져야 영상을 요청한다
   const keyframed = framesOf(render.keyframes).length > 0;
   const inputReady = keyframed ? keyframesDone(render.keyframes) : render.board_image?.status === "done";
-  const canAsk = inputReady && !["awaiting_approval", "running", "done"].includes(video?.status ?? "");
+  // 11/25 AI 가상 인물·그림 캐릭터는 원본을 참조로 써서 스토리보드 그림 없이도 요청할 수 있다(키프레임이 아닐 때)
+  const canAsk = keyframed
+    ? inputReady && !["awaiting_approval", "running", "done"].includes(video?.status ?? "")
+    : canAskVideo(render.board_image?.status, video?.status, rec?.sheet?.kind);
   const ask = async () => {
     setAsking(true);
     setError(null);
@@ -235,6 +239,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
           </button>
         )}
         {!canAsk && !video?.status && !inputReady && <p className="text-xs text-ink-500">{keyframed ? "키프레임이 모두 그려지면 영상을 요청할 수 있어요." : "스토리보드 그림이 끝나면 영상을 요청할 수 있어요."}</p>}
+        {!keyframed && canAsk && render.board_image?.status !== "done" && usesOriginalReference(rec?.sheet?.kind) && <p className="text-xs text-ink-500">AI 가상 인물·그림 캐릭터는 올린 원본을 참조로 써서 스토리보드 그림 없이 만들어요.</p>}
         {rec?.storyboard && <HiggsfieldWeb board={rec.storyboard} speed={video?.summary?.speed} reference={video?.summary?.reference} />}
       </div>
       <div className="border-t border-ink-100 pt-3">

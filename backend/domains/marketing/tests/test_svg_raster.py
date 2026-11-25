@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import struct
 import zlib
+from pathlib import Path
 
 import pytest
 
@@ -110,6 +111,23 @@ def test_stroke_ends_are_round() -> None:
     # 두께 4 → 32px. 끝점(160, 640) 왼쪽 12px은 둥근 끝 안, 모서리 쪽(왼쪽 12·위 14)은 밖
     assert _px(img, 148, 640) == (0, 0, 0)
     assert _px(img, 148, 626) == (255, 255, 255)
+
+
+def test_planning_mannequin_svg_paints_the_person_off_the_background() -> None:
+    # 기획 3D 마네킹 콘티(#1807 pose_render.render, medium 샷) 한 장을 시험 고정값으로 둔다.
+    # 그라데이션(배경 linear·몸 radial)·rgba 그림자·round cap 선을 다 쓴다
+    svg = (Path(__file__).parent / "fixtures" / "pose_medium.svg").read_text(encoding="utf-8")
+    img = sr.render(svg, *sr.size_for("9:16"))  # viewBox 180×320 → 720×1280 (4배)
+    background = _px(img, 20, 20)
+    assert background == (247, 244, 236)  # 배경 그라데이션 stop 평균
+    # 인물 영역(몸통 97,198 · 머리 90,166 · 오른 다리 102.5,255)은 배경·흰색이 아니다
+    # (몸통 가운데 x=89.4 줄은 rgba 흰 하이라이트라 피한다)
+    for x, y in ((97, 198), (90, 166), (102.5, 255)):
+        got = _px(img, round(x * 4), y * 4)
+        assert got not in (background, (255, 255, 255), (253, 251, 247)), (x, y, got)
+    assert _px(img, 97 * 4, 198 * 4) == (0x4F, 0x7F, 0xE0)  # 몸통 선 색
+    png = sr.to_png(svg)
+    assert png.startswith(b"\x89PNG")
 
 
 def test_png_is_a_valid_white_background_file() -> None:
