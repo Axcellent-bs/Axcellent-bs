@@ -28,6 +28,14 @@ const BRAND_PATH = '/marketing/brand'
 type TabId = (typeof TABS)[number]['id']
 const tabParam = () => (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') : null)
 const readTab = (): TabId => (tabParam() === 'ai' ? 'ai' : 'site')
+/** 고른 탭을 주소(?tab=)에 남긴다. 배포 뒤 자동 새로고침·다른 화면에 갔다 돌아오기·뒤로 가기에도 같은 탭으로 연다 */
+const writeTab = (t: TabId) => {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  if (t === 'site') url.searchParams.delete('tab')
+  else url.searchParams.set('tab', t)
+  window.history.replaceState(window.history.state, '', url)
+}
 
 type Phase = { at: 'key' } | { at: 'move'; key: IssuedKey } | { at: 'info'; key: IssuedKey }
 
@@ -135,7 +143,7 @@ function CompanyConnectScreen() {
         이 워크스페이스를 회사와 잇고, 부서 AI가 읽을 회사 사이트 서버를 정해요. 업무 데이터는 회사 밖으로 나가지 않아요.
       </PageHead>
 
-      <Tabs label="회사 연결" items={TABS} value={tab} onPick={setTab} />
+      <Tabs label="회사 연결" items={TABS} value={tab} onPick={(t) => { setTab(t); writeTab(t) }} />
 
       {tab === 'ai' ? <CompanyAiTools me={account?.name ?? ''} /> : <>
       <ConnectionMap company={company?.name ?? null} shop={company ? shop : null} pcs={{ online, total: hosts.length }} />
