@@ -52,8 +52,10 @@ def test_company_without_settings_counts_days_in_korea_time() -> None:
 
 
 def test_site_companies_get_common_sales_section() -> None:
-    """누비투어·스터디온도 매출·객단가·재구매율을 낸다(11/25). 품목 이름은 기본 "상품", 서점 칸은 없다.
-    캣북스 매출 설정은 그대로."""
+    """누비투어·스터디온도 매출·객단가·재구매율을 낸다(11/25).
+
+    품목 이름은 기본 "상품", 서점 칸은 없다. 캣북스 매출 설정은 그대로.
+    """
     expected = {"nubi-tour": "nubi", "studyon": "studyon"}
     for company, cat_id in expected.items():
         with company_scope.using(company):
