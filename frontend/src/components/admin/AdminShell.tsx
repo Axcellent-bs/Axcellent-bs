@@ -284,7 +284,8 @@ function CompanyBrand({ name, siteUrl }: { name: string; siteUrl?: string }) {
     if (siteUrl) void findSiteIconOrNull(siteUrl).then((found) => { if (live) setIcon(found) })
     return () => { live = false }
   }, [siteUrl])
-  const mark = icon && <img src={icon} alt="" aria-hidden="true" className="ml-1.5 inline h-4 w-4 rounded-sm align-[-2px]" />
+  // 회사 로고는 외부 주소(회사 사이트)라 크기를 못 줄인다. 크기를 적어 자리를 먼저 잡고, 첫 그리기를 막지 않게 늦게 푼다
+  const mark = icon && <img src={icon} alt="" aria-hidden="true" width={16} height={16} decoding="async" className="ml-1.5 inline h-4 w-4 rounded-sm align-[-2px]" />
   if (!siteUrl) return <>{name}</>
   return (
     <a href={siteUrl} target="_blank" rel="noopener noreferrer" title={`${name} 사이트 열기`} className="hover:underline">
