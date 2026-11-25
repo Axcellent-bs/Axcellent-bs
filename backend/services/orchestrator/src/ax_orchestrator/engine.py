@@ -682,6 +682,9 @@ class Engine:
             path=["orchestrator"],
             deadline=now() + timedelta(seconds=self.deadline_seconds(step)),
             idempotency_key=f"{inc.context_id}:{skill}:{step.id}",
+            # 이 매니저 회사로 부른다(11/25): 빠지면 받는 쪽이 캣북스로 보고, 누비투어 장애의
+            # 원인 확인 요청(create_ticket)이 캣북스 기획 요청 목록에 들어갔다
+            tenant_id=self.tenant_id,
         )
         return AgentRequest(meta=meta, skill=skill, input=payload, sequence=sequence)
 
@@ -1245,6 +1248,7 @@ class Engine:
                 path=["orchestrator"],
                 deadline=now() + timedelta(seconds=self.step_timeout),
                 idempotency_key=f"{inc.context_id}:record_event_times:{digest}",
+                tenant_id=self.tenant_id,
             ),
             skill="record_event_times",
             input=payload,

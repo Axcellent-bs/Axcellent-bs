@@ -160,7 +160,7 @@ class IncidentManager:
         self.plan_factory = plan_factory
         self.store = store
         self.incidents: dict[str, Incident] = {}
-        self.finance_opinions = FinanceOpinions(store)
+        self.finance_opinions = FinanceOpinions(store, tenant=lambda: self.engine.tenant_id)
         self.agent_diagnoses = AgentDiagnoses(store)
         # 고객 의뢰 기록. 장애 이벤트와 달리 재시작 때 닫지 않고 이어 간다(work_requests.py)
         self.work_requests = WorkRequests(store)

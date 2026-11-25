@@ -37,11 +37,17 @@ RelaySender = Callable[[ReceiveInsightInput, str], Awaitable[dict[str, Any]]]
 
 
 class FinanceOpinions:
-    def __init__(self, store: IncidentStore | None = None) -> None:
+    def __init__(
+        self, store: IncidentStore | None = None, tenant: Callable[[], str | None] | None = None
+    ) -> None:
         self._rows: dict[str, dict[str, Any]] = {}
         self._store = store
-        # 기획에 넘기는 곳 (시험은 바꿔 끼운다)과 넘기는 중인 일
-        self.relay_sender: RelaySender = finance_relay.send_to_planning
+        # 기획에 넘기는 곳 (시험은 바꿔 끼운다)과 넘기는 중인 일.
+        # 매니저 회사로 넘긴다(11/25): 다른 회사 의견이 캣북스 기획에 들어가지 않게
+        self._tenant = tenant or (lambda: None)
+        self.relay_sender: RelaySender = lambda inp, ctx: finance_relay.send_to_planning(
+            inp, ctx, self._tenant()
+        )
         self.retry_delays: tuple[float, ...] = finance_relay.RETRY_DELAYS
         self._relaying: dict[str, asyncio.Task] = {}
 
