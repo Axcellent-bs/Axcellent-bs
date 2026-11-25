@@ -81,3 +81,21 @@ export const canClose = (t: ChatThread | undefined) => !!t && t.status !== 'clos
 
 /** 숨긴 대화는 화면에 넣지 않는다 (SSE 상태에는 기록으로 남아 같이 실려 온다) */
 export const isShown = (t: { removedAt?: string | null }) => !t.removedAt
+
+/** 대화와 함께 보낼 "지금 보는 PR" (형상관리 번호 + 연결). 레포 PR 화면(…/work/prs/repo/80?repo=conn)이면
+ *  그 번호, AI PR 화면(…/work/prs/PR-45)이면 그 PR이 형상관리에 열린 번호. 아니면 undefined (서버가 CI를 읽어 답한다) */
+export function viewedPr(
+  pathname: string,
+  search: string,
+  prs: { id: string; vcsNumber?: number | null; target?: { connectionId: string } }[],
+): { number: number; connection?: string } | undefined {
+  const repo = pathname.match(/\/work\/prs\/repo\/(\d+)(?:\/|$)/)
+  if (repo) {
+    const conn = new URLSearchParams(search).get('repo')
+    return { number: Number(repo[1]), ...(conn ? { connection: conn } : {}) }
+  }
+  const ai = pathname.match(/\/work\/prs\/PR-(\d+)(?:\/|$)/)
+  const p = ai ? prs.find((x) => x.id === `PR #${ai[1]}`) : undefined
+  if (p?.vcsNumber == null) return undefined
+  return { number: p.vcsNumber, ...(p.target ? { connection: p.target.connectionId } : {}) }
+}

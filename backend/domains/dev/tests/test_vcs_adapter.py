@@ -919,6 +919,42 @@ def test_github_checks_fall_back_to_statuses_without_checks_permission() -> None
     assert checks.state == "passed" and [r.name for r in checks.runs] == ["ci"]
 
 
+def test_github_failed_logs_read_actions_job_log_and_fall_back_to_output() -> None:
+    """실패한 Actions 검사는 작업 로그(로그 주소로 넘겨줌), 그 밖의 검사는 결과 글을 쓴다."""
+    seen: list[tuple[str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        seen.append((path, request.headers.get("authorization")))
+        if path.endswith("/pulls/7"):
+            return httpx.Response(200, json={"head": {"sha": "abc"}})
+        if path.endswith("/check-runs"):
+            runs = [
+                {"id": 11, "name": "ci", "status": "completed", "conclusion": "failure",
+                 "app": {"slug": "github-actions"}},
+                {"id": 12, "name": "lint", "status": "completed", "conclusion": "success",
+                 "app": {"slug": "github-actions"}},
+                {"id": 13, "name": "other", "status": "completed", "conclusion": "failure",
+                 "app": {"slug": "x"}, "output": {"title": "깨짐", "summary": "3 failed"}},
+            ]  # fmt: skip
+            return httpx.Response(200, json={"check_runs": runs})
+        if path.endswith("/actions/jobs/11/logs"):
+            return httpx.Response(302, headers={"location": "https://logs.example/job-11.txt"})
+        if request.url.host == "logs.example":
+            text = "2026-11-25T01:02:03.0000000Z ##[error]src/a.ts(1,1): error TS2339: x\n"
+            return httpx.Response(200, text=text)
+        return httpx.Response(404, json={})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = GithubVcsAdapter("acme/shop", "t" * 12, client=client)
+    logs = run(adapter.get_failed_logs(7))
+    assert [lg.name for lg in logs] == ["ci", "other"]
+    assert logs[0].text == "##[error]src/a.ts(1,1): error TS2339: x"
+    assert "3 failed" in logs[1].text
+    # 다른 호스트(로그 저장소)로 넘어가면 토큰을 보내지 않는다
+    assert next(a for p, a in seen if p == "/job-11.txt") is None
+
+
 def test_open_conflict_adopts_existing_change() -> None:
     """앞선 시도에서 브랜치·PR이 이미 올라갔으면 새로 만들지 않고 이어받는다."""
     from dev_agent import vcs_bridge

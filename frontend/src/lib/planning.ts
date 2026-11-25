@@ -493,7 +493,8 @@ export const devTaskApi = (base: string) => ({
 })
 
 // ---- AI와 대화 (dev 서비스 `/api/planning/dev-chat`). 답이 오면 바뀐 대화 전체를 돌려준다 (5~30초)
-export interface ChatSend { thread_id?: string; message: string; connection?: string; mode?: CodingMode; account?: string }
+// pr: 화면이 지금 보는 PR (형상관리 번호·연결). 서버가 그 PR의 CI 상태·실패 로그를 읽어 답한다
+export interface ChatSend { thread_id?: string; message: string; connection?: string; mode?: CodingMode; account?: string; pr?: { number: number; connection?: string } }
 
 // 대화 모양이 아닌 값(목의 {ok:true} 등)은 버린다
 const isThread = (x: unknown): x is Json => !!x && typeof x === 'object' && typeof (x as Json).id === 'string' && Array.isArray((x as Json).messages)

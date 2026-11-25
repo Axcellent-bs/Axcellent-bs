@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ChatThread } from "./planningData.ts";
 import {
-  KEY_HINT, LIVE_ANSWER_POLL_MS, POLL_MS, canClose, chatNotice, createLatestGate, isShown, mergeThreads, needsTools, pollInterval, sendErrorText, stampKey, toStamps,
+  KEY_HINT, LIVE_ANSWER_POLL_MS, POLL_MS, canClose, chatNotice, createLatestGate, isShown, mergeThreads, needsTools, pollInterval, sendErrorText, stampKey, toStamps, viewedPr,
 } from "./devChatView.ts";
 
 const th = (id: string, status: ChatThread["status"], updatedAt: string, n = 1): ChatThread => ({
@@ -68,4 +68,13 @@ test("SSE 대화는 id·상태·시각만 읽고, 그게 바뀌면 열쇠가 바
   assert.equal(stampKey([{ id: "chat-1", status: "talking", updatedAt: "t1" }]), before);
   assert.notEqual(stampKey([{ id: "chat-1", status: "answering", updatedAt: "t2" }]), before);
   assert.equal(stampKey(undefined), "");
+});
+
+test("대화에 지금 보는 PR을 붙인다 (레포 PR 화면·AI PR 화면)", () => {
+  const prs = [{ id: "PR #45", vcsNumber: 80, target: { connectionId: "conn-2" } }, { id: "PR #46", vcsNumber: null }];
+  assert.deepEqual(viewedPr("/dev/work/prs/repo/80", "?repo=conn-1", prs), { number: 80, connection: "conn-1" });
+  assert.deepEqual(viewedPr("/dev/work/prs/repo/81/files", "", prs), { number: 81 });
+  assert.deepEqual(viewedPr("/dev/work/prs/PR-45", "", prs), { number: 80, connection: "conn-2" });
+  assert.equal(viewedPr("/dev/work/prs/PR-46", "", prs), undefined);
+  assert.equal(viewedPr("/dev/tasks", "", prs), undefined);
 });

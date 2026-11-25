@@ -139,6 +139,14 @@ class Checks:
 
 
 @dataclass(frozen=True)
+class CheckLog:
+    """실패한 검사 하나의 로그 끝부분 (오류 줄 + 마지막 줄들, `log_tail`로 줄인 글)."""
+
+    name: str
+    text: str
+
+
+@dataclass(frozen=True)
 class TraceMeta:
     """변경 → 기획서 역추적용 ID (제목·본문에서 읽는다)."""
 
@@ -500,6 +508,10 @@ class VcsAdapter(Protocol):
         """CI 상태 (IF-CUS-002)."""
         ...
 
+    async def get_failed_logs(self, number: int) -> list[CheckLog]:
+        """실패한 검사의 로그 끝부분 (검사마다 `log_tail`). 로그가 없으면 빈 목록. 쓰기 없음."""
+        ...
+
     # ---- 레포 작업 공간 (읽기는 그냥, 쓰기는 `execute()` 뒤에만)
 
     async def list_changes(
@@ -639,3 +651,27 @@ def combine_checks(runs: list[CheckRun]) -> Checks:
     else:
         state = "passed"
     return Checks(state=state, runs=tuple(runs))
+
+
+LOG_TAIL_LINES = 200  # 검사 로그에서 남길 마지막 줄 수
+LOG_TAIL_CHARS = 8000  # 검사 하나의 로그 글 길이 한도
+LOG_ERROR_LINES = 40  # 마지막 줄 앞에서 따로 뽑아 둘 오류 줄 수
+MAX_LOG_CHECKS = 3  # 로그를 읽을 실패 검사 수
+_STAMP = re.compile(r"^\ufeff?\d{4}-\d{2}-\d{2}T[\d:.]+Z ?")
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_ERROR = re.compile(r"##\[error\]|\berror\b|\bERR!|\bfailed\b", re.IGNORECASE)
+
+
+def log_tail(text: str) -> str:
+    """CI 로그를 LLM에 넣을 만큼 줄인다. 시각·색 표시를 걷어 내고, 마지막 200줄 앞에 있던
+    오류 줄(`##[error]`·error 등)을 먼저 두고 마지막 200줄을 붙인다. 8000자를 넘으면 앞을 자른다
+    (오류는 보통 끝에 가깝다)."""
+    lines = [_ANSI.sub("", _STAMP.sub("", ln)).rstrip() for ln in (text or "").splitlines()]
+    lines = [ln for ln in lines if ln.strip()]
+    tail = lines[-LOG_TAIL_LINES:]
+    head = lines[: max(0, len(lines) - LOG_TAIL_LINES)]
+    errors = [ln for ln in head if _ERROR.search(ln)][-LOG_ERROR_LINES:]
+    body = "\n".join(tail)
+    if errors:
+        body = "\n".join(errors) + "\n… (중간 생략)\n" + body
+    return body if len(body) <= LOG_TAIL_CHARS else "… (앞 잘림)\n" + body[-LOG_TAIL_CHARS:]

@@ -1086,6 +1086,91 @@ def test_ci_failure_holds_for_human(service: PlanningService, adapter) -> None:
     assert not pr.merged and pr.auto_review is not None
 
 
+TS_LOG = (
+    "2026-11-25T01:02:03.0000000Z Run npm run typecheck\n"
+    "2026-11-25T01:02:04.0000000Z ##[error]src/components/Banner.tsx(2,10): error TS2339: "
+    "Property 'published_at' does not exist on type 'Banner'.\n"
+)
+
+
+def _ci_fix_llm() -> FakeLLM:
+    """CI 로그를 받으면 BANNER_FIX, 아니면 BANNER_NEW를 쓴다."""
+    return FakeLLM(
+        plan=CodePlan(files=[FilePick(path=BANNER)]),
+        writes={BANNER: lambda d: BANNER_FIX if d.get("ci_logs") else BANNER_NEW},
+    )
+
+
+def test_ci_failure_reads_logs_fixes_once_then_merges(
+    service: PlanningService, adapter, monkeypatch
+) -> None:
+    """CI 실패 → 실패 로그를 데이터로 넣어 한 번 고쳐 같은 PR에 커밋(관문 뒤) → CI 통과 → 머지."""
+    monkeypatch.setattr(coder, "CI_POLL_SECONDS", 0.0)
+    ci = ChecksAdapter("failed", "passed")
+    ci.set_logs(1, {"build": TS_LOG})
+    vcs.set_vcs(ci)
+    fake = _ci_fix_llm()
+    coder.set_llm(fake)
+    run(_go(service))
+    c = _task(service).coding
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert c.status == "merged" and pr.merged, c.error
+    assert ci.contents(pr.vcs_number)[BANNER] == BANNER_FIX
+    [fix] = [x[2] for x in fake.calls if x[0] == "FileWrite" and x[2].get("ci_logs")]
+    assert fix["path"] == BANNER and "published_at" in fix["ci_logs"][0]["log"]
+    assert "2026-11-25T" not in fix["ci_logs"][0]["log"]
+    assert ("update_change", pr.vcs_number) in ci.writes
+    assert "code_write" in [g.action for g in service.gate_calls]  # 같은 PR 커밋도 관문을 지난다
+    texts = [a.text for a in service.state.activity if a.point == "code.ci"]
+    assert any("CI 실패 로그 읽음 → 한 번 고쳐 다시 올림" in t for t in texts)
+    assert any("CI 통과" in t for t in texts)
+
+
+def test_ci_failing_again_after_fix_holds_for_human(
+    service: PlanningService, adapter, monkeypatch
+) -> None:
+    """고친 뒤에도 CI가 실패하면 더 고치지 않고 사람 확인 (실행 한 번에 한 번만)."""
+    monkeypatch.setattr(coder, "CI_POLL_SECONDS", 0.0)
+    ci = ChecksAdapter("failed")
+    ci.set_logs(1, {"build": TS_LOG})
+    vcs.set_vcs(ci)
+    fake = _ci_fix_llm()
+    coder.set_llm(fake)
+    run(_go(service))
+    c = _task(service).coding
+    pr = next(p for p in service.state.prs if p.id == c.pr)
+    assert c.status == "waiting_human" and c.ci_hold and not pr.merged
+    assert "CI 실패 (build)" in (c.error or "") and "한 번 고친 뒤에도" in (c.error or "")
+    assert len([x for x in fake.calls if x[0] == "FileWrite" and x[2].get("ci_logs")]) == 1
+    assert ci.writes.count(("update_change", pr.vcs_number)) == 1
+
+
+def test_ci_failure_without_logs_holds_without_fixing(service: PlanningService, adapter) -> None:
+    """로그를 못 읽으면 고치지 않고 지금처럼 사람 확인."""
+    ci = ChecksAdapter("failed")
+    vcs.set_vcs(ci)
+    fake = _ci_fix_llm()
+    coder.set_llm(fake)
+    run(_go(service))
+    c = _task(service).coding
+    assert c.status == "waiting_human" and "CI 실패 (build)" in (c.error or "")
+    assert not any(x[2].get("ci_logs") for x in fake.calls if x[0] == "FileWrite")
+    assert not any(w[0] == "update_change" for w in ci.writes)
+    assert any("자동으로 고치지 못함 (읽을 로그가 없음)" in a.text for a in service.state.activity)
+
+
+def test_log_tail_keeps_errors_and_last_lines() -> None:
+    from dev_agent.vcs.base import LOG_TAIL_CHARS, LOG_TAIL_LINES, log_tail
+
+    lines = ["2026-11-25T01:00:00.0000000Z \x1b[31m##[error]early.ts: error TS1\x1b[0m"]
+    lines += [f"2026-11-25T01:00:01.0000000Z line {i}" for i in range(LOG_TAIL_LINES + 50)]
+    out = log_tail("\n".join(lines))
+    assert out.startswith("##[error]early.ts: error TS1") and "중간 생략" in out
+    assert out.endswith(f"line {LOG_TAIL_LINES + 49}") and "line 0\n" not in out
+    assert "2026-11-25T" not in out and "\x1b" not in out
+    assert len(log_tail("x" * 50 + "\n" + "y" * (LOG_TAIL_CHARS * 2))) <= LOG_TAIL_CHARS + 20
+
+
 def test_ci_passes_later_then_auto_merges(service: PlanningService, adapter) -> None:
     ci = ChecksAdapter("failed")
     vcs.set_vcs(ci)

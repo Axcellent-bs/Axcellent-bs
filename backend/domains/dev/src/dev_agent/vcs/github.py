@@ -39,11 +39,13 @@ from dev_agent.vcs.base import (
     ISSUE_LIST_LIMIT,
     ISSUE_STATES,
     LIST_LIMIT,
+    MAX_LOG_CHECKS,
     Branch,
     Capabilities,
     Change,
     ChangedFile,
     ChangeSummary,
+    CheckLog,
     CheckRun,
     Checks,
     CheckState,
@@ -67,6 +69,7 @@ from dev_agent.vcs.base import (
     check_sha,
     combine_checks,
     decode_text,
+    log_tail,
     match_issue,
     match_query,
     order_commits,
@@ -550,6 +553,62 @@ class GithubVcsAdapter:
     async def get_checks(self, number: int) -> Checks:
         pr = await self._call("GET", f"/pulls/{int(number)}")
         return await self._checks_sha(pr["head"]["sha"])
+
+    async def get_failed_logs(self, number: int) -> list[CheckLog]:
+        """실패한 검사(check run)의 로그 끝부분. GitHub Actions 검사는 작업 로그
+        (`GET /actions/jobs/{id}/logs`, 검사 id = 작업 id)를, 그 밖의 검사나 로그를 못 읽으면
+        검사 결과 글(output)을 쓴다. 커밋 상태(status)만 있는 검사는 설명 한 줄."""
+        pr = await self._call("GET", f"/pulls/{int(number)}")
+        sha = pr["head"]["sha"]
+        try:
+            raw = await self._call(
+                "GET", f"/commits/{sha}/check-runs", params={"per_page": PER_PAGE}
+            )
+        except VcsError as exc:
+            if exc.code not in ("forbidden", "not_found"):
+                raise
+            raw = None
+        failed = [r for r in (raw or {}).get("check_runs", []) if _run_state(r) == "failed"]
+        out: list[CheckLog] = []
+        for r in failed[:MAX_LOG_CHECKS]:
+            text = ""
+            if ((r.get("app") or {}).get("slug") or "") == "github-actions" and r.get("id"):
+                try:
+                    text = await self._text(f"/actions/jobs/{int(r['id'])}/logs")
+                except VcsError:
+                    text = ""  # Actions 읽기 권한이 없는 토큰 등: 결과 글로 대신한다
+            if not text.strip():
+                o = r.get("output") or {}
+                text = "\n".join(str(o.get(k) or "") for k in ("title", "summary", "text"))
+            if text.strip():
+                out.append(CheckLog(name=str(r.get("name") or ""), text=log_tail(text)))
+        if not out:
+            status = await self._call("GET", f"/commits/{sha}/status")
+            for st in (status or {}).get("statuses", []):
+                if _status_state(st.get("state")) == "failed" and st.get("description"):
+                    out.append(
+                        CheckLog(name=str(st.get("context") or ""), text=str(st["description"]))
+                    )
+        return out[:MAX_LOG_CHECKS]
+
+    async def _text(self, path: str) -> str:
+        """글 응답 (작업 로그). 로그 주소로 넘겨주는(302) 곳까지 따라간다. 다른 호스트로 넘어가면
+        httpx가 인증 머리글을 떼고 보낸다."""
+        where = f"GET {path}"
+        token = await self._auth()
+        try:
+            res = await self._client.get(
+                f"{self.base_url}/repos/{self.repo}{path}",
+                headers=self._headers(token),
+                follow_redirects=True,
+            )
+        except UnicodeEncodeError:
+            raise VcsError("config", f"{where} 토큰이나 주소에 쓸 수 없는 글자가 있다") from None
+        except httpx.HTTPError as exc:
+            raise VcsError("unavailable", f"{where} 연결 실패 ({type(exc).__name__})") from None
+        if res.status_code >= 400:
+            raise VcsError(self._code(res, ""), self._clean(f"{where} → {res.status_code}"))
+        return res.text
 
     async def _checks_sha(self, sha: str) -> Checks:
         # 개인용 토큰(fine-grained)에는 Checks 권한이 없다. 막히면 커밋 상태만으로 판단한다
