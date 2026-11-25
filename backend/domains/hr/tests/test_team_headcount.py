@@ -137,3 +137,15 @@ def test_only_finance_and_orchestrator_may_ask(org, client) -> None:
     )
     denied = client.post("/a2a", json=_body(token="mock:support")).json()
     assert denied["status"] != "completed"
+
+
+def test_other_company_gets_no_example_roster(svc, org, client) -> None:
+    """회사 분리(11/25): 예시 명부(팀원 6명)는 캣북스만. 누비투어는 입력한 발령이 없으면 0명."""
+    body = _body()
+    body["meta"]["tenant_id"] = "nubi-tour"
+    res = client.post("/a2a", json=body).json()
+    assert res["status"] == "completed"
+    out = TeamHeadcountOutput.model_validate(res["output"])
+    assert sum(r.headcount for r in out.rows) == 0
+    assert out.example is True  # 등록 전이라 재무가 예산을 확정하지 못하게
+    assert out.basis == "등록한 직원 없음(발령 기록 0건), 2026-11-01 소속"

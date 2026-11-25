@@ -4,7 +4,8 @@
 팀을 읽지 못함) 0명으로 채우지 않고 실패로 답한다.
 발령은 발령일이 1일이면 그 달부터, 아니면 다음 달 1일부터 센다.
 
-- 확정된 발령 기록이 하나도 없으면 가상 명부(예시)로 세고 `example: true`로 밝힌다.
+- 확정된 발령 기록이 하나도 없으면 가상 명부(예시)로 세고 `example: true`로 밝힌다. 예시 명부는
+  캣북스만 쓴다(다른 회사는 0명, 회사 분리 11/25).
 - 확정 기록이 있으면 그 기록만으로 센다. 초안·반려는 세지 않는다.
   기록이 시작되기 전의 달은 인원을 알 수 없으므로 0명으로 채우지 않고 실패로 답한다.
 - 인사 담당자가 "전 직원 등록 완료"를 표시하기 전(`baseline_complete`)에는 확정 기록으로 세어도
@@ -26,7 +27,7 @@ from ax_contracts.schemas import (
     TeamHeadcountRow,
 )
 from hr_agent.org import changes, ledger
-from hr_agent.org.roster import example_roster, org_teams
+from hr_agent.org.roster import example_roster, org_teams, uses_example
 from hr_agent.results import completed, failed, invalid_input, make_evidence
 from hr_agent.services import Services
 
@@ -49,7 +50,11 @@ async def team_headcount(svc: Services, request: AgentRequest) -> AgentResult:
     records = changes.confirmed(svc)
     if not records:
         members = [m.team for m in example_roster(teams)]
-        basis = f"예시 직원 명단 기준, {params.month}-01 소속"
+        basis = (
+            f"예시 직원 명단 기준, {params.month}-01 소속"
+            if uses_example()
+            else f"등록한 직원 없음(발령 기록 0건), {params.month}-01 소속"
+        )
         example = True
     else:
         first = ledger.earliest_month(records)

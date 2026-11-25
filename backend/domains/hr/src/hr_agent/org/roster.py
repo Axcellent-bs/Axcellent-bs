@@ -4,6 +4,9 @@
 조직도(`org.yaml`)의 `members`에 적고, 부서 이름은 조직도에만 두고 코드에는 쓰지 않는다.
 `members`가 없으면 직원 6명을 조직도의 부서에 차례로 나눈다. 발령 기록으로 확정한 명부가 아니라서
 화면과 응답에 "예시 직원 명단"이라고 밝힌다. 발령 기록이 생기면 그 기록으로 센 명부가 대신한다.
+
+회사 분리(11/25): 예시 명부는 캣북스(설치 기본 회사)만 쓴다. 조직도 `members`·팀원 6명은 이 설치의
+예시라 다른 회사(누비투어 등)에는 넣지 않는다. 다른 회사는 입력한 발령 기록만으로 센다(없으면 0명).
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from typing import Any
 
 import yaml
 
+from ax_agent_template import company_scope
 from ax_agent_template.routing import ORG_ENV, load_org
 
 logger = logging.getLogger("hr.org.roster")
@@ -73,12 +77,18 @@ def _configured_members(teams: list[str]) -> list[OrgMember]:
     return members
 
 
+def uses_example() -> bool:
+    """이 요청 회사가 예시 명부를 쓰는가. 캣북스(또는 요청 밖)만 쓴다."""
+    company = company_scope.active()
+    return company is None or company == company_scope.CATBOOKS
+
+
 def example_roster(teams: list[str]) -> list[OrgMember]:
     """기본 명부. 조직도 `members`가 있으면 그대로, 없으면 직원을 팀에 차례로 나눈다.
 
-    팀이 없으면 빈 명부다(지어내지 않는다).
+    팀이 없거나 캣북스가 아닌 회사의 요청이면 빈 명부다(지어내지 않는다).
     """
-    if not teams:
+    if not teams or not uses_example():
         return []
     configured = _configured_members(teams)
     if configured:
