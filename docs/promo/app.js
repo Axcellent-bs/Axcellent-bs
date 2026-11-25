@@ -39,6 +39,12 @@
       more.setAttribute("aria-label", collapsed ? moreLabel : lessLabel);
     });
   });
+  // 마케팅 AI가 만든 영상 칸: 하나를 재생하면 칸 안의 다른 영상은 멈춘다
+  document.querySelectorAll(".mkvideos").forEach(function (box) {
+    box.addEventListener("play", function (e) {
+      box.querySelectorAll("video").forEach(function (v) { if (v !== e.target) v.pause(); });
+    }, true);
+  });
   // 지금 보고 있는 구역을 메뉴에 표시한다
   if (nav && "IntersectionObserver" in window) {
     var links = {};

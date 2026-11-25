@@ -350,5 +350,46 @@ body { overflow-x: clip; }
 .vposts-two .vpost-wide { grid-column: auto; }
 @media (max-width: 780px) { .vposts-two { grid-template-columns: minmax(0, 1fr); } }
 @media (min-width: 780px) { .vpost-wide { grid-column: span 2; } }
+/* 마케팅 AI가 만든 영상 칸: 세로(9:16) 영상을 한 줄에 4개. 4개를 넘으면 화살표로 펼친다. 좁은 화면은 옆으로 넘겨 본다 */
+.mk-lead { margin-top: 6px; color: #4a4a68; }
+.mk-wrap { margin-top: 16px; }
+.mk-grid.vposts { flex: 1; min-width: 0; margin-top: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.mk-card.vpost { border-radius: 22px; padding: 10px 10px 16px; }
+.mk-card .vpost-media { aspect-ratio: 9 / 16; }
+.mk-card.vpost h3 { margin-top: 12px; font-size: 17px; }
+.mk-card .badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mk-len { font-size: 14px; color: #6a6a86; }
+.mk-grid.is-collapsed .vpost:nth-child(n+3) { display: block; }
+.mk-grid.is-collapsed .vpost:nth-child(n+5) { display: none; }
+/* 대표 사례의 제작 과정: 캐릭터 시트 → 스토리보드 → 사람 승인 → 완성 영상 */
+.mk-process { margin-top: 24px; background: var(--paper); border-radius: 26px; padding: 24px; }
+.mk-process-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.mk-process-h h4 { font-size: 20px; font-weight: 800; }
+.mk-process-h span { color: #6a6a86; }
+.mk-steps { list-style: none; margin: 16px 0 0; padding: 0; display: flex; align-items: flex-start; gap: 14px; }
+.mk-step { flex: 1; min-width: 0; }
+.mk-step.mk-final { flex: none; width: 202px; }
+.mk-shot { position: relative; height: 360px; border-radius: 16px; overflow: hidden; background: #fff; border: 1px solid #d9d9ee; display: grid; place-items: center; }
+.mk-shot img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.mk-final .mk-shot { background: #000; border: 3px solid var(--brand-d); }
+.mk-shot video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.mk-shot .ai-mark { position: absolute; left: 8px; top: 8px; background: rgba(0, 0, 0, .65); color: #fff; font-size: 12px; padding: 3px 8px; border-radius: 999px; }
+.mk-step h5 { margin-top: 10px; font-size: 17px; font-weight: 800; }
+.mk-step p { margin-top: 2px; color: #4a4a68; font-size: 15px; }
+.mk-link { flex: none; height: 360px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; color: #6a6a86; font-size: 24px; }
+.mk-approval em { font-style: normal; font-size: 14px; font-weight: 800; color: #6b4a00; background: #ffe9ad; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+@media (max-width: 780px) {
+  .mk-grid.vposts { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 14px; padding-bottom: 8px; }
+  .mk-grid .mk-card { flex: 0 0 66%; scroll-snap-align: start; }
+  .mk-grid.is-collapsed .vpost:nth-child(n+5) { display: block; }
+  .mk-wrap .posts-more { display: none; }
+  .mk-process { padding: 16px; }
+  .mk-steps { flex-direction: column; align-items: stretch; }
+  .mk-step.mk-final { width: min(100%, 240px); align-self: center; }
+  .mk-shot { height: auto; min-height: 160px; }
+  .mk-final .mk-shot { aspect-ratio: 9 / 16; }
+  .mk-link { height: auto; }
+  .mk-link span { transform: rotate(90deg); }
+}
 
 .top-cta .btn { white-space: nowrap; }
