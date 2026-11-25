@@ -241,7 +241,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
           playPart={playPartFor("video", render, showOriginal)} version={overlayVersion} />
         {overlayControls("video")}
         {video?.status === "done" && (
-          <VideoQc qc={render.qc} videoStatus={video.status} credits={video.summary?.credits_estimate} busy={asking} onRegenerate={() => void ask(true)} />
+          <VideoQc qc={render.qc} videoStatus={video.status} credits={video.summary?.credits_estimate} busy={asking} regenerate={video.regenerate} onRegenerate={() => void ask(true)} />
         )}
         {video?.status === "awaiting_approval" && (
           <p className="text-xs text-ink-700"><ApprovalDeadline reviewId={video.review_id} className="mr-1" />사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>

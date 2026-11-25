@@ -1009,6 +1009,9 @@ async def request_video(
         "plan_seconds": planned,
         "attempt": attempt,
         "reason": None,  # 거절 이유(review_timeout 등). 새 요청이면 지운다
+        # 11/26 다시 만들기(again)면 지금 다 만든 영상을 남겨 두고, 거절·기한 지남이면 되돌린다
+        PREVIOUS_VIDEO: _previous_video(video) if again else None,
+        REGENERATE_RESULT: None,
     }
     if keyframed:
         base["keyframes"] = True  # 승인 뒤에도 같은 방식으로 만든다
@@ -1029,7 +1032,43 @@ async def request_video(
         _spawn(_render_video(ledger, record_id, seq, decision))
         return _creative.store().get_render(record_id).get("video") or {}
     _safe(lambda: ledger.release(seq))
+    if again:  # 11/26 다시 만들기를 관문이 바로 막으면 다 만든 영상은 그대로 두고 결과만 남긴다
+        return _set(record_id, "video", attempt=attempt, **{REGENERATE_RESULT: _regen_result(
+            "blocked", attempt)})  # fmt: skip
     return _set(record_id, "video", status="blocked", error=f"gate_{decision.status}", **base)
+
+
+PREVIOUS_VIDEO = "previous"  # render.video.previous: 다시 만들기 전 다 만든 영상 (되돌릴 때만 씀)
+# render.video.regenerate: 다시 만들기가 안 됐을 때 {status, reason, attempt, at}
+REGENERATE_RESULT = "regenerate"
+
+
+def _regen_result(reason: str, attempt: Any) -> dict[str, Any]:
+    return {"status": "rejected", "reason": reason, "attempt": attempt, "at": _now().isoformat()}
+
+
+def _previous_video(video: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in video.items() if k not in (PREVIOUS_VIDEO, REGENERATE_RESULT)}
+
+
+def _restore_previous_video(record_id: str, reason: str) -> dict[str, Any] | None:
+    """승인 대기였던 다시 만들기 요청이 거절·기한 지남으로 끝나면 예전 다 만든 영상으로 되돌린다.
+
+    새 영상은 승인 뒤에야 같은 파일 자리에 받으므로, 여기까지 오면 예전 파일이 그대로다.
+    시도 번호(attempt)는 거절된 것으로 두어 다음 다시 만들기가 또 새 키를 쓰게 한다.
+    되돌릴 영상이 없으면(보통 요청) None."""
+    store = _creative.store()
+    render = store.get_render(record_id)
+    video = render.get("video") or {}
+    previous = video.get(PREVIOUS_VIDEO)
+    if not isinstance(previous, dict) or previous.get("status") != "done":
+        return None
+    restored = dict(previous)
+    restored["attempt"] = video.get("attempt") or previous.get("attempt")
+    restored[REGENERATE_RESULT] = _regen_result(reason, video.get("attempt"))
+    render["video"] = restored
+    store.set_render(record_id, render)
+    return restored
 
 
 async def check_video(ledger: MediaLedger, meta: RequestMeta, record_id: str) -> None:
@@ -1060,6 +1099,8 @@ async def check_video(ledger: MediaLedger, meta: RequestMeta, record_id: str) ->
     # 11/26 기한 지나 자동 취소(review_timeout)면 화면이 "기한 지나 취소됨" + [다시 승인 요청]
     timed_out = decision.hold_reason == "review_timeout"
     reason = "review_timeout" if timed_out else "rejected"
+    if _restore_previous_video(record_id, reason) is not None:
+        return  # 11/26 다시 만들기 거절·기한 지남: 예전 영상이 다시 내보낼 영상
     _set(record_id, "video", status="rejected", error=f"gate_{decision.status}", reason=reason)
 
 
@@ -1242,6 +1283,8 @@ async def _render_video(
         asset=FILES["video"],
         sha256=sha,
         execution_id=decision.execution_id,
+        previous=None,  # 새 영상이 생겼으니 되돌릴 예전 영상은 버린다
+        regenerate=None,
     )
     await _overlay_after_attach(record_id, cid)
 

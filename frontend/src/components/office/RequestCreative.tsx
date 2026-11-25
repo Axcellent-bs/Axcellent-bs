@@ -190,7 +190,7 @@ function VideoQcStage({ recordId, version }: { recordId: string; version: string
       setBusy(false);
     }
   };
-  return <VideoQc qc={rec.render.qc} videoStatus={video.status} credits={video.summary?.credits_estimate} busy={busy} error={error} onRegenerate={() => void regenerate()} />;
+  return <VideoQc qc={rec.render.qc} videoStatus={video.status} credits={video.summary?.credits_estimate} busy={busy} error={error} regenerate={video.regenerate} onRegenerate={() => void regenerate()} />;
 }
 
 export function RequestCreative({ row, plan }: { row: WorkRequestRow; plan: Pick<VideoPlanView, "scenes"> | null }) {

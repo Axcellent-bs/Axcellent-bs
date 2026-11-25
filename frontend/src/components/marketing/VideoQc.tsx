@@ -1,16 +1,17 @@
 import { TONE } from "@/components/finance/bits";
-import { QC_NOTE, QC_NO_AUTO, canRegenerate, qcView, regenerateLabel, type VideoQcState } from "@/lib/videoQcView";
+import { QC_NOTE, QC_NO_AUTO, canRegenerate, qcView, regenerateLabel, regenerateNote, type RegenerateResult, type VideoQcState } from "@/lib/videoQcView";
 
 const TONES = { ok: TONE.ok, bad: TONE.bad, muted: TONE.muted } as const;
 
 /** 영상 기술 검사 (11/26): 칩(모두 통과 / N개 확인 필요) + 표(검사·결과·내용) + 확인 필요면 [영상 다시 만들기 · 사람 결정 · 약 N 크레딧].
  *  버튼은 지금 있는 영상 다시 요청 길(사람 승인·영상 예산 그대로)만 부른다. 자동으로 다시 만들지 않는다 */
-export function VideoQc({ qc, videoStatus, credits, busy, error, onRegenerate }: {
+export function VideoQc({ qc, videoStatus, credits, busy, error, regenerate, onRegenerate }: {
   qc: VideoQcState | null | undefined; videoStatus: string | null | undefined; credits: number | null | undefined;
-  busy: boolean; error?: string | null; onRegenerate: () => void;
+  busy: boolean; error?: string | null; regenerate?: RegenerateResult | null; onRegenerate: () => void;
 }) {
   const v = qcView(qc);
   if (!v) return null;
+  const note = regenerateNote(regenerate);
   return (
     <section className="space-y-2" aria-label="영상 기술 검사">
       <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-ink-900">
@@ -31,6 +32,7 @@ export function VideoQc({ qc, videoStatus, credits, busy, error, onRegenerate }:
         </table>
       </div>
       <p className="text-[11px] text-ink-500">{QC_NOTE}</p>
+      {note && <p className="text-[11px] text-ink-700" role="status">{note}</p>}
       {canRegenerate(videoStatus, qc) && (
         <p className="flex flex-wrap items-center gap-2">
           <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={onRegenerate}>{busy ? "요청 중…" : regenerateLabel(credits)}</button>

@@ -7,7 +7,7 @@ import type { CharacterSheetResult } from "./characterSheet";
 import type { StoryboardResult } from "./storyboard";
 import type { CreativeScript } from "./creativeScript";
 import type { OverlayState, PlayPart } from "./videoOverlay";
-import { videoRequestBody, type VideoQcState } from "./videoQcView";
+import { videoRequestBody, type RegenerateResult, type VideoQcState } from "./videoQcView";
 import type { CreativeVideoSummary } from "./creativeVideo";
 import { boardImagePath } from "./storyboardSvg";
 import { keyframeRedrawPath, type KeyframePart, type KeyframesState } from "./keyframes";
@@ -56,6 +56,8 @@ export interface RenderPart {
   attempt?: number;
   /** 승인 대기를 시작한 시각 */
   held_at?: string | null;
+  /** 기술 검사 [영상 다시 만들기]가 거절·기한 지남·막힘으로 끝나 예전 영상으로 되돌렸을 때(11/26) */
+  regenerate?: RegenerateResult | null;
 }
 
 export interface CreativeRecord {

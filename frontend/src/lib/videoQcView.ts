@@ -48,6 +48,16 @@ export function regenerateLabel(credits: number | null | undefined): string {
 /** 영상 요청 본문(creativeRecords.requestCreativeVideo): 보통은 "{}", 기술 검사 [영상 다시 만들기]만 regenerate=true */
 export const videoRequestBody = (opts?: { regenerate?: boolean }) => (opts?.regenerate ? JSON.stringify({ regenerate: true }) : "{}");
 
+/** 기록 render.video.regenerate: 다시 만들기가 안 돼 예전 영상으로 되돌렸을 때 (서버 creative_render) */
+export interface RegenerateResult { status?: string | null; reason?: string | null; attempt?: number | null; at?: string | null }
+
+/** 다시 만들기가 안 됐을 때 안내 한 줄. 없으면 null */
+export function regenerateNote(result: RegenerateResult | null | undefined): string | null {
+  if (result?.status !== "rejected") return null;
+  const why = result.reason === "review_timeout" ? "기한이 지나 취소돼" : result.reason === "blocked" ? "승인 관문에서 막혀" : "거절돼";
+  return `다시 만들기가 ${why} 예전 영상을 그대로 써요(게시·썸네일 포함).`;
+}
+
 /** 다 만든 영상이고 확인 필요가 있을 때만 다시 만들기 버튼 (서버도 같은 조건으로만 받는다) */
 export function canRegenerate(videoStatus: string | null | undefined, qc: VideoQcState | null | undefined): boolean {
   return videoStatus === "done" && !!qcView(qc)?.needsAction;
