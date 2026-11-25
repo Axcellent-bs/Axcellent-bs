@@ -97,14 +97,25 @@ def plan_script(plan: Any) -> CreativeScript | None:
     )
 
 
-def request_story(plan: Any, request_text: str | None) -> str:
-    """대본 작가에게 줄 줄거리: 기획 장면 + 의뢰문(데이터로만)."""
+REAL_PERSON_NOTE = (
+    "인물은 실사 사람(AI 가상 인물)이라 화면에 일러스트·만화·캐릭터 그림 표현을 쓰지 않는다."
+)
+
+
+def request_story(plan: Any, request_text: str | None, real_person: bool = False) -> str:
+    """대본 작가에게 줄 줄거리: 의뢰문(화면 연출·대사·목소리는 이것을 먼저) + 기획 장면(참고).
+
+    11/25 기획 장면을 앞에 두니 작가가 기획 화면을 그대로 옮겨 의뢰 연출(첫 장면 클로즈업 등)이
+    빠졌다. 의뢰문은 데이터로만 간다."""
     lines = [f"{i}. {_visual(s)}" for i, s in enumerate(_plan_scenes(plan), start=1)]
-    story = f"기획 장면: {' '.join(lines)}"
+    parts = []
     asked = _cut(request_text, MAX_REQUEST)
     if asked:
-        story += f" 의뢰자 요청(대사·목소리·연출은 이대로): {asked}"
-    return _cut(story, _script.MAX_STORY)
+        parts.append(f"의뢰자 요청(장면 화면 연출·대사·목소리는 이것을 먼저 따른다): {asked}")
+    if real_person:
+        parts.append(REAL_PERSON_NOTE)
+    parts.append(f"기획 장면(참고, 장면 수와 순서는 이대로): {' '.join(lines)}")
+    return _cut(" / ".join(parts), _script.MAX_STORY)
 
 
 def apply_request(script: CreativeScript, request_text: str | None) -> CreativeScript:
@@ -117,8 +128,13 @@ def apply_request(script: CreativeScript, request_text: str | None) -> CreativeS
         if s.no == 1 and line:
             update["line_ko"] = line
         said = update.get("line_ko") or s.line_ko
-        if voice and said and (not s.speaker_ko or s.speaker_ko in NARRATION):
-            update["speaker_ko"] = _cut(voice, MAX_SCRIPT_SPEAKER)
+        if voice and said:
+            # 11/25 "직장인"처럼 역할만 적히면 목소리가 빠진다: "여자 직장인"으로 붙인다
+            who = s.speaker_ko
+            if not who or who in NARRATION:
+                update["speaker_ko"] = _cut(voice, MAX_SCRIPT_SPEAKER)
+            elif voice not in who:
+                update["speaker_ko"] = _cut(f"{voice} {who}", MAX_SCRIPT_SPEAKER)
         rows.append(s.model_copy(update=update) if update else s)
     return script.model_copy(update={"scenes": rows})
 
@@ -135,9 +151,10 @@ async def write_request_script(
     if base is None:
         return None
     script = base
+    real = (character or {}).get("kind") == "virtual_human"
     try:
         written = await _script.write_script(
-            request_story(plan, request_text),
+            request_story(plan, request_text, real),
             len(base.scenes),
             base.total_seconds,
             character,
@@ -163,6 +180,10 @@ def board_with_script(board: dict[str, Any], script: CreativeScript) -> dict[str
         return board
     scenes = [s.model_dump(mode="json") for s in script.scenes]
     merged = _storyboard.with_script(out, scenes, script.cta_ko).model_dump(mode="json")
+    if script.source == "llm":
+        # 작가가 의뢰 연출을 반영해 쓴 화면을 칸 장면으로 쓴다(영상 프롬프트가 칸 장면을 쓴다)
+        for shot, scene in zip(merged["shots"], script.scenes, strict=True):
+            shot["scene_ko"] = scene.visual_ko
     return {**merged, **extra}
 
 
