@@ -268,3 +268,17 @@ def test_cache_key_follows_the_last_aggregate_run(world, cat, monkeypatch) -> No
     assert run is not None and run.status == "done" and rb.run_key(TENANT) == "aggregate:d2"
     ask()
     assert len(calls) == 2
+
+
+def test_gate_uses_the_aggregate_when_a_snapshot_is_ready(world, cat, monkeypatch) -> None:  # noqa: ANN001
+    """수집이 멈춰도(마지막 수집이 오래됨) 어제 기준 스냅샷이 있으면 고객 분석은 막지 않는다.
+    (3-2 ⑨)"""
+    late = NOW + timedelta(hours=3)  # 마지막 수집(NOW)에서 3시간 뒤, 기준일은 그대로 11/15
+    stale = cv.channel_value(world, TENANT, "365d", cat.sales, cat.id, late)[0]
+    assert stale.status == "insufficient"
+    assert any("마지막 수집" in r for r in stale.insufficient_reasons)
+    monkeypatch.setenv(read.READ_ENV, read.READ_AGGREGATE)
+    out = cv.channel_value(world, TENANT, "365d", cat.sales, cat.id, late)[0]
+    assert out.status == "ok" and out.summary.endswith("(11월 15일 기준)")
+    gone = cv.channel_value(world, TENANT, "365d", cat.sales, cat.id, late + timedelta(days=2))[0]
+    assert gone.status == "insufficient"  # 그 기준일 스냅샷이 없으면 원래 관문 그대로
