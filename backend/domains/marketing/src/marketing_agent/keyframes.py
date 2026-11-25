@@ -438,6 +438,8 @@ async def ensure(
     """프레임을 모두 그린다(이미 done인 장은 다시 안 그림). 하나라도 못 그리면 이유 코드."""
     cur = prepare(record_id, cid)
     for frame in cur.get("frames") or []:
+        if _render.superseded(record_id):  # 11/26 의뢰 캐릭터를 바꿨다: 남은 장을 그리지 않는다
+            return _render.CHARACTER_CHANGED
         index = int(frame.get("index") or 0)
         # 같이 도는 다른 ensure(시트 그림이 끝나며 부른 것 등)가 그리는 장은 건너뛴다.
         # 그때그때 다시 읽는다

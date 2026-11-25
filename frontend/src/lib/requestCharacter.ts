@@ -20,7 +20,7 @@ export const RIGHTS_LABEL = "우리 회사가 쓸 권리가 있는 그림이에�
 export const RIGHTS_HINT = "(체크해야 올릴 수 있어요)";
 export const UPLOAD_HINT = "PNG·JPG 한 장 · 사람 실사 사진은 그림체 캐릭터로 바꿔요";
 // 11/24: 홍보 영상은 캐릭터 답을 받아야 데이터분석이 시작된다 ("답하지 않으면 캐릭터 없이"를 뺐다)
-export const SPACE_NOTE = "올린 이미지는 이 회사 공간에만 저장하고 이미지 시트(CR-…)를 만들어요. 다른 회사에는 보이지 않아요. 답해야 다음 단계가 시작돼요. 영상 초안 준비 전까지는 바꿀 수 있어요.";
+export const SPACE_NOTE = "올린 이미지는 이 회사 공간에만 저장하고 이미지 시트(CR-…)를 만들어요. 다른 회사에는 보이지 않아요. 답해야 다음 단계가 시작돼요. 영상 요청 전까지는 바꿀 수 있어요.";
 export const PLAN_OUTDATED_LINE = "기획서는 예전 캐릭터 기준이에요";
 export const VIDEO_WAIT_LABEL = "영상 승인 대기";
 
@@ -76,12 +76,37 @@ const prepareStep = (r: Pick<WorkRequestRow, "plan">) => r.plan.find((p) => p.sk
 /** 홍보 영상 흐름(영상 준비 단계가 있는 의뢰)인가 */
 export const isVideoRequest = (r: Pick<WorkRequestRow, "plan">) => !!prepareStep(r);
 
-/** 아직 캐릭터를 바꿀 수 있나: 열린 의뢰이고 영상 준비가 시작되지 않았다 (서버도 같은 규칙, 뒤면 409) */
-export function characterOpen(r: CharacterRow): boolean {
+// 11/26 캐릭터는 영상 요청(사람 승인 요청) 전까지 바꾼다. 영상 초안 준비 뒤에 바꾸면 서버가 그 의뢰의
+// 시트·콘티·키프레임을 새 캐릭터로 다시 준비한다(그림 크레딧 다시 씀). 서버 규칙(총괄 `_reprepare`)과 같다
+export const VIDEO_SENT_STEPS: readonly string[] = ["held", "completed", "rejected_by_human"];
+export const REPREPARE_CONFIRM = "콘티·키프레임을 새 캐릭터로 다시 준비해요(그림 크레딧 다시 씀)";
+export const VIDEO_LOCKED_LINE = "영상 요청 뒤라 바꿀 수 없어요";
+export const PREPARING_LINE = "영상 초안을 준비하는 중이에요. 잠시 뒤 바꿀 수 있어요";
+
+/** 캐릭터 바꾸기 단계
+ *  - before_prepare: 영상 초안 준비 전(그냥 바뀐다) · after_prepare: 준비 뒤·영상 요청 전(다시 준비)
+ *  - preparing: 준비 단계가 도는 중(잠시 뒤) · video_requested: 영상을 사람 승인에 올린 뒤(못 바꿈)
+ *  - closed: 홍보 영상 의뢰가 아니거나 닫히거나 멈춘 의뢰 */
+export type CharacterStage = "before_prepare" | "after_prepare" | "preparing" | "video_requested" | "closed";
+
+export function characterStage(r: CharacterRow): CharacterStage {
   const step = prepareStep(r);
-  if (!step || r.stopped_at || !isOpenRequest(r)) return false;
-  return (r.steps[step.step_id]?.status ?? "pending") === "pending";
+  if (!step || r.stopped_at || !isOpenRequest(r)) return "closed";
+  const prep = r.steps[step.step_id]?.status ?? "pending";
+  if (prep === "pending") return "before_prepare";
+  const make = r.plan.find((p) => p.after.includes(step.step_id));
+  if (make && VIDEO_SENT_STEPS.includes(r.steps[make.step_id]?.status ?? "")) return "video_requested";
+  return prep === "running" ? "preparing" : "after_prepare";
 }
+
+/** 아직 캐릭터를 바꿀 수 있나: 열린 의뢰이고 영상 요청 전(준비 중이 아닐 때). 서버도 같은 규칙, 아니면 409 */
+export function characterOpen(r: CharacterRow): boolean {
+  const stage = characterStage(r);
+  return stage === "before_prepare" || stage === "after_prepare";
+}
+
+/** 바꾸면 콘티·키프레임을 다시 준비하나(화면 안에서 한 번 더 묻는다) */
+export const needsReprepare = (r: CharacterRow): boolean => characterStage(r) === "after_prepare";
 
 /** 질문 카드 모양 (시안 ①)
  *  - hidden: 홍보 영상 의뢰가 아니다
@@ -111,7 +136,7 @@ export const isPromoVideo = (r: Pick<CharacterRow, "plan" | "task">) =>
 
 /** 대화방 카드 맨 위에 질문을 띄우나: 홍보 영상 의뢰 · 영상 준비가 아직 pending · 캐릭터를 아직 정하지 않음 */
 export const chatAskShown = (r: CharacterRow) =>
-  isPromoVideo(r) && characterOpen(r) && r.brand_character_record_id === undefined;
+  isPromoVideo(r) && characterStage(r) === "before_prepare" && r.brand_character_record_id === undefined;
 
 /** 정한 뒤 접힌 한 줄: "회사 캐릭터: 이름(CR-…)" 또는 "캐릭터 없이 진행". [바꾸기]는 영상 준비 전까지만 (뒤면 서버도 409) */
 export function chatCharacterLine(r: CharacterRow, name?: string | null): { text: string; canChange: boolean } | null {

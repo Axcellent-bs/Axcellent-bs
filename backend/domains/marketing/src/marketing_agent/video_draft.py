@@ -103,6 +103,9 @@ class PrepareVideoDraftInput(AxModel):
     # 11/23 의뢰자가 고른 회사 대표 캐릭터(제작 기록 CR-…). 총괄이 의뢰 기록 값을 그대로 넘긴다.
     # 있으면 의뢰용 기록을 만들고 기획 장면으로 스토리보드를 붙여 영상은 캐릭터 경로(C)로 만든다
     brand_character_record_id: str | None = Field(default=None, pattern=r"^CR-[0-9a-f]{12}$")
+    # 11/26 영상 요청 전에 캐릭터를 바꿔 다시 준비할 때 예전 의뢰 기록(멈춤 표시: 그 기록으로는
+    # 그림을 더 그리지 않고 영상을 요청하지 않는다). 총괄이 의뢰 기록 값을 그대로 넘긴다
+    replaces_creative_record_id: str | None = Field(default=None, pattern=r"^CR-[0-9a-f]{12}$")
 
 
 class DurationAdjusted(AxModel):
@@ -405,6 +408,11 @@ def prepare_video_draft(
         if rid is not None and skipped is None:
             creative_id = rid
             generate_input[request_creative.INPUT_KEY] = rid
+    old = data.replaces_creative_record_id
+    if old and old != creative_id:  # 11/26 캐릭터를 바꿔 다시 준비: 예전 의뢰 기록은 멈춘다
+        from marketing_agent import creative_render
+
+        creative_render.supersede(old, data.brand_character_record_id)
     aspect = plan.aspect
     out = PreparedVideoDraft(
         post_draft_id=draft.post_draft_id,

@@ -100,6 +100,22 @@ CHARACTER_WAIT_NOTE = "캐릭터 답 대기"
 PLAN_STARTED = ("running", "waiting_async", "completed")  # 기획이 이미 캐릭터 없이 받은 상태
 CATBOOKS = "catbooks"
 CREATIVE_RECORD = re.compile(r"CR-[0-9a-f]{12}")  # 마케팅 제작 기록 번호
+# 11/26 영상 제작 단계가 영상을 사람 승인에 올린 뒤(대기·끝남·거절)면 캐릭터를 바꾸지 않는다
+VIDEO_SENT = ("held", "completed", "rejected_by_human")
+REPLACED_RECORD_KEY = "replaces_creative_record_id"  # 바꾸기 전 캐릭터의 의뢰 기록(CR-…)
+REPREPARE_NOTE = "캐릭터를 바꿔 다시 준비한다"
+RESET_STEP: dict[str, Any] = {
+    "status": "pending",
+    "attempts": 0,
+    "reason_code": None,
+    "result_ref": None,
+    "review_id": None,
+    "handoff_task_id": None,
+    "async_task_id": None,
+    "last_signal_at": None,
+    "started_at": None,
+    "finished_at": None,
+}
 Notifier = Callable[[str, str], None]
 Escalator = Callable[[str, str, str | None], None]
 ScopeCheck = Callable[[dict[str, Any], dict[str, Any]], bool]
@@ -389,6 +405,10 @@ class RequestRunner:
         for key in spec.get("row_input") or []:  # 사람이 화면에서 정한 의뢰 기록 값(번호)만
             if row.get(key):
                 payload = {**payload, key: row[key]}
+        # 11/26 캐릭터를 바꿔 다시 준비하면 예전 의뢰 기록 번호를 같이 넘긴다(마케팅이 멈춤 표시)
+        replaced = row.get(REPLACED_RECORD_KEY)
+        if request_tasks.BRAND_CHARACTER_KEY in (spec.get("row_input") or []) and replaced:
+            payload = {**payload, REPLACED_RECORD_KEY: replaced}
         self._update(rid, step_id, status="running", grade=grade, started_at=stamp())
         result = await self._call(engine, row, spec, entry.dept, step_id, payload, grade)
         self._apply(rid, step_id, result, spec)
@@ -597,10 +617,20 @@ class RequestRunner:
             if key == "insight":  # 기획 입력은 근거(facts)가 있어야 쓸 수 있다
                 ok = ok and bool(value.get("facts"))
             self._requests.set_carry(rid, step_id, value if ok else None)
-        if spec.get("takes_carry"):  # 넘겨받은 값은 쓰고 나면 지운다
+        # 넘겨받은 값은 쓰고 나면 지운다. 11/26 영상 초안 준비(캐릭터를 받는 단계)는 기획 결과를
+        # 둔다: 영상 요청 전에 캐릭터를 바꾸면 같은 기획으로 다시 준비한다(`_reprepare`)
+        keep = request_tasks.BRAND_CHARACTER_KEY in (spec.get("row_input") or [])
+        if spec.get("takes_carry") and not keep:
             source = [spec["carry_from"]] if spec.get("carry_from") else spec.get("after") or []
             for before in source:
                 self._requests.set_carry(rid, before, None)
+                # 영상까지 끝났으면 준비 단계가 남겨 둔 기획 결과도 지운다(더 다시 준비하지 않음)
+                row = self._requests.get(rid) or {}
+                prev = next((p for p in row.get("plan") or [] if p["step_id"] == before), None)
+                if prev and request_tasks.BRAND_CHARACTER_KEY in (prev.get("row_input") or []):
+                    kept = [prev["carry_from"]] if prev.get("carry_from") else prev.get("after")
+                    for origin in kept or []:
+                        self._requests.set_carry(rid, origin, None)
         self._update(
             rid,
             step_id,
@@ -806,8 +836,11 @@ class RequestRunner:
             return "not_video", False
         step = row["steps"].get(prepare["step_id"]) or {}
         closed = row["status"] not in OPEN_STATES or bool(row.get("stopped_at"))
-        if closed or step.get("status") != "pending":
+        if closed:
             return "started", False
+        if step.get("status") != "pending":
+            # 11/26 영상 요청(사람 승인 요청) 전까지는 바꾼다: 같은 의뢰를 새 캐릭터로 다시 준비
+            return self._reprepare(row, prepare, record_id, by)
         outdated = any(
             p.get("dept") == "planning"
             and (row["steps"].get(p["step_id"]) or {}).get("status") in PLAN_STARTED
@@ -836,6 +869,45 @@ class RequestRunner:
         else:
             self._tell(row, said)
         return "ok", outdated
+
+    def _reprepare(
+        self, row: dict[str, Any], prepare: dict[str, Any], record_id: str | None, by: str | None
+    ) -> tuple[str, bool]:
+        """영상 초안 준비가 시작된 뒤 캐릭터를 바꾼다 (11/26). (결과, plan_outdated=True).
+
+        - 영상 제작 단계가 영상을 사람 승인에 올렸으면(held·completed·rejected_by_human)
+          `video_requested`.
+        - 준비 단계가 도는 중이면 `busy`(잠깐 뒤 다시). 기획 결과(carry)가 없으면 `no_plan`.
+        - 아니면 새 캐릭터를 적고 준비·제작 단계를 처음 상태로 되돌려 다시 시킨다(`reprepared`).
+          마케팅은 새 캐릭터의 의뢰 기록에 시트·콘티·키프레임을 다시 준비하고(그림 크레딧을
+          다시 쓴다), 예전 기록(`replaces_creative_record_id`)은 멈춤 표시를 해 그 기록으로는
+          영상을 요청하지 않는다. 예전 제작 단계의 긴 작업 결과는 작업 번호가 달라 반영되지 않는다.
+        """
+        rid = row["request_id"]
+        steps = row["steps"]
+        make = next((p for p in row["plan"] if prepare["step_id"] in (p.get("after") or [])), None)
+        make_step = (steps.get(make["step_id"]) or {}) if make else {}
+        if make_step.get("status") in VIDEO_SENT:
+            return "video_requested", False
+        prep = steps.get(prepare["step_id"]) or {}
+        if prep.get("status") == "running":
+            return "busy", False
+        source = prepare.get("carry_from") or next(iter(prepare.get("after") or []), None)
+        if not source or not self._requests.get_carry(rid, source):
+            return "no_plan", False
+        old = prep.get("result_ref")
+        self._requests.set_brand_character(rid, record_id, by)
+        self._requests.set_replaced_record(
+            rid, old if isinstance(old, str) and CREATIVE_RECORD.fullmatch(old) else None
+        )
+        for spec in (prepare, make):
+            if spec is not None:
+                self._update(rid, spec["step_id"], **RESET_STEP, note=REPREPARE_NOTE)
+        said = f"캐릭터 {record_id}로" if record_id else "캐릭터 없이"
+        self._tell(row, f"{said} 바꿔 콘티·키프레임을 다시 준비할게요(그림 크레딧을 다시 써요).")
+        self._requests.set_status(rid, "running", "캐릭터를 바꿔 영상 초안을 다시 준비한다")
+        self.start(rid)
+        return "reprepared", True
 
     def held_videos(self, review_id: str | None = None) -> list[tuple[str, str, str]]:
         """영상 승인 대기 단계: (의뢰, 단계, review_id). `review_id`를 주면 그것만."""

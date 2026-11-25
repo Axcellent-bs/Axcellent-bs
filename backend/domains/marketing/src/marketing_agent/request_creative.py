@@ -152,6 +152,7 @@ def prepare_storyboard(brand_id: str, context_id: str, plan: Any) -> tuple[str |
     record_id = store.copy_for_request(brand_id, context_id)
     if record_id is None:
         return None, "record_not_found"
+    _render.unsupersede(record_id)  # 11/26 바꿨다가 이 캐릭터로 되돌아오면 다시 쓴다
     _copy_sheet_image(brand_id, record_id)
     rec = store.get(record_id) or {}
     board = plan_storyboard(plan, rec.get("sheet") or {})
@@ -314,8 +315,13 @@ async def make_video(request: AgentRequest, ledger: MediaLedger) -> AgentResult:
     video = _part(record_id, "video")
     if video.get("status") == "rejected":  # 거절된 영상은 다시 승인에 올리지 않는다
         return _result(request, TaskStatus.FAILED, VIDEO_REJECTED, **out, retryable=False)
+    changed = _result(request, TaskStatus.FAILED, _render.CHARACTER_CHANGED, **out, retryable=False)
+    if not video.get("status") and _render.superseded(record_id):  # 11/26 캐릭터를 바꾼 의뢰
+        return changed
     if video.get("status") != "done":
         blocked = await _ensure_images(request, ledger, record_id, rec)
+        if not video.get("status") and _render.superseded(record_id):  # 그리는 동안 바꿨다
+            return changed
         if blocked:
             return _result(request, TaskStatus.FAILED, blocked, **out)
     video = _part(record_id, "video")

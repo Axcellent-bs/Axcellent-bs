@@ -7,7 +7,8 @@ import { orchestrator } from "@/lib/orchestrator";
 import {
   CHARACTER_NOTE, CHARACTER_QUESTION, KIND_OPTIONS, PLAN_OUTDATED_LINE, RIGHTS_HINT, RIGHTS_LABEL, SPACE_NOTE,
   UPLOAD_HINT, VIRTUAL_CONFIRM_LABEL, VIRTUAL_HUMAN_LABEL, VIRTUAL_NOTE,
-  askMode, canUploadKind, chatCharacterLine, isPromoVideo, isReferenceKind, planOutdated, savedLine,
+  PREPARING_LINE, REPREPARE_CONFIRM, VIDEO_LOCKED_LINE,
+  askMode, canUploadKind, characterStage, chatCharacterLine, isPromoVideo, isReferenceKind, needsReprepare, planOutdated, savedLine,
   type CharacterRow, type UploadKind,
 } from "@/lib/requestCharacter";
 import { refreshWorkRequests } from "@/components/office/useWorkRequests";
@@ -39,6 +40,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
   const [saved, setSaved] = useState<BrandCharacter[] | null>(null);
   const [upload, setUpload] = useState(false);
   const [change, setChange] = useState(false);
+  const [confirm, setConfirm] = useState(false); // 11/26 영상 준비 뒤 바꾸기: 다시 준비 확인 단계
   const [file, setFile] = useState<File | null>(null);
   const [rights, setRights] = useState(false);
   const [kind, setKind] = useState<UploadKind>("real_photo");
@@ -62,6 +64,24 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
   const chosen = saved?.find((c) => c.record_id === row.brand_character_record_id);
   const line = chat ? chatCharacterLine(row, chosen?.name) : null;
   const def = saved?.find((c) => c.is_default) ?? saved?.[0];
+  const stage = characterStage(row);
+  // 영상 초안 준비 뒤면 [바꾸기] 전에 화면 안에서 한 번 더 묻는다(콘티·키프레임 다시 준비, 그림 크레딧)
+  const startChange = () => (needsReprepare(row) ? setConfirm(true) : setChange(true));
+  const changeButton = (
+    <button type="button" className="text-xs text-brand-700 underline" disabled={busy} onClick={startChange}>바꾸기</button>
+  );
+  const lockedLine = stage === "video_requested" || stage === "preparing" ? (
+    <p className="chip self-start bg-ink-100 text-[11px] text-ink-700">{stage === "video_requested" ? VIDEO_LOCKED_LINE : PREPARING_LINE}</p>
+  ) : null;
+  const confirmBox = confirm && !change ? (
+    <div role="group" aria-label="캐릭터 바꾸기 확인" className="space-y-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+      <p>{REPREPARE_CONFIRM}</p>
+      <span className="flex flex-wrap gap-1.5">
+        <button type="button" className="btn-primary btn-card" disabled={busy} onClick={() => { setConfirm(false); setChange(true); }}>다시 준비하고 바꾸기</button>
+        <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => setConfirm(false)}>취소</button>
+      </span>
+    </div>
+  ) : null;
 
   const pick = (recordId: string | null) => {
     setBusy(true);
@@ -121,9 +141,11 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
       {chat && line && (mode === "closed" || mode === "chosen" || mode === "none") && (
         <p className="text-ink-900">
           {line.text}
-          {line.canChange && <> · <button type="button" className="text-xs text-brand-700 underline" disabled={busy} onClick={() => setChange(true)}>바꾸기</button></>}
+          {line.canChange && <> · {changeButton}</>}
         </p>
       )}
+      {(mode === "closed" || mode === "chosen" || mode === "none") && lockedLine}
+      {confirmBox}
       {/* 11/24 시안 ②: 기획이 시작된 뒤 바꿨으면 한 줄 (서버 plan_outdated와 같은 규칙) */}
       {(mode === "closed" || mode === "chosen" || mode === "none") && planOutdated(row) && (
         <p className="text-xs text-amber-800">{PLAN_OUTDATED_LINE}</p>
@@ -135,7 +157,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
             <span className="chip bg-ink-100 text-[11px] text-ink-700">
               {row.brand_character_record_id ? (chosen?.name ?? row.brand_character_record_id) : "캐릭터 없이"}
             </span>
-            {mode !== "closed" && <button type="button" className="text-xs text-brand-700 underline" disabled={busy} onClick={() => setChange(true)}>바꾸기</button>}
+            {mode !== "closed" && changeButton}
           </p>
           {row.brand_character_record_id && <p className="chip self-start bg-amber-50 text-[11px] text-amber-800">{CHARACTER_NOTE}</p>}
         </>

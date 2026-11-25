@@ -176,7 +176,8 @@ async def test_changing_the_answer_before_prepare_is_ok_and_after_plan_is_outdat
     assert r.answer_brand_character(rid, OTHER) == ("ok", True)  # 기획서는 예전 캐릭터 기준
     assert reqs.get(rid)["brand_character_record_id"] == OTHER
     reqs.update_step(rid, "prepare", status="running")
-    assert r.answer_brand_character(rid, None) == ("started", False)  # 지금 그대로
+    # 11/26: 준비 중이면 잠시 뒤(예전 기대값: "started"). 값은 그대로
+    assert r.answer_brand_character(rid, None) == ("busy", False)
     assert reqs.get(rid)["brand_character_record_id"] == OTHER
 
 
