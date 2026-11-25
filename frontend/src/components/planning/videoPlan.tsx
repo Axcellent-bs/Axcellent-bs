@@ -8,7 +8,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Tag } from '@/components/planning-common/parts'
 import { usePrinting } from '@/lib/print'
 import { svgDataUri } from '@/lib/storyboardSvg'
-import { sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoPurposeChip, type VideoPlanView } from '@/lib/videoPlan'
+import { sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoPurposeChip, videoSvgLine, type VideoPlanView } from '@/lib/videoPlan'
 import { sceneRole, sceneShares } from '@/lib/videoStoryboard'
 import { orchestrator } from '@/lib/orchestrator'
 import { proposalOfRequest, requestActionError, stepRows } from '@/lib/requestCards'
@@ -32,6 +32,7 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
   const shares = sceneShares(v.scenes)
   const purpose = videoPurposeChip(v)
   const why = videoFallbackLine(v)
+  const svgWhy = videoSvgLine(v)
   return (
     <section className="pp-part sb" aria-label="영상 제작안">
       <h3 className="pp-part-h">영상 제작안<Tag>{videoPlanChip(v)}</Tag>{why && <span className="sb-fallback">{why}</span>}{purpose && <span className="chip sb-purpose" title="광고 목적">{purpose}</span>}</h3>
@@ -52,6 +53,7 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
           <li key={s.n} className={`sb-c${i % 4}`} style={{ flexBasis: `${shares[i]}%` }} title={`장면 ${s.n} · ${sceneTime(s)}`}>{s.n} · {sceneTime(s)}</li>
         ))}
       </ol>
+      {svgWhy && <p className="sb-fallback sb-svg-why">{svgWhy}</p>}
       <ol className="sb-cards" style={{ '--n': v.scenes.length } as CSSProperties}>
         {v.scenes.map((s, i) => {
           const keyframe = sceneKeyframeLine(s)

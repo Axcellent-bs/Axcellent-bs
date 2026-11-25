@@ -17,10 +17,10 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
+from ax_agent_template import pose_render as pr
 from ax_agent_template.llm import LLMSettings, MockLLMClient
 from ax_contracts.schemas.planning import KeyPose, VideoPlan, VideoScene
 from ax_workflow.models import Proposal
-from planning_agent import pose_render as pr
 from planning_agent import storyboard_svg as sb
 from planning_agent import video_plan as vp
 
@@ -43,16 +43,10 @@ SAMPLES = [
 ]  # fmt: skip
 PROP_COLORS = {"book": "#e2552f", "desk": "#c9a27a", "phone": "#2b2f36", "shelf": "#b98d63",
                "cup": "#f4f1ea"}  # fmt: skip
-EYE = 'fill="#333"'
 
 
 def _pose(**kw: Any) -> KeyPose:
     return KeyPose.model_validate(kw)
-
-
-def _head_r(svg: str) -> float:
-    """머리 구(피부 그라데이션 원 중 가장 큰 것)의 반지름."""
-    return max(float(r) for r in re.findall(r'<circle [^>]*r="([\d.]+)" fill="url\(#sk\)"', svg))
 
 
 # ---------------------------------------------------------------- 계약
@@ -102,40 +96,8 @@ def test_same_pose_same_svg_and_under_16kb(raw: dict[str, Any]) -> None:
     assert 'fill="url(#sk)"' in clean and "<stop" in clean
 
 
-def test_different_pose_different_svg() -> None:
-    a, b = KeyPose.model_validate(SAMPLES[0]), KeyPose.model_validate(SAMPLES[2])
-    assert pr.render(a) != pr.render(b)
-
-
-def test_shot_size_close_is_bigger_than_medium_is_bigger_than_full() -> None:
-    r = {shot: _head_r(pr.render(_pose(shot=shot))) for shot in ("close", "medium", "full")}
-    assert r["close"] > r["medium"] > r["full"]
-
-
-def test_eyes_only_when_facing_the_camera() -> None:
-    assert pr.render(_pose(yaw=0)).count(EYE) == 2
-    assert EYE not in pr.render(_pose(yaw=90))
-    assert EYE not in pr.render(_pose(yaw=-90))
-    assert EYE not in pr.render(_pose(yaw=180))  # 뒷모습엔 눈을 그리지 않는다
-
-
-@pytest.mark.parametrize("prop", list(PROP_COLORS))
-def test_props_are_drawn(prop: str) -> None:
-    svg = pr.render(_pose(prop=prop, arm_l={"raise": 60, "bend": 40}, arm_r={"raise": 60}))
-    assert PROP_COLORS[prop] in svg
-    others = set(PROP_COLORS.values()) - {PROP_COLORS[prop]}
-    assert not any(c in svg for c in others)
-    assert not any(c in pr.render(_pose()) for c in PROP_COLORS.values())
-
-
-def test_other_aspects_fit_the_frame() -> None:
-    assert 'viewBox="0 0 320 180"' in pr.render(_pose(), "16:9")
-    assert 'viewBox="0 0 180 180"' in pr.render(_pose(), "1:1")
-
-
-def test_label_is_escaped_text() -> None:
-    svg = pr.render(_pose(label_ko="<b>책 & 컵</b>"))
-    assert "&lt;b&gt;책 &amp; 컵&lt;/b&gt;" in svg and "<b>" not in svg
+# 렌더러만 보는 시험(포즈마다 다른 그림·샷 크기·눈·소품·비율·글자 이스케이프)은 공용 렌더러로
+# 옮겼다: shared/agent-template/tests/test_pose_render.py. 여기는 기획 정리 규칙 통과만 본다
 
 
 def test_every_shot_and_prop_stays_under_16kb() -> None:
@@ -200,8 +162,67 @@ def test_unknown_shot_and_prop_from_llm_become_defaults_and_label_falls_back() -
 def test_llm_failure_keeps_plan_without_pose_or_svg() -> None:
     plan = _plan()
     for llm in (None, MockLLMClient(responses={})):
-        assert asyncio.run(sb.draw(llm, plan, "ctx")) == (plan, 0)
+        drawn, changed = asyncio.run(sb.draw(llm, plan, "ctx"))
+        assert changed == 0 and drawn.svg_reason  # 11/25 5-1: 이유를 남긴다 (장면은 그대로)
+        assert drawn.scenes == plan.scenes
+        assert drawn.model_copy(update={"svg_reason": ""}) == plan
     assert all(s.start_pose is None and not s.start_svg for s in plan.scenes)
+
+
+class _Slow:
+    """제한 시간보다 늦게 답하는 가짜 LLM."""
+
+    async def structured(self, *_: Any, **__: Any) -> Any:
+        await asyncio.sleep(5)
+
+
+class _Raises:
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+
+    async def structured(self, *_: Any, **__: Any) -> Any:
+        raise self.exc
+
+
+def _reason(llm: Any) -> str:
+    drawn, changed = asyncio.run(sb.draw(llm, _plan(), "ctx"))
+    assert changed == 0 and all(not s.start_svg and not s.end_svg for s in drawn.scenes)
+    return drawn.svg_reason
+
+
+def test_svg_reason_for_each_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(sb.MODEL_ENV, raising=False)
+    assert _reason(None) == "no_llm"
+    monkeypatch.setattr(sb, "TIMEOUT_SECONDS", 0.05)
+    assert _reason(_Slow()) == "timeout"
+    assert _reason(_Raises(sb.LLMFormatError("형식"))) == "bad_format"
+    assert _reason(_Raises(RuntimeError("끊김"))) == "error"
+    empty = MockLLMClient(responses={sb._PoseOut: sb._PoseOut.model_validate({"scenes": []})})
+    assert _reason(empty) == "bad_format"  # 답은 왔지만 장면이 없다
+    wrong_n = sb._PoseOut.model_validate({"scenes": [{"n": 99, "start": SAMPLES[0]}]})
+    assert _reason(MockLLMClient(responses={sb._PoseOut: wrong_n})) == "rejected"
+
+
+def test_timeout_is_150s_for_the_background_flow() -> None:
+    assert sb.TIMEOUT_SECONDS == 150.0
+
+
+def test_partial_poses_draw_only_those_scenes_and_success_has_no_reason() -> None:
+    plan = _plan()
+    got = sb._PoseOut.model_validate({"scenes": [{"n": 2, "start": SAMPLES[0], "end": SAMPLES[1]}]})
+    drawn, changed = asyncio.run(sb.draw(MockLLMClient(responses={sb._PoseOut: got}), plan, "c"))
+    assert changed == 1 and drawn.svg_reason == ""
+    for s in drawn.scenes:
+        assert bool(s.start_svg) == bool(s.end_svg) == (s.n == 2)
+    full, n = asyncio.run(sb.draw(MockLLMClient(responses={sb._PoseOut: _out(plan)}), plan, "c"))
+    assert n == len(plan.scenes) and full.svg_reason == ""
+
+
+def test_failure_log_has_kind_seconds_and_count_only(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING"):
+        _reason(_Raises(RuntimeError("비밀 프롬프트 내용")))
+    line = " ".join(r.getMessage() for r in caplog.records)
+    assert "RuntimeError" in line and "s 0/" in line and "비밀" not in line
 
 
 class _Recorder:

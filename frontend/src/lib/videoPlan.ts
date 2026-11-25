@@ -41,7 +41,19 @@ export interface VideoPlanView {
   offerKo?: string // 혜택 한 줄
   ctaKo?: string // 마지막 행동 문구
   fallbackReason?: VideoFallbackReason // 규칙 초안이 된 이유 (11/25, 예전 제작안·LLM 제작안은 없음)
+  svgReason?: VideoFallbackReason // 3D 마네킹 콘티를 못 그린 이유 (11/25, 그렸거나 예전 제작안은 없음)
 }
+
+/** "장면 그림 자리" 위 이유 한 줄 (계약 VideoPlan.svg_reason) */
+export const VIDEO_SVG_LINE: Record<VideoFallbackReason, string> = {
+  no_llm: '회사 AI가 연결되지 않아 콘티를 못 그렸어요',
+  timeout: 'AI가 제한 시간 안에 포즈를 주지 못했어요',
+  bad_format: 'AI 포즈 답 형식이 맞지 않았어요',
+  rejected: '포즈 답이 규칙에 걸렸어요',
+  error: '콘티 호출이 실패했어요',
+}
+/** 콘티를 못 그린 이유가 있을 때만 그 한 줄, 아니면 '' (지금 화면 그대로) */
+export const videoSvgLine = (v: Pick<VideoPlanView, 'svgReason'>) => (v.svgReason ? VIDEO_SVG_LINE[v.svgReason] : '')
 
 export type VideoFallbackReason = 'no_llm' | 'timeout' | 'bad_format' | 'rejected' | 'error'
 /** 규칙 초안 칩 옆 이유 한 줄 (계약 VideoPlan.fallback_reason) */
@@ -112,6 +124,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
   const purpose = str(o.purpose)
   const offerKo = str(pick(o, 'offerKo', 'offer_ko')), ctaKo = str(pick(o, 'ctaKo', 'cta_ko'))
   const fallback = str(pick(o, 'fallbackReason', 'fallback_reason'))
+  const svgWhy = str(pick(o, 'svgReason', 'svg_reason'))
   return {
     concept, durationS, aspect, script: str(o.script),
     scenes: (scenes as VideoSceneView[]).slice().sort((a, b) => a.n - b.n),
@@ -122,6 +135,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     ...(offerKo ? { offerKo } : {}),
     ...(ctaKo ? { ctaKo } : {}),
     ...(FALLBACKS.has(fallback) ? { fallbackReason: fallback as VideoFallbackReason } : {}),
+    ...(FALLBACKS.has(svgWhy) ? { svgReason: svgWhy as VideoFallbackReason } : {}),
   }
 }
 

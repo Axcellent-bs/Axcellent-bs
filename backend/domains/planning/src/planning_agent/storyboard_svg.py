@@ -22,20 +22,24 @@ import asyncio
 import logging
 import os
 import re
+import time
 import xml.etree.ElementTree as ET  # noqa: S405 - DOCTYPE·ENTITY가 든 입력은 파싱 전에 버린다
 from dataclasses import replace
 from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ax_agent_template import pose_render
 from ax_agent_template.company_ai import settings_for
-from ax_agent_template.llm import LLMClient
+from ax_agent_template.llm import LLMClient, LLMFormatError
 from ax_contracts.schemas.planning import KeyPose, VideoPlan
-from planning_agent import pose_render
 
 log = logging.getLogger(__name__)
 
-TIMEOUT_SECONDS = 90
+# 11/25 PROP-38: 제작안은 AI 초안인데 포즈 단계가 조용히 실패해 그림이 하나도 없었다. 의뢰 흐름은
+# 뒤에서 돈다(제작안 video_plan.TIMEOUT_SECONDS와 같게 150초)
+TIMEOUT_SECONDS = 150.0
+FORMAT_ERRORS = (LLMFormatError, ValidationError, ValueError)
 # 계약 VideoScene.start_svg·end_svg 길이 상한과 같다 (11/25 3D 마네킹 콘티로 8KB → 16KB)
 MAX_SVG_BYTES: Final = 16384
 MAX_NOTE = 300
@@ -140,35 +144,9 @@ def sanitize_svg(raw: object) -> str:
 # ---------------------------------------------------------------- 그리기
 
 
-class _ArmOut(BaseModel):
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
-    raise_: float = Field(default=0.0, alias="raise")
-    bend: float = 0.0
-
-
-class _HeadOut(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    yaw: float = 0.0
-    pitch: float = 0.0
-
-
-class _PoseLLM(BaseModel):
-    """LLM이 내는 포즈 숫자. 모르는 shot·prop은 기본값으로 바꾸고 범위는 계약 KeyPose가 자른다."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    shot: str = "medium"
-    x: float = 0.0
-    z: float = 0.0
-    yaw: float = 0.0
-    head: _HeadOut = Field(default_factory=_HeadOut)
-    arm_l: _ArmOut = Field(default_factory=_ArmOut)
-    arm_r: _ArmOut = Field(default_factory=_ArmOut)
-    step: float = 0.0
-    prop: str | None = None
-    label_ko: str = ""
+# 포즈 답 파싱·렌더러는 공용(`ax_agent_template.pose_render`, 마케팅 콘티도 같이 쓴다)
+_PoseLLM = pose_render.PoseLLM
+key_pose = pose_render.key_pose
 
 
 class _PoseFrame(BaseModel):
@@ -187,25 +165,17 @@ class _PoseOut(BaseModel):
     scenes: list[_PoseFrame] = Field(default_factory=list)
 
 
-SHOTS: Final = ("close", "medium", "full")
-PROPS: Final = ("book", "desk", "phone", "shelf", "cup")
-
-POSE_RULES = """- 장면마다 start(첫 화면)와 end(끝 화면)에 마네킹 포즈 숫자만 JSON으로 쓴다.
+POSE_RULES = (
+    """- 장면마다 start(첫 화면)와 end(끝 화면)에 마네킹 포즈 숫자만 JSON으로 쓴다.
   글 문단·SVG·그림 원문은 쓰지 않는다(그림은 코드가 포즈로 그린다).
   - shot: camera_en의 샷 크기. close-up·face·detail → "close", medium·waist → "medium",
     wide·full body·establishing → "full"
-  - x: 좌우 위치 -1.5~1.5 (m, + = 화면 오른쪽), z: 카메라에서 먼 정도 0~3 (m)
-  - yaw: 몸 방향 -180~180 (0 = 카메라를 봄, 90 = 화면 왼쪽을 봄, -90 = 화면 오른쪽, 180 = 뒷모습)
-  - head: {yaw: -80~80 (몸 기준 좌우 시선), pitch: -40~40 (+ = 아래를 봄)}
-  - arm_l·arm_r: {raise: -30~170 (0 = 내림, 90 = 앞으로 뻗음, 170 = 머리 위), bend: 0~150 (팔꿈치)}
-  - step: 걸음 폭 0~0.6 (0 = 서 있음, 0.4 넘으면 크게 걷거나 뜀)
-  - prop: 없으면 null. "book"(왼손 책)·"desk"(앞 책상)·"phone"(오른손 휴대폰)·"shelf"(뒤 책장)·
-    "cup"(오른손 컵) 중 하나
-  - label_ko: 칸 위 한 줄 (한국어 15자 안팎, 예: "0초 · 놀라 돌아봄").
-    자막·회사 이름·행동 문구는 쓰지 않는다
-- 인물 위치·시선·손 동작은 start_frame·end_frame·action_en을 각도로 옮긴다.
+"""
+    + pose_render.POSE_FIELDS
+    + """- 인물 위치·시선·손 동작은 start_frame·end_frame·action_en을 각도로 옮긴다.
 - 모든 장면을 같은 포즈로 두지 않는다. 장면마다 샷·방향·팔 동작이 달라 보이게 한다.
 """
+)
 
 PROMPT = f"""너는 영상 기획의 콘티 작가다.
 데이터 블록의 장면(scenes)마다 첫 화면(start_frame)과 끝 화면(end_frame)의 인물 포즈를 숫자로
@@ -253,22 +223,6 @@ def _data(plan: VideoPlan, note: str, only: int | None) -> dict[str, Any]:
     return data
 
 
-def key_pose(got: _PoseLLM, label: str) -> KeyPose | None:
-    """LLM 포즈 → 계약 KeyPose (범위는 자른다). 모르는 shot은 medium, 모르는 prop은 없음."""
-    try:
-        return KeyPose.model_validate({
-            "shot": got.shot if got.shot in SHOTS else "medium",
-            "x": got.x, "z": got.z, "yaw": got.yaw,
-            "head": {"yaw": got.head.yaw, "pitch": got.head.pitch},
-            "arm_l": {"raise": got.arm_l.raise_, "bend": got.arm_l.bend},
-            "arm_r": {"raise": got.arm_r.raise_, "bend": got.arm_r.bend},
-            "step": got.step, "prop": got.prop if got.prop in PROPS else None,
-            "label_ko": got.label_ko.strip() or label,
-        })  # fmt: skip
-    except ValueError:
-        return None
-
-
 def drawn(pose: KeyPose, aspect: str) -> str:
     """포즈 → 정리까지 마친 SVG (렌더 결과도 정리 규칙을 한 번 통과시킨다)."""
     return sanitize_svg(pose_render.render(pose, aspect))
@@ -297,14 +251,32 @@ def apply(plan: VideoPlan, got: _PoseOut, only: int | None = None) -> tuple[Vide
     return plan.model_copy(update={"scenes": scenes}), changed
 
 
+def svg_reason_of(exc: BaseException) -> str:
+    """포즈 호출 실패 → 계약 VideoPlan.svg_reason."""
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, FORMAT_ERRORS):
+        return "bad_format"
+    return "error"
+
+
+def _failed(plan: VideoPlan, reason: str) -> tuple[VideoPlan, int]:
+    return plan.model_copy(update={"svg_reason": reason}), 0
+
+
 async def draw(
     llm: Any, plan: VideoPlan, context_id: str, note: str = "", only: int | None = None
 ) -> tuple[VideoPlan, int]:
     """장면별 첫·끝 포즈를 받아 3D 마네킹 콘티로 그린다. (제작안, 바뀐 장면 수).
-    LLM이 없거나 실패하면 (그대로, 0) — 포즈·SVG 없이 제작안 그대로. LLM 호출은 한 번."""
+
+    LLM 호출은 한 번. 포즈가 일부 장면만 오면 온 장면만 그리고 나머지는 비운다.
+    하나도 못 그리면 (장면 그대로, 0)이고 `svg_reason`에 이유를 남긴다(그렸으면 "").
+    로그에는 예외 종류·경과 초·그린 장면 수만 남긴다(포즈 값·프롬프트는 남기지 않는다)."""
     llm = pose_llm(llm)
     if llm is None:
-        return plan, 0
+        log.warning("마네킹 콘티: LLM 없음 → 그림 없이 제작안 그대로")
+        return _failed(plan, "no_llm")
+    started = time.monotonic()
     try:
         got = await asyncio.wait_for(
             llm.structured(PROMPT, _PoseOut, untrusted=_data(plan, note, only),
@@ -312,6 +284,15 @@ async def draw(
             TIMEOUT_SECONDS,
         )  # fmt: skip
     except Exception as exc:  # noqa: BLE001 - 포즈·SVG 없이 제작안 그대로
-        log.info("마네킹 콘티 포즈를 못 받음: %s", type(exc).__name__)
-        return plan, 0
-    return apply(plan, got, only)
+        log.warning("마네킹 콘티 포즈 실패: %s %.1fs 0/%d장면", type(exc).__name__,
+                    time.monotonic() - started, len(plan.scenes))  # fmt: skip
+        return _failed(plan, svg_reason_of(exc))
+    out, changed = apply(plan, got, only)
+    elapsed = time.monotonic() - started
+    if not changed:
+        reason = "rejected" if got.scenes else "bad_format"
+        log.warning("마네킹 콘티 포즈를 하나도 못 씀: %s %.1fs 0/%d장면", reason, elapsed,
+                    len(plan.scenes))  # fmt: skip
+        return _failed(plan, reason)
+    log.info("마네킹 콘티: %.1fs %d/%d장면", elapsed, changed, len(plan.scenes))
+    return out.model_copy(update={"svg_reason": ""}), changed

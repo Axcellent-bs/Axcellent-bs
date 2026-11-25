@@ -1,8 +1,12 @@
-"""3D 마네킹 콘티 렌더러 (11/25, 표준 라이브러리만).
+"""3D 마네킹 콘티 렌더러 (11/25, 표준 라이브러리만 + 계약 KeyPose).
 
-기획 LLM은 포즈 숫자(`KeyPose`)만 내고, 그림은 이 코드가 그린다. 어떤 모델이 포즈를 내도 같은
+LLM은 포즈 숫자(`KeyPose`)만 내고, 그림은 이 코드가 그린다. 어떤 모델이 포즈를 내도 같은
 마네킹·같은 바닥·같은 빛이라 칸마다 인물 모양이 달라지지 않는다. 화면 시안(3D 마네킹 콘티)의
 JS(skeleton·cam·project·draw)를 그대로 옮겼다.
+
+콘티를 만드는 길이 기획(제작안)과 마케팅(의뢰 스토리보드·스토리보드 다시 만들기) 둘이라 공용으로
+둔다(11/25, 도메인끼리 import하지 않음. 처음엔 `planning_agent.pose_render`였고 출력은 같다).
+LLM 답 파싱(`PoseLLM` → `key_pose`)·포즈 숫자 지시문(`POSE_FIELDS`)도 같이 쓴다.
 
 - 관절 뼈대 → 몸 방향(yaw) 회전 → 샷 크기별 카메라 원근 투영
 - 배경 그라데이션·바닥 격자(0.5m)·그림자 타원·소품 → 깊이순으로 팔다리(굵은 둥근 선 + 하이라이트),
@@ -18,6 +22,8 @@ import math
 from collections.abc import Callable
 from typing import Final
 from xml.sax.saxutils import escape
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from ax_contracts.schemas.planning import KeyPose
 
@@ -37,6 +43,75 @@ SIZES: Final = {"9:16": (180, 320), "1:1": (180, 180), "16:9": (320, 180)}
 PANTS, BODY, SLEEVE, SKIN_LINE, SHOE = "#3a5590", "#4f7fe0", "#5b8ae6", "#f0c69c", "#222"
 GRID, FLOOR, LABEL, EYE = "#e6dccd", "#fdfbf7", "#6b6256", "#333"
 HIGHLIGHT, SHADOW = "rgba(255,255,255,.25)", "rgba(60,50,40,.25)"
+BG_TOP, BG_BOTTOM = "#f3efe7", "#fbf8f2"
+
+SHOTS: Final = ("close", "medium", "full")
+PROPS: Final = ("book", "desk", "phone", "shelf", "cup")
+
+# 포즈 숫자 지시문 (기획·마케팅 같은 문장). 앞에 "무엇을 보고 shot을 고르나" 한 줄을 붙여 쓴다
+POSE_FIELDS = """  - x: 좌우 위치 -1.5~1.5 (m, + = 화면 오른쪽), z: 카메라에서 먼 정도 0~3 (m)
+  - yaw: 몸 방향 -180~180 (0 = 카메라를 봄, 90 = 화면 왼쪽을 봄, -90 = 화면 오른쪽, 180 = 뒷모습)
+  - head: {yaw: -80~80 (몸 기준 좌우 시선), pitch: -40~40 (+ = 아래를 봄)}
+  - arm_l·arm_r: {raise: -30~170 (0 = 내림, 90 = 앞으로 뻗음, 170 = 머리 위), bend: 0~150 (팔꿈치)}
+  - step: 걸음 폭 0~0.6 (0 = 서 있음, 0.4 넘으면 크게 걷거나 뜀)
+  - prop: 없으면 null. "book"(왼손 책)·"desk"(앞 책상)·"phone"(오른손 휴대폰)·"shelf"(뒤 책장)·
+    "cup"(오른손 컵) 중 하나
+  - label_ko: 칸 위 한 줄 (한국어 15자 안팎, 예: "0초 · 놀라 돌아봄").
+    자막·회사 이름·행동 문구는 쓰지 않는다
+"""
+
+
+# ---------------------------------------------------------------- LLM 답 파싱
+
+
+class ArmLLM(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    raise_: float = Field(default=0.0, alias="raise")
+    bend: float = 0.0
+
+
+class HeadLLM(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    yaw: float = 0.0
+    pitch: float = 0.0
+
+
+class PoseLLM(BaseModel):
+    """LLM이 내는 포즈 숫자. 모르는 shot·prop은 기본값으로 바꾸고 범위는 계약 KeyPose가 자른다."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    shot: str = "medium"
+    x: float = 0.0
+    z: float = 0.0
+    yaw: float = 0.0
+    head: HeadLLM = Field(default_factory=HeadLLM)
+    arm_l: ArmLLM = Field(default_factory=ArmLLM)
+    arm_r: ArmLLM = Field(default_factory=ArmLLM)
+    step: float = 0.0
+    prop: str | None = None
+    label_ko: str = ""
+
+
+def key_pose(got: PoseLLM, label: str) -> KeyPose | None:
+    """LLM 포즈 → 계약 KeyPose (범위는 자른다). 모르는 shot은 medium, 모르는 prop은 없음."""
+    try:
+        return KeyPose.model_validate({
+            "shot": got.shot if got.shot in SHOTS else "medium",
+            "x": got.x, "z": got.z, "yaw": got.yaw,
+            "head": {"yaw": got.head.yaw, "pitch": got.head.pitch},
+            "arm_l": {"raise": got.arm_l.raise_, "bend": got.arm_l.bend},
+            "arm_r": {"raise": got.arm_r.raise_, "bend": got.arm_r.bend},
+            "step": got.step, "prop": got.prop if got.prop in PROPS else None,
+            "label_ko": got.label_ko.strip() or label,
+        })  # fmt: skip
+    except ValueError:
+        return None
+
+
+# ---------------------------------------------------------------- 그리기
 
 
 def _n(v: float) -> str:
@@ -127,6 +202,23 @@ def render(pose: KeyPose, aspect: str = "9:16") -> str:
     return out
 
 
+def _stops(c1: str, c2: str) -> str:
+    return (_tag("stop", {"offset": "0%", "stop-color": c1})
+            + _tag("stop", {"offset": "100%", "stop-color": c2}))  # fmt: skip
+
+
+def _bg_gradient() -> str:
+    return _tag("linearGradient", {"id": "bg", "x1": 0, "y1": 0, "x2": 0, "y2": 1},
+                _stops(BG_TOP, BG_BOTTOM))  # fmt: skip
+
+
+def backdrop(aspect: str = "9:16") -> str:
+    """인물·글자 없이 배경 그라데이션만 (엔드카드 칸. 글자는 영상에 코드가 얹는다)."""
+    w, h = SIZES.get(aspect, SIZES["9:16"])
+    rect = _tag("rect", {"x": 0, "y": 0, "width": w, "height": h, "fill": "url(#bg)"})
+    return f'<svg xmlns="{SVG_NS}" viewBox="0 0 {w} {h}"><defs>{_bg_gradient()}</defs>{rect}</svg>'
+
+
 def _line(a: _Pt, b: _Pt, **attrs: float | str) -> Attrs:
     return {"x1": a.x, "y1": a.y, "x2": b.x, "y2": b.y, **attrs}
 
@@ -163,15 +255,9 @@ class _Frame:
 
     def background(self) -> None:
         add, c, w, h = self.parts.append, self.c, self.w, self.h
-
-        def stops(c1: str, c2: str) -> str:
-            return (_tag("stop", {"offset": "0%", "stop-color": c1})
-                    + _tag("stop", {"offset": "100%", "stop-color": c2}))  # fmt: skip
-
-        bg = _tag("linearGradient", {"id": "bg", "x1": 0, "y1": 0, "x2": 0, "y2": 1},
-                  stops("#f3efe7", "#fbf8f2"))  # fmt: skip
+        bg = _bg_gradient()
         balls = "".join(
-            _tag("radialGradient", {"id": gid, "cx": "35%", "cy": "30%", "r": "75%"}, stops(a, b))
+            _tag("radialGradient", {"id": gid, "cx": "35%", "cy": "30%", "r": "75%"}, _stops(a, b))
             for gid, a, b in (("sk", "#ffe6c7", "#d9a77a"), ("st", "#8fb6ff", "#3f6fd1"),
                               ("pt", "#5f7bb0", "#2f4677"), ("hr", "#6b4a3a", "#2b1d16"))
         )  # fmt: skip

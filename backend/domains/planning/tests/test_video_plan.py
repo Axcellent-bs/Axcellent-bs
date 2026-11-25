@@ -138,8 +138,10 @@ def test_llm_scene_count_spreads_evenly() -> None:
 )
 def test_llm_plan_breaking_rules_falls_back_to_rule(out) -> None:
     plan = asyncio.run(vp.write(_mock(out), _prop(), "ctx"))
-    # 11/25 규칙 제작안 이유가 같이 남는다 (나머지 칸은 규칙 제작안 그대로)
-    assert plan == vp.rule_plan(_prop()).model_copy(update={"fallback_reason": "rejected"})
+    # 11/25 규칙 제작안 이유가 같이 남는다 (나머지 칸은 규칙 제작안 그대로).
+    # 가짜 LLM에 포즈 답이 없어 콘티 단계는 실패 → svg_reason="error"(5-1)
+    want = {"fallback_reason": "rejected", "svg_reason": "error"}
+    assert plan == vp.rule_plan(_prop()).model_copy(update=want)
 
 
 def test_llm_failure_falls_back_to_rule() -> None:

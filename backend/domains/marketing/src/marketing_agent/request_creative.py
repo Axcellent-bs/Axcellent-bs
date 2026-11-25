@@ -142,6 +142,22 @@ def plan_storyboard(plan: Any, sheet: dict[str, Any]) -> dict[str, Any] | None:
     return board
 
 
+def plan_svg_missing(plan: Any) -> str:
+    """기획 제작안에 콘티 SVG가 없는 이유 코드 (로그용, 값·글은 넣지 않는다).
+
+    fallback_reason=…(규칙 초안) · svg_reason=…(기획 포즈 단계 실패) · sanitize_dropped(정리 탈락)
+    · unknown(예전 제작안 등)."""
+    fallback = getattr(plan, "fallback_reason", "") or ""
+    if isinstance(fallback, str) and fallback:
+        return f"fallback_reason={_cut(fallback, 20)}"
+    svg_reason = getattr(plan, "svg_reason", "") or ""
+    if isinstance(svg_reason, str) and svg_reason:
+        return f"svg_reason={_cut(svg_reason, 20)}"
+    if any(getattr(s, "start_svg", "") for s in getattr(plan, "scenes", None) or []):
+        return "sanitize_dropped"
+    return "unknown"
+
+
 def prepare_storyboard(brand_id: str, context_id: str, plan: Any) -> tuple[str | None, str | None]:
     """(의뢰용 기록 번호, 못 쓴 이유).
 
@@ -157,6 +173,8 @@ def prepare_storyboard(brand_id: str, context_id: str, plan: Any) -> tuple[str |
     board = plan_storyboard(plan, rec.get("sheet") or {})
     if board is None:
         return record_id, "no_scenes"
+    if not any(s.get("svg") for s in board["shots"]):  # 마케팅이 대신 그린다(`board_svg`)
+        logger.info("기획 콘티 SVG 없음 → 마케팅이 그림: %s %s", record_id, plan_svg_missing(plan))
     if not rec.get("storyboard"):  # 같은 의뢰를 다시 준비하면 처음 붙인 스토리보드를 둔다
         store.attach_storyboard(record_id, _cut(plan.script, 1000), len(board["shots"]), board)
     return record_id, None

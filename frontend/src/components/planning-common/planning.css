@@ -1342,6 +1342,7 @@ table.rq-table td { padding-top: 9px; padding-bottom: 9px; }
 .sb-purpose { border-radius: 999px; color: rgb(var(--brand-500)); background: color-mix(in srgb, rgb(var(--brand-500)) 10%, transparent); }
 /* 11/25 규칙 초안이 된 이유 한 줄 (칩 옆). 이유 칸이 비면 안 그린다 */
 .sb-fallback { font-size: 12px; font-weight: 400; color: var(--text-3); }
+.sb-svg-why { margin: 0 0 6px; }
 .sb-fold { border: 1px solid var(--border); border-radius: 10px; margin-top: 8px; }
 .sb-fold > summary { cursor: pointer; list-style: none; padding: 10px 14px; display: flex; align-items: baseline; gap: 8px; font-size: 13.5px; }
 .sb-fold > summary::-webkit-details-marker { display: none; }

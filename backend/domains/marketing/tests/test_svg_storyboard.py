@@ -167,29 +167,88 @@ def test_size_limit_is_16kb() -> None:
 # ---------------------------------------------------------------- 스토리보드 계약·LLM
 
 
-def _read_with(svgs: list[str]) -> sb.StoryRead:
-    return S._read(  # noqa: SLF001
-        6,
-        shots=[S._shot(i + 1, svg=svg) for i, svg in enumerate(svgs)],  # noqa: SLF001
-    )
+POSE = {"shot": "medium", "yaw": 35, "head": {"yaw": -40}, "arm_l": {"raise": 40, "bend": 60},
+        "label_ko": "놀라 돌아봄"}  # fmt: skip
 
 
-def _make(svgs: list[str]) -> tuple[StoryboardPromptOutput, MockLLMClient]:
-    llm = MockLLMClient(responses={sb.StoryRead: _read_with(svgs)})
+def _read_with(poses: list[Any], **over: Any) -> sb.StoryRead:
+    shots = [S._shot(i + 1, has_character=True, pose=p, **over) for i, p in enumerate(poses)]  # noqa: SLF001
+    return S._read(6, shots=shots)  # noqa: SLF001
+
+
+def _make(poses: list[Any], **over: Any) -> tuple[StoryboardPromptOutput, MockLLMClient]:
+    llm = MockLLMClient(responses={sb.StoryRead: _read_with(poses, **over)})
     out = asyncio.run(sb.make_storyboard({"story": S.STORY, "shots": 6}, lambda: llm))
     return out, llm
 
 
-def test_mixed_cells_keep_svg_where_clean_and_mark_the_board_svg() -> None:
-    out, llm = _make([GOOD, "<svg><script/></svg>x", GOOD, "", "<div/>", GOOD])
+def _is_mannequin(svg: str | None) -> bool:
+    """3D 마네킹 콘티: 구 음영(radialGradient)·바닥 격자(g stroke)·피부 구(url(#sk))."""
+    return bool(svg) and all(
+        p in str(svg) for p in ("<radialGradient", 'stroke="#e6dccd"', 'fill="url(#sk)"')
+    )
+
+
+def test_mixed_cells_draw_mannequins_where_a_pose_came_and_mark_the_board_svg() -> None:
+    # 11/25: LLM은 SVG 대신 칸마다 포즈 숫자. 포즈가 온 칸만 코드가 3D 마네킹으로 그린다
+    out, llm = _make([POSE, None, POSE, {"shot": "full", "x": 99}, None, POSE])
     assert out.board_source == "svg"
-    assert [bool(s.svg) for s in out.shots] == [True, False, True, False, False, True]
+    assert [bool(s.svg) for s in out.shots] == [True, False, True, True, False, True]
+    assert all(_is_mannequin(s.svg) for s in out.shots if s.svg)
     assert len(llm.calls) == 1  # 호출 수는 그대로 1회
+    sent = llm.calls[0]
+    assert "SVG·그림 원문은 쓰지 않는다" in sent and "단순 도형" not in sent
+
+
+def test_svg_written_by_the_llm_is_ignored_and_no_pose_is_layout() -> None:
+    # 납작한 SVG 길을 막는다: LLM이 svg 원문을 적어도 쓰지 않는다 (포즈 없음 → 배치판)
+    out, _ = _make([None] * 6, svg=GOOD)
+    assert out.board_source == "layout" and all(s.svg is None for s in out.shots)
 
 
 def test_all_empty_cells_fall_back_to_layout() -> None:
-    out, _ = _make([""] * 6)
+    out, _ = _make([None] * 6)
     assert out.board_source == "layout" and all(s.svg is None for s in out.shots)
+
+
+def test_no_character_cell_gets_no_mannequin() -> None:
+    shots = [S._shot(i, pose=POSE, has_character=i != 2) for i in range(1, 7)]  # noqa: SLF001
+    llm = MockLLMClient(responses={sb.StoryRead: S._read(6, shots=shots)})  # noqa: SLF001
+    out = asyncio.run(sb.make_storyboard({"story": S.STORY, "shots": 6}, lambda: llm))
+    assert [bool(s.svg) for s in out.shots] == [True, False, True, True, True, True]
+
+
+def test_end_card_cell_is_background_only() -> None:
+    shots = [S._shot(i, has_character=True, pose=POSE) for i in range(1, 6)]  # noqa: SLF001
+    shots.append(S._shot(6, scene_ko="마무리: 채널 이름 엔드 카드", pose=POSE, has_character=True))  # noqa: SLF001
+    llm = MockLLMClient(responses={sb.StoryRead: S._read(6, shots=shots)})  # noqa: SLF001
+    out = asyncio.run(sb.make_storyboard({"story": S.STORY, "shots": 6}, lambda: llm))
+    end = str(out.shots[-1].svg)
+    assert "<linearGradient" in end and 'fill="url(#bg)"' in end
+    for gone in ("<text", "<circle", "url(#sk)", "채널"):  # 인물·글자 없음
+        assert gone not in end
+    assert all(_is_mannequin(s.svg) for s in out.shots[:-1])
+    # 다른 칸을 하나도 못 그리면 엔드카드 배경도 두지 않는다(배치판)
+    none = [S._shot(i, has_character=True) for i in range(1, 6)] + [shots[-1] | {"pose": None}]  # noqa: SLF001
+    llm2 = MockLLMClient(responses={sb.StoryRead: S._read(6, shots=none)})  # noqa: SLF001
+    out2 = asyncio.run(sb.make_storyboard({"story": S.STORY, "shots": 6}, lambda: llm2))
+    assert out2.board_source == "layout" and all(s.svg is None for s in out2.shots)
+
+
+def test_redraw_from_script_draws_mannequins_and_end_card_background() -> None:
+    """대본대로 스토리보드 다시 만들기: 칸 = 대본 장면, 포즈 → 3D 마네킹, 끝 엔드카드는 배경만."""
+    scenes = [{"no": i, "visual_ko": f"대본 장면 {i}", "line_ko": "", "caption_ko": ""}
+              for i in range(1, 4)]  # fmt: skip
+    scenes.append({"no": 4, "visual_ko": "채널 이름 엔드 카드", "line_ko": "", "caption_ko": ""})
+    shots = [S._shot(i, has_character=True, pose=POSE) for i in range(1, 5)]  # noqa: SLF001
+    llm = MockLLMClient(responses={sb.StoryRead: S._read(4, shots=shots)})  # noqa: SLF001
+    out = asyncio.run(
+        sb.make_storyboard({"story": S.STORY}, lambda: llm, script_scenes=scenes, cta="")
+    )
+    assert out.script_used and len(out.shots) == 4 and len(llm.calls) == 1
+    assert all(_is_mannequin(s.svg) for s in out.shots[:3])
+    assert "<text" not in str(out.shots[3].svg) and "url(#sk)" not in str(out.shots[3].svg)
+    assert 'fill="url(#bg)"' in str(out.shots[3].svg)
 
 
 def test_old_records_read_with_defaults() -> None:
@@ -199,7 +258,7 @@ def test_old_records_read_with_defaults() -> None:
         angle_ko="눈높이", composition_ko="c", has_character=True, prompt_en="p",
     )  # fmt: skip
     assert shot.svg is None
-    out, _ = _make([GOOD] * 6)
+    out, _ = _make([POSE] * 6)
     dumped = out.model_dump(mode="json")
     dumped.pop("board_source")
     for s in dumped["shots"]:
