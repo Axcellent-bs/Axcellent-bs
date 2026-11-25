@@ -234,6 +234,26 @@ export default {
       { title: "AXcellent × DejaFix (1분, 음악 포함)", customer: "AXcellent 홍보 영상", caption: "장애 하나에, AI 아홉이 일을 나눠 맡아요. 소리(배경음악)가 나옵니다. 시연 환경(가상 데이터) 기준. 영상 속 안전 관문의 “10분”은 쿠폰·환불 같은 일반 보류 기준이며, 판매자 정산 지급 보류는 24시간입니다.", src: "assets/demo/axcellent-promo-66s.mp4", ratio: "16 / 9", wide: true, aiMade: true },
       { title: "AXcellent 홍보 영상 (13초, 소리 포함)", customer: "AXcellent 홍보 영상", caption: "AI 직원들이 서로 일을 이어받고, 돈과 외부 게시는 대표님이 승인합니다. 남성 나레이션과 BGM이 나옵니다(소리가 나옵니다). 장면과 인물은 AI가 만든 것이며 시연 환경(가상 데이터) 기준.", src: "assets/demo/axcellent-promo-ai-13s.mp4", ratio: "16 / 9", wide: true, aiMade: true },
     ],
+    // 마케팅 AI가 만든 영상 칸(AXcellent 홍보 영상과 고객사 홍보 영상 사이에 보인다). items가 비어 있으면 칸 전체가 안 보인다.
+    // 영상 추가: 마케팅 AI 제작 기록에서 만든 완성 영상(세로 9:16)을 assets/demo/에 넣고(영문 소문자·숫자·-, 15MB 이하) items에 한 줄을 더한다.
+    // item: { title, customer(회사 이름), length(예: "15초"), src, poster(대표 그림), aiMade: true }. 4개를 넘으면 오른쪽 화살표로 나머지를 본다.
+    // process: 대표 사례 하나의 제작 과정. 세 자료는 **같은 제작 기록 하나**에서 가져오고, 제작 기록 번호·계정 이름이 보이지 않는 그림만 넣는다.
+    //   { sheet: { src, alt }, board: { src, alt }, video: { src, poster } } — 셋 중 하나라도 없으면 과정 상자는 안 보인다.
+    marketingVideos: {
+      title: "마케팅 AI가 만든 영상",
+      lead: "AXcellent 마케팅 AI가 만든 세로 영상입니다. 시연용 가상 고객사와 시연 환경 기준입니다.",
+      itemsFirst: 4,
+      items: [],
+      process: null,
+      processTitle: "이렇게 만들었어요",
+      processNote: "대표 사례 하나",
+      approval: "사람 승인",
+      steps: [
+        { title: "캐릭터 시트", body: "주인공을 정해요" },
+        { title: "스토리보드", body: "장면 순서를 짜요" },
+        { title: "완성 영상", body: "승인 뒤에 영상을 만들어요" },
+      ],
+    },
     // 고객사 홍보 영상 칸(AXcellent 홍보 영상과 캣북스 인스타그램 사이에 보인다). 칸 이름 아래에 고객사 이름, 그 아래에 영상이 가로로 나란히 보인다.
     // 영상 추가: mp4를 assets/demo/에 넣고(영문 소문자·숫자·-, 15MB 이하) 해당 고객사 items에 한 줄을 더한다. groups에 고객사를 더하면 칸 아래에 이어서 보인다.
     customerVideos: {
