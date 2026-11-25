@@ -177,6 +177,9 @@ class AggRun(AxModel):
     reason: str | None = None
     source_cursor: str | None = None
     rows: dict[str, int] = Field(default_factory=dict)  # 표 이름 → 행 수
+    # 아래는 예전 기록에 없다 (3-2 ②). 계산에 쓴 원본 판매 출처 이름(sync_state.source, 예: "fake").
+    # 고객 분석 선택지(segment_options)가 원본을 열지 않고 "가짜 데이터" 표시를 정한다
+    source_name: str | None = None
 
 
 class AggCompareRow(AxModel):
