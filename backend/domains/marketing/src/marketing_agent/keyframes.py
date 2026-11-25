@@ -39,6 +39,7 @@ status, error, credits_estimate, attempt}], approved_at}`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -62,6 +63,7 @@ STATE = "keyframes"  # render.keyframes
 PLAN_SCENES_KEY = "plan_scenes"  # 의뢰 스토리보드에 남긴 기획 장면(키프레임 칸·SVG)
 MAX_FRAMES = _mcp.MAX_KEYFRAMES
 MAX_IMAGE_REFS = 4  # 그림 참조 상한: 구도 + 인물 원본 + 추가 참조
+PARALLEL = 3  # 11/26 키프레임을 동시에 그리는 장 수 상한(ensure)
 REFERENCE = "keyframes"  # render.video.summary.reference
 NO_TEXT_IMAGE = "No text, letters, captions, logos, signs, real people or real brands."
 FOLLOW_LAYOUT = "Follow the composition and pose of the first reference exactly."
@@ -435,18 +437,35 @@ async def render_frame(
 async def ensure(
     ledger: MediaLedger, meta: RequestMeta, record_id: str, cid: str | None
 ) -> str | None:
-    """프레임을 모두 그린다(이미 done인 장은 다시 안 그림). 하나라도 못 그리면 이유 코드."""
+    """프레임을 모두 그린다(이미 done인 장은 다시 안 그림). 하나라도 못 그리면 이유 코드.
+
+    11/26: 최대 `PARALLEL`장을 동시에 그린다(예전에는 한 장씩 차례로라 장 수만큼 기다렸다).
+    같은 장 중복 방지는 그대로: 자리를 얻은 뒤 상태를 다시 읽고, done·running이면 건너뛴다.
+    읽기부터 running 표시까지 await가 없어 두 쪽이 같은 장을 함께 잡지 않는다.
+    실패한 장만 실패다."""
     cur = prepare(record_id, cid)
-    for frame in cur.get("frames") or []:
-        if _render.superseded(record_id):  # 11/26 의뢰 캐릭터를 바꿨다: 남은 장을 그리지 않는다
-            return _render.CHARACTER_CHANGED
-        index = int(frame.get("index") or 0)
-        # 같이 도는 다른 ensure(시트 그림이 끝나며 부른 것 등)가 그리는 장은 건너뛴다.
-        # 그때그때 다시 읽는다
-        now = (frames_of(_creative.store().get(record_id) or {}) or [{}] * (index + 1))
-        if index < len(now) and now[index].get("status") in ("done", "running"):
-            continue
-        await render_frame(ledger, meta, record_id, index, cid)
+    if _render.superseded(record_id):  # 11/26 의뢰 캐릭터를 바꿨다: 남은 장을 그리지 않는다
+        return _render.CHARACTER_CHANGED
+    slots = asyncio.Semaphore(PARALLEL)
+
+    async def one(index: int) -> None:
+        async with slots:
+            if _render.superseded(record_id):
+                return
+            # 같이 도는 다른 ensure(시트 그림이 끝나며 부른 것 등)가 그리는 장은 건너뛴다
+            now = frames_of(_creative.store().get(record_id) or {}) or [{}] * (index + 1)
+            if index < len(now) and now[index].get("status") in ("done", "running"):
+                return
+            try:
+                await render_frame(ledger, meta, record_id, index, cid)
+            except Exception:  # noqa: BLE001 - 한 장의 뜻밖의 오류가 다른 장을 멈추지 않게
+                logger.exception("keyframes: 그림 %s 실패 (%s)", index, record_id)
+                _set_frame(record_id, index, status="failed", error="error")
+
+    indexes = [int(f.get("index") or 0) for f in cur.get("frames") or []]
+    await asyncio.gather(*(one(i) for i in indexes))
+    if _render.superseded(record_id):
+        return _render.CHARACTER_CHANGED
     waited = 0.0
     while waited <= _render.JOB_TIMEOUT_S:  # 다른 쪽이 그리는 장이 끝나기를 기다린다
         rec = _creative.store().get(record_id) or {}
