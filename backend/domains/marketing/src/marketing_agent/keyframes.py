@@ -61,6 +61,10 @@ logger = logging.getLogger("marketing.keyframes")
 
 STATE = "keyframes"  # render.keyframes
 PLAN_SCENES_KEY = "plan_scenes"  # 의뢰 스토리보드에 남긴 기획 장면(키프레임 칸·SVG)
+# 11/26 기획 제작안을 쓴 쪽(VideoPlan.written_by). "rule"(규칙 초안)이면 키프레임 0장 → 지금 흐름.
+# 규칙 초안의 start_frame은 화면 설명(visual)일 뿐 키프레임 묘사가 아니라 그림 크레딧만 든다
+PLAN_WRITTEN_BY_KEY = "plan_written_by"
+RULE_PLAN = "rule"
 MAX_FRAMES = _mcp.MAX_KEYFRAMES
 MAX_IMAGE_REFS = 4  # 그림 참조 상한: 구도 + 인물 원본 + 추가 참조
 PARALLEL = 3  # 11/26 키프레임을 동시에 그리는 장 수 상한(ensure)
@@ -215,7 +219,21 @@ def video_prompt(
 
 
 # ---------------------------------------------------------------- 기록
+def plan_written_by(plan: Any) -> str:
+    """기획 제작안의 written_by("llm"·"rule"·"human"). 없거나 모르는 값이면 ""(예전 동작)."""
+    value = getattr(plan, "written_by", None)
+    return value if value in ("llm", "rule", "human") else ""
+
+
+def rule_plan(rec: dict[str, Any] | None) -> bool:
+    """규칙 초안으로 만든 의뢰 기록인가. 값이 없는 예전 기록은 False(지금 동작 그대로)."""
+    return ((rec or {}).get("storyboard") or {}).get(PLAN_WRITTEN_BY_KEY) == RULE_PLAN
+
+
 def _scenes_of(rec: dict[str, Any]) -> list[dict[str, Any]]:
+    """키프레임을 고를 기획 장면. 규칙 초안이면 빈 목록(키프레임 0장)."""
+    if rule_plan(rec):
+        return []
     rows = (rec.get("storyboard") or {}).get(PLAN_SCENES_KEY)
     return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
 
@@ -225,7 +243,9 @@ def state(rec: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def frames_of(rec: dict[str, Any]) -> list[dict[str, Any]]:
-    """기록에 만든 프레임이 있으면 그것, 없으면 기획 장면으로 고른 프레임."""
+    """기록에 만든 프레임이 있으면 그것, 없으면 기획 장면으로 고른 프레임. 규칙 초안이면 빈 목록."""
+    if rule_plan(rec):
+        return []
     made = state(rec).get("frames")
     if isinstance(made, list) and made:
         return [f for f in made if isinstance(f, dict)]
@@ -305,7 +325,7 @@ def prepare(record_id: str, cid: str | None) -> dict[str, Any]:
     store = _creative.store()
     rec = store.get(record_id) or {}
     cur = state(rec)
-    if cur.get("frames"):
+    if cur.get("frames") or rule_plan(rec):  # 규칙 초안이면 프레임 표를 만들지 않는다
         return cur
     frames = plan_frames(_scenes_of(rec))
     aspect = _render.video_aspect(cid)
@@ -539,6 +559,7 @@ async def render_video(
 
 __all__ = [
     "PLAN_SCENES_KEY",
+    "PLAN_WRITTEN_BY_KEY",
     "REFERENCE",
     "active",
     "all_done",
@@ -547,8 +568,10 @@ __all__ = [
     "frames_of",
     "plan_frames",
     "plan_scenes",
+    "plan_written_by",
     "prepare",
     "redraw",
     "render_frame",
+    "rule_plan",
     "video_prompt",
 ]

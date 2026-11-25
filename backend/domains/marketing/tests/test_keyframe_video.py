@@ -369,6 +369,57 @@ def test_old_record_without_plan_scenes_reads_as_no_keyframes(kenv: dict[str, An
     assert res.status == TaskStatus.FAILED and res.outcome == "no_keyframes"
 
 
+def _written(rid: str, env: dict[str, Any], by: str | None) -> None:
+    """기록 스토리보드를 그 제작안 작성자로 다시 붙인다(None = 값 없는 예전 기록)."""
+    with company_scope.using("catbooks"):
+        rec = env["store"].get(rid)
+        plan = _plan(SCENES) if by is None else _plan(SCENES).model_copy(update={"written_by": by})
+        board = request_creative.plan_storyboard(plan, rec["sheet"])
+        env["store"].attach_storyboard(rid, "대본", len(board["shots"]), board)
+
+
+def test_plan_storyboard_keeps_written_by_only_when_known() -> None:
+    sheet = M.SHEET | {"kind": "virtual_human"}
+    rule = _plan(SCENES).model_copy(update={"written_by": "rule"})
+    board = request_creative.plan_storyboard(rule, sheet)
+    assert board and board[kf.PLAN_WRITTEN_BY_KEY] == "rule"
+    old = request_creative.plan_storyboard(_plan(SCENES), sheet)
+    assert old and kf.PLAN_WRITTEN_BY_KEY not in old  # 값이 없으면 남기지 않는다
+
+
+def test_rule_plan_makes_no_keyframes_and_keeps_todays_flow(kenv: dict[str, Any]) -> None:
+    rid = _record(kenv, SCENES)
+    _written(rid, kenv, "rule")
+    rec = kenv["store"].get(rid)
+    assert kf.frames_of(rec) == [] and not kf.active(rec, rr.MCP, "catbooks")
+    assert kf.prepare(rid, "catbooks") == {}  # 프레임 표도 만들지 않는다
+    out = _make(kenv, rid)
+    assert out.outcome == request_creative.VIDEO_HELD
+    state = kenv["store"].get_render(rid)
+    assert "keyframes" not in state  # 키프레임 그림 0장
+    assert not [g for g in _image_gates(kenv) if "키프레임" in g["summary"]]  # 그림 크레딧 예약 0
+    assert state["video"]["summary"]["reference"] != "keyframes"
+    assert "keyframes" not in state["video"]
+    after = _approve(kenv, rid)
+    params = dict(kenv["hf"].tools)["generate_video_batch"]["requests"][0]["params"]
+    assert after["video"]["status"] == "done" and params["mode"] != "image-to-video"
+    assert {m["role"] for m in params["medias"]} == {"image_references"}  # 키프레임 모드 아님
+
+
+def test_llm_plan_still_makes_keyframes(kenv: dict[str, Any]) -> None:
+    rid = _record(kenv, SCENES)
+    _written(rid, kenv, "llm")
+    assert _make(kenv, rid).outcome == request_creative.VIDEO_HELD
+    assert len(kenv["store"].get_render(rid)["keyframes"]["frames"]) == 4
+
+
+def test_record_without_written_by_keeps_keyframes(kenv: dict[str, Any]) -> None:
+    rid = _record(kenv, SCENES)  # 예전 기록: plan_written_by 칸 없음
+    assert kf.PLAN_WRITTEN_BY_KEY not in kenv["store"].get(rid)["storyboard"]
+    assert _make(kenv, rid).outcome == request_creative.VIDEO_HELD
+    assert len(kenv["store"].get_render(rid)["keyframes"]["frames"]) == 4
+
+
 def test_redraw_is_company_scoped_and_checks_the_index(kenv: dict[str, Any]) -> None:
     rid = _record(kenv, SCENES)
     _make(kenv, rid)

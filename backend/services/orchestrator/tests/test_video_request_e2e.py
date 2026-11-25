@@ -476,10 +476,6 @@ def test_planning_timeout_falls_back_to_rule_plan_and_still_makes_a_video(
     assert after["render"]["video"]["status"] == "done"
 
 
-@pytest.mark.skip(
-    reason="보고서 버그 2: 규칙 초안은 start_frame에 visual만 채우는데(키프레임 칸 아님) 마케팅 "
-    "keyframes.plan_frames가 그 글로 키프레임 그림을 만든다(장면 수만큼 그림 크레딧)"
-)
 def test_planning_timeout_rule_plan_keeps_todays_flow_without_keyframes(
     world: dict[str, Any],
 ) -> None:
