@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
 import { PlanningHandoff, proposalsOf, usePlanningProposals } from "@/components/data/PlanningHandoff";
 import { PlanningProposals, ReportInsights, useInsightReports } from "@/components/data/ReportInsights";
@@ -218,6 +219,7 @@ function PlatformViews({ searchExtra }: { searchExtra?: ReactNode }) {
         </>
       )}
       {view === "instagram" && (
+        <ErrorBoundary title="인스타그램 칸을 그리지 못했습니다">
         <Suspense fallback={<Waiting />}>
         <section aria-label="인스타그램" className="space-y-4">
           {igKeyLine !== null ? (
@@ -236,6 +238,7 @@ function PlatformViews({ searchExtra }: { searchExtra?: ReactNode }) {
           <InstagramMemo />
         </section>
         </Suspense>
+        </ErrorBoundary>
       )}
       {view === "search" && (
         <>
@@ -274,7 +277,9 @@ function InsightsTab({ brief, examples, examplesCount }: { brief: SkillState<Tre
         </section>
       )}
       {filter !== "report" && (
-        <Suspense fallback={<Waiting />}><InsightBrief state={brief} examplesCount={examplesCount} examples={examples} /></Suspense>
+        <ErrorBoundary title="매일 브리프를 그리지 못했습니다">
+          <Suspense fallback={<Waiting />}><InsightBrief state={brief} examplesCount={examplesCount} examples={examples} /></Suspense>
+        </ErrorBoundary>
       )}
     </div>
   );
@@ -360,7 +365,7 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
                 {kpiLive && <TrendHeadline popular={popularRes.state} />}
                 {kpiLive ? <PlatformViews searchExtra={detect} /> : detect}
               </div>
-            ) : !seen.has(t.key) ? null : <Suspense fallback={<Waiting />}>{t.key === "recommend" ? (
+            ) : !seen.has(t.key) ? null : <ErrorBoundary title="이 탭을 그리지 못했습니다"><Suspense fallback={<Waiting />}>{t.key === "recommend" ? (
               // 처음 열 때 그리고, 그 뒤에는 하위 탭을 오가도 남도록 숨기기만 한다
               <InsightsTab brief={briefRes.state} examplesCount={promoOut ? promoOut.concepts.length : null}
                 examples={<PromoConcepts state={promoRes.state} popular={popularOut} onRegenerate={promoRes.reload} />} />
@@ -379,7 +384,7 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
                 <VideoPerformance />
                 <CampaignEffect onProbe={setCampaignProbe} />
               </div>
-            )}</Suspense>}
+            )}</Suspense></ErrorBoundary>}
           </div>
         ))}
       </div>

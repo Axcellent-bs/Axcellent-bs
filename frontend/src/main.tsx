@@ -7,6 +7,10 @@ import './styles.css'
 import { App } from './App'
 import { SessionProvider } from './demo/session'
 import { installApiDirect, readDirectConfig } from './lib/apiDirect'
+import { installChunkReload } from './lib/chunkReload'
+
+// 배포 뒤 열린 탭이 옛 코드 조각을 못 받으면(vite:preloadError) 한 번 새로고침한다. 60초 안 두 번째는 화면의 [새로고침] 버튼으로
+installChunkReload(window)
 
 // 읽기 API 를 외부 직접 호스트로 보내는 길. 환경값(VITE_API_DIRECT_BASE·VITE_API_DIRECT_SERVICES)이 비면 아무것도 하지 않는다
 installApiDirect(readDirectConfig(import.meta.env))

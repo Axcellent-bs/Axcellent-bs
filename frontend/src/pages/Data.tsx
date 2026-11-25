@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Chip, TONE, Waiting, useResource } from "@/components/finance/bits";
 import { DATA_SERVER, ORCH_SERVER, dataAi, sortRecent } from "@/lib/data";
 import { orchestrator } from "@/lib/orchestrator";
@@ -111,6 +112,8 @@ export default function DataPage() {
         </p>
       )}
 
+      {/* 하위 화면 조각을 못 받으면 머리·경고는 두고 이 자리에 "새 버전이 나왔어요" + [새로고침] */}
+      <ErrorBoundary key={mode} title="데이터 화면을 그리지 못했습니다">
       <Suspense fallback={<Waiting />}>
         {mode === "incident" && (
           <div className="space-y-6 sm:space-y-8">
@@ -123,6 +126,7 @@ export default function DataPage() {
         {mode === "segments" && <SegmentAnalysis />}
         {mode === "trend" && <TrendScan dataUp={dataUp} company={company?.name ?? null} />}
       </Suspense>
+      </ErrorBoundary>
     </div>
   );
 }
