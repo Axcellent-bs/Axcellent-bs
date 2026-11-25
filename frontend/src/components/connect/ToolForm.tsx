@@ -94,7 +94,7 @@ export function ToolForm({ kind, data, admin, existing, choices, onSaved, onCanc
     const saved = existing?.secrets_set[f.key]
     if (f.secret && f.key === 'private_key') {
       return (
-        <label htmlFor={id} className="field flex cursor-pointer items-center gap-2 text-sm">
+        <label htmlFor={id} className="field relative flex cursor-pointer items-center gap-2 text-sm">
           <input id={id} type="file" accept=".pem,application/x-pem-file" className="sr-only" onChange={(e) => pickKey(f.key, e.target.files?.[0])} />
           <span className="chip bg-ink-100 text-ink-700">.pem 파일 고르기</span>
           <span className="truncate text-ink-500">{keyName || (saved ? `${saved} · 바꾸려면 다시 고르기` : '고른 파일 없음')}</span>
