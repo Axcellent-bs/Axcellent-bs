@@ -10,6 +10,9 @@
   쓰는 프로세스가 둘이라 읽고-고치고-쓰기는 `<파일>.lock`(O_EXCL로 만드는 잠금 파일)으로 막는다.
   임시 파일 이름은 쓸 때마다 다르다. 30초 넘은 잠금은 죽은 프로세스가 남긴 것으로 보고
   다른 이름으로 옮긴 뒤 다시 확인하고 지운다 (`_break_stale`).
+- 회사(11/25, 로드맵 6단계): 요청 회사(`company_scope.active()`)가 캣북스가 아니면 그 회사 폴더의
+  `tool_connections.json`을 쓴다(옛 파일을 옮겨 오지 않는다). 회사 폴더를 끄면 그 회사는 연결 없음.
+  요청 밖(스스로 도는 루틴)·캣북스는 예전 그대로다. 다른 회사에 캣북스 연결이 보이지 않게 한다.
 - 읽기: 부를 때마다 바뀐 시각·크기로 확인해 읽는다 (재시작 없이 반영).
   파일이 없으면 연결이 없는 것이다(경고 없음). 깨졌으면 경고를 한 번 남기고 없는 것으로 본다.
 - 비밀 값(`secrets`)은 repr·로그·오류 문구·이력 줄에 넣지 않는다. 화면에는 `public()`만 준다.
@@ -117,8 +120,18 @@ FILE_NAME = "tool_connections.json"
 
 
 def connections_file() -> str:
-    """보관함 파일 경로. 환경변수 → 회사 폴더. 둘 다 없으면 빈 문자열(연결 없음)."""
-    from ax_agent_template import company_files
+    """보관함 파일 경로. 환경변수 → 회사 폴더. 둘 다 없으면 빈 문자열(연결 없음).
+
+    요청 회사가 캣북스가 아니면 그 회사 폴더 파일(회사 폴더가 없거나 꺼졌으면 빈 문자열)."""
+    from ax_agent_template import company_files, company_scope
+    from ax_agent_template.companies import company_path
+
+    company = company_scope.active()
+    if company is not None and company_scope.scope_id(company) != company_scope.CATBOOKS:
+        if company_files.folders_off():
+            return ""
+        path = company_path(company_scope.scope_id(company), FILE_NAME)
+        return "" if path is None else str(path)
 
     explicit = os.getenv(FILE_ENV, "").strip()
     if explicit:

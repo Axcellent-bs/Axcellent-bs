@@ -313,18 +313,19 @@ async def departments() -> dict:
         await state.build()
     view = state.registry.view()
     current = now()
+    company = state.company()  # 사용량은 지금 요청 회사 것만 (6단계)
     items: list[dict[str, Any]] = []
     for dept in view["depts"]:
         name = dept["name"]
         skills = []
         for skill in dept["skills"]:
-            per_skill = state.usage.summary(name, current, skill["id"])
+            per_skill = state.usage.summary(name, current, skill["id"], company)
             skills.append(
                 {
                     **skill,
                     **{k: per_skill[k] for k in ("calls", "errors", "success_rate", "avg_ms")},
                     "retries": per_skill["retries"],
-                    "series": state.usage.series(name, current, skill["id"]),
+                    "series": state.usage.series(name, current, skill["id"], company),
                 }
             )
         items.append(_dept_item(name, dept["owner"], True, None, skills, current))
@@ -356,9 +357,9 @@ def _dept_item(
         "available": available,
         "unavailable_reason": reason,
         "skills": skills,
-        "usage": state.usage.summary(name, current),
-        "series": state.usage.series(name, current),
-        "recent": state.usage.recent(name),
+        "usage": state.usage.summary(name, current, company=state.company()),
+        "series": state.usage.series(name, current, company=state.company()),
+        "recent": state.usage.recent(name, company=state.company()),
     }
 
 

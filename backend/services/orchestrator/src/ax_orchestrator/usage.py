@@ -3,6 +3,9 @@
 총괄이 부서를 부를 때마다 (부서, skill, 시각, 응답 시간, 결과)를 기록한다. 화면의 부서별 사용량
 그래프(호출 수·성공률·평균 응답 시간)는 전부 여기서 센 실측값이다. 부서 내부의 CPU·메모리는 총괄이
 알 수 없으므로 그리지 않고, 총괄 쪽에서 본 호출만 보여 준다.
+
+회사(11/25, 로드맵 6단계): 기록마다 그 호출의 회사(요청 봉투 `tenant_id`, 정식 회사 ID)를 남기고,
+화면은 지금 요청 회사 것만 센다(`company`). 회사를 안 주면 예전처럼 전부.
 """
 
 from __future__ import annotations
@@ -14,7 +17,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from ax_agent_template.companies import canonical_company_id
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 from ax_orchestrator.models import iso, now
 
 WINDOW_SECONDS = 600  # 그래프 구간 (최근 10분)
@@ -36,6 +41,7 @@ class CallRecord:
     outcome: str | None
     context_id: str
     idempotency_key: str | None
+    company: str = TENANT_ID_CATBOOKS  # 정식 회사 ID (예전 기록·회사 없는 호출은 캣북스)
 
     @property
     def ok(self) -> bool:
@@ -53,12 +59,17 @@ class UsageRecorder:
     def add(self, record: CallRecord) -> None:
         self._records.append(record)
 
-    def _window(self, dept: str, current: datetime, skill: str | None = None) -> list[CallRecord]:
+    def _window(
+        self, dept: str, current: datetime, skill: str | None = None, company: str | None = None
+    ) -> list[CallRecord]:
         start = current - timedelta(seconds=WINDOW_SECONDS)
         return [
             r
             for r in self._records
-            if r.dept == dept and r.at >= start and (skill is None or r.skill == skill)
+            if r.dept == dept
+            and r.at >= start
+            and (skill is None or r.skill == skill)
+            and (company is None or r.company == company)
         ]
 
     @staticmethod
@@ -68,9 +79,15 @@ class UsageRecorder:
         ordered = sorted(values)
         return ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
 
-    def summary(self, dept: str, current: datetime | None = None, skill: str | None = None) -> dict:
+    def summary(
+        self,
+        dept: str,
+        current: datetime | None = None,
+        skill: str | None = None,
+        company: str | None = None,
+    ) -> dict:
         current = current or now()
-        rows = self._window(dept, current, skill)
+        rows = self._window(dept, current, skill, company)
         finished = [r for r in rows if not r.waiting]
         durations = [r.duration_ms for r in rows]
         keys = Counter(r.idempotency_key for r in rows if r.idempotency_key)
@@ -89,12 +106,16 @@ class UsageRecorder:
         }
 
     def series(
-        self, dept: str, current: datetime | None = None, skill: str | None = None
+        self,
+        dept: str,
+        current: datetime | None = None,
+        skill: str | None = None,
+        company: str | None = None,
     ) -> list[dict[str, Any]]:
         current = current or now()
         buckets = WINDOW_SECONDS // BUCKET_SECONDS
         start = current - timedelta(seconds=WINDOW_SECONDS)
-        rows = self._window(dept, current, skill)
+        rows = self._window(dept, current, skill, company)
         out: list[dict[str, Any]] = []
         for i in range(buckets):
             lo = start + timedelta(seconds=i * BUCKET_SECONDS)
@@ -112,8 +133,12 @@ class UsageRecorder:
             )
         return out
 
-    def recent(self, dept: str, limit: int = 30) -> list[dict[str, Any]]:
-        rows = [r for r in self._records if r.dept == dept][-limit:]
+    def recent(
+        self, dept: str, limit: int = 30, company: str | None = None
+    ) -> list[dict[str, Any]]:
+        rows = [
+            r for r in self._records if r.dept == dept and (company is None or r.company == company)
+        ][-limit:]
         return [
             {
                 "at": iso(r.at),
@@ -153,5 +178,6 @@ class RecordingCaller:
                     outcome=outcome,
                     context_id=req.meta.context_id,
                     idempotency_key=req.meta.idempotency_key,
+                    company=canonical_company_id(req.meta.tenant_id) or TENANT_ID_CATBOOKS,
                 )
             )
