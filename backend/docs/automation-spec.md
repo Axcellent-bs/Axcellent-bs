@@ -63,13 +63,13 @@ docs/requirements.md (사람이 수정) ──claude-plan──▶ 작업 이슈
 | safety (태윤) | agent-template (준하) | execute()가 safety를 호출 |
 | hr (준하) | memory (재현) | 사건 기록을 memory에 씀 |
 | orchestrator (준하) | dejafix (예진) | 사건 흐름의 첫 진단 담당 |
-| agent-template (준하) | finance (태윤) + planning (예진) | 전원이 쓰는 공통 코드 |
-| infra (준하) | finance (태윤) + planning (예진) | 전체 compose·장애 주입 |
-| planning (예진) | orchestrator (준하) | 변경 요청·롤백 검증을 통합 에이전트가 지시 |
+| agent-template (준하) | finance (태윤) + planning (예진·병환·준하) | 전원이 쓰는 공통 코드 |
+| infra (준하) | finance (태윤) + planning (예진·병환·준하) | 전체 compose·장애 주입 |
+| planning (예진·병환·준하) | orchestrator (준하) | 변경 요청·롤백 검증을 통합 에이전트가 지시 |
 | dejafix (예진) | orchestrator (준하) | 진단·롤백을 통합 에이전트가 지시 |
-| support (병환) | marketing (태윤·재현·예진, 서브 재헌) | 보상 요청 → 쿠폰 경로 |
+| support (병환) | marketing (태윤·재현·예진·병환·준하, 서브 재헌) | 보상 요청 → 쿠폰 경로 |
 | dashboard-api (병환) | safety (태윤) | C 보류 큐 승인·거절 |
-| marketing (태윤·재현·예진, 서브 재헌) | support (병환) | 공지·보상 쿠폰을 support가 씀 |
+| marketing (태윤·재현·예진·병환·준하, 서브 재헌) | support (병환) | 공지·보상 쿠폰을 support가 씀 |
 | shop-api (재헌) | data (재현) | 데이터 조회 API 사용자 |
 | contracts (준하·태윤) | agent-template (준하) + safety (태윤) | 계약은 2명. 작성자가 둘 중 한 사람이면 그 자리는 data (재현) |
 
@@ -122,7 +122,7 @@ depts:      # id: { folder, aliases, owners(첫 번째가 실행 토큰), env_pr
   orchestrator:   { folder: orchestrator,         owners: [haakim7], env_prefix: ORCHESTRATOR }
   agent-template: { folder: agent-template,       owners: [haakim7], env_prefix: AGENT_TEMPLATE }
   infra:          { folder: infra,                owners: [haakim7], env_prefix: COMPOSE }
-  planning:       { folder: agents/planning,      owners: [NYejin],         env_prefix: PLANNING }
+  planning:       { folder: agents/planning,      owners: [NYejin, bxbae, haakim7],  env_prefix: PLANNING }   # 예진·병환·준하 (2026-11-25)
   dejafix:        { folder: agents/infra-dejafix, aliases: [infra-dejafix], owners: [NYejin], env_prefix: INFRA }
   support:        { folder: agents/support,       owners: [bxbae],          env_prefix: SUPPORT }
   dashboard-api:  { folder: dashboard-api,        owners: [bxbae],          env_prefix: DASHBOARD }

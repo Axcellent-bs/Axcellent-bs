@@ -419,7 +419,11 @@ def get_sales_store() -> SalesStore:
     """매출 분석 표준 판매 저장소 (`DATA_SALES_DB`). 테스트는 `use_sales_store`로 바꿔 끼운다."""
     global _sales_store
     if _sales_store is None:
-        _sales_store = SalesStore(os.environ.get(SALES_DB_ENV) or SALES_DEFAULT_DB)
+        from data_agent.sales_memory import memory_mode
+
+        # 3-3 A안: 원본을 디스크에 두지 않으면 빈 메모리 저장소로 시작하고, 다 받으면 바꿔 끼운다
+        path = ":memory:" if memory_mode(os.environ) else None
+        _sales_store = SalesStore(path or os.environ.get(SALES_DB_ENV) or SALES_DEFAULT_DB)
     return _sales_store
 
 

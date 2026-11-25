@@ -410,7 +410,10 @@ def aggregate_daily(store: SalesStore, tenant: str, env: Mapping[str, str], now:
     try:
         agg = AggregateStore(agg_db_path(dict(env)))
         try:
-            run_daily(store, agg, tenant, catalog.current(env).sales, now)
+            from data_agent.sales_memory import memory_mode
+
+            run_daily(store, agg, tenant, catalog.current(env).sales, now,
+                      input_name="company_server" if memory_mode(env) else "sales_db")  # fmt: skip
         finally:
             agg.close()
     except Exception as error:  # noqa: BLE001 - 집계 때문에 수집이 멈추지 않게
@@ -598,6 +601,11 @@ def main(argv: list[str] | None = None) -> int:
         print("[sales] --reset은 한 번만 실행 (--every와 같이 쓸 수 없음)", flush=True)
         return 2
     env = dict(os.environ)
+    from data_agent.sales_memory import NOTICE, memory_mode
+
+    if memory_mode(env):  # 3-3 A안: 데이터 AI 안에서 받는다. 잠금·sales.db를 건드리지 않는다
+        print(NOTICE, flush=True)
+        return 0
     every = None if args.every is None else every_seconds(env, args.every or None)
     path = lock_path(env)
     lock = collector_lock.acquire(path, "sales", lambda line: print(line, flush=True))

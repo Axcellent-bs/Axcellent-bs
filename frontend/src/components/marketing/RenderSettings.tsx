@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { renderSettingsApi } from "@/lib/renderSettingsApi";
 import {
   CREDITS_STOP_NOTE, PLAN_LABEL, READ_ONLY_NOTE, SPEEDS, SPEED_NOTE, aspectOptions, speedLabel, changeVideoModel, defaultHint, loadRenderSettings, parseRenderSettings,
-  saveBody, saveErrorKo, sameValues, secondsOptions, startValues, videoModelOf,
+  rangeLabel, saveBody, saveErrorKo, sameValues, secondsOptions, startValues, videoModelOf,
   type Aspect, type PlanOr, type RenderSettingsState, type RenderValues, type Speed,
 } from "@/lib/renderSettings";
 
@@ -94,7 +94,7 @@ export function RenderSettings() {
         <select className="field w-auto text-sm" aria-label="영상 모델" disabled={!edit || busy} value={vals.video_model ?? ""}
           onChange={(e) => { setVals(changeVideoModel(state, vals, e.target.value || null)); setMsg(null); setErr(null); }}>
           <option value="">정하지 않음</option>
-          {state.models.video.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.min_s}~{m.max_s}초</option>)}
+          {state.models.video.map((m) => <option key={m.id} value={m.id}>{m.name}{rangeLabel(m) ? ` · ${rangeLabel(m)}` : ""}</option>)}
         </select>
       </Row>
 

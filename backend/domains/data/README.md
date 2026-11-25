@@ -1308,3 +1308,10 @@ ax-contracts, ax-agent-template
 - 저장된 분류 중 **연예·스포츠·기타만** 한 번 다시 묻는다(`RECHECK`, `CATEGORY_VERSION` = 3). 다시 후보로 나올 때 다른 것과 묶어서 묻고(LLM 하루 상한 안), 다른 분류는 재사용한다. 영상 분류도 같다.
 - 화면 칸(`[popular] categories`)에 유머·드라마·교양을 더하고 보충 검색 YouTube 카테고리(유머 23, 드라마 1, 교양 27, 검색어는 그 칸 지금 인기 주제 이름)를 붙였다. 보충 검색 하루 상한 `fill_search_calls` 6 → 9.
 - 기획안 재료(`[promo] trend_categories`, 기본값 `ad_material.DEFAULT_ALLOWED`)에 유머·드라마·교양을 허용한다. 실존 인물·상표·음원 주의는 기존 규칙 그대로다.
+
+## 원본 판매 기록을 메모리에만 (3단계 3-3 A안, `DATA_SALES_STORE=memory`)
+
+- 켜기: 서버 `.env`에 `DATA_SALES_STORE=memory` → 재시작. 판매 수집기(`sales_collect`)는 안내 한 줄만 찍고 끝나고, 데이터 AI가 시작 뒤 뒤에서 회사 사이트 판매 기록·고객을 처음부터 받아 메모리 저장소에 두고 분석이 그걸 읽어요(`data_agent/sales_memory.py`). 다 받기 전에는 분석이 "수집 전"으로 보여요
+- 그 뒤: 같은 간격(`DATA_SALES_SYNC_SECONDS`)으로 이어 받고, 하루 집계(`aggregates.db`, 디스크)는 지금처럼 남아요. 계산 기록의 입력 이름은 `company_server`
+- `sales.db`는 지우지 않고 보관만 해요(읽지도 쓰지도 않음). 지난 날짜 비교(`--verify-days`)는 보관된 `sales.db` 기준이에요
+- 되돌리기: 값을 지우고 재시작 → 예전처럼 수집기가 `sales.db`에 이어 써요(커서는 `sales.db`의 것이라 켜 둔 동안의 주문도 다시 받아요)

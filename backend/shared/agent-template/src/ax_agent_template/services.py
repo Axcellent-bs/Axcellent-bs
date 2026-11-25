@@ -229,6 +229,7 @@ SERVICES: tuple[Service, ...] = (
             "prepare_sns_post_from_media",
             "prepare_brief_media",
             "choose_brief_audio",
+            "prepare_brief_creative",
             "request_brief_publish",
             "prepare_outage_sns_media",
             "request_outage_sns_publish",
