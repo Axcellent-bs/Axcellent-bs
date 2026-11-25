@@ -28,7 +28,10 @@ def degraded(event_id: str = "evt_down") -> EventEnvelope:
 
 
 def decided(
-    review_id: str = REVIEW, decision: str = "approved", source: str = "safety"
+    review_id: str = REVIEW,
+    decision: str = "approved",
+    source: str = "safety",
+    by: str = "kim",
 ) -> EventEnvelope:
     event_id = f"evt_{uuid.uuid4().hex[:10]}"
     return EventEnvelope(
@@ -43,7 +46,7 @@ def decided(
             "action": "rollback_deployment",
             "requester": "infra",
             "decision": decision,
-            "decided_by": "kim",
+            "decided_by": by,
         },
     )
 
@@ -116,7 +119,10 @@ async def test_rejection_ends_the_step_as_rejected() -> None:
 async def test_expiry_by_safety_is_a_timeout_rejection() -> None:
     engine, manager = await start()
     inc = await open_held(engine, manager, safety_says("expired", by="system"))
-    await manager.process(decided(decision="expired"))
+    # 안전 관문은 만료를 decision rejected · decided_by system으로 보낸다 (계약에 expired는 없다).
+    # 예전에는 expired를 보내 이벤트가 무시되고 보류 한도(30초) 뒤 마감 확인으로 끝났다
+    outcome, _ = await manager.process(decided(decision="rejected", by="system"))
+    assert outcome == "resumed"
     await manager.wait(inc.context_id)
     run = inc.steps["rollback"]
     assert run.status == "rejected_by_human" and run.note == "시간 초과로 자동 거절"
