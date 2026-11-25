@@ -362,18 +362,13 @@ def test_promo_video_request_end_to_end_with_keyframes(world: dict[str, Any]) ->
     e = world
     llm = _planning_llm()
     reqs, req_id, depts = _run(_flow(e, llm))
-    # 11/26 바뀐 기대값: 마케팅 확인에서 장면 1(훅 0~2초)이 영상 모델 최소 3초보다 짧아 기획에
-    # 고치기(revise_video_plan)를 1회 요청한다. 길이만 걸려서 기획은 LLM 없이 고르게 다시 나눈다
+    # 11/26 L 바뀐 기대값(#1861 때는 revise_video_plan 1회): 첫 훅 0~2초는 마케팅 길이 검사에서
+    # 빼고 최소가 2초라, 18초 3장면(0~2·2~15·15~18)은 고치기를 부르지 않는다 (훅 설계 그대로)
     assert depts.calls == ["trend_report_create", "trend_report_insight", "receive_insight",
-                           "prepare_video_draft_from_plan", "revise_video_plan",
-                           "generate_media"]  # fmt: skip
-    v2 = depts.results["revise_video_plan"].output["video_plan"]
-    assert v2["version"] == 2 and [(s["start_s"], s["end_s"]) for s in v2["scenes"]] == [
-        (0, 6), (6, 12), (12, 18),
-    ]  # fmt: skip
-    assert [r["by"] for r in v2["check_log"]][-2:] == ["marketing", "planning"]
+                           "prepare_video_draft_from_plan", "generate_media"]  # fmt: skip
     saved = next(p for p in depts.planning.state.proposals if p.video_plan is not None)
-    assert saved.video_plan and saved.video_plan.version == 2  # 기획이 같은 제안에 2판 저장
+    assert saved.video_plan and saved.video_plan.version == 1
+    assert [(s.start_s, s.end_s) for s in saved.video_plan.scenes] == [(0, 2), (2, 15), (15, 18)]
 
     # 기획: AI 초안 · 키프레임 칸 · 포즈 콘티(3D 마네킹) SVG, LLM 2회(제작안 + 포즈)
     video_plan = depts.results["receive_insight"].output["video_plan"]
@@ -393,11 +388,9 @@ def test_promo_video_request_end_to_end_with_keyframes(world: dict[str, Any]) ->
     assert board["board_source"] == "svg" and all(s["svg"] for s in board["shots"])
     assert e["board_calls"] == []
     assert rec["sheet"]["kind"] == "virtual_human"
-    # 마케팅은 받은 2판으로 준비한다 (판 기록은 의뢰 제작 기록에)
-    review = rec["render"]["plan_review"]
-    assert [(v["version"], v["passed"]) for v in review["versions"]] == [(1, False), (2, True)]
-    assert review["outcome"] == "revised" and review["needs_human"] is False
-    assert [r["start_s"] for r in board["plan_scenes"]] == [0, 6, 12]
+    # 마케팅 확인에 문제가 없으니 판 기록도 없고, 1판 장면 시간 그대로 준비한다
+    assert "plan_review" not in rec["render"]
+    assert [r["start_s"] for r in board["plan_scenes"]] == [0, 2, 15]
 
     # 키프레임 4장(#1806) → 영상 승인 대기
     assert depts.results["generate_media"].outcome == "video_held"
