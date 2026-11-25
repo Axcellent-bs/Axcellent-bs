@@ -39,6 +39,9 @@ SPEC_PROMPT = """너는 고객사 사내 기획 담당 AI다.
 - evidence(근거)는 왜 이 요청이 왔는지 보여 주는 배경이다. 근거 속 원인 후보 설명·관찰 값(시각·
   채널·건수·비슷한 과거 사례)을 요구사항·완료 기준으로 옮기지 않는다. 그런 값은 problem에만 짧게
   쓴다. 요구사항은 title이 바라는 변경만 다룬다
+- 개발은 이 회사의 사이트·서비스 코드를 고친다. 장애 원인 확인 요청이면 요구사항은 그 장애가 난
+  회사 서비스(예: 결제)의 원인을 찾아 고치는 일이다. AXcellent 쪽 화면(장애 상세 화면, 원인 후보·
+  신뢰도 표시, 운영자 원인 확정 입력)은 회사 코드가 아니라 요구사항으로 쓰지 않는다
 - 요구사항 하나는 개발 작업 하나가 된다. 그래서 만들 것이 있는 변경만 요구사항에 쓴다. "다른 파일은
   수정하지 않는다", "기존 내용은 그대로 둔다" 같은 제약·금지는 요구사항이 아니라 완료 기준에 쓴다
 - 존댓말 대신 "~한다" 문장으로, 각 문장은 160자 이하
@@ -77,6 +80,15 @@ _CONSTRAINT_END = re.compile(
 )
 
 
+# AXcellent 쪽 화면을 고치라는 문장 (11/25 SPEC-30 R1·R3: 회사 레포에는 이 화면이 없어 개발이 손님
+# 결제 실패 화면에 붙였다). 회사 사이트 코드가 아니라 요구사항·완료 기준에서 뺀다
+_AX_SCREEN = re.compile(r"장애 상세 화면|원인 후보|운영자가 (직접 )?원인을")
+
+
+def about_ax_screen(item: str) -> bool:
+    return bool(_AX_SCREEN.search(item))
+
+
 def is_constraint(item: str) -> bool:
     """요구사항 문장이 만들 것 없는 제약·금지면 True (완료 기준으로 옮긴다)."""
     return bool(_CONSTRAINT_END.search(" ".join(item.split())))
@@ -109,8 +121,12 @@ class SpecWriter:
             )
         except (TimeoutError, ValidationError, Exception):  # noqa: BLE001 - 규칙 초안으로 대신
             return None
-        keep = [x for x in got.requirements if not _from_evidence(x, title, evidence)]
-        done_keep = [x for x in got.done_criteria if not _from_evidence(x, title, evidence)]
+
+        def ok(x: str) -> bool:
+            return not _from_evidence(x, title, evidence) and not about_ax_screen(x)
+
+        keep = [x for x in got.requirements if ok(x)]
+        done_keep = [x for x in got.done_criteria if ok(x)]
         # 제약·금지 요구사항은 작업이 되지 않게 완료 기준 쪽으로 (만들 것이 하나도 없으면 그대로)
         rules = [x for x in keep if is_constraint(x)]
         if rules and len(rules) < len(keep):
