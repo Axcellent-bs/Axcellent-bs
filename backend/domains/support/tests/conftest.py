@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from ax_agent_template.testing import reset_state  # noqa: F401  autouse
-from support_agent import policy_memory
+from support_agent import policy_memory, shop_client
 from support_agent.persistence import BY_NAME, TABLES
 
 
@@ -58,3 +58,13 @@ def _memory_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(policy_memory, "fetch_sources", unavailable)
+
+
+@pytest.fixture(autouse=True)
+def _no_shop_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """판매 서버 가짜 클라이언트(`shop_client.use_client`)를 시험마다 비운다.
+
+    끼운 시험이 되돌리지 않으면 같은 프로세스의 다음 시험이 시드 주문 대신 그 가짜 서버를 읽는다.
+    시험을 나눠 돌리면(pytest-xdist) 순서가 바뀌어 드러난다.
+    """
+    monkeypatch.setattr(shop_client, "_client", None)
