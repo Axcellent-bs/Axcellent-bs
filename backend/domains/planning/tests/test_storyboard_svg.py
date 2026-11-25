@@ -86,14 +86,35 @@ def test_draw_without_llm_or_on_failure_keeps_plan() -> None:
     assert asyncio.run(sb.draw(junk, plan, "ctx")) == (plan, 0)
 
 
-def test_write_draws_svg_after_the_plan() -> None:
+def test_write_does_not_wait_for_svg() -> None:
+    """제작안 쓰기는 SVG를 기다리지 않는다.
+    (11/25: 기획안 만들기가 늦어져 화면이 기획서를 못 찾았다)"""
     scenes = [{"visual": f"장면 {i}", "caption": "", "prompt": "A woman reading on a calm subway"}
               for i in range(4)]  # fmt: skip
     out = vp._PlanOut.model_validate({"concept": "출근길", "script": "훅 → 공감", "scenes": scenes})
     llm = MockLLMClient(responses={vp._PlanOut: out, sb._SvgOut: _svg_out()})
     plan = asyncio.run(vp.write(llm, _prop(), "ctx", (vp.FUN_FIRST, vp.END_CARD)))
-    assert plan.written_by == "llm" and len(llm.calls) == 2
-    assert all(s.start_svg for s in plan.scenes)
+    assert plan.written_by == "llm" and len(llm.calls) == 1
+    assert not any(s.start_svg for s in plan.scenes)
+
+
+def test_make_plan_returns_first_and_svg_is_added_after() -> None:
+    llm = MockLLMClient(responses={sb._SvgOut: _svg_out()})
+    svc = _service(llm)
+
+    async def go() -> tuple[Any, bool]:
+        res = await svc.dispatch({"type": "makePlan", "proposal": "PROP-91"})
+        p = next(x for x in svc.state.proposals if x.id == "PROP-91")
+        before = any(s.start_svg for s in p.video_plan.scenes) if p.video_plan else True
+        while svc._sending:
+            await asyncio.gather(*list(svc._sending), return_exceptions=True)
+        return res, before
+
+    res, before = asyncio.run(go())
+    assert res.changed and res.output.get("spec_id")
+    assert before is False  # 기획안이 먼저 만들어지고, 그때는 아직 SVG가 없다
+    p = next(x for x in svc.state.proposals if x.id == "PROP-91")
+    assert p.video_plan is not None and all(s.start_svg for s in p.video_plan.scenes)
 
 
 def test_only_one_scene_is_redrawn_with_the_request_in_the_data_block() -> None:

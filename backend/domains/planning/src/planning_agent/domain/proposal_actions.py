@@ -469,6 +469,7 @@ class ProposalMixin:
             return ActionResult(outcome="created", output=res.output)
 
         await self._apply(keep)
+        self._spawn_svg(pid)
         out = {**res.output, "video_plan": video.model_dump(mode="json")}
         return ActionResult(changed=res.changed, outcome=res.outcome, output=out)
 
@@ -548,7 +549,40 @@ class ProposalMixin:
             video = p.video_plan or await video_plan.write(  # 총괄 의뢰 때 쓴 초안은 이어 쓴다
                 getattr(writer, "llm", None), p, _ctx(p)
             )
-        return await self._apply(self._make_plan, proposal=proposal, video=video)
+        res = await self._apply(self._make_plan, proposal=proposal, video=video)
+        self._spawn_svg(proposal)  # 기획안은 바로 만들고, SVG 콘티는 뒤에서 그려 붙인다
+        return res
+
+    def _spawn_svg(self: Any, proposal: str) -> None:
+        """제작안에 SVG 콘티가 없으면 뒤에서 그려 붙인다 (11/25). 기다리지 않는다.
+
+        LLM은 잠금 밖에서 부르고, 그린 동안 제작안이 바뀌지 않았을 때만(같은 장면 글) 넣는다.
+        LLM이 없거나 실패하면 아무것도 하지 않는다(제작안은 그대로)."""
+        p = _find(self.state, proposal)
+        llm = getattr(self._proposal_writer, "llm", None)
+        if p is None or p.video_plan is None or llm is None:
+            return
+        if any(s.start_svg or s.end_svg for s in p.video_plan.scenes):
+            return
+        base = p.video_plan
+
+        async def run() -> None:
+            drawn, changed = await storyboard_svg.draw(llm, base, _ctx(p))
+            if not changed:
+                return
+
+            async def put(s: State) -> ActionResult | None:
+                q = _find(s, proposal)
+                if q is None or q.video_plan != base:  # 그동안 제작안이 바뀌었으면 넣지 않는다
+                    return None
+                q.video_plan = drawn
+                return ActionResult(changed=True, output={"proposal_id": proposal})
+
+            await self._apply(put)
+
+        task = asyncio.create_task(run())
+        self._sending.add(task)
+        task.add_done_callback(self._sending.discard)
 
     async def redraw_storyboard(
         self: Any, proposal: str, scene: int | None = None, note: str = ""
