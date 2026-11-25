@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Notice, SectionHead, StatusChip } from './parts'
-import { currentIncidents, recentIncidents } from '@/lib/dejafix'
+import { DejafixNotConnectedError, currentIncidents, recentIncidents } from '@/lib/dejafix'
 import { connectedPcs, pcSummary, type PcRow } from '@/lib/connectedPcs'
 import { when } from '@/lib/toolForms'
 
@@ -9,7 +9,7 @@ import { when } from '@/lib/toolForms'
 // 연결 현황만 보여 준다(장애 제목·건수는 장애 대응 탭 몫). "연결 확인"은 두 목록을 DejaFix에서 다시 읽는다.
 // 못 읽으면 표 대신 이유를 보여 준다. 0대로 지어내지 않는다.
 
-type Load = { rows: PcRow[]; checkedAt: string } | { error: string }
+type Load = { rows: PcRow[]; checkedAt: string } | { error: string } | { notConnected: true }
 
 /** 두 목록 읽기. busy = 지금 읽는 버튼('all' 또는 PC 이름) */
 function usePcs() {
@@ -21,7 +21,7 @@ function usePcs() {
       const [recent, open] = await Promise.all([recentIncidents(), currentIncidents()])
       setLoad({ rows: connectedPcs(recent.data, open.data), checkedAt: new Date().toISOString() })
     } catch (e) {
-      setLoad({ error: (e as Error).message || 'DejaFix가 응답하지 않았어요.' })
+      setLoad(e instanceof DejafixNotConnectedError ? { notConnected: true } : { error: (e as Error).message || 'DejaFix가 응답하지 않았어요.' })
     } finally {
       setBusy(null)
     }
@@ -40,6 +40,13 @@ export function ConnectedPcs() {
       <SectionHead as="h3" title="연결한 PC" desc="Zabbix agent로 DejaFix에 연결된 회사 PC와 서버예요." />
 
       {!load && <p className="text-sm text-ink-500">DejaFix에서 PC 목록을 읽는 중…</p>}
+
+      {load && 'notConnected' in load && (
+        <div className="space-y-3">
+          <Notice tone="wait">DejaFix를 아직 연결하지 않았어요. 위 DejaFix 연결에서 연결하면 PC 목록이 보여요.</Notice>
+          <button type="button" className="btn-ghost" disabled={busy !== null} onClick={() => void read('all')}>{busy ? '확인 중…' : '다시 읽기'}</button>
+        </div>
+      )}
 
       {load && 'error' in load && (
         <div className="space-y-3">
