@@ -792,13 +792,33 @@ async def higgsfield_status(request: AgentRequest) -> AgentResult:
 
 # 스토리보드 프롬프트(read). 테스트는 이 값을 가짜 LLM을 돌려주는 함수로 바꾼다
 STORYBOARD_LLM: Any = None
+# 11/25 화면이 기다리지 않고 뒤에서 만들 때(dashboard-api input.background) LLM 응답 제한.
+# 대본을 따르는 6칸 SVG 콘티는 기본 60초를 넘겨 llm_failed로 끝났다(CR-edfae358333f)
+BACKGROUND_STORYBOARD_LLM_TIMEOUT_SEC = 240.0
+
+
+def storyboard_llm_factory(request: AgentRequest) -> Any:
+    """스토리보드 LLM을 만드는 함수. 뒤에서 만들 때만 응답 제한을 늘린다(모델·주소는 env 그대로)."""
+    from ax_agent_template.llm import LLMClient, LLMSettings
+    from marketing_agent.chat import default_llm
+
+    if STORYBOARD_LLM is not None:
+        return STORYBOARD_LLM
+    if request.input.get("background") is not True:
+        return default_llm
+
+    def long_llm() -> Any:
+        settings = LLMSettings.from_env("marketing")
+        if not (settings.model and settings.base_url):
+            return None
+        return LLMClient("marketing", settings, timeout=BACKGROUND_STORYBOARD_LLM_TIMEOUT_SEC)
+
+    return long_llm
 
 
 async def storyboard_prompt(request: AgentRequest) -> AgentResult:
     """줄거리와 이미지 시트 캐릭터 문장으로 장면별 구도를 정한 스토리보드 프롬프트(read)."""
-    from marketing_agent.chat import default_llm
-
-    factory = STORYBOARD_LLM or default_llm
+    factory = storyboard_llm_factory(request)
     script = _record_script(request.untrusted.get("record_id"))
     try:
         out = await _storyboard.make_storyboard(
@@ -821,9 +841,7 @@ async def storyboard_prompt(request: AgentRequest) -> AgentResult:
         # [Higgsfield 그림으로 다시 그리기]: 사람이 고를 때만 untrusted.board_higgsfield=true
         redraw = request.untrusted.get("board_higgsfield") is True
         _safe_render(
-            lambda: _render.maybe_start_board(
-                STATE.media_ledger, request.meta, rid, force=redraw
-            )
+            lambda: _render.maybe_start_board(STATE.media_ledger, request.meta, rid, force=redraw)
         )
     return _result(
         request,
@@ -1207,9 +1225,7 @@ async def creative_overlay_redo(request: AgentRequest) -> AgentResult:
     if isinstance(data, AgentResult):
         return data
     try:
-        done = await _overlay.redo(
-            data.record_id, {str(c.no): c.caption_ko for c in data.captions}
-        )
+        done = await _overlay.redo(data.record_id, {str(c.no): c.caption_ko for c in data.captions})
     except _overlay.OverlayRefused as error:
         return _result(
             request, TaskStatus.FAILED, outcome=error.code, output={"message": error.code}

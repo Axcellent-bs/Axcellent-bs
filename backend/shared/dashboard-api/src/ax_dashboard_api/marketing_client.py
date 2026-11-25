@@ -817,7 +817,8 @@ async def storyboard_call(
             **tenant_meta(),
         ),
         skill="storyboard_prompt",
-        input={},
+        # 뒤에서 만들 때는 마케팅이 LLM 응답 제한을 늘린다(사람 입력이 아니라 input)
+        input={"background": True} if deadline_s > STORYBOARD_DEADLINE_SECONDS else {},
         untrusted=untrusted,
     )
     result = await SEND(TARGET, request)
