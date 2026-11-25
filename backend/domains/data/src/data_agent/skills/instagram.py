@@ -75,6 +75,7 @@ from data_agent.connectors.instagram_graph import (
     PERMISSION_NOTE,
     IgError,
 )
+from data_agent.skills import notice_ad
 
 KST = timezone(timedelta(hours=9))
 TREND_CONFIG_ENV = "DATA_TREND_CONFIG"
@@ -646,6 +647,10 @@ def bursts(media: Mapping[str, Sequence[Mapping[str, Any]]], now: datetime,
                 audience_ages=list(tag.ages) if tag else [],
                 audience_genders=list(tag.genders) if tag else [],
                 topic=tag.topic if tag else None,
+                # 11/26: 브랜드 공지·광고 (캡션 전체로 본다. 화면에는 칩만, 근거·밈 재료에서 뺀다)
+                notice_ad=notice_ad.classify(cap, m.get("media_product_type"),
+                                             account_kind=tag.kind if tag else None,
+                                             source_kind=config.kind_of(account)),
             ))  # fmt: skip
     return out
 
@@ -699,8 +704,10 @@ MEME_POSTS_MAX = 12
 
 
 def meme_posts(posts: Sequence[InstagramRadarPost]) -> list[InstagramRadarPost]:
-    """밈·크리에이터 계정의 뜬 게시물 (묶음과 상관없이, 평소 대비 배수 순, 최대 12개)."""
-    mine = [p for p in posts if p.source_kind == "meme"]
+    """밈·크리에이터 계정의 뜬 게시물 (묶음과 상관없이, 평소 대비 배수 순, 최대 12개).
+
+    11/26: 브랜드 공지·광고(notice_ad)는 밈 재료가 아니라 뺀다."""
+    mine = [p for p in posts if p.source_kind == "meme" and not notice_ad.is_notice_ad(p)]
     return sorted(mine, key=lambda p: (-p.ratio, p.media_id))[:MEME_POSTS_MAX]
 
 

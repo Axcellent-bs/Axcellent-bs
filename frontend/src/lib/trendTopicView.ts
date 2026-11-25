@@ -12,7 +12,8 @@ const REASON_SHORT: Record<ExcludedReason, string> = { off_topic: "주제와 상
 
 export interface TopicRow { row: TrendTopicEvidenceRow; chip: string | null }
 export interface TopicView {
-  theme: string;
+  /** 주제 없는 의뢰면 null (그때는 뺀 근거(공지·광고)만 보인다) */
+  theme: string | null;
   terms: string[];
   rows: TopicRow[];
   excluded: TrendExcludedEvidence[];
@@ -20,12 +21,11 @@ export interface TopicView {
   excludedTitle: string | null;
 }
 
-/** 주제가 있고 확장어·근거·뺀 근거 중 하나라도 있으면 칸을 보인다 */
+/** 주제가 있고 확장어·근거·뺀 근거 중 하나라도 있으면 칸을 보인다. 주제가 없어도 뺀 근거(공지·광고)가 있으면 그것만 */
 export function topicView(report: Pick<TrendReport, "brief" | "related_terms" | "topic_evidence" | "excluded">): TopicView | null {
-  const theme = report.brief.theme?.trim();
-  if (!theme) return null;
-  const terms = report.related_terms ?? [];
-  const evidence = report.topic_evidence ?? [];
+  const theme = report.brief.theme?.trim() || null;
+  const terms = theme ? report.related_terms ?? [] : [];
+  const evidence = theme ? report.topic_evidence ?? [] : [];
   const excluded = report.excluded ?? [];
   if (!terms.length && !evidence.length && !excluded.length) return null;
   // 결론 근거로 쓴 줄 먼저, 참고 행(끝난 급상승)은 뒤로 (서버 순서는 그대로)

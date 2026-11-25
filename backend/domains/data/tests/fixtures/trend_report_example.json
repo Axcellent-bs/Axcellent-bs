@@ -127,7 +127,8 @@
           "audience_ages": [],
           "audience_genders": [],
           "topic": null,
-          "ad_excluded": null
+          "ad_excluded": null,
+          "notice_ad": null
         }
       ],
       "memes": [

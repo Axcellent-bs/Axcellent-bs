@@ -26,6 +26,7 @@ from ax_contracts.schemas.data import (
     TrendTopicEvidenceRow,
 )
 from data_agent.keyword_pool import compact
+from data_agent.skills.notice_ad import is_notice_ad
 
 SCAN_SOURCE = "감지 탭에서 가져옴 · 네이버 데이터랩"
 FADED_SOURCE = "결론 근거에서 뺌 · 참고로만"
@@ -82,7 +83,10 @@ def scan_hits(stored: Any, words: Sequence[str]) -> list[Mapping[str, Any]]:
 
 
 def apply(report: TrendReport, scan_stored: Any = None) -> None:
-    """주제가 있는 의뢰면 `topic_evidence`·`excluded`를 채운다 (근거 목록이 이 값을 읽는다)."""
+    """주제가 있는 의뢰면 `topic_evidence`·`excluded`를 채운다 (근거 목록이 이 값을 읽는다).
+
+    11/26 C: 브랜드 공지·광고 게시물(notice_ad)은 주제와 상관없이 늘 뺀다 (excluded notice_ad)."""
+    report.excluded = _merge(notice_ads(report), report.excluded)
     b = report.brief
     if not b.theme:
         return
@@ -133,7 +137,7 @@ def apply(report: TrendReport, scan_stored: Any = None) -> None:
             drop(f"hashtag:{i}", h.tag, f"{h.accounts}곳 사용")
     # 4) 콘텐츠: 터진 게시물(캡션 앞부분)·조회 천만·쇼츠(찾은 검색어·제목)·밈
     for i, p in enumerate(s.content.posts, start=1):
-        if p.ad_excluded:
+        if p.ad_excluded or is_notice_ad(p):  # 공지·광고는 위에서 이미 뺐다
             continue
         if connected(p.caption_excerpt, words):
             rows.append(TrendTopicEvidenceRow(kind="content", label=f"{p.account} 게시물",
@@ -176,6 +180,17 @@ def _merge(before: Sequence[TrendExcludedEvidence],
         if key not in seen:
             seen.add(key)  # type: ignore[arg-type]
             out.append(e)
+    return out
+
+
+def notice_ads(report: TrendReport) -> list[TrendExcludedEvidence]:
+    """콘텐츠 칸 게시물 중 브랜드 공지·광고 → 뺀 근거 (id = content:N, 원자료 표에는 남는다)."""
+    out = []
+    for i, p in enumerate(report.sections.content.posts, start=1):
+        if not p.ad_excluded and is_notice_ad(p):
+            out.append(TrendExcludedEvidence(label=f"{p.account} 게시물", value=f"{p.ratio:g}배",
+                                             reason="notice_ad",
+                                             evidence_id=f"content:{i}"))  # fmt: skip
     return out
 
 

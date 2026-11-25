@@ -61,7 +61,7 @@ from ax_contracts.schemas.data import (
 from data_agent import instagram_store as st
 from data_agent import number_words as nw
 from data_agent import radar_meta as rm
-from data_agent.skills import caption_noise
+from data_agent.skills import caption_noise, notice_ad
 from data_agent.skills import trend_report_audience as ra
 from data_agent.skills import trend_report_brief as tb
 
@@ -657,7 +657,8 @@ def meme_source_posts(stored: Any) -> list[InstagramRadarPost]:
             post = InstagramRadarPost.model_validate(row)
         except ValueError:
             continue
-        if post.source_kind == "meme":
+        # 11/26: 브랜드 공지·광고는 밈 재료가 아니다 (예전 저장분은 규칙으로 다시 본다)
+        if post.source_kind == "meme" and not notice_ad.is_notice_ad(post):
             out.append(post)
     return out
 

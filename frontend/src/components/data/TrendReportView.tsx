@@ -355,6 +355,7 @@ function ReportPost({ p, rank, domId }: { p: InstagramRadarPost; rank: number; d
         <span className="text-ink-700">{[kind, `${METRIC[p.metric]} ${COMPACT.format(p.value)}`, posted].filter(Boolean).join(" · ")}</span>
         {p.standout && <span className="font-medium text-emerald-700">{p.standout}</span>}
         {p.ad_excluded && <span className="font-medium text-ink-500">{p.ad_excluded}</span>}
+        {p.notice_ad && <span><span className={`chip text-[11px] ${TONE.warn}`} title={`${p.notice_ad} · 결론 근거에서 뺌`}>공지·광고</span></span>}
       </span>
     </>
   );

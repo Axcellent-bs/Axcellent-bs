@@ -55,6 +55,7 @@ export function PostCard({ post: p, rank, adMaterial, domId }: { post: Instagram
       {p.standout && <span className="text-xs font-medium text-emerald-700">{p.standout}</span>}
       {layers.length > 0 && <span className="flex flex-wrap gap-1">{layers.map((c) => <span key={c} className="chip text-[11px]">{c}</span>)}</span>}
       {ad &&<span><span className={`chip text-[11px] ${ad.tone}`}>광고 재료 {ad.label}</span></span>}
+      {p.notice_ad && <span><span className="chip bg-amber-50 text-[11px] text-amber-700" title={`${p.notice_ad} · 보고서 근거·밈 재료에서 뺌`}>공지·광고</span></span>}
     </>
   );
   const cls = "flex flex-col gap-1 rounded-lg";
@@ -125,6 +126,7 @@ function Posts({ list }: { list: InstagramRadarPost[] }) {
             {" · "}{METRIC[p.metric]} {n(p.value)}
             {" · "}평소 {times(p.ratio)}
             {p.posted_at && <span className="text-ink-500"> · {when(p.posted_at)}</span>}
+            {p.notice_ad && <span className="chip ml-1 bg-amber-50 text-[11px] text-amber-700" title={p.notice_ad}>공지·광고</span>}
             {link && <> · <a href={link} target="_blank" rel="noreferrer noopener" className="text-brand-700 underline-offset-2 hover:underline">게시물 열기</a></>}
             {p.caption_excerpt && <span className="block whitespace-pre-line break-words text-ink-500">{p.caption_excerpt}</span>}
           </li>
