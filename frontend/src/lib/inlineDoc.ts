@@ -4,7 +4,7 @@
 // - 기획 SVG 콘티는 늘 <img src="data:image/svg+xml;base64,…">로만 그린다(svgDataUri)
 
 import { svgDataUri } from "./storyboardSvg.ts";
-import { characterLine, versionChip, videoFallbackLine, videoSvgLine, type VideoPlanView, type VideoSceneView } from "./videoPlan.ts";
+import { characterLine, formatChip, versionChip, videoFallbackLine, videoSvgLine, type VideoPlanView, type VideoSceneView } from "./videoPlan.ts";
 
 export const expandLabel = (open: boolean): string => (open ? "▾ 접기" : "▸ 펼쳐 보기");
 
@@ -22,6 +22,8 @@ const secs = (x: number) => (Number.isInteger(x) ? `${x}` : x.toFixed(1));
 export interface InlineScene {
   key: string;
   title: string; // "장면 1 · 0~2초"
+  beat: string | null; // 11/26 형식 카드 비트 이름 · 없으면 null
+  punch: boolean; // 펀치 비트 (강조)
   thumb: string | null; // 첫 화면 3D 콘티 (data URI) · 없으면 null
   thumbEnd: string | null; // 끝 화면 콘티
   frames: string | null; // "첫 화면 → 끝 화면"
@@ -39,6 +41,8 @@ export function inlineScene(s: VideoSceneView): InlineScene {
   return {
     key: `scene-${s.n}`,
     title: `장면 ${s.n} · ${secs(s.startS)}~${secs(s.endS)}초`,
+    beat: s.beatKo?.trim() || null,
+    punch: s.beatPunch === true,
     thumb: svgOrNull(s.startSvg),
     thumbEnd: svgOrNull(s.endSvg),
     frames: start || end ? `${start || "?"} → ${end || "?"}` : null,
@@ -58,6 +62,9 @@ export interface InlinePlanView {
   fallback: string | null;
   /** "주인공: …" 줄 (11/26, 기획 화면과 같은 문구) · 예전 제작안은 null */
   lead: string | null;
+  /** 형식 칩 "F-02 기대 vs 현실 · 보고서 추천"과 상황 줄 (11/26) · 형식이 없으면 null */
+  format: string | null;
+  situation: string | null;
   /** 3D 콘티를 못 그린 이유 한 줄(계약 VideoPlan.svg_reason, 기획 화면과 같은 문구) · 없으면 null */
   svgWhy: string | null;
   /** 콘티(SVG)를 못 그린 장면 수 · 0이면 줄을 두지 않는다 */
@@ -73,6 +80,8 @@ export function inlinePlan(v: VideoPlanView): InlinePlanView {
     scenes,
     fallback: videoFallbackLine(v) || null,
     lead: characterLine(v) || null,
+    format: formatChip(v) || null,
+    situation: (v.formatId && v.situationKo) || null,
     svgWhy: videoSvgLine(v) || null,
     missingSvg: scenes.filter((s) => !s.thumb).length,
   };

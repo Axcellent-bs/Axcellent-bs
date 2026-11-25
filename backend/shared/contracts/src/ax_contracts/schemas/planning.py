@@ -678,6 +678,13 @@ PromoStyle = Literal["fun_first", "product"]
 BrandExposure = Literal["end_card", "prop", "caption"]
 
 
+class InsightHumorSituation(AxModel):
+    """보고서 웃음 재료 상황 한 줄 (11/26, 데이터 TrendHumorSituation에서 출처 종류를 뺀 것)."""
+
+    text_ko: str = Field(min_length=1, max_length=80)
+    format_id: str = Field(default="", max_length=8)  # 형식 카드 id 또는 "" (모름)
+
+
 class ReceiveInsightInput(AxModel):
     schema_version: SchemaVersion = PROPOSAL_SCHEMA_VERSION
     insight_id: str = Field(min_length=1, max_length=80)  # 보낸 쪽 인사이트 id (재전송은 중복)
@@ -712,6 +719,11 @@ class ReceiveInsightInput(AxModel):
     # None이면 기획은 fun_first·end_card로 본다
     promo_style: Literal["fun_first", "product"] | None = None
     brand_exposure: Literal["end_card", "prop", "caption"] | None = None
+    # 아래는 예전 요청은 없다 (11/26). 데이터 트렌드 보고서가 추천한 형식 카드 id(점수 순, F-01…)와
+    # 웃음 재료 상황 요약(원문 아님, 데이터가 요약·검사한 것). 기획은 카드로 제작안 형식을 잡고
+    # 상황은 데이터 칸(untrusted)에만 넣는다
+    format_ids: list[str] = Field(default_factory=list, max_length=3)
+    humor_situations: list[InsightHumorSituation] = Field(default_factory=list, max_length=5)
 
 
 class ReceiveInsightOutput(AxModel):
@@ -848,6 +860,10 @@ class VideoScene(AxModel):
     # 기획 코드가 SVG로 그려 start_svg·end_svg에 넣는다
     start_pose: KeyPose | None = None
     end_pose: KeyPose | None = None
+    # 아래는 예전 제작안은 없다 (11/26). 형식 카드에서 이 장면이 맡은 비트 이름
+    # (예: 기대·현실·펀치 리액션)과 그 비트가 펀치라인 비트인지 (화면 강조, 카드 값)
+    beat_ko: str = Field(default="", max_length=20)
+    beat_punch: bool = False
 
     @model_validator(mode="after")
     def _ends_after_start(self) -> VideoScene:
@@ -947,6 +963,10 @@ class VideoPlan(AxModel):
     # 아래는 예전 제작안은 없다 (11/26). 제작안 판: 1 = 처음, 2 = 마케팅 요청으로 기획이 고친 판
     # (revise_video_plan, 제안당 1회)
     version: int = Field(default=1, ge=1, le=9)
+    # 아래는 예전 제작안은 없다 (11/26). 따른 형식 카드 id(보고서 추천, 없으면 "")와 웃음 재료 상황
+    format_id: str = Field(default="", max_length=8)
+    format_name: str = Field(default="", max_length=40)  # 그 카드 이름 (화면 칩, 카드 파일 값)
+    situation_ko: str = Field(default="", max_length=80)
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:

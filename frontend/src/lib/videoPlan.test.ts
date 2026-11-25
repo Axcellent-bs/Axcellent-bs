@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { adjustmentLine, characterLine, checkAttemptTitle, checkChip, checkProblemLine, requestRuleLine, versionChip, requestRulesChip, sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
+import { adjustmentLine, characterLine, formatChip, checkAttemptTitle, checkChip, checkProblemLine, requestRuleLine, versionChip, requestRulesChip, sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
 
 // 11/20 16:55 서버 PROP-15 모양 (snake_case, 계약 VideoPlan)
 const RAW = {
@@ -242,6 +242,22 @@ test("제작안 판 칩 (계약 version): 2판(마케팅 요청으로 고침) ·
   assert.equal(versionChip(toVideoPlan({ ...RAW, version: 1 })!), "");
   assert.equal("version" in toVideoPlan(RAW)!, false);
   assert.match(readFileSync(new URL("../components/planning/videoPlan.tsx", import.meta.url), "utf8"), /versionChip\(v\) && <Tag>\{versionChip\(v\)\}<\/Tag>/);
+});
+
+test("형식 카드 (계약 format_id·format_name·situation_ko, 장면 beat_ko·beat_punch): 칩·상황·비트 · 없으면 지금 화면", () => {
+  const scenes = RAW.scenes.map((s, i) => ({ ...s, beat_ko: ["기대", "현실", "펀치 리액션", "엔드카드"][i] ?? "", beat_punch: i === 2 }));
+  const v = toVideoPlan({ ...RAW, scenes, format_id: "F-02", format_name: "기대 vs 현실", situation_ko: "시험 전날 계획표 vs 새벽 3시" })!;
+  assert.equal(formatChip(v), "F-02 기대 vs 현실 · 보고서 추천");
+  assert.equal(v.situationKo, "시험 전날 계획표 vs 새벽 3시");
+  assert.deepEqual(v.scenes.map((s) => [s.beatKo, s.beatPunch === true]).slice(0, 3), [["기대", false], ["현실", false], ["펀치 리액션", true]]);
+  const old = toVideoPlan(RAW)!;
+  assert.equal(formatChip(old), "");
+  assert.equal("formatId" in old || "situationKo" in old || "beatKo" in old.scenes[0], false);
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  const screen = read("../components/planning/videoPlan.tsx");
+  assert.match(screen, /formatChip\(v\) && <div className="sb-format"><dt>형식<\/dt>/);
+  assert.match(screen, /v\.formatId && v\.situationKo && <div className="sb-situation"><dt>상황<\/dt>/);
+  assert.match(screen, /sb-beat\$\{s\.beatPunch \? ' sb-beat-punch' : ''\}/);
 });
 
 test("주인공 줄 (계약 character_source·character_ko·character_look, 기획 character_line과 같은 문구)", () => {

@@ -37,6 +37,7 @@ from ax_workflow.core import ActionError, ActionResult
 from ax_workflow.models import (
     CompanyCharacter,
     DeletedProposal,
+    HumorSituation,
     Para,
     Proposal,
     ProposalFact,
@@ -441,6 +442,9 @@ class ProposalMixin:
                 options=options, scale=scale,
                 brand_character_record_id=inp.brand_character_record_id,
                 request_text=inp.request_text if requester == "orchestrator" else None,
+                format_ids=list(inp.format_ids),
+                humor_situations=[HumorSituation(text_ko=s.text_ko, format_id=s.format_id)
+                                  for s in inp.humor_situations],
             )  # fmt: skip
             s.proposals.append(p)
             warn = f", 경고 {len(p.warnings)}" if p.warnings else ""

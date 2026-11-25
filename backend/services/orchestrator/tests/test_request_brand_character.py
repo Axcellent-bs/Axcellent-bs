@@ -463,3 +463,22 @@ def test_only_the_prepare_step_is_the_character_prepare_step() -> None:
     assert [p["step_id"] for p in plan if key in (p.get("pass_row") or [])] == ["plan"]
     other = request_tasks.plan_of(request_tasks.BY_NAME["trend_report"])
     assert all("pass_row" not in p for p in other)  # 다른 일의 계획 모양은 그대로
+
+
+@pytest.mark.asyncio
+async def test_report_format_cards_and_situations_reach_planning_unchanged() -> None:
+    """11/26 데이터 insight의 형식 카드·웃음 재료 상황을 총괄이 그대로 기획에 넘긴다.
+
+    총괄 코드는 그대로다(넘겨받은 insight를 통째로 넘긴다)."""
+    fake = Fake()
+    rich = INSIGHT | {
+        "format_ids": ["F-02", "F-06"],
+        "humor_situations": [{"text_ko": "시험 전날 계획 vs 새벽 3시", "format_id": "F-02"}],
+    }
+    fake.answers["trend_report_insight"] = [
+        result(TaskStatus.COMPLETED, output={"report_id": "rep_1", "insight": rich})
+    ]
+    await until_confirm(fake)
+    plan = next(c[1] for c in fake.calls if c[1].skill == "receive_insight")
+    assert plan.input["format_ids"] == ["F-02", "F-06"]
+    assert plan.input["humor_situations"] == rich["humor_situations"]

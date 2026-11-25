@@ -25,7 +25,11 @@ from datetime import datetime
 from typing import Any
 
 from ax_contracts.schemas.data import TrendReport
-from ax_contracts.schemas.planning import InsightFact, ReceiveInsightInput
+from ax_contracts.schemas.planning import (
+    InsightFact,
+    InsightHumorSituation,
+    ReceiveInsightInput,
+)
 from data_agent.skills import trend_report_brief as tb
 from data_agent.skills import trend_report_promo as tp
 
@@ -354,4 +358,14 @@ def build_insight(report: TrendReport | None) -> tuple[ReceiveInsightInput | Non
         # 예전 보고서는 None → 기획이 fun_first·end_card로 본다
         promo_style=report.sections.recommendation.promo_style,
         brand_exposure=report.sections.recommendation.brand_exposure,
+        # 11/26 보고서 추천 형식 카드(점수 순)·웃음 재료 상황(이미 요약·검사한 것, 원문 아님).
+        # 예전 보고서는 비어 있다 → 기획은 지금처럼 형식 없이 쓴다
+        format_ids=list(report.recommended_formats)[:MAX_FORMATS],
+        humor_situations=[
+            InsightHumorSituation(text_ko=clip(s.text, 80), format_id=s.format_id)
+            for s in report.humor_situations[:MAX_SITUATIONS]
+        ],
     ), None
+
+
+MAX_FORMATS, MAX_SITUATIONS = 3, 5  # 계약 ReceiveInsightInput.format_ids·humor_situations 상한

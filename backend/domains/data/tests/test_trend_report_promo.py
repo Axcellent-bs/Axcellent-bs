@@ -238,6 +238,30 @@ def test_insight_first_line_and_two_fields(report: Any) -> None:
     assert (insight.promo_style, insight.brand_exposure) == (None, None)
 
 
+def test_insight_carries_recommended_format_cards_and_humor_situations(report: Any) -> None:
+    """11/26 보고서 추천 형식 카드·웃음 재료 상황을 기획 입력에 (원문 아님, 요약·검사한 것)."""
+    from ax_contracts.schemas.data import TrendHumorSituation
+
+    report.recommended_formats = ["F-02", "F-06", "F-01", "F-03"]
+    report.humor_situations = [
+        TrendHumorSituation(text=f"시험 전날 계획 vs 새벽 {i}시", format_id="F-02",
+                            source_kind="shorts_title")  # fmt: skip
+        for i in range(7)
+    ]
+    insight, _ = ti.build_insight(report)
+    assert insight is not None and insight.format_ids == ["F-02", "F-06", "F-01"]  # 상한 3
+    assert [s.text_ko for s in insight.humor_situations][:2] == [
+        "시험 전날 계획 vs 새벽 0시", "시험 전날 계획 vs 새벽 1시",
+    ]  # fmt: skip
+    assert len(insight.humor_situations) == 5 and insight.humor_situations[0].format_id == "F-02"
+    dumped = insight.model_dump(mode="json")
+    assert "source_kind" not in str(dumped["humor_situations"])  # 출처 종류는 넘기지 않는다
+    # 예전 보고서: 칸이 비어 있다 (기획은 지금처럼 형식 없이)
+    report.recommended_formats, report.humor_situations = [], []
+    old, _ = ti.build_insight(report)
+    assert old is not None and old.format_ids == [] and old.humor_situations == []
+
+
 def test_insight_facts_stay_within_twelve(report: Any) -> None:
     rec = report.sections.recommendation
     rec.promo_style, rec.brand_exposure = "fun_first", "end_card"
