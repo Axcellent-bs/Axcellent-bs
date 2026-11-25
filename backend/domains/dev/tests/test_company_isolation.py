@@ -63,6 +63,24 @@ def test_other_company_does_not_get_catbooks_repo(env) -> None:  # noqa: ANN001
     assert CATBOOKS_REPO not in str(rows)
 
 
+def test_read_through_shared_token_proxy_uses_session_header(env) -> None:  # noqa: ANN001
+    """실서버 11/25: 같은 출처 nginx(`/dev-api/`)는 읽기(GET)의 Authorization을 공용 토큰으로
+    바꿔 붙인다. 그래서 세션 토큰만 실은 읽기는 캣북스로 떨어져 누비투어 화면에 캣북스 화면
+    연결이 보였다. 화면은 읽기에도 `X-AX-Session`을 싣고, 서버는 Authorization이 세션 토큰이
+    아니면 그 머리로 회사를 고른다."""
+    client = TestClient(app)
+    saved = client.post(
+        CONNS, json={"kind": "github", "repo": CATBOOKS_REPO, "token": "ghp_catbooks_placeholder"}
+    )  # 캣북스 화면 연결
+    assert saved.status_code == 200, saved.text
+    shared = {"Authorization": "Bearer shared-operator-token-placeholder"}
+    as_catbooks = client.get(CONNS, headers=shared).json()["data"]
+    assert any(r["source"] == "screen" for r in as_catbooks)  # 공용 토큰만이면 예전 그대로(캣북스)
+    as_nubi = client.get(CONNS, headers={**shared, "X-AX-Session": _session("nubi")}).json()
+    assert as_nubi["data"] == []
+    assert CATBOOKS_REPO not in str(as_nubi)
+
+
 def test_saved_connection_stays_in_its_company(env, tmp_path) -> None:  # noqa: ANN001
     client = TestClient(app)
     body = {"kind": "github", "repo": "nubi-tour/site", "token": "ghp_nubi_placeholder"}

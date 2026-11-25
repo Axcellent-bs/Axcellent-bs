@@ -204,7 +204,10 @@ async function call<T>(base: string, path: string, init?: RequestInit): Promise<
   // 머리 없는 읽기(GET)는 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이). 토큰을 안 보는 읽기(state)는 싣지 않는다
   const read = (init?.method ?? 'GET').toUpperCase() === 'GET' && !new Headers(init?.headers).has('authorization')
     && !tokenFree(base === DEV_API ? 'dev' : 'planning', `/api/planning${path}`)
-  const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init, ...(read ? { headers: { ...Object.fromEntries(new Headers(init?.headers)), ...sessionAuth() } } : {}) })
+  // 같은 출처 nginx는 읽기의 Authorization을 공용 토큰으로 바꿔 붙여서(실서버 11/25) 세션 회사가 사라진다.
+  // 그래서 읽기에도 X-AX-Session을 같이 싣는다: 서버는 Authorization이 세션 토큰이 아니면 이 머리로 회사만 고른다
+  const session = sessionAuth().Authorization?.replace(/^Bearer /, '')
+  const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init, ...(read ? { headers: { ...Object.fromEntries(new Headers(init?.headers)), ...sessionAuth(), ...(session ? { 'X-AX-Session': session } : {}) } } : {}) })
   const parsed: unknown = await res.json().catch(() => undefined)
   const body = parsed ?? {}
   if (!res.ok) {
