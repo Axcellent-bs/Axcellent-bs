@@ -22,6 +22,7 @@ def plan_call(llm) -> str:  # noqa: ANN001
     """마지막 제작안 호출 (11/25부터 SVG 콘티 호출이 뒤에 한 번 더 붙는다)."""
     return [c for c in llm.calls if "콘티 작가" not in c][-1]
 
+
 PRODUCT = (vp.PRODUCT, vp.END_CARD)
 
 
@@ -240,7 +241,8 @@ def test_forbidden_scene_prompt_still_falls_back_to_rule() -> None:
     out.scenes[0].prompt = "Close-up on a Starbucks cup"
     assert vp.reject_reason(_prop(), out) == "prompt_rule"
     plan = asyncio.run(vp.write(_mock(out), _prop(), "ctx"))
-    assert plan == vp.rule_plan(_prop())
+    # 11/25 규칙 제작안 이유가 같이 남는다 (나머지 칸은 규칙 제작안 그대로)
+    assert plan == vp.rule_plan(_prop()).model_copy(update={"fallback_reason": "rejected"})
 
 
 def test_topic_name_in_keyframe_is_rejected() -> None:

@@ -138,7 +138,8 @@ def test_llm_scene_count_spreads_evenly() -> None:
 )
 def test_llm_plan_breaking_rules_falls_back_to_rule(out) -> None:
     plan = asyncio.run(vp.write(_mock(out), _prop(), "ctx"))
-    assert plan == vp.rule_plan(_prop())
+    # 11/25 규칙 제작안 이유가 같이 남는다 (나머지 칸은 규칙 제작안 그대로)
+    assert plan == vp.rule_plan(_prop()).model_copy(update={"fallback_reason": "rejected"})
 
 
 def test_llm_failure_falls_back_to_rule() -> None:
