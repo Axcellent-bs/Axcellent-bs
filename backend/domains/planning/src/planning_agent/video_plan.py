@@ -9,7 +9,8 @@
   편집 때 오버레이), 실존 인물·실제 브랜드·주소·긴 숫자열을 넣지 않는다. 걸리면 규칙 제작안을 쓴다
 - LLM이 없거나 실패하면 규칙 제작안(같은 입력이면 같은 결과)
 - 마케팅 장면 템플릿 힌트(`media_hints`, 11/20 재헌 님과 맞춤)는 코드 규칙으로만 채운다:
-  계절은 제안을 받은 날(한국 시간)의 달, 색감은 고른 방향. 책 분류는 기획이 모르니 비운다.
+  계절은 제안을 받은 날(한국 시간)의 달, 색감은 고른 방향. 분류(category)는 회사 분류 목록
+  (`[brand] categories`) 안에서만: 제안 글에 나온 분류, 없으면 LLM이 목록에서 고른 것(11/25)
   마케팅이 검사해 통과한 값만 쓰고 나머지는 자기 추천값을 쓴다
 - 키프레임 칸(11/24 멘토링 "기획이 아주 디테일해야 함"): 장면마다 첫 화면·끝 화면·사이 동작·카메라를
   글로만 쓴다. 기획은 영상·그림 모델을 모른다(프롬프트는 마케팅). 장면 prompt와 같은 금지를 본다
@@ -383,11 +384,46 @@ def _season(month: int) -> str:
     return "winter"
 
 
-def media_hints(p: Proposal) -> VideoMediaHints:
+CATEGORY_MAX = 30  # VideoMediaHints.category·마케팅 장면 템플릿 category와 같다
+
+
+def company_categories() -> tuple[str, ...]:
+    """회사 분류 목록 (`[brand] categories`).
+    글이 아니거나 빈 값·긴 값은 뺀다(마케팅과 같은 규칙)."""
+    raw = tenant.brand_section().get("categories")
+    if not isinstance(raw, list):
+        return ()
+    out: list[str] = []
+    for value in raw:
+        word = " ".join(value.split()) if isinstance(value, str) else ""
+        if word and len(word) <= CATEGORY_MAX and word not in out:
+            out.append(word)
+    return tuple(out)
+
+
+def category_of(p: Proposal, picked: str = "") -> str | None:
+    """회사 분류 하나. 제안 글(제목·아이디어·인사이트·이유·주제·상품·설명)에 먼저 나온 분류,
+    없으면 LLM이 고른 값(목록에 있을 때만). 목록이 없거나 못 고르면 None(지어내지 않는다)."""
+    cats = company_categories()
+    if not cats:
+        return None
+    texts = [p.title, idea_of(p), p.insight, p.why, p.content_category or "", *p.products,
+             p.body_md or ""]  # fmt: skip
+    for text in texts:
+        low = (text or "").lower()
+        found = [(at, -len(c), c) for c in cats if (at := low.find(c.lower())) >= 0]
+        if found:
+            return min(found)[2]
+    got = " ".join((picked or "").split())
+    return got if got in cats else None
+
+
+def media_hints(p: Proposal, picked: str = "") -> VideoMediaHints:
     """마케팅 장면 템플릿 힌트. 같은 제안이면 같은 값, 모르는 것은 비운다."""
     return VideoMediaHints(
         season=_season(p.created_at.astimezone(_KST).month),
         color_theme=COLOR.get(p.angle or ""),
+        category=category_of(p, picked),
     )
 
 
@@ -568,6 +604,8 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
   - camera_en: 샷 크기와 카메라 움직임 (영어, 120자 이내. 예: medium shot, slow push-in)
 - offer_ko: 혜택·이점 한 줄 (한국어, 60자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
 - cta_ko: 마지막 행동 문구 (한국어, 40자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
+- category: 데이터 블록 categories(회사 상품 분류) 중 이 영상에 가장 맞는 것 하나를 그대로.
+  목록이 비었거나 맞는 것이 없으면 빈 문자열 (목록에 없는 말을 만들지 않는다)
 
 키프레임 규칙 (첫·끝 화면을 주고 사이 동작을 자세히 써야 영상이 덜 어색하다):
 - 장면 i의 end_frame과 장면 i+1의 start_frame은 같은 순간이다. 같은 인물·위치·소품으로 이어지게 쓴다
@@ -682,6 +720,7 @@ class _PlanOut(BaseModel):
     scenes: list[_SceneOut] = Field(min_length=1)
     offer_ko: str = ""
     cta_ko: str = ""
+    category: str = ""  # 데이터 블록 categories 중 하나 (아니면 코드가 버린다)
 
 
 def keyframe_texts(s: _SceneOut) -> list[str]:
@@ -831,7 +870,7 @@ def _from_llm(
             concept=_short(got.concept, 200), duration_s=d, script=_short(got.script, 800),
             scenes=scenes, style=style(b, fixed_setting=style_ != FUN_FIRST),
             negative=NEGATIVE, written_by="llm",
-            media_hints=media_hints(p), purpose=purpose,
+            media_hints=media_hints(p, got.category), purpose=purpose,
             offer_ko=_short(got.offer_ko, 60) if ad else "",
             cta_ko=_short(got.cta_ko, 40) if ad else "",
         )  # fmt: skip
@@ -860,6 +899,7 @@ async def write(
         "audience": p.audience or "",
         "content_category": p.content_category or "",
         "shorts_format": p.shorts_format or "",
+        "categories": list(company_categories()),
     }
     style_, exposure = promo
     purpose = purpose_of(p)
