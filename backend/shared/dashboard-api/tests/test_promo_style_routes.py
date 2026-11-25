@@ -72,8 +72,9 @@ def test_read_shows_tenant_file_values_and_sources(
 ) -> None:
     got = _data(client.get(URL, headers=people["a-3"]))  # 회원도 본다
     assert (got["promo_style"], got["brand_exposure"]) == ("fun_first", "end_card")
-    assert got["source"] == {"promo_style": "tenant", "brand_exposure": "tenant"}
-    assert got["editable"] is True and got["defaults"] == tenants.PROMO_DEFAULTS
+    assert got["source"]["promo_style"] == got["source"]["brand_exposure"] == "tenant"
+    assert got["editable"] is True
+    assert got["defaults"] == {**tenants.PROMO_DEFAULTS, **tenants.BRAND_DEFAULTS}
 
 
 def test_admin_saves_and_data_reads_the_same_value(
@@ -82,7 +83,7 @@ def test_admin_saves_and_data_reads_the_same_value(
     body = {"promo_style": "product", "brand_exposure": "caption"}
     got = _data(client.post(f"{URL}/save", json=body, headers=people["a-1"]))
     assert (got["promo_style"], got["brand_exposure"]) == ("product", "caption")
-    assert got["source"] == {"promo_style": "screen", "brand_exposure": "screen"}
+    assert got["source"]["promo_style"] == got["source"]["brand_exposure"] == "screen"
     assert tenants.promo() == body  # data 트렌드 보고서가 읽는 값
     saved = json.loads((env / "promo_style.json").read_text(encoding="utf-8"))
     assert saved == {"companies": {"catbooks": body}}
@@ -124,3 +125,53 @@ def test_other_company_values_are_kept_and_not_read(
     _data(client.post(f"{URL}/clear", headers=people["a-1"]))
     saved = json.loads((env / "promo_style.json").read_text(encoding="utf-8"))
     assert saved["companies"] == {"nubi": nubi}
+
+
+BASE = {"promo_style": "fun_first", "brand_exposure": "end_card"}
+
+
+def test_brand_look_fields_save_source_and_priority(
+    client: TestClient, env: Path, people: dict[str, dict[str, str]]
+) -> None:
+    got = _data(client.get(URL, headers=people["a-1"]))
+    for k in tenants.BRAND_DEFAULTS:  # 비움 = 지금 그대로
+        assert got["source"][k] in ("tenant", "default")
+    before = tenants.brand()
+    body = {**BASE, "character_ko": "수염 난 토끼 사장님", "style_en": "watercolor style"}
+    got = _data(client.post(f"{URL}/save", json=body, headers=people["a-1"]))
+    assert got["character_ko"] == "수염 난 토끼 사장님"
+    assert got["source"]["character_ko"] == got["source"]["style_en"] == "screen"
+    assert got["source"]["setting_ko"] != "screen"
+    assert tenants.brand()["character_ko"] == "수염 난 토끼 사장님"  # 화면 저장이 먼저
+    assert tenants.brand()["setting_ko"] == before["setting_ko"]  # 안 쓴 칸은 그대로
+    # 두 칸만 보낸 저장은 저장돼 있던 브랜드 칸을 건드리지 않고, ""는 그 칸만 지운다
+    _data(client.post(f"{URL}/save", json=BASE, headers=people["a-1"]))
+    assert tenants.brand()["character_ko"] == "수염 난 토끼 사장님"
+    _data(client.post(f"{URL}/save", json={**BASE, "character_ko": ""}, headers=people["a-1"]))
+    assert tenants.brand()["character_ko"] == before["character_ko"]
+    assert tenants.brand()["style_en"] == "watercolor style"
+    _data(client.post(f"{URL}/clear", headers=people["a-1"]))
+    assert tenants.brand() == before
+
+
+@pytest.mark.parametrize("field,value", [
+    ("character_en", "a famous celebrity"), ("setting_ko", "최고의 배경"),
+    ("style_en", "with logo text"), ("character_ko", "가" * 61), ("setting_en", "room 101"),
+])  # fmt: skip
+def test_brand_look_forbidden_words_are_422(client: TestClient, people: dict[str, dict[str, str]],
+                                            field: str, value: str) -> None:  # fmt: skip
+    res = client.post(f"{URL}/save", json={**BASE, field: value}, headers=people["a-1"])
+    assert res.status_code == 422
+    assert tenants.brand_saved() == {}
+
+
+def test_brand_look_companies_do_not_mix(
+    client: TestClient, env: Path, people: dict[str, dict[str, str]]
+) -> None:
+    nubi = {**BASE, "setting_ko": "바닷가 마을"}
+    (env / "promo_style.json").write_text(json.dumps({"companies": {"nubi": nubi}}), "utf-8")
+    assert _data(client.get(URL, headers=people["a-1"]))["source"]["setting_ko"] != "screen"
+    _data(client.post(f"{URL}/save", json={**BASE, "setting_ko": "산속 마을"},
+                      headers=people["a-1"]))  # fmt: skip
+    saved = json.loads((env / "promo_style.json").read_text(encoding="utf-8"))["companies"]
+    assert saved["nubi"] == nubi and saved["catbooks"]["setting_ko"] == "산속 마을"

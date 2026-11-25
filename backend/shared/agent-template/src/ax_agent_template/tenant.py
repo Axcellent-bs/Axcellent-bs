@@ -248,8 +248,47 @@ def _brand_ok(key: str, value: object) -> bool:
 def brand() -> dict[str, str]:
     """지금 회사의 영상 브랜드 5칸(character_en·character_ko·setting_en·setting_ko·style_en).
 
-    회사가 없거나 `[brand]`가 없거나 칸이 금칙·길이에 걸리면 그 칸은 `BRAND_DEFAULTS`."""
-    return brand_values(brand_section())
+    칸마다 화면 저장(promo_style.json 회사 칸) → tenant.toml `[brand]` → `BRAND_DEFAULTS`.
+    칸이 없거나 금칙·길이에 걸리면 그 칸은 다음 순서로 넘어간다(화면 저장이 걸리면 파일 값)."""
+    return brand_values({**brand_section(), **brand_saved()})
+
+
+def brand_ok(key: str, value: object) -> bool:
+    """영상 브랜드 한 칸이 금칙·길이 규칙을 지키는지 (`brand_values`와 같은 검사)."""
+    return _brand_ok(key, value)
+
+
+def brand_saved_all() -> dict[str, dict[str, str]]:
+    """화면 저장 파일(promo_style.json)의 영상 브랜드 5칸 (회사 → 칸). 규칙에 걸린 칸은 뺀다."""
+    import json
+
+    path = promo_file()
+    if path is None:
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    companies = data.get("companies") if isinstance(data, dict) else None
+    if not isinstance(companies, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for name, row in companies.items():
+        if isinstance(name, str) and isinstance(row, dict):
+            good = {
+                k: " ".join(v.split())
+                for k, v in row.items()
+                if k in BRAND_DEFAULTS and _brand_ok(k, v)
+            }
+            if good:
+                out[name] = good
+    return out
+
+
+def brand_saved(name: str | None = None) -> dict[str, str]:
+    """이 회사가 화면에서 저장한 영상 브랜드 칸 (다른 회사 값은 보지 않는다)."""
+    name = name if name is not None else current()
+    return brand_saved_all().get(name, {}) if name else {}
 
 
 def brand_values(given: Any) -> dict[str, str]:
