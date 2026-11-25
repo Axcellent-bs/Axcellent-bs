@@ -173,6 +173,34 @@ def _other_company() -> bool:
     return company_of() != CATBOOKS
 
 
+def screen_key() -> str | None:
+    """화면 저장 값(브랜드·홍보 방향 등)의 회사 열쇠.
+
+    회사 설정 이름(`current()`) → 없으면(설정 폴더 없이 가입만 한 다른 회사) 그 회사의 정식 id.
+    캣북스·요청 밖은 예전 그대로(`current()`). 11/25: 누비투어(c-cf2f0d)처럼 설정 폴더가 없는
+    회사는 열쇠가 None이라 브랜드를 저장할 수 없었다."""
+    name = current()
+    if name:
+        return name
+    if _other_company():
+        from ax_agent_template.company_connection import company_of
+
+        return company_of()
+    return None
+
+
+def _other_company_file(name: str) -> Path | None:
+    """다른 회사의 화면 저장·자동 파일 자리: 그 회사 폴더 `<회사 폴더>/<회사 id>/<이름>`.
+
+    회사 연결 파일 옆 옛 자리·환경변수 자리는 설치 하나에 하나(캣북스 것)라 쓰지 않는다
+    (옮기지도 않는다).
+    회사 폴더를 쓰지 않으면 None(저장할 수 없음)."""
+    from ax_agent_template.companies import company_path
+    from ax_agent_template.company_connection import company_of
+
+    return company_path(company_of(), name)
+
+
 def setting(env_name: str) -> str:
     """회사 설정 값. 환경변수 → 지금 회사 폴더 → (다른 회사, 회사 설정 없음) 틀 기본값. 없으면 "".
 
@@ -313,7 +341,7 @@ def brand_saved_all() -> dict[str, dict[str, str]]:
 
 def brand_saved(name: str | None = None) -> dict[str, str]:
     """이 회사가 화면에서 저장한 영상 브랜드 칸 (다른 회사 값은 보지 않는다)."""
-    name = name if name is not None else current()
+    name = name if name is not None else screen_key()
     return brand_saved_all().get(name, {}) if name else {}
 
 
@@ -399,10 +427,11 @@ def promo_tenant(name: str | None = None) -> dict[str, str]:
 def promo(name: str | None = None) -> dict[str, str]:
     """회사의 홍보 영상 방향 두 칸 {promo_style, brand_exposure}. 칸마다 화면 저장 → 파일 → 기본값.
 
-    다른 회사의 화면 저장 값은 쓰지 않는다(회사 이름으로 나눠 저장)."""
-    name = name if name is not None else current()
-    saved = promo_saved_all().get(name, {}) if name else {}
-    from_file = promo_tenant(name)
+    다른 회사의 화면 저장 값은 쓰지 않는다(회사 이름으로 나눠 저장). 회사 설정 폴더가 없는 회사는
+    정식 회사 id로 저장한다(`screen_key`)."""
+    key = name if name is not None else screen_key()
+    saved = promo_saved_all().get(key, {}) if key else {}
+    from_file = promo_tenant(name if name is not None else current())
     return {k: saved.get(k) or from_file.get(k) or d for k, d in PROMO_DEFAULTS.items()}
 
 
@@ -416,6 +445,8 @@ IG_RADAR_FILE = "instagram_radar.json"
 
 
 def ig_radar_file() -> Path | None:
+    if _other_company():  # 다른 회사는 그 회사 폴더 (옛 자리는 캣북스 것, 11/25)
+        return _other_company_file(IG_RADAR_FILE)
     raw = os.getenv(IG_RADAR_FILE_ENV, "").strip()
     if raw:
         return Path(raw)
@@ -468,6 +499,8 @@ YT_MEME_KEYWORDS_FILE = "youtube_meme_keywords.json"
 
 
 def yt_meme_keywords_file() -> Path | None:
+    if _other_company():  # 다른 회사는 그 회사 폴더 (옛 자리는 캣북스 것, 11/25)
+        return _other_company_file(YT_MEME_KEYWORDS_FILE)
     raw = os.getenv(YT_MEME_KEYWORDS_FILE_ENV, "").strip()
     if raw:
         return Path(raw)
@@ -510,6 +543,10 @@ def ig_radar_auto_file() -> Path | None:
     from ax_agent_template.companies import canonical_company_id
     from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 
+    if (
+        _other_company()
+    ):  # 다른 회사는 그 회사 폴더 (설정 폴더가 없으면 캣북스로 떨어지던 것, 11/25)
+        return _other_company_file(IG_RADAR_AUTO_FILE)
     cid = canonical_company_id(current()) or TENANT_ID_CATBOOKS
     raw = os.getenv(IG_RADAR_AUTO_FILE_ENV, "").strip()
     if raw:
@@ -572,12 +609,23 @@ def _meta_company(company_id: str | None) -> str:
     from ax_agent_template.companies import canonical_company_id
     from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 
+    if (
+        company_id is None and _other_company()
+    ):  # 설정 폴더 없는 회사가 캣북스로 떨어지지 않게(11/25)
+        from ax_agent_template.company_connection import company_of
+
+        return company_of()
     return canonical_company_id(company_id or current()) or TENANT_ID_CATBOOKS
 
 
 def ig_radar_meta_file(company_id: str | None = None) -> Path | None:
     from ax_agent_template import company_files
+    from ax_agent_template.companies import company_path
+    from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
 
+    cid = _meta_company(company_id)
+    if cid != TENANT_ID_CATBOOKS:  # 다른 회사는 그 회사 폴더만 (옛 자리는 캣북스 것, 11/25)
+        return company_path(cid, IG_RADAR_META_FILE)
     raw = os.getenv(IG_RADAR_META_FILE_ENV, "").strip()
     if raw:
         return Path(raw)
@@ -585,7 +633,7 @@ def ig_radar_meta_file(company_id: str | None = None) -> Path | None:
     legacy = Path(conn).with_name(IG_RADAR_META_FILE) if conn else None
     if company_files.folders_on():
         return company_files.company_file(IG_RADAR_META_FILE, source=legacy,
-                                          company_id=_meta_company(company_id))  # fmt: skip
+                                          company_id=cid)  # fmt: skip
     return legacy
 
 

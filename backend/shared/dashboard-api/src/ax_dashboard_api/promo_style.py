@@ -59,7 +59,7 @@ def _admin(authorization: str | None) -> human_auth.Human:
 
 
 def _company() -> str:
-    name = tenants.current()
+    name = tenants.screen_key()  # 설정 폴더가 없는 회사는 정식 회사 id (11/25)
     if not name:
         raise ApiError(409, "NO_COMPANY", "회사를 먼저 연결해 주세요")
     return name
@@ -73,14 +73,15 @@ def _path() -> Path:
 
 
 def _state() -> dict[str, Any]:
-    name = tenants.current()
+    name = tenants.screen_key()  # 저장 열쇠: 설정 폴더 이름 → 없으면 정식 회사 id (11/25)
+    folder = tenants.current()  # 회사 설정 파일(tenant.toml)은 설정 폴더 이름으로만 읽는다
     saved = tenants.promo_saved_all().get(name, {}) if name else {}
-    from_file = tenants.promo_tenant(name) if name else {}
-    now = tenants.promo(name)
+    from_file = tenants.promo_tenant(folder) if folder else {}
+    now = {k: saved.get(k) or from_file.get(k) or d for k, d in tenants.PROMO_DEFAULTS.items()}
     source = {k: "screen" if k in saved else "tenant" if k in from_file else "default"
               for k in tenants.PROMO_DEFAULTS}  # fmt: skip
     brand_screen = tenants.brand_saved(name)
-    section = tenants.brand_section(name) if name else {}
+    section = tenants.brand_section(folder) if folder else {}
     for k in tenants.BRAND_DEFAULTS:
         source[k] = (
             "screen" if k in brand_screen
