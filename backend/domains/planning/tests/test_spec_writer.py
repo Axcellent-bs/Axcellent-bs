@@ -94,12 +94,12 @@ class LeakLLM(FakeLLM):
             problem="payment 장애 원인이 확정되지 않았다",
             goal="운영자가 원인을 확인해 확정한다",
             requirements=[
-                "장애 상세 화면에 원인 후보를 신뢰도와 함께 표시한다",
+                "결제 요청이 서버 오류로 실패하는 원인을 찾아 고친다",
                 "후보의 근거로 공지 게시 시각(2026-11-13T07:01:44Z)과 게시 채널(banner)을 표시한다",
             ],
             done_criteria=[
                 "화면에 공지 게시 시각 2026-11-13T07:01:44Z와 채널 banner가 표시된다",
-                "운영자가 원인을 저장하면 확정 상태로 바뀐다",
+                "결제 요청이 서버 오류 없이 끝난다",
             ],
         )
 
@@ -113,8 +113,8 @@ def test_evidence_values_do_not_become_requirements() -> None:
     got = run(SpecWriter(llm).draft(title="payment 장애 원인 확인", evidence=EVIDENCE,
                                     requester="orchestrator", context_id="ctx"))  # fmt: skip
     assert got is not None
-    assert got.requirements == ["장애 상세 화면에 원인 후보를 신뢰도와 함께 표시한다"]
-    assert got.done_criteria == ["운영자가 원인을 저장하면 확정 상태로 바뀐다"]
+    assert got.requirements == ["결제 요청이 서버 오류로 실패하는 원인을 찾아 고친다"]
+    assert got.done_criteria == ["결제 요청이 서버 오류 없이 끝난다"]
     assert "요구사항·완료 기준으로 옮기지 않는다" in llm.calls[0]["prompt"]
 
 
@@ -158,3 +158,32 @@ def test_is_constraint() -> None:
     assert is_constraint("버튼의 동작, 스타일, 레이아웃과 다른 문구는 변경하지 않는다.")
     assert is_constraint("상단 메뉴의 로그인 링크 문구는 대상에서 제외하고 그대로 둔다.")
     assert not is_constraint("로그인 제출 버튼 텍스트를 '시작하기'로 변경한다.")
+
+
+class AxScreenLLM(FakeLLM):
+    """장애 원인 확인 요청에 AXcellent 장애 상세 화면을 고치라고 쓰는 LLM (11/25 SPEC-30)."""
+
+    async def structured(self, prompt, schema, untrusted=None, images=None, context_id=None):
+        self.calls.append({"prompt": prompt, "untrusted": untrusted, "context_id": context_id})
+        return schema(
+            problem="payment 장애 원인이 확정되지 않았다",
+            goal="결제 실패 원인을 고쳐 결제가 다시 된다",
+            requirements=[
+                "장애 상세 화면에 원인 후보를 1개 표시하고, 신뢰도를 '낮음'으로 명시한다",
+                "결제 요청이 서버 오류로 실패하는 원인을 찾아 고친다",
+            ],
+            done_criteria=[
+                "운영자가 원인을 입력해 저장하면 확정 상태로 바뀐다",
+                "결제 요청이 서버 오류 없이 끝난다",
+            ],
+        )
+
+
+def test_incident_spec_targets_company_service_not_ax_screens() -> None:
+    llm = AxScreenLLM()
+    got = run(SpecWriter(llm).draft(title="payment 장애 원인 확인", evidence=EVIDENCE,
+                                    requester="총괄", context_id="ctx"))  # fmt: skip
+    assert got is not None
+    assert got.requirements == ["결제 요청이 서버 오류로 실패하는 원인을 찾아 고친다"]
+    assert got.done_criteria == ["결제 요청이 서버 오류 없이 끝난다"]
+    assert "AXcellent 쪽 화면" in llm.calls[0]["prompt"]
