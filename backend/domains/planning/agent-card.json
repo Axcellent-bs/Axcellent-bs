@@ -106,6 +106,18 @@
       "priority": "required"
     },
     {
+      "id": "revise_video_plan",
+      "description": "제작안 고치기 (11/26 마케팅↔기획 재협업). 마케팅이 영상으로 만들기 전에 제작안을 코드로 확인해 걸린 것(장면 길이·인물 참조·화면 속 글자, problems)을 보내면, 기획이 저장된 제안(고른 회사 캐릭터·의뢰 원문 포함)으로 제작안 LLM을 1회 불러 고치고 제작 검사·의뢰 지시 검사를 다시 돌려 같은 proposal_id에 다음 판(version+1, check_log에 마케팅 확인 줄)을 저장해 돌려준다. 제안당 1회, 이미 고친 판이 있으면 그 판(already). 거절 outcome: not_found(다른 회사 제안 포함)·no_video_plan·stale_version·revise_limit, 실패 revise_timeout·revise_bad_format·revise_rejected·revise_error. execute()를 거친다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReviseVideoPlanInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReviseVideoPlanOutput",
+      "grade": "A",
+      "allowed_requesters": [
+        "marketing"
+      ],
+      "verifier": null,
+      "priority": "required"
+    },
+    {
       "id": "receive_campaign_update",
       "description": "기획 제안의 진행·성과 받기. 마케팅이 확정 제안을 게시했으면(published), 데이터분석이 성과를 쟀으면(result: 방향·요약·성과 수치 facts) 보낸다. id 사슬 insight_id → proposal_id → campaign_id → result로 제안에 기록한다. 모르는 제안은 unknown_proposal. execute()를 거친다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/planning.py#ReceiveCampaignUpdateInput",

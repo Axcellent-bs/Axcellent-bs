@@ -4,7 +4,7 @@
 // - 기획 SVG 콘티는 늘 <img src="data:image/svg+xml;base64,…">로만 그린다(svgDataUri)
 
 import { svgDataUri } from "./storyboardSvg.ts";
-import { characterLine, videoFallbackLine, videoSvgLine, type VideoPlanView, type VideoSceneView } from "./videoPlan.ts";
+import { characterLine, versionChip, videoFallbackLine, videoSvgLine, type VideoPlanView, type VideoSceneView } from "./videoPlan.ts";
 
 export const expandLabel = (open: boolean): string => (open ? "▾ 접기" : "▸ 펼쳐 보기");
 
@@ -68,7 +68,7 @@ export function inlinePlan(v: VideoPlanView): InlinePlanView {
   const scenes = v.scenes.map(inlineScene);
   return {
     concept: v.concept,
-    meta: `${v.durationS}초 · ${v.aspect} · 장면 ${v.scenes.length}`,
+    meta: [`${v.durationS}초 · ${v.aspect} · 장면 ${v.scenes.length}`, versionChip(v)].filter(Boolean).join(" · "),
     script: v.script?.trim() || null,
     scenes,
     fallback: videoFallbackLine(v) || null,

@@ -32,7 +32,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-from ax_agent_template import tenant
+from ax_agent_template import pose_render, tenant
 from ax_agent_template.llm import LLMClient, LLMFormatError
 from ax_contracts.schemas.planning import (
     CheckAttempt,
@@ -1006,8 +1006,11 @@ def _checked(
     style_: str = PRODUCT,
     purpose: str = CHANNEL_CONTENT,
     elapsed: float = 0.0,
+    even: bool = False,
 ) -> tuple[VideoPlan | None, str]:
-    """`_from_llm`과 같고, 못 쓰면 규칙 제작안 이유(`rejected`·`bad_format`)를 같이 돌려준다."""
+    """`_from_llm`과 같고, 못 쓰면 규칙 제작안 이유(`rejected`·`bad_format`)를 같이 돌려준다.
+
+    even: 장면을 고르게 나눈다 (11/26 마케팅이 장면 길이가 짧다고 고치기를 요청했을 때)."""
     reason = reject_reason(p, got, style_, purpose)
     if reason:
         log.info("LLM 영상 제작안 거절 → 규칙 제작안: %s %.1fs", reason, elapsed)
@@ -1015,6 +1018,8 @@ def _checked(
     n = len(got.scenes)
     ad = purpose in PURPOSE_DIRECTION
     cuts = fun_timings(d, n) if style_ == FUN_FIRST or ad else timings(d, n)
+    if even:
+        cuts = plan_checks.even_cuts(d, n)
     if not plan_checks.cuts_ok(cuts, d, n):  # 11/26 장면 n개 = 구간 n개 (어긋나면 고르게 다시 나눔)
         log.info("영상 제작안 구간 %d개 ≠ 장면 %d개 → 고르게 나눔", len(cuts), n)
         cuts = plan_checks.even_cuts(d, n)
@@ -1133,6 +1138,22 @@ async def write(
     promo = promo or promo_of(p)
     if llm is None:
         return _rule(p, promo, "no_llm")
+    prompt, data, d, b, style_, purpose = _plan_prompt(p, promo)
+    started = time.monotonic()
+
+    async def ask(text: str) -> _PlanOut:
+        return await asyncio.wait_for(
+            llm.structured(text, _PlanOut, untrusted=data, context_id=context_id), timeout
+        )
+
+    return await _write_with(p, promo, ask, prompt, d, b, style_, purpose, started, llm,
+                             context_id)  # fmt: skip
+
+
+def _plan_prompt(
+    p: Proposal, promo: tuple[str, str]
+) -> tuple[str, dict[str, Any], int, dict[str, str], str, str]:
+    """제작안 LLM 지시문·데이터 블록 (처음 쓰기·고치기가 같은 것을 쓴다)."""
     d = duration_of(p)
     b = cast(p)  # 11/26 회사 캐릭터를 골랐으면 주인공·그림체는 그 캐릭터, 회사 브랜드는 배경에만
     company = bool(cast_fields(p))
@@ -1167,13 +1188,13 @@ async def write(
         direction=direction(style_, exposure, purpose) + (CHARACTER_RULE if company else "")
         + (REQUEST_RULE if p.request_text else ""),
     )  # fmt: skip
-    started = time.monotonic()
+    return prompt, data, d, b, style_, purpose
 
-    async def ask(text: str) -> _PlanOut:
-        return await asyncio.wait_for(
-            llm.structured(text, _PlanOut, untrusted=data, context_id=context_id), timeout
-        )
 
+async def _write_with(
+    p: Proposal, promo: tuple[str, str], ask: Any, prompt: str, d: int, b: dict[str, str],
+    style_: str, purpose: str, started: float, llm: LLMClient, context_id: str,
+) -> VideoPlan:  # fmt: skip
     try:
         got = await ask(prompt)
     except Exception as exc:  # noqa: BLE001 - 규칙 제작안으로 대신 (종류·경과 초만 로그)
@@ -1210,6 +1231,112 @@ async def write(
     # 11/25 예진: 장면별 첫·끝 화면 SVG 콘티를 같은 LLM으로 그려 함께 넘긴다(실패해도 그대로)
     drawn, _ = await storyboard_svg.draw(llm, plan, context_id)
     return drawn
+
+
+# ---------------------------------------------------------------- 고치기 (11/26 I, 마케팅 요청)
+MARKETING_FIX_HEAD = (
+    "\n\n고칠 점 (마케팅이 영상으로 만들기 전에 확인한 것. 영상 모델·참조 이미지 한계라 이번 "
+    "답에서 고친다. 그 밖의 장면은 될 수 있으면 그대로 둔다):\n"
+)
+
+
+class ReviseRefused(Exception):
+    """고친 답을 쓸 수 없다 (code: no_llm·timeout·bad_format·rejected·error)."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+def marketing_fix(x: Any) -> str:
+    scene = getattr(x, "scene", None)
+    where = f"장면 {scene}" if scene else "제작안"
+    return f"마케팅 확인 {where}: {getattr(x, 'detail_ko', '')}"
+
+
+def redraw(old: VideoPlan, new: VideoPlan) -> VideoPlan:
+    """새 판 장면에 앞 판 포즈를 새 시각 라벨로 다시 그린다 (LLM 없이, 같은 번호 장면만)."""
+    by_n = {s.n: s for s in old.scenes}
+    scenes = []
+    for s in new.scenes:
+        prev = by_n.get(s.n)
+        update: dict[str, Any] = {}
+        for key, at in (("start", s.start_s), ("end", s.end_s)):
+            pose = getattr(prev, f"{key}_pose", None) if prev else None
+            if pose is None:
+                continue
+            label = pose_render.time_label(pose.label_ko, at)
+            timed = pose.model_copy(update={"label_ko": label[:30]})
+            svg = storyboard_svg.drawn(timed, new.aspect)
+            if svg:
+                update[f"{key}_pose"], update[f"{key}_svg"] = timed, svg
+        scenes.append(s.model_copy(update=update) if update else s)
+    drawn_any = any(s.start_svg or s.end_svg for s in scenes)
+    return new.model_copy(update={"scenes": scenes, "svg_reason": "" if drawn_any else "rejected"})
+
+
+def retime(plan: VideoPlan) -> VideoPlan:
+    """장면을 고르게 다시 나눈다 (글은 그대로, LLM 없음). 장면 시간을 적은 대본은 새 시간으로."""
+    cuts = plan_checks.even_cuts(plan.duration_s, len(plan.scenes))
+    scenes = [s.model_copy(update={"start_s": a, "end_s": b})
+              for s, (a, b) in zip(plan.scenes, cuts, strict=True)]  # fmt: skip
+    script = plan.script
+    if plan_checks.script_segments(script) == len(scenes):  # "0~2초 …" 대본은 새 시각으로
+        it = iter(cuts)
+        script = plan_checks._SEGMENT.sub(lambda _m: "{}~{}초".format(*next(it)), script)  # noqa: SLF001
+    return plan.model_copy(update={"scenes": scenes, "script": script})
+
+
+async def revise(
+    llm: LLMClient | None,
+    p: Proposal,
+    problems: list[Any],
+    from_version: int,
+    context_id: str,
+    timeout: float = TIMEOUT_SECONDS,
+) -> VideoPlan:
+    """마케팅 확인 문제를 "고칠 점"으로 붙여 제작안 LLM을 1회 부르고, 제작 검사·의뢰 지시 검사를
+    그대로 돌린다(여기서 다시 쓰기는 하지 않는다 — 이 호출이 그 1회). 새 판은 version + 1,
+    check_log에 마케팅 확인 줄과 새 판 기획 검사 줄을 더한다. 못 쓰면 ReviseRefused."""
+    old = p.video_plan
+    if old is None:
+        raise ReviseRefused("no_llm")
+    kinds = {getattr(x, "kind", "") for x in problems}
+    asked = attempt_log(from_version, [{"kind": x.kind, "scene": x.scene, "detail_ko": x.detail_ko}
+                                       for x in problems], by="marketing")  # fmt: skip
+    if kinds == {"duration"}:  # 장면 시간은 코드가 정하니 LLM 없이 고르게 다시 나눈다
+        timed = retime(old)
+        rows = [{**plan_checks.rule_problem(r.model_dump()), "rule": r.model_dump()}
+                for r in old.request_rules if not r.kept]  # fmt: skip
+        log_rows = [*old.check_log, asked, attempt_log(from_version + 1, rows)][-6:]
+        return redraw(old, timed.model_copy(update={"version": from_version + 1,
+                                                     "check_log": log_rows}))  # fmt: skip
+    if llm is None:
+        raise ReviseRefused("no_llm")
+    promo = promo_of(p)
+    prompt, data, d, b, style_, purpose = _plan_prompt(p, promo)
+    fixes = "".join(f"- {marketing_fix(x)}\n" for x in problems)
+    try:
+        got = await asyncio.wait_for(
+            llm.structured(prompt + MARKETING_FIX_HEAD + fixes + FEASIBILITY_FIRST, _PlanOut,
+                           untrusted=data, context_id=context_id),
+            timeout,
+        )  # fmt: skip
+    except Exception as exc:  # noqa: BLE001 - 고치기 실패는 마케팅이 앞 판으로 계속한다
+        log.warning("영상 제작안 고치기 실패: %s", type(exc).__name__)
+        raise ReviseRefused(fallback_of(exc)) from None
+    if not got.request_rules and old.request_rules:  # 지시는 처음 뽑은 것을 그대로 본다
+        rules = [_RuleOut(kind=r.kind, text_ko=r.text_ko) for r in old.request_rules]
+        got = got.model_copy(update={"request_rules": rules})
+    plan, reason = _checked(p, got, d, b, style_, purpose, even="duration" in kinds)
+    if plan is None:
+        raise ReviseRefused(reason or "rejected")
+    log_rows = [*old.check_log, asked, attempt_log(from_version + 1, plan_problems(p, got))][-6:]
+    plan = plan.model_copy(update={
+        "version": from_version + 1, "check_log": log_rows,
+        "adjustments": _adjustments(got) or old.adjustments,
+    })  # fmt: skip
+    return redraw(old, plan)
 
 
 PURPOSE_LABEL = {

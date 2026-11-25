@@ -29,6 +29,7 @@ from ax_contracts.schemas.planning import (
     InsightFact,
     ReceiveCampaignUpdateInput,
     ReceiveInsightInput,
+    ReviseVideoPlanInput,
     VideoPlan,
 )
 from ax_contracts.schemas.planning import ProposalTarget as TargetIn
@@ -51,6 +52,8 @@ from planning_agent import idea_options, storyboard_svg, video_plan
 from planning_agent import proposals as ext
 
 log = logging.getLogger("ax.planning")
+REVISE_ACTION = "revise_video_plan"  # 안전 관문 액션 (registry.toml 등록은 사람이 한다)
+REVISE_MAX_VERSION = 2  # 제안당 고치기 1회 (1판 → 2판)
 PULL_CTX = "ctx_proposals"
 PULL_DONE = "pull_insights"  # 받아오기 결과 기록 (화면이 마지막 것을 보여 준다)
 PULL_FAILED = "pull_insights_failed"
@@ -481,6 +484,55 @@ class ProposalMixin:
         await self._apply(keep)
         out = {**res.output, "video_plan": video.model_dump(mode="json")}
         return ActionResult(changed=res.changed, outcome=res.outcome, output=out)
+
+    async def revise_video_plan(
+        self: Any, requester: str, inp: ReviseVideoPlanInput
+    ) -> ActionResult:
+        """마케팅 요청으로 제작안 고치기 (11/26 A2A 재협업, 제안당 1회).
+
+        같은 제안에 다음 판을 저장해 돌려준다. 이미 고친 판이 있으면(from_version이 앞 판) 그 판을
+        그대로 돌려주고 LLM을 다시 부르지 않는다. 한 번 고친 판을 또 고치라면 revise_limit."""
+        p = _find(self.state, inp.proposal_id)
+        if p is None:
+            return ActionResult(changed=False, outcome="not_found", output={})
+        cur = p.video_plan
+        if cur is None:
+            return ActionResult(changed=False, outcome="no_video_plan", output={})
+        if inp.from_version < cur.version:
+            out = {"outcome": "already", "video_plan": cur.model_dump(mode="json")}
+            return ActionResult(changed=False, outcome="already", output=out)
+        if inp.from_version > cur.version:
+            return ActionResult(changed=False, outcome="stale_version", output={})
+        if cur.version >= REVISE_MAX_VERSION:
+            return ActionResult(changed=False, outcome="revise_limit", output={})
+        writer = self._proposal_writer
+        try:
+            new = await video_plan.revise(
+                getattr(writer, "llm", None), p, list(inp.problems), inp.from_version, _ctx(p)
+            )
+        except video_plan.ReviseRefused as exc:
+            return ActionResult(changed=False, outcome=f"revise_{exc.code}", output={})
+        pid = p.id
+
+        async def run(s: State) -> ActionResult:
+            q = _find(s, pid)
+            if q is None or q.video_plan is None or q.video_plan.version != inp.from_version:
+                return ActionResult(outcome="stale_version", output={})
+            summary = f"{pid} 제작안 {new.version}판 (마케팅 요청, 고칠 점 {len(inp.problems)}개)"
+            await self._execute(
+                REVISE_ACTION, f"proposal:{pid}", f"{pid}:v{new.version}", summary
+            )
+            q.video_plan = new
+            n = len(inp.problems)
+            text = f"{pid} 제작안 {new.version}판: 마케팅 요청으로 고침 (고칠 점 {n}개)"
+            act = self._act(self.clock(), _ctx(q), requester, "planning", REVISE_ACTION, "A2A",
+                            text)  # fmt: skip
+            act.grade = "A"
+            s.activity.append(act)
+            out = {"outcome": "revised", "video_plan": new.model_dump(mode="json")}
+            return ActionResult(outcome="revised", output=out)
+
+        return await self._apply(run)
 
     async def _company_character(self: Any, p: Proposal) -> CompanyCharacter | None:
         """의뢰에서 고른 회사 캐릭터를 마케팅 A2A로 읽는다(11/26). 번호가 없거나 못 읽으면 None

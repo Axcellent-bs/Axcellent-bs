@@ -126,6 +126,7 @@ from marketing_agent import creative_thumbnails as _thumbs
 from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import instagram_post as _instagram
 from marketing_agent import keyframes as _keyframes
+from marketing_agent import plan_review as _plan_review
 from marketing_agent import render_settings as _render_settings
 from marketing_agent import request_creative as _request_creative
 from marketing_agent import request_script as _request_script
@@ -877,6 +878,8 @@ def _record_script(rid: Any) -> dict[str, Any] | None:
 
 # 영상 대본(read). 테스트는 이 값을 가짜 LLM을 돌려주는 함수로 바꾼다
 SCRIPT_LLM: Any = None
+# 11/26 기획 제작안 고치기 요청(A2A). None이면 call_agent. 테스트는 가짜 기획으로 바꾼다
+PLAN_REVIEW_CALLER: Any = None
 
 
 def _script_done(request: AgentRequest, record_id: str, script: Any, what: str) -> AgentResult:
@@ -2164,9 +2167,20 @@ async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentRes
     """총괄용: 영상 제작안(video_plan)으로 SNS 초안·장면 템플릿을 정한다(생성·게시 안 함).
 
     11/25: 캐릭터 의뢰 기록에 스토리보드가 붙으면 회사 LLM을 한 번 불러 칸별 SVG 콘티를 채운다
-    (`board_svg`, 그림 크레딧 0). 실패해도 결과는 그대로다."""
+    (`board_svg`, 그림 크레딧 0). 실패해도 결과는 그대로다.
+    11/26: 준비 전에 제작안을 마케팅 기준으로 확인하고, 걸리면 기획에 고치기를 1회 요청해 받은
+    판으로 준비한다(`plan_review`). 확인 기록은 의뢰 제작 기록 render.plan_review에 남긴다."""
+    try:
+        request, review = await _plan_review.review(request, PLAN_REVIEW_CALLER)
+    except Exception:  # noqa: BLE001 - 확인 실패는 지금 흐름(받은 제작안 그대로)을 막지 않는다
+        _plan_review.logger.exception("제작안 마케팅 확인 실패")
+        review = None
     result = video_draft.prepare_video_draft(request, STATE.sns)
     rid = (result.output or {}).get("creative_record_id")
+    if review is not None and isinstance(rid, str) and rid:
+        render = _creative.store().get_render(rid)
+        render[_plan_review.REVIEW_KEY] = review
+        _creative.store().set_render(rid, render)
     if result.status == TaskStatus.COMPLETED and isinstance(rid, str) and rid:
         try:
             await _board_svg.draw(rid, request.meta.context_id)

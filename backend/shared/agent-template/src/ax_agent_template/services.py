@@ -432,6 +432,8 @@ SERVICES: tuple[Service, ...] = (
             "receive_campaign_update",
             # 데이터분석·마케팅 인사이트를 기획 제안으로 받기
             "receive_insight",
+            # 마케팅이 영상 전에 확인한 제작안을 고쳐 다음 판으로 (11/26, 제안당 1회)
+            "revise_video_plan",
             # 사람과 직접 대화 (dashboard-api /api/dashboard/planning-chat)
             "planning_chat_send",
             "planning_chat_list",

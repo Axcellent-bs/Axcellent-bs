@@ -73,7 +73,7 @@ export interface CreativeRecord {
   /** 영상 대본(11/23). 옛 기록은 없다 */
   script?: CreativeScript | null;
   /** Higgsfield 그림·영상 */
-  render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState; thumbnails?: ThumbnailsState; instagram?: InstagramPostState; overlay?: OverlayState; keyframes?: KeyframesState; qc?: VideoQcState };
+  render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState; thumbnails?: ThumbnailsState; instagram?: InstagramPostState; overlay?: OverlayState; keyframes?: KeyframesState; qc?: VideoQcState; plan_review?: { status?: string } & Record<string, unknown> };
 }
 
 const PATH = "/api/dashboard/marketing/creative-records";
