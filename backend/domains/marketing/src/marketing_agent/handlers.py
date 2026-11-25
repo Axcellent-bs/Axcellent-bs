@@ -128,6 +128,7 @@ from marketing_agent import instagram_post as _instagram
 from marketing_agent import keyframes as _keyframes
 from marketing_agent import render_settings as _render_settings
 from marketing_agent import request_creative as _request_creative
+from marketing_agent import request_script as _request_script
 from marketing_agent import request_video_cover as _request_cover
 from marketing_agent import request_video_youtube as _request_youtube
 from marketing_agent import storyboard as _storyboard
@@ -2169,6 +2170,20 @@ async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentRes
             await _board_svg.draw(rid, request.meta.context_id)
         except Exception:  # noqa: BLE001 - SVG 콘티는 부가 기능이라 영상 준비를 막지 않는다
             _board_svg.logger.exception("의뢰 SVG 콘티를 채우지 못함")
+        # 11/25 대화방 의뢰 하나로: 의뢰문의 대사·목소리를 지킨 대본을 기록에 쓰고 칸에 붙인다
+        try:
+            from marketing_agent.chat import default_llm
+
+            plan = video_draft.PrepareVideoDraftInput.model_validate(request.input).video_plan
+            await _request_script.attach(
+                rid,
+                plan,
+                (request.untrusted or {}).get("request_text"),
+                SCRIPT_LLM or default_llm,
+                request.meta.context_id,
+            )
+        except Exception:  # noqa: BLE001 - 대본은 부가 기능이라 영상 준비를 막지 않는다
+            _request_script.logger.exception("의뢰 대본을 붙이지 못함")
     return result
 
 
