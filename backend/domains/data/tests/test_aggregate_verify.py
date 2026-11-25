@@ -40,10 +40,15 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_every_analysis_is_the_same_on_fake_data(tmp_path: Path) -> None:
+def test_every_analysis_is_the_same_on_fake_data(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
     path = tmp_path / "sales.db"
     _sales(path)
     before = _digest(path)
+    # 이 시험만 쓰는 임시 폴더를 본다. 공용 임시 폴더는 나눠 도는 다른 시험(같은 대조)이
+    # 같은 이름으로 만들고 지워서, 시작·끝 목록이 그 시험 때문에 달라질 수 있다
+    own_tmp = tmp_path / "tmp"
+    own_tmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(own_tmp))
     left = set(Path(tempfile.gettempdir()).glob("agg-verify-*"))
     report = v.verify(path, TENANT, catalog.load_catalog("catbooks"), NOW, days=8, every=7)
     assert report.days == [date(2026, 11, 8), date(2026, 11, 15)]
