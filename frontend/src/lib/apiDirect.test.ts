@@ -35,8 +35,14 @@ test("서비스를 고른 것만 직접 간다", () => {
 test("토큰이 필요 없는 읽기는 헤더를 건드리지 않는다", () => {
   assert.deepEqual(go("/orch/api/incidents"), { url: `${BASE}/orch/api/incidents` });
   assert.deepEqual(go("/safety-api/api/safety/executions"), { url: `${BASE}/safety-api/api/safety/executions` });
-  assert.deepEqual(go("/planning-api/api/planning/state"), { url: `${BASE}/planning-api/api/planning/state` });
   assert.deepEqual(go("/dashboard-api/api/dashboard/auth/company"), { url: `${BASE}/dashboard-api/api/dashboard/auth/company` });
+});
+
+test("기획·개발 state는 세션 토큰을 실어 직접 간다 (11/25 회사 분리: 서버가 세션 회사 상태를 준다)", () => {
+  for (const u of ["/planning-api/api/planning/state", "/dev-api/api/planning/state"]) {
+    assert.equal(go(u), null); // 세션이 없으면 같은 출처
+    assert.deepEqual(go(u, { session: S }), { url: `${BASE}${u}`, authorization: `Bearer ${S}` });
+  }
 });
 
 test("dashboard 읽기는 세션 토큰이 있을 때만 직접 간다", () => {
@@ -107,8 +113,9 @@ test("중단 신호는 되돌리지 않고 그대로 던진다", async () => {
 test("토큰을 안 보는 읽기(tokenFree): 표의 auth none 경로만 참, 쿼리는 무시, 다른 경로·서비스는 거짓", () => {
   assert.equal(tokenFree("safety", "/api/safety/executions"), true);
   assert.equal(tokenFree("orch", "/api/incidents?limit=5"), true);
-  assert.equal(tokenFree("planning", "/api/planning/state"), true);
-  assert.equal(tokenFree("dev", "/api/planning/state"), true);
+  // 기획·개발 state는 세션 회사로 그 회사 상태를 고르므로 세션 토큰을 싣는다 (11/25 회사 분리)
+  assert.equal(tokenFree("planning", "/api/planning/state"), false);
+  assert.equal(tokenFree("dev", "/api/planning/state"), false);
   assert.equal(tokenFree("safety", "/api/safety/reviews"), false);
   assert.equal(tokenFree("orch", "/api/requests"), false);
   assert.equal(tokenFree("planning", "/api/planning/review-queue"), false);

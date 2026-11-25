@@ -180,14 +180,23 @@ def _bad_request(code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=400, content={"error": {"code": code, "message": message}})
 
 
+SESSION_HEADER = b"x-ax-session"  # 공용·운영자 토큰으로 쓰는 화면 요청이 같이 싣는 로그인 세션 토큰
+
+
 def _session_company(headers: list[tuple[bytes, bytes]]) -> str | None:
-    """화면 요청의 로그인 세션 회사. 세션 토큰이 아니거나 검증이 안 되면 None(거절은 각 경로 몫)."""
+    """화면 요청의 로그인 세션 회사. 세션 토큰이 아니거나 검증이 안 되면 None(거절은 각 경로 몫).
+
+    `Authorization`이 세션 토큰이 아니면(운영자 토큰으로 쓰는 형상관리 연결 저장 등) `X-AX-Session`
+    머리의 세션 토큰으로 회사만 고른다(11/25 회사 분리). 권한은 여전히 `Authorization`이 정한다."""
     from ax_agent_template import human_auth
 
     authorization = next(
         (v.decode("latin-1") for k, v in headers if k.lower() == b"authorization"), None
     )
     token = human_auth.bearer(authorization)
+    if not token or not human_auth.is_session_token(token):
+        extra = next((v.decode("latin-1") for k, v in headers if k.lower() == SESSION_HEADER), "")
+        token = extra.strip()
     if not token or not human_auth.is_session_token(token):
         return None
     try:

@@ -171,7 +171,10 @@ class DevService(PlanningCore):
         relater: related.Relater | None | Literal["default"] = "default",
         cross_checker: CrossChecker | None | Literal["default"] = "default",
         hr_client: HrClient | None | Literal["default"] = "default",
+        company: str | None = None,
     ):
+        # 캣북스가 아닌 회사면 그 회사 id: 상태 파일을 따로 두고 빈 상태로 시작한다 (11/25)
+        self.company = company
         super().__init__(clock, gate, tenant_id, result_sender, dev_sender, real_example, relater)
         # 인사 record_case (인사 연동 2단계: PR 머지·요청 완료). 목 모드면 None (부르지 않는다)
         self._hr = hr_link.default_client() if hr_client == "default" else hr_client
@@ -1308,9 +1311,7 @@ class DevService(PlanningCore):
         self._spawn_coder(task_id)
         return result
 
-    async def hand_to_subscription(
-        self, task_id: str, assignee: str | None = None
-    ) -> ActionResult:
+    async def hand_to_subscription(self, task_id: str, assignee: str | None = None) -> ActionResult:
         """사람이 '내 Claude로 넘기기': 멈춘 서버 AI 작업을 개발자 Claude 대기열에 올린다
         (서버 AI로 넘기기의 반대). 서버 AI 예산·체험 한도를 다 썼을 때 이어 가는 길이다.
 

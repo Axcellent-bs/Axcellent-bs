@@ -8,7 +8,6 @@ import { useVisibleInterval } from './visibleInterval'
 import { createLatestGate, toStamps } from './devChatView'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import { isNginxBlocked, NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from '@/lib/apiError'
-import { tokenFree } from '@/lib/apiDirect'
 import { sessionAuth } from '@/lib/humanToken'
 import { getSession } from '@/lib/humanSession'
 import { actorAccount } from '@/lib/actor'
@@ -200,9 +199,9 @@ export async function approveReview(reviewId: string, note = '교차검증 대�
 }
 
 async function call<T>(base: string, path: string, init?: RequestInit): Promise<T> {
-  // 머리 없는 읽기(GET)는 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이). 토큰을 안 보는 읽기(state)는 싣지 않는다
+  // 머리 없는 읽기(GET)는 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이).
+  // state도 싣는다(11/25 회사 분리): 서버가 세션 회사로 그 회사 상태를 고른다. 안 실으면 누비투어 화면에 캣북스 상태가 보였다
   const read = (init?.method ?? 'GET').toUpperCase() === 'GET' && !new Headers(init?.headers).has('authorization')
-    && !tokenFree(base === DEV_API ? 'dev' : 'planning', `/api/planning${path}`)
   const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init, ...(read ? { headers: { ...Object.fromEntries(new Headers(init?.headers)), ...sessionAuth() } } : {}) })
   const parsed: unknown = await res.json().catch(() => undefined)
   const body = parsed ?? {}
@@ -219,9 +218,11 @@ async function call<T>(base: string, path: string, init?: RequestInit): Promise<
 type Who = 'human' | 'admin'
 const post = (body: unknown = {}, who: Who = 'human'): RequestInit => {
   const token = who === 'admin' ? RELAY_TOKEN : SAFETY_HUMAN_TOKEN
+  // 로그인 세션이 있으면 X-AX-Session으로 같이 싣는다: 서버가 그 세션 회사 자리에 쓴다(11/25 회사 분리, 권한은 Authorization 그대로)
+  const session = sessionAuth().Authorization?.replace(/^Bearer /, '')
   return {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(session ? { 'X-AX-Session': session } : {}) },
     body: JSON.stringify(body),
   }
 }
