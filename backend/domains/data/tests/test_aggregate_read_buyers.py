@@ -20,6 +20,7 @@ from data_agent.aggregate import daily, read
 from data_agent.aggregate import read_buyers as rb
 from data_agent.aggregate.build_day import day_window
 from data_agent.aggregate.store import DB_ENV, AggregateStore
+from data_agent.sales_cache import ResultCache, cached
 from data_agent.sales_collect import collect_once
 from data_agent.sales_fake import FAKE_DIR, FakeSalesSource, load_config
 from data_agent.sales_store import SalesStore
@@ -245,3 +246,39 @@ def test_event_base_reads_yesterday_snapshot(world, cat, monkeypatch) -> None:  
     assert got.basis.period_to == end
     later = ep.read_base(world, TENANT, cat.sales, cat.id, NOW + timedelta(days=2))
     assert later.as_of is None  # 그 기준일 스냅샷이 없으면 원본
+
+
+def test_cache_key_follows_the_last_aggregate_run(world, cat, monkeypatch) -> None:  # noqa: ANN001
+    """스위치가 켜지면 하루 계산이 새로 끝날 때 캐시를 다시 계산한다 (3-2 ⑧).
+    꺼지면 키 조각은 빈 값."""
+    assert rb.run_key(TENANT) == ""
+    monkeypatch.setenv(read.READ_ENV, read.READ_AGGREGATE)
+    first = rb.run_key(TENANT)
+    assert first == "aggregate:d1"
+    box = ResultCache()
+    calls: list[int] = []
+    ask = lambda: cached("t", world, TENANT, {}, cat.id, "v", NOW, lambda: calls.append(1),  # noqa: E731
+                         box, stale_ok=False)  # fmt: skip
+    ask()
+    ask()
+    assert len(calls) == 1
+    agg = AggregateStore(read.db_path())
+    run = daily.run_daily(world, agg, TENANT, cat.sales, NOW + timedelta(days=1), run_id="d2")
+    agg.close()
+    assert run is not None and run.status == "done" and rb.run_key(TENANT) == "aggregate:d2"
+    ask()
+    assert len(calls) == 2
+
+
+def test_gate_uses_the_aggregate_when_a_snapshot_is_ready(world, cat, monkeypatch) -> None:  # noqa: ANN001
+    """수집이 멈춰도(마지막 수집이 오래됨) 어제 기준 스냅샷이 있으면 고객 분석은 막지 않는다.
+    (3-2 ⑨)"""
+    late = NOW + timedelta(hours=3)  # 마지막 수집(NOW)에서 3시간 뒤, 기준일은 그대로 11/15
+    stale = cv.channel_value(world, TENANT, "365d", cat.sales, cat.id, late)[0]
+    assert stale.status == "insufficient"
+    assert any("마지막 수집" in r for r in stale.insufficient_reasons)
+    monkeypatch.setenv(read.READ_ENV, read.READ_AGGREGATE)
+    out = cv.channel_value(world, TENANT, "365d", cat.sales, cat.id, late)[0]
+    assert out.status == "ok" and out.summary.endswith("(11월 15일 기준)")
+    gone = cv.channel_value(world, TENANT, "365d", cat.sales, cat.id, late + timedelta(days=2))[0]
+    assert gone.status == "insufficient"  # 그 기준일 스냅샷이 없으면 원래 관문 그대로
