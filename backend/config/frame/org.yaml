@@ -1,0 +1,27 @@
+# 틀 기본값 조직도: 회사 설정 폴더가 없는 회사의 업무 배정 틀 (11/25, config/frame/tenant.toml).
+#
+# 업무 → 맡은 부서. 켜지 않은 서비스로 가는 요청은 여기 적힌 부서의 사람 할 일함으로 간다.
+# 여기 없는 업무가 꺼진 서비스로 가면 지어내지 않고 실패(no_assignee)로 돌려준다.
+# 기본 명부(members)는 두지 않는다: 인원은 회사가 발령 기록·화면으로 채운다(예시 인원을 보여 주지 않는다).
+# 부서 이름은 이 파일에만 둔다. 코드에는 쓰지 않는다.
+
+assignments:
+  # 서비스 단위
+  orchestrator: {unit: 서비스운영}
+  planning: {unit: 기획팀}
+  dev: {unit: 개발팀}
+  incident: {unit: 서비스운영}
+  hosts: {unit: 서비스운영}
+  inquiry: {unit: 고객지원}
+  claims: {unit: 고객지원}
+  settlement: {unit: 고객지원}
+  reviews: {unit: 고객지원}
+  coupon: {unit: 마케팅}
+  finance: {unit: 재무/정산}
+  data: {unit: 데이터분석}
+  handover: {unit: 인사총무}
+  decisions: {unit: 인사총무}
+  org: {unit: 인사총무}
+
+  # skill 단위 (예시): 배포 롤백은 서비스운영이 아니라 개발팀 배포 담당이 맡는다
+  rollback_deployment: {unit: 개발팀, assignee: 배포 담당}
