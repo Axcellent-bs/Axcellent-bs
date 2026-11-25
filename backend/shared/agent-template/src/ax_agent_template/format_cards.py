@@ -17,6 +17,7 @@ from pathlib import Path
 
 CARDS_PATH = Path(__file__).with_name("format_cards.toml")
 PUNCHLINES = ("자막", "표정", "컷")
+MAX_PEOPLE = 2  # 한 화면 인물 상한. 이보다 많은 카드는 추천에 쓰지 않는다(recommend = false)
 DIFFICULTIES = ("쉬움", "보통", "어려움")
 _ID = re.compile(r"^F-\d{2}$")
 
@@ -43,6 +44,7 @@ class FormatCard:
     ai_difficulty: str
     audio_names: tuple[str, ...]
     note: str
+    recommend: bool = True  # 추천에 쓸지 (라이브러리에는 남긴다)
 
     @property
     def difficulty_rank(self) -> int:
@@ -74,11 +76,18 @@ def _card(raw: dict) -> FormatCard:
     people = raw.get("people")
     if not isinstance(people, int) or people < 0:
         raise FormatCardError(f"{cid}: people은 0 이상 정수")
+    recommend = raw.get("recommend", True)
+    if not isinstance(recommend, bool):
+        raise FormatCardError(f"{cid}: recommend는 true·false")
+    if recommend and people > MAX_PEOPLE:
+        raise FormatCardError(
+            f"{cid}: 한 화면 인물 {people}명 > {MAX_PEOPLE}명이면 recommend = false"
+        )
     names = raw.get("audio_names") or []
     return FormatCard(cid, str(raw.get("name") or "").strip() or cid, tuple(beats),
                       str(raw.get("hook") or ""), raw["punchline"], people,
                       raw["ai_difficulty"], tuple(str(x) for x in names),
-                      str(raw.get("note") or ""))  # fmt: skip
+                      str(raw.get("note") or ""), recommend)  # fmt: skip
 
 
 def load_cards(path: Path = CARDS_PATH) -> tuple[FormatCard, ...]:
