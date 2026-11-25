@@ -31,6 +31,8 @@ from ax_contracts.schemas.planning import (
     ReceivePlanningAnswerOutput,
     RequestReleaseCheckInput,
     RequestReleaseCheckOutput,
+    ReviseVideoPlanInput,
+    ReviseVideoPlanOutput,
     WithdrawTicketInput,
     WithdrawTicketOutput,
 )
@@ -255,6 +257,42 @@ async def receive_insight(request: AgentRequest) -> AgentResult:
     )
 
 
+async def revise_video_plan(request: AgentRequest) -> AgentResult:
+    """제작안 고치기 (A, marketing → planning, 11/26).
+
+    마케팅이 영상 전에 확인한 문제(장면 길이·인물 참조·글자)를 고칠 점으로 받아 같은 제안에
+    다음 판을 저장한다. 제안당 1회. 다른 회사 제안은 not_found(회사마다 서비스가 따로다)."""
+    try:
+        inp = ReviseVideoPlanInput.model_validate(request.input)
+    except ValidationError as exc:
+        return _invalid(request, exc)
+    if not request.meta.idempotency_key:
+        return _missing_key(request)
+    try:
+        result = await get_service().revise_video_plan(requester=_requester(request), inp=inp)
+    except GateRefused as exc:
+        return _gate_rejected(request, exc)
+    if result.outcome not in ("revised", "already"):  # 거절·실패 이유는 outcome (마케팅은 1판으로)
+        return AgentResult(
+            meta=request.meta,
+            status=TaskStatus.FAILED,
+            outcome=result.outcome,
+            output={},
+            evidence=Evidence(data_summary=f"{inp.proposal_id} 고치기 {result.outcome}"),
+        )
+    out = ReviseVideoPlanOutput.model_validate(result.output)
+    return AgentResult(
+        meta=request.meta,
+        status=TaskStatus.COMPLETED,
+        outcome=out.outcome,
+        output=out.model_dump(mode="json"),
+        evidence=Evidence(
+            data_summary=f"{inp.proposal_id} 제작안 {out.video_plan.version}판 ({out.outcome})",
+            ref_ids=[f"proposal:{inp.proposal_id}"],
+        ),
+    )
+
+
 async def receive_campaign_update(request: AgentRequest) -> AgentResult:
     """넘긴 제안의 진행·성과 (A, marketing → planning)."""
     try:
@@ -327,5 +365,6 @@ PLANNING_HANDLERS = {
     "receive_planning_answer": receive_planning_answer,
     "request_release_check": request_release_check,
     "receive_insight": receive_insight,
+    "revise_video_plan": revise_video_plan,
     "receive_campaign_update": receive_campaign_update,
 }

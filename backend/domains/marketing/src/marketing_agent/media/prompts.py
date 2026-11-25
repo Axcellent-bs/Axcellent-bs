@@ -323,6 +323,16 @@ def contains_pii(text: str, path: Path | None = None) -> bool:
     return any(p.search(text) for p in _load(path or TEMPLATES_PATH).rules.pii)
 
 
+_NEGATED = re.compile(r"(?i)\b(?:no|without|never)\s+(?:on-screen\s+|readable\s+)?[a-z-]+")
+
+
+def asks_for_text(text: str, path: Path | None = None) -> bool:
+    """글자·간판·화면 속 문구를 그리라는 말이 있나 (11/26 마케팅 제작안 확인, 금칙어 표
+    `text_request_words` 그대로). "no text"·"without logos"처럼 하지 말라는 말은 뺀다."""
+    words = _load(path or TEMPLATES_PATH).rules.text_request
+    return _contains(_NEGATED.sub(" ", text or ""), words)
+
+
 def field_choices(name: str, path: Path | None = None) -> tuple[tuple[str, ...] | None, int]:
     """필드의 (고를 수 있는 값 목록 | None=짧은 단어, 짧은 단어 최대 길이). 화면 선택지에 쓴다."""
     config = _load(path or TEMPLATES_PATH)

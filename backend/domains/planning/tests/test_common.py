@@ -42,7 +42,10 @@ def test_agent_card_format_and_served() -> None:
     rest = {"receive_dev_result", "request_release_check"}
     notes = {"receive_improvement_note"}  # 총괄이 보낸 진단을 받는 공통 skill (11/18)
     resync = {"handoff_known"}  # 다시 켰을 때 맞추기: 개발이 넘긴 것을 받았는지 (read, 11/23)
-    assert set(skills) == intake | proposals | chat | rest | notes | resync
+    revise = {"revise_video_plan"}  # 마케팅 요청 제작안 고치기 (11/26 A2A 재협업)
+    assert set(skills) == intake | proposals | chat | rest | notes | resync | revise
+    assert skills["revise_video_plan"].grade == "A"
+    assert skills["revise_video_plan"].allowed_requesters == ["marketing"]
     assert skills["handoff_known"].grade == "read"
     assert skills["handoff_known"].allowed_requesters == ["dev"]
     for name in chat:

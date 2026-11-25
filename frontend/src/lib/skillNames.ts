@@ -26,6 +26,8 @@ export const ACTION_KO: Record<string, string> = {
   // 고객 의뢰(홍보 영상) 흐름 (11/20 대화방에 영어 id가 그대로 나왔다)
   generate_media: "영상 제작", prepare_video_draft_from_plan: "영상 초안 준비", trend_report_create: "트렌드 분석 보고서",
   trend_report_insight: "기획에 넘길 인사이트", receive_insight: "기획 제안 받기",
+  // 11/26 마케팅이 영상 전에 확인한 제작안을 기획이 고친다 (대화방 "@기획 제작안 고치기 부탁해요")
+  revise_video_plan: "제작안 고치기",
 };
 export const actionKo = (a: string) => ACTION_KO[a] ?? a;
 /** 코드 이름 → 사람이 읽는 이름. 모르는 이름은 밑줄을 띄어 쓴다 */

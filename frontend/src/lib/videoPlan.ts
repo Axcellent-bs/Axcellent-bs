@@ -47,6 +47,7 @@ export interface VideoPlanView {
   characterKo?: string // 회사 캐릭터 외형 요약 (마케팅 시트 summary_ko)
   characterLook?: 'photo' | 'illustration'
   requestRules?: RequestRuleView[] // 11/26 의뢰 연출 지시와 지켰는지 (계약 VideoPlan.request_rules). 없으면 칸 없음
+  version?: number // 11/26 제작안 판 (계약 VideoPlan.version). 1판·예전 제작안은 칸 없음
   checkLog?: CheckAttemptView[] // 11/26 제작 검사 기록 (계약 VideoPlan.check_log). 예전 제작안은 없음
   adjustments?: PlanAdjustmentView[] // 11/26 제작 검사 때문에 의뢰와 달라진 점
 }
@@ -68,6 +69,12 @@ export function checkChip(v: Pick<VideoPlanView, 'checkLog'>): string {
   const last = log[log.length - 1]
   if (!last.passed) return '확인 필요'
   return log.some((a) => !a.passed) ? '다시 써서 통과' : '검사 통과'
+}
+/** 판 칩 "2판(마케팅 요청으로 고침)". 1판·예전 제작안은 '' */
+export function versionChip(v: Pick<VideoPlanView, 'version' | 'checkLog'>): string {
+  if (!v.version || v.version < 2) return ''
+  const byMarketing = (v.checkLog ?? []).some((a) => a.by === 'marketing')
+  return `${v.version}판${byMarketing ? '(마케팅 요청으로 고침)' : ''}`
 }
 /** "의뢰와 달라진 점" 한 줄 */
 export const adjustmentLine = (a: PlanAdjustmentView) => `"${a.ruleTextKo}" → ${a.changedToKo} (${a.whyKo})`
@@ -234,6 +241,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     ...(source === 'company_character' && characterKo ? { characterKo } : {}),
     ...(source === 'company_character' && (look === 'photo' || look === 'illustration') ? { characterLook: look } : {}),
     ...(rules.length ? { requestRules: rules } : {}),
+    ...((int(o.version) ?? 1) >= 2 ? { version: int(o.version) as number } : {}),
     ...(checkLog.length ? { checkLog } : {}),
     ...(adjustments.length ? { adjustments } : {}),
   }

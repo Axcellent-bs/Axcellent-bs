@@ -33,7 +33,12 @@ from ax_agent_template import company_scope
 from ax_agent_template import render_settings as settings_store
 from ax_agent_template.llm import MockLLMClient
 from ax_contracts.schemas import AgentRequest, AgentResult, ExecuteDecision, RequestMeta, TaskStatus
-from ax_contracts.schemas.planning import ReceiveInsightInput, ReceiveInsightOutput
+from ax_contracts.schemas.planning import (
+    ReceiveInsightInput,
+    ReceiveInsightOutput,
+    ReviseVideoPlanInput,
+    ReviseVideoPlanOutput,
+)
 from ax_orchestrator import request_tasks
 from ax_orchestrator.registry import SkillEntry
 from ax_orchestrator.request_runner import RequestRunner
@@ -191,6 +196,11 @@ class Departments:
             # 기획 handlers.receive_insight와 같이 계약 모양으로 내보낸다
             out = ReceiveInsightOutput.model_validate(res.output)
             return _result(**out.model_dump(mode="json"))
+        if req.skill == "revise_video_plan":  # 11/26 마케팅 → 기획 제작안 고치기 (A2A)
+            inp = ReviseVideoPlanInput.model_validate(req.input)
+            res = await self.planning.revise_video_plan(requester="marketing", inp=inp)
+            out = ReviseVideoPlanOutput.model_validate(res.output)
+            return _result(**out.model_dump(mode="json"))
         with company_scope.using(COMPANY):
             if req.skill == "prepare_video_draft_from_plan":
                 out = await handlers.HANDLERS[req.skill](req)
@@ -224,6 +234,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str,
     rs.reset_cache()
     monkeypatch.setattr(handlers.STATE, "media_ledger", e["ledger"])
     monkeypatch.setattr(handlers, "SCRIPT_LLM", lambda: None)  # 의뢰 대본은 기획 장면 그대로
+    monkeypatch.setattr(handlers, "PLAN_REVIEW_CALLER", None)  # _flow가 가짜 부서로 바꾼다
     uploads: list[tuple[bytes, str]] = []
 
     async def upload(hf: Any, data: bytes, filename: str, content_type: str) -> str:
@@ -294,6 +305,7 @@ async def _flow(e: dict[str, Any], planning_llm: Any) -> tuple[WorkRequests, str
     reqs.set_plan(rid, task="promo_video", confidence=0.9, reason="r", alternatives=[], plan=plan)
     reqs.link_thread(rid, "orchchat-e2e")
     depts = Departments(planning_llm, e["ledger"])
+    handlers.PLAN_REVIEW_CALLER = depts.caller  # 마케팅 → 기획 고치기 요청도 같은 가짜 전송으로
     runner = RequestRunner(reqs, lambda: depts, retry_delay=0, notify=lambda _t, _m: None)
     await runner.run(rid)
     assert depts.calls == []  # 캐릭터 답 전에는 데이터분석을 부르지 않는다 (#1728)
@@ -350,8 +362,18 @@ def test_promo_video_request_end_to_end_with_keyframes(world: dict[str, Any]) ->
     e = world
     llm = _planning_llm()
     reqs, req_id, depts = _run(_flow(e, llm))
+    # 11/26 바뀐 기대값: 마케팅 확인에서 장면 1(훅 0~2초)이 영상 모델 최소 3초보다 짧아 기획에
+    # 고치기(revise_video_plan)를 1회 요청한다. 길이만 걸려서 기획은 LLM 없이 고르게 다시 나눈다
     assert depts.calls == ["trend_report_create", "trend_report_insight", "receive_insight",
-                           "prepare_video_draft_from_plan", "generate_media"]  # fmt: skip
+                           "prepare_video_draft_from_plan", "revise_video_plan",
+                           "generate_media"]  # fmt: skip
+    v2 = depts.results["revise_video_plan"].output["video_plan"]
+    assert v2["version"] == 2 and [(s["start_s"], s["end_s"]) for s in v2["scenes"]] == [
+        (0, 6), (6, 12), (12, 18),
+    ]  # fmt: skip
+    assert [r["by"] for r in v2["check_log"]][-2:] == ["marketing", "planning"]
+    saved = next(p for p in depts.planning.state.proposals if p.video_plan is not None)
+    assert saved.video_plan and saved.video_plan.version == 2  # 기획이 같은 제안에 2판 저장
 
     # 기획: AI 초안 · 키프레임 칸 · 포즈 콘티(3D 마네킹) SVG, LLM 2회(제작안 + 포즈)
     video_plan = depts.results["receive_insight"].output["video_plan"]
@@ -371,6 +393,11 @@ def test_promo_video_request_end_to_end_with_keyframes(world: dict[str, Any]) ->
     assert board["board_source"] == "svg" and all(s["svg"] for s in board["shots"])
     assert e["board_calls"] == []
     assert rec["sheet"]["kind"] == "virtual_human"
+    # 마케팅은 받은 2판으로 준비한다 (판 기록은 의뢰 제작 기록에)
+    review = rec["render"]["plan_review"]
+    assert [(v["version"], v["passed"]) for v in review["versions"]] == [(1, False), (2, True)]
+    assert review["outcome"] == "revised" and review["needs_human"] is False
+    assert [r["start_s"] for r in board["plan_scenes"]] == [0, 6, 12]
 
     # 키프레임 4장(#1806) → 영상 승인 대기
     assert depts.results["generate_media"].outcome == "video_held"

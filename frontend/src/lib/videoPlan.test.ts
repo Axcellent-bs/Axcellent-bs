@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { adjustmentLine, characterLine, checkAttemptTitle, checkChip, checkProblemLine, requestRuleLine, requestRulesChip, sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
+import { adjustmentLine, characterLine, checkAttemptTitle, checkChip, checkProblemLine, requestRuleLine, versionChip, requestRulesChip, sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
 
 // 11/20 16:55 서버 PROP-15 모양 (snake_case, 계약 VideoPlan)
 const RAW = {
@@ -232,6 +232,16 @@ test("제작 검사 기록 (계약 check_log·adjustments): 1차 ✕ → 2차 �
   assert.match(read("../components/planning/videoPlan.tsx"), /<CheckLog v=\{v\} \/>/);
   assert.match(read("../components/office/InlineDoc.tsx"), /<CheckLog v=\{plan\} \/>/);
   assert.match(read("../components/office/RequestProgressCard.tsx"), /<CheckLog v=\{found\.fullPlan\} \/>/);
+});
+
+test("제작안 판 칩 (계약 version): 2판(마케팅 요청으로 고침) · 1판·예전 제작안은 칩 없음", () => {
+  const log = [{ attempt: 1, by: "marketing", passed: false, problems: [] }, { attempt: 2, by: "planning", passed: true, problems: [] }];
+  const v2 = toVideoPlan({ ...RAW, version: 2, check_log: log })!;
+  assert.equal(v2.version, 2);
+  assert.equal(versionChip(v2), "2판(마케팅 요청으로 고침)");
+  assert.equal(versionChip(toVideoPlan({ ...RAW, version: 1 })!), "");
+  assert.equal("version" in toVideoPlan(RAW)!, false);
+  assert.match(readFileSync(new URL("../components/planning/videoPlan.tsx", import.meta.url), "utf8"), /versionChip\(v\) && <Tag>\{versionChip\(v\)\}<\/Tag>/);
 });
 
 test("주인공 줄 (계약 character_source·character_ko·character_look, 기획 character_line과 같은 문구)", () => {

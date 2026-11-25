@@ -944,6 +944,9 @@ class VideoPlan(AxModel):
     # 제작 검사 때문에 의뢰와 달라진 점. 규칙 초안·예전 제작안은 []
     check_log: list[CheckAttempt] = Field(default_factory=list, max_length=6)
     adjustments: list[PlanAdjustment] = Field(default_factory=list, max_length=3)
+    # 아래는 예전 제작안은 없다 (11/26). 제작안 판: 1 = 처음, 2 = 마케팅 요청으로 기획이 고친 판
+    # (revise_video_plan, 제안당 1회)
+    version: int = Field(default=1, ge=1, le=9)
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:
@@ -958,6 +961,25 @@ class VideoPlan(AxModel):
 
 
 ReceiveInsightOutput.model_rebuild()  # video_plan이 아래에 정의된 VideoPlan을 가리킨다
+
+REVISE_VIDEO_PLAN_SKILL = "revise_video_plan"
+
+
+class ReviseVideoPlanInput(AxModel):
+    """마케팅 → 기획: 제작안 고치기 요청 (11/26 A2A 재협업). 마케팅이 코드로 확인해 걸린 것
+    (장면 길이·인물 참조·글자 그리기)을 "고칠 점"으로 보낸다. 기획은 같은 제안(proposal_id)에
+    다음 판을 저장해 돌려준다. 제안당 1회."""
+
+    proposal_id: str = Field(min_length=1, max_length=40, pattern=r"^PROP-\d+$")
+    from_version: int = Field(ge=1, le=9)  # 마케팅이 확인한 판
+    problems: list[CheckProblem] = Field(min_length=1, max_length=12)
+    requested_by: Literal["marketing"] = "marketing"
+
+
+class ReviseVideoPlanOutput(AxModel):
+    # revised = 새 판, already = 이미 고친 판이 있어 그것을 돌려줌 (다시 부르지 않음)
+    outcome: Literal["revised", "already"] = "revised"
+    video_plan: VideoPlan
 
 
 class CampaignBriefInput(AxModel):

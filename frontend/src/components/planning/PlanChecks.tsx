@@ -5,6 +5,38 @@ import {
   adjustmentLine, checkAttemptTitle, checkChip, checkProblemLine, requestRuleLine, requestRulesChip, type VideoPlanView,
 } from '@/lib/videoPlan'
 
+import { reviewNote, reviewProblemLine, toPlanReview, versionCell } from '@/lib/planReview'
+
+/** 제작안 판 기록 (11/26 I, 의뢰 카드 ⑦ 마케팅 준비): 1판 마케팅 확인 ✕ N개 → 2판 ✓. 기록 없으면 안 그림 */
+export function PlanVersions({ raw }: { raw: unknown }) {
+  const r = toPlanReview(raw)
+  if (!r) return null
+  return (
+    <div className="plan-versions space-y-1.5 text-xs" aria-label="제작안 판 기록">
+      <p className="flex flex-wrap items-center gap-1.5">
+        <b className="text-ink-900">제작안 판 기록</b>
+        {r.needsHuman && <span className="chip bg-red-50 text-[11px] text-red-700">사람 확인 필요</span>}
+      </p>
+      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+        {r.versions.map((v, i) => {
+          const c = versionCell(r, v, i)
+          return (
+            <div key={v.version} className={`min-w-0 space-y-0.5 rounded-lg border p-2 ${c.current ? 'border-brand-500' : 'border-ink-100'}`}>
+              <b className="block text-ink-900">{c.title}</b>
+              <span className={`chip text-[11px] ${c.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'}`}>{c.chip}</span>
+              <span className="block text-ink-500">{c.note}</span>
+              {v.problems.length > 0 && (
+                <ul className="ml-4 list-disc text-ink-700">{v.problems.map((p, k) => <li key={k} className="break-words">{reviewProblemLine(p)}</li>)}</ul>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <p className={r.needsHuman ? 'text-amber-800' : 'text-ink-500'}>{reviewNote(r)}</p>
+    </div>
+  )
+}
+
 const CHIP_TONE: Record<string, string> = {
   '검사 통과': 'bg-emerald-50 text-emerald-800',
   '다시 써서 통과': 'bg-amber-50 text-amber-800',

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { KeyframePairs } from "@/components/marketing/KeyframePairs";
 import { SheetBoard } from "@/components/marketing/SheetBoard";
+import { PlanVersions } from "@/components/planning/PlanChecks";
 import { framesOf } from "@/lib/keyframes";
 import { StoryboardView } from "@/components/marketing/StoryboardMaker";
 import { approvalLink } from "@/lib/briefMedia";
@@ -67,6 +68,8 @@ function Panel({ recordId, plan, tab, setTab, version }: {
         ))}
       </div>
       <div className="max-h-[32rem] overflow-y-auto p-2.5">
+        {/* 11/26 ⑦ 마케팅 준비: 마케팅 확인 → 기획 고치기 → 다시 확인 판 기록 (render.plan_review) */}
+        {recordId && !!rec?.render?.plan_review && <div className="mb-2"><PlanVersions raw={rec.render.plan_review} /></div>}
         {recordId && error && <p className="text-xs text-red-700">{error}</p>}
         {recordId && !rec && !error && <p className="animate-pulse text-xs text-ink-500">이미지 시트를 불러오는 중…</p>}
         {recordId && rec && tab === "sheet" && <SheetBoard r={rec.sheet} thumb={thumbSrc(rec.thumbnail_base64)} />}
