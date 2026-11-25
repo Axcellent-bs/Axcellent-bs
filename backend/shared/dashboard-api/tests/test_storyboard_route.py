@@ -315,6 +315,7 @@ def test_background_answers_at_once_and_still_asks_marketing(
     request = next(c[1] for c in fake.calls if c[1].untrusted.get("record_id"))
     left = request.meta.deadline - datetime.now(UTC)
     assert left.total_seconds() > marketing_client.STORYBOARD_DEADLINE_SECONDS
+    assert request.input == {"background": True}  # 마케팅이 LLM 응답 제한을 늘린다
 
 
 def test_background_needs_a_record(client: TestClient, fake: Fake) -> None:
