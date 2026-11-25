@@ -146,7 +146,7 @@ _INSERT_QUALITY = (
 )
 _INSERT_RUN = (
     "INSERT OR REPLACE INTO agg_runs (run_id, tenant_id, as_of, input, started_at, finished_at, "
-    "status, reason, source_cursor, rows) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "status, reason, source_cursor, rows, source_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 _ROLL_UP = (
     f"INSERT INTO agg_sales_monthly ({_COMMON_COLS}, month, {_SALES_KEY_SQL}, {_NUMBER_SQL}) "
@@ -292,6 +292,9 @@ class AggregateStore:
         if str(path) != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
+        if "source_name" not in self.columns("agg_runs"):  # 3-2 ② 전 파일에 칸 더하기
+            with self._conn:
+                self._conn.execute("ALTER TABLE agg_runs ADD COLUMN source_name TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -337,7 +340,7 @@ class AggregateStore:
                 (
                     run.run_id, run.tenant_id, run.as_of.isoformat(), run.input,
                     _iso(run.started_at), finished, run.status, run.reason, run.source_cursor,
-                    _json(run.rows),
+                    _json(run.rows), run.source_name,
                 ),
             )  # fmt: skip
 

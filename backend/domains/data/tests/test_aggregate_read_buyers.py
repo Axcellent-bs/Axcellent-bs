@@ -282,3 +282,38 @@ def test_gate_uses_the_aggregate_when_a_snapshot_is_ready(world, cat, monkeypatc
     assert out.status == "ok" and out.summary.endswith("(11월 15일 기준)")
     gone = cv.channel_value(world, TENANT, "365d", cat.sales, cat.id, late + timedelta(days=2))[0]
     assert gone.status == "insufficient"  # 그 기준일 스냅샷이 없으면 원래 관문 그대로
+
+
+def test_segment_options_reads_the_source_from_the_aggregate_run(world, cat, monkeypatch) -> None:  # noqa: ANN001
+    """고객 분석 선택지의 "가짜 데이터" 표시는 집계 계산 기록의 출처로 정한다 (3-2 ②)."""
+    empty = SalesStore(":memory:")  # 원본이 없어도(3-3 뒤) 표시가 같다
+    assert seg.read_options(world, TENANT, cat.sales, cat.id).data_source == seg.FAKE_DATA
+    assert seg.read_options(empty, TENANT, cat.sales, cat.id).data_source is None  # 스위치 꺼짐
+    monkeypatch.setenv(read.READ_ENV, read.READ_AGGREGATE)
+    assert rb.run_source(TENANT) == (True, "fake")
+    got = seg.read_options(empty, TENANT, cat.sales, cat.id)
+    assert got == seg.read_options(world, TENANT, cat.sales, cat.id)
+    assert got.data_source == seg.FAKE_DATA
+    assert rb.run_source("other-co") == (False, None)  # 계산 기록이 없으면 원본 경로
+
+
+def test_old_runs_table_gets_the_source_column(tmp_path) -> None:  # noqa: ANN001
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE agg_runs (run_id TEXT NOT NULL PRIMARY KEY, tenant_id TEXT NOT NULL, "
+        "as_of TEXT NOT NULL, input TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, "
+        "status TEXT NOT NULL, reason TEXT, source_cursor TEXT, rows TEXT NOT NULL DEFAULT '{}')"
+    )
+    conn.execute(
+        "INSERT INTO agg_runs VALUES ('r0', 'shop-demo', '2026-11-20', 'sales_db', "
+        "'2026-11-21T00:00:00Z', '2026-11-21T00:01:00Z', 'done', NULL, NULL, '{}')"
+    )
+    conn.commit()
+    conn.close()
+    agg = AggregateStore(path)
+    assert "source_name" in agg.columns("agg_runs")
+    assert agg.runs("shop-demo")[0]["source_name"] is None  # 옛 기록은 비어 있다
+    agg.close()

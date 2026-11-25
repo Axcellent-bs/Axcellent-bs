@@ -72,6 +72,26 @@ def from_snapshot[T](
         return None
 
 
+def run_source(tenant_id: str) -> tuple[bool, str | None]:
+    """마지막으로 끝난 집계 계산의 원본 판매 출처 이름 (3-2 ②). (찾음, 이름).
+
+    스위치가 꺼졌거나, 끝난 계산이 없거나, 출처 칸이 없는 옛 기록이면 (False, None): 원본 경로."""
+    if not enabled():
+        return False, None
+    try:
+        agg = AggregateStore(db_path())
+        try:
+            done = [r for r in agg.runs(tenant_id) if r["status"] == "done"]
+        finally:
+            agg.close()
+    except Exception:  # noqa: BLE001 - 못 읽으면 원본 경로로
+        logger.warning("[aggregate] 계산 기록 읽기 실패: 출처는 원본에서", exc_info=True)
+        return False, None
+    if not done or done[-1]["source_name"] is None:
+        return False, None
+    return True, done[-1]["source_name"]
+
+
 def run_key(tenant_id: str) -> str:
     """판매 캐시 키 조각 (3-2 ⑧): 스위치가 켜졌으면 마지막으로 끝난 집계 계산 번호, 꺼졌으면 "".
     하루 계산이 새로 끝나면 키가 달라져 어제 스냅샷으로 낸 결과가 섞이지 않는다."""

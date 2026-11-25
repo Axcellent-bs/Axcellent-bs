@@ -113,6 +113,7 @@ def backfill(  # noqa: PLR0913 - 두 저장소·회사·카탈로그·시각·�
         run_id=run_id or f"agg_{uuid.uuid4().hex[:12]}", tenant_id=tenant_id, as_of=as_of,
         input="sales_db", started_at=now, status="running",
         source_cursor=source_cursor(sales, tenant_id),
+        source_name=sales.sync_state(tenant_id).source,
     )  # fmt: skip
     agg.save_run(run)
     try:

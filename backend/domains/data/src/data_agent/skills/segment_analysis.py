@@ -504,6 +504,9 @@ def options(cfg: CatalogSales | None, catalog_id: str, source: str | None) -> Se
 def read_options(
     store: SalesStore, tenant_id: str, cfg: CatalogSales | None, catalog_id: str
 ) -> SegmentOptionsOutput:
+    found, name = rb.run_source(tenant_id)  # 3-2 ②: 집계 계산 기록의 출처 (원본을 열지 않는다)
+    if found:
+        return options(cfg, catalog_id, FAKE_DATA if name == FAKE_SOURCE else None)
     return options(cfg, catalog_id, data_source(store, tenant_id))
 
 
