@@ -27,7 +27,9 @@ NOW = datetime(2026, 11, 16, 3, 0, tzinfo=UTC)  # 한국 11/16 12:00 → 어제 
 
 def _sales(path: Path) -> None:
     store = SalesStore(path)
-    src = FakeSalesSource(load_config(FAKE_DIR / "catbooks.toml"), clock=lambda: NOW)
+    # 하루 주문 수만 줄인다 (60 → 20, 11/25 CI 시간 줄이기). 기간 90일은 그대로
+    cfg = load_config(FAKE_DIR / "catbooks.toml").model_copy(update={"orders_per_day": 20})
+    src = FakeSalesSource(cfg, clock=lambda: NOW)
     assert asyncio.run(collect_once(src, store, source_name="fake", now=NOW)).errors == []
     store.close()
 
