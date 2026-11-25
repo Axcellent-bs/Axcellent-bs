@@ -28,12 +28,20 @@ import tomllib
 import unicodedata
 from datetime import timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
 from ax_agent_template import tenant
 from ax_agent_template.llm import LLMClient, LLMFormatError
-from ax_contracts.schemas.planning import VideoMediaHints, VideoPlan, VideoScene
+from ax_contracts.schemas.planning import (
+    CheckAttempt,
+    CheckProblem,
+    PlanAdjustment,
+    VideoMediaHints,
+    VideoPlan,
+    VideoScene,
+)
 from ax_workflow.models import Proposal
 from planning_agent import plan_checks, storyboard_svg
 
@@ -693,6 +701,9 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
   - action_en: start_frame에서 end_frame까지 일어나는 동작 (영어, 400자 이내, 동사 중심.
     누가 무엇을 어떻게 하는지 순서대로)
   - camera_en: 샷 크기와 카메라 움직임 (영어, 120자 이내. 예: medium shot, slow push-in)
+  - people: 화면에 보이는 인물·캐릭터 수 (정수, 주인공 포함)
+  - props: 손으로 다루거나 꼭 보이는 소품 (짧은 한국어 목록, 없으면 빈 목록)
+  - 장면마다 people·props를 사실대로 적는다 (규칙에 맞추려고 줄여 적지 않는다)
 - offer_ko: 혜택·이점 한 줄 (한국어, 60자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
 - cta_ko: 마지막 행동 문구 (한국어, 40자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
 - category: 데이터 블록 categories(회사 상품 분류) 중 이 영상이 보여 주는 상품에 맞는 것 하나를
@@ -804,6 +815,15 @@ class _SceneOut(BaseModel):
     end_frame: str = ""
     action_en: str = ""
     camera_en: str = ""
+    # 11/26 제작 검사 칸 (사실대로). 화면에 보이는 인물 수(회사 캐릭터 포함)·꼭 보이는 소품
+    people: int = 1
+    props: list[str] = Field(default_factory=list)
+
+
+class _AdjOut(BaseModel):
+    rule_text_ko: str = ""
+    changed_to_ko: str = ""
+    why_ko: str = ""
 
 
 class _RuleOut(BaseModel):
@@ -820,6 +840,8 @@ class _PlanOut(BaseModel):
     category: str = ""  # 데이터 블록 categories 중 하나 (아니면 코드가 버린다)
     # 11/26 의뢰문(request_text)에서 뽑은 연출 지시 (의뢰문이 없으면 빈 목록, 지켰는지는 코드)
     request_rules: list[_RuleOut] = Field(default_factory=list)
+    # 11/26 제작 검사 때문에 의뢰 지시를 줄인 것 (다시 쓸 때만, 최대 3)
+    adjustments: list[_AdjOut] = Field(default_factory=list)
 
 
 # 11/26 의뢰문이 있을 때만 지시문 끝에 붙는다 (의뢰문은 데이터 블록 request_text에만 들어간다)
@@ -1042,23 +1064,54 @@ def fallback_of(exc: BaseException) -> str:
 
 
 FIX_HEAD = "\n\n고칠 점 (앞 답에서 코드 검사에 걸린 것. 이번 답에서 고친다):\n"
+# 11/26 제작 검사 문제가 있을 때 고칠 점 끝에 붙인다
+FEASIBILITY_FIRST = (
+    "- 제작 검사가 의뢰 지시보다 먼저다. 의뢰 지시를 줄여야 하면(예: 셋이서 → 둘이서) "
+    "adjustments에 [{rule_text_ko: 의뢰 지시, changed_to_ko: 바꾼 내용, why_ko: 이유}]로 적는다 "
+    "(최대 3개)\n"
+)
+
+
+def plan_problems(p: Proposal, got: _PlanOut) -> list[dict[str, Any]]:
+    """검사 기록에 남는 문제 (제작 검사 + 못 지킨 의뢰 지시). 의뢰 지시는 B와 같은 검사 결과."""
+    checked = plan_checks.check_rules(_rules(p, got), _check_scenes(got), got.script)
+    out = plan_checks.feasibility(got.scenes)
+    return out + [{**plan_checks.rule_problem(r), "rule": r} for r in checked if not r["kept"]]
 
 
 def plan_fixes(p: Proposal, got: _PlanOut) -> list[str]:
     """LLM 제작안을 버리지는 않지만 한 번 다시 쓰게 할 문제 (사람이 읽는 한 줄씩, 값은 코드 글).
 
-    11/26: 회사 캐릭터 설명에 없는 외형 낱말(고양이 귀 등)이 장면 visual·prompt에 나온 장면."""
+    11/26: 회사 캐릭터 설명에 없는 외형 낱말(고양이 귀 등)이 장면 visual·prompt에 나온 장면,
+    제작 검사(인물·동작·소품), 못 지킨 의뢰 지시, script 시간 구간 수."""
     texts = [(i, f"{s.visual} {s.prompt}") for i, s in enumerate(got.scenes, start=1)]
     out = [
         f"장면 {n}: 회사 캐릭터에 없는 외형 '{w}'을 빼고 main_character 외형 그대로 쓴다"
         for n, w in look_problems(p, texts)
     ]
-    # 11/26 의뢰 지시를 못 지킨 것 (지켰는지는 코드 검사)
-    checked = plan_checks.check_rules(_rules(p, got), _check_scenes(got), got.script)
-    out += [plan_checks.rule_fix(r) for r in checked if not r["kept"]]
+    problems = plan_problems(p, got)
+    out += [plan_checks.problem_fix(x) for x in problems if x["kind"] != "request_rule"]
+    out += [plan_checks.rule_fix(x["rule"]) for x in problems if x["kind"] == "request_rule"]
     segments = plan_checks.script_segments(got.script)
     if segments and segments != len(got.scenes):  # 11/26 wr_012c98d9d9: 장면 4개에 구간 5개
         out.append(f"script의 시간 구간이 {segments}개인데 장면은 {len(got.scenes)}개다. 같게 쓴다")
+    return out
+
+
+def attempt_log(n: int, problems: list[dict[str, Any]], by: str = "planning") -> CheckAttempt:
+    """검사 한 번 → 계약 CheckAttempt (문제의 kind·scene·detail_ko만)."""
+    rows = [CheckProblem(kind=x["kind"], scene=x.get("scene"), detail_ko=x["detail_ko"][:160])
+            for x in problems][:20]  # fmt: skip
+    return CheckAttempt(attempt=n, by=by, passed=not rows, problems=rows)  # type: ignore[arg-type]
+
+
+def _adjustments(got: _PlanOut) -> list[PlanAdjustment]:
+    out = []
+    for a in got.adjustments[:3]:
+        rule, to, why = (_short(x, n) for x, n in ((a.rule_text_ko, 120), (a.changed_to_ko, 120),
+                                                    (a.why_ko, 160)))  # fmt: skip
+        if rule and to and why:
+            out.append(PlanAdjustment(rule_text_ko=rule, changed_to_ko=to, why_ko=why))
     return out
 
 
@@ -1128,12 +1181,18 @@ async def write(
         log.warning("LLM 영상 제작안 실패 → 규칙 제작안: %s %.1fs", type(exc).__name__, elapsed)
         return _rule(p, promo, fallback_of(exc))
     # 11/26 코드 검사에 걸린 것이 있으면 그 목록을 붙여 한 번만 다시 쓴다 (LLM 호출 최대 2회)
+    # 11/26 제작 검사 ✕·의뢰 지시 ✕를 한 목록으로 붙여 다시 쓴다 (G가 B와 같은 1회를 쓴다)
     fixes = plan_fixes(p, got)
+    log_rows = [attempt_log(1, plan_problems(p, got))]
+    rewritten = False
     if fixes:
         log.info("영상 제작안 다시 쓰기 1회: %d건", len(fixes))
         first = got
+        feasible = any(x["kind"] in ("people", "actions", "props") for x in plan_problems(p, got))
+        tail = FEASIBILITY_FIRST if feasible else ""
         try:
-            got = await ask(prompt + FIX_HEAD + "".join(f"- {f}\n" for f in fixes))
+            got = await ask(prompt + FIX_HEAD + "".join(f"- {f}\n" for f in fixes) + tail)
+            rewritten = True
             if not got.request_rules and first.request_rules:  # 다시 쓴 답에 지시가 없으면 첫 답
                 got = got.model_copy(update={"request_rules": first.request_rules})
         except Exception as exc:  # noqa: BLE001 - 다시 쓰기 실패면 첫 답으로 계속
@@ -1142,6 +1201,12 @@ async def write(
     plan, reason = _checked(p, got, d, b, style_, purpose, elapsed)
     if plan is None:
         plan = _rule(p, promo, reason)
+    else:  # 검사 기록: 다시 썼으면 2판 검사도 남긴다. 다시 써도 ✕면 그 제작안을 쓰고 ✕를 남긴다
+        if rewritten:
+            log_rows.append(attempt_log(2, plan_problems(p, got)))
+        plan = plan.model_copy(
+            update={"check_log": log_rows, "adjustments": _adjustments(got) if rewritten else []}
+        )
     # 11/25 예진: 장면별 첫·끝 화면 SVG 콘티를 같은 LLM으로 그려 함께 넘긴다(실패해도 그대로)
     drawn, _ = await storyboard_svg.draw(llm, plan, context_id)
     return drawn

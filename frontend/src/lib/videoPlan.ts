@@ -47,6 +47,55 @@ export interface VideoPlanView {
   characterKo?: string // 회사 캐릭터 외형 요약 (마케팅 시트 summary_ko)
   characterLook?: 'photo' | 'illustration'
   requestRules?: RequestRuleView[] // 11/26 의뢰 연출 지시와 지켰는지 (계약 VideoPlan.request_rules). 없으면 칸 없음
+  checkLog?: CheckAttemptView[] // 11/26 제작 검사 기록 (계약 VideoPlan.check_log). 예전 제작안은 없음
+  adjustments?: PlanAdjustmentView[] // 11/26 제작 검사 때문에 의뢰와 달라진 점
+}
+
+export type CheckKind = 'people' | 'actions' | 'props' | 'request_rule' | 'duration' | 'refs' | 'text'
+export interface CheckProblemView { kind: CheckKind; scene: number | null; detailKo: string }
+export interface CheckAttemptView { attempt: number; by: 'planning' | 'marketing'; passed: boolean; problems: CheckProblemView[] }
+export interface PlanAdjustmentView { ruleTextKo: string; changedToKo: string; whyKo: string }
+const CHECK_KINDS = new Set<string>(['people', 'actions', 'props', 'request_rule', 'duration', 'refs', 'text'])
+const CHECK_BY: Record<CheckAttemptView['by'], string> = { planning: '기획 검사', marketing: '마케팅 확인' }
+/** 검사 한 줄 제목 "1차 초안 · 기획 검사 · 통과 못 함" */
+export const checkAttemptTitle = (a: CheckAttemptView) => `${a.attempt}차 초안 · ${CHECK_BY[a.by]} · ${a.passed ? '통과' : '통과 못 함'}`
+/** 문제 한 줄 "장면 2 · 인물 3명 (허용 2명)" */
+export const checkProblemLine = (p: CheckProblemView) => (p.scene ? `장면 ${p.scene} · ${p.detailKo}` : p.detailKo)
+/** 검사 칩: 다시 써서 통과 / 검사 통과 / 확인 필요. 기록이 없으면 '' */
+export function checkChip(v: Pick<VideoPlanView, 'checkLog'>): string {
+  const log = v.checkLog ?? []
+  if (!log.length) return ''
+  const last = log[log.length - 1]
+  if (!last.passed) return '확인 필요'
+  return log.some((a) => !a.passed) ? '다시 써서 통과' : '검사 통과'
+}
+/** "의뢰와 달라진 점" 한 줄 */
+export const adjustmentLine = (a: PlanAdjustmentView) => `"${a.ruleTextKo}" → ${a.changedToKo} (${a.whyKo})`
+function toCheckLog(raw: unknown): CheckAttemptView[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((x) => {
+    const o = obj(x)
+    const attempt = o ? int(o.attempt) : null
+    const by = o ? str(o.by) : ''
+    if (!o || attempt === null || (by !== 'planning' && by !== 'marketing')) return []
+    const problems = (Array.isArray(o.problems) ? o.problems : []).flatMap((y) => {
+      const q = obj(y)
+      const kind = q ? str(q.kind) : ''
+      const detailKo = q ? str(pick(q, 'detailKo', 'detail_ko')) : ''
+      if (!q || !CHECK_KINDS.has(kind) || !detailKo) return []
+      return [{ kind: kind as CheckKind, scene: int(q.scene), detailKo }]
+    })
+    return [{ attempt, by: by as CheckAttemptView['by'], passed: o.passed === true, problems }]
+  })
+}
+function toAdjustments(raw: unknown): PlanAdjustmentView[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((x) => {
+    const o = obj(x)
+    if (!o) return []
+    const a = { ruleTextKo: str(pick(o, 'ruleTextKo', 'rule_text_ko')), changedToKo: str(pick(o, 'changedToKo', 'changed_to_ko')), whyKo: str(pick(o, 'whyKo', 'why_ko')) }
+    return a.ruleTextKo && a.changedToKo && a.whyKo ? [a] : []
+  })
 }
 
 export type RequestRuleKind = 'quote' | 'ending' | 'setting' | 'prop' | 'action' | 'look'
@@ -168,6 +217,8 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
   const characterKo = str(pick(o, 'characterKo', 'character_ko'))
   const look = str(pick(o, 'characterLook', 'character_look'))
   const rules = toRules(pick(o, 'requestRules', 'request_rules'))
+  const checkLog = toCheckLog(pick(o, 'checkLog', 'check_log'))
+  const adjustments = toAdjustments(o.adjustments)
   return {
     concept, durationS, aspect, script: str(o.script),
     scenes: (scenes as VideoSceneView[]).slice().sort((a, b) => a.n - b.n),
@@ -183,6 +234,8 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     ...(source === 'company_character' && characterKo ? { characterKo } : {}),
     ...(source === 'company_character' && (look === 'photo' || look === 'illustration') ? { characterLook: look } : {}),
     ...(rules.length ? { requestRules: rules } : {}),
+    ...(checkLog.length ? { checkLog } : {}),
+    ...(adjustments.length ? { adjustments } : {}),
   }
 }
 

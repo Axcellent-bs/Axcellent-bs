@@ -22,7 +22,7 @@ import { RequestCoverCell } from "@/components/marketing/CoverPicker";
 import { refreshWorkRequests, useWorkRequests } from "@/components/office/useWorkRequests";
 import { RequestActions } from "@/components/office/RequestActions";
 import { InlinePlan, useExpand } from "@/components/office/InlineDoc";
-import { RequestRules } from "@/components/planning/PlanChecks";
+import { CheckLog, RequestRules } from "@/components/planning/PlanChecks";
 import type { VideoPlanView } from "@/lib/videoPlan";
 
 // 대화방 "의뢰 진행" 카드 (총괄에게 맡긴 고객 의뢰 하나, 11/20). 전체 대화방·이슈 방·총괄 1:1에서 의뢰 번호가 처음 나온 총괄 말풍선 아래에 붙는다.
@@ -301,7 +301,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                 )}
                 {/* 11/26 사람 확인: 제작안 검사 결과(의뢰 지시 ✓/✕)를 버튼 위에 */}
                 {s.decide && !decided.has(s.stepId) && s.skill === "human_check" && found?.fullPlan && (
-                  <div className="mt-1"><RequestRules v={found.fullPlan} /></div>
+                  <div className="mt-1 space-y-1.5"><RequestRules v={found.fullPlan} /><CheckLog v={found.fullPlan} /></div>
                 )}
                 {s.decide && !decided.has(s.stepId) && s.notice && <p className="mt-1 text-xs text-amber-800">{s.notice}</p>}
                 {s.decide && !decided.has(s.stepId) && unansweredNotice(row, s.stepId) && (

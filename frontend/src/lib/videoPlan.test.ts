@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { characterLine, requestRuleLine, requestRulesChip, sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
+import { adjustmentLine, characterLine, checkAttemptTitle, checkChip, checkProblemLine, requestRuleLine, requestRulesChip, sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
 
 // 11/20 16:55 서버 PROP-15 모양 (snake_case, 계약 VideoPlan)
 const RAW = {
@@ -201,6 +201,37 @@ test("의뢰 지시는 기획 화면·카드 안 기획서·의뢰 카드 사람
   assert.match(read("../components/planning/videoPlan.tsx"), /<RequestRules v=\{v\} \/>/);
   assert.match(read("../components/office/InlineDoc.tsx"), /<RequestRules v=\{plan\} \/>/);
   assert.match(read("../components/office/RequestProgressCard.tsx"), /s\.skill === "human_check" && found\?\.fullPlan[\s\S]{0,80}<RequestRules v=\{found\.fullPlan\} \/>/);
+});
+
+test("제작 검사 기록 (계약 check_log·adjustments): 1차 ✕ → 2차 ✓ = 다시 써서 통과 · 달라진 점 · 예전 제작안 없음", () => {
+  const v = toVideoPlan({ ...RAW,
+    check_log: [
+      { attempt: 1, by: "planning", passed: false, problems: [
+        { kind: "people", scene: 2, detail_ko: "인물 3명 (허용 2명)" },
+        { kind: "request_rule", scene: null, detail_ko: "의뢰 지시(대사) '…' 못 지킴" },
+        { kind: "weird", scene: 1, detail_ko: "버림" },
+      ] },
+      { attempt: 2, by: "planning", passed: true, problems: [] },
+    ],
+    adjustments: [{ rule_text_ko: "셋이서", changed_to_ko: "둘", why_ko: "한 화면 인물 2명까지" }],
+  });
+  assert.ok(v && v.checkLog);
+  assert.equal(checkChip(v), "다시 써서 통과");
+  assert.equal(checkAttemptTitle(v.checkLog[0]), "1차 초안 · 기획 검사 · 통과 못 함");
+  assert.equal(checkAttemptTitle(v.checkLog[1]), "2차 초안 · 기획 검사 · 통과");
+  assert.deepEqual(v.checkLog[0].problems.map(checkProblemLine), ["장면 2 · 인물 3명 (허용 2명)", "의뢰 지시(대사) '…' 못 지킴"]);
+  assert.equal(adjustmentLine(v.adjustments![0]), '"셋이서" → 둘 (한 화면 인물 2명까지)');
+  const once = toVideoPlan({ ...RAW, check_log: [{ attempt: 1, by: "planning", passed: true, problems: [] }] })!;
+  assert.equal(checkChip(once), "검사 통과");
+  const stuck = toVideoPlan({ ...RAW, check_log: [{ attempt: 1, by: "planning", passed: false, problems: [] }, { attempt: 2, by: "planning", passed: false, problems: [] }] })!;
+  assert.equal(checkChip(stuck), "확인 필요");
+  const old = toVideoPlan(RAW)!;
+  assert.equal("checkLog" in old || "adjustments" in old, false);
+  assert.equal(checkChip(old), "");
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  assert.match(read("../components/planning/videoPlan.tsx"), /<CheckLog v=\{v\} \/>/);
+  assert.match(read("../components/office/InlineDoc.tsx"), /<CheckLog v=\{plan\} \/>/);
+  assert.match(read("../components/office/RequestProgressCard.tsx"), /<CheckLog v=\{found\.fullPlan\} \/>/);
 });
 
 test("주인공 줄 (계약 character_source·character_ko·character_look, 기획 character_line과 같은 문구)", () => {
