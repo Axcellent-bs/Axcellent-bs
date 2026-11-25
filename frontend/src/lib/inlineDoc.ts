@@ -4,7 +4,7 @@
 // - 기획 SVG 콘티는 늘 <img src="data:image/svg+xml;base64,…">로만 그린다(svgDataUri)
 
 import { svgDataUri } from "./storyboardSvg.ts";
-import { videoFallbackLine, videoSvgLine, type VideoPlanView, type VideoSceneView } from "./videoPlan.ts";
+import { characterLine, videoFallbackLine, videoSvgLine, type VideoPlanView, type VideoSceneView } from "./videoPlan.ts";
 
 export const expandLabel = (open: boolean): string => (open ? "▾ 접기" : "▸ 펼쳐 보기");
 
@@ -56,6 +56,8 @@ export interface InlinePlanView {
   scenes: InlineScene[];
   /** 규칙 초안이면 그 이유 한 줄(필드가 있을 때만) */
   fallback: string | null;
+  /** "주인공: …" 줄 (11/26, 기획 화면과 같은 문구) · 예전 제작안은 null */
+  lead: string | null;
   /** 3D 콘티를 못 그린 이유 한 줄(계약 VideoPlan.svg_reason, 기획 화면과 같은 문구) · 없으면 null */
   svgWhy: string | null;
   /** 콘티(SVG)를 못 그린 장면 수 · 0이면 줄을 두지 않는다 */
@@ -70,6 +72,7 @@ export function inlinePlan(v: VideoPlanView): InlinePlanView {
     script: v.script?.trim() || null,
     scenes,
     fallback: videoFallbackLine(v) || null,
+    lead: characterLine(v) || null,
     svgWhy: videoSvgLine(v) || null,
     missingSvg: scenes.filter((s) => !s.thumb).length,
   };

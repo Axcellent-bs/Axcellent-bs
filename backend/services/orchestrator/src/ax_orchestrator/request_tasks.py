@@ -73,6 +73,10 @@ class TaskStep:
     # 의뢰 기록에서 값이 있으면 입력에 그대로 더할 칸 이름(11/23 홍보 영상: 사람이 고른 회사 대표
     # 캐릭터 `brand_character_record_id`). 사람이 화면에서 정한 번호만 넣는다(고객 글이 아니다)
     row_input: tuple[str, ...] = ()
+    # 의뢰 기록 값을 입력에 더하기"만" 하는 칸(11/26 기획 제작안이 고른 회사 캐릭터를 따르게).
+    # row_input과 달리 캐릭터 바꾸기(_reprepare)·넘겨받은 값 남기기·예전 기록 번호 붙이기에 쓰지
+    # 않는다(row_input에 BRAND_CHARACTER_KEY가 있는 단계 = 영상 초안 준비 단계, #1838)
+    pass_row: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -173,6 +177,8 @@ PROMO_VIDEO = TaskDef(
             carry_keys=("proposal_id", "video_plan"),
             # 11/23: 고객 문장의 길이("30초 이내")를 기획이 제작안 길이로 쓴다 (문장은 데이터로만)
             text_key="request_text",
+            # 11/26: 사람이 고른 회사 캐릭터 번호를 기획에도 넘긴다(제작안 주인공 = 그 캐릭터)
+            pass_row=(BRAND_CHARACTER_KEY,),
         ),
         TaskStep("confirm", None, "human_check", "사람 확인", None, after=("plan",), kind="human"),
         # 사람이 제작안을 확인한 뒤: 마케팅이 제작안으로 SNS 초안·장면 템플릿을 정하고(읽기),
@@ -418,6 +424,7 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "timeout_s": s.timeout_s,
             # 의뢰 기록 칸을 입력에 더하는 단계만 둔다(다른 일의 계획 모양은 그대로)
             **({"row_input": list(s.row_input)} if s.row_input else {}),
+            **({"pass_row": list(s.pass_row)} if s.pass_row else {}),
         }
         for s in task.steps
     ]

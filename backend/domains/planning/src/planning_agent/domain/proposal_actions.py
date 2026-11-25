@@ -15,6 +15,7 @@ LLM 초안·다른 부서 호출(data promo_concepts, marketing receive_campaign
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any, Literal
@@ -33,6 +34,7 @@ from ax_contracts.schemas.planning import (
 from ax_contracts.schemas.planning import ProposalTarget as TargetIn
 from ax_workflow.core import ActionError, ActionResult
 from ax_workflow.models import (
+    CompanyCharacter,
     DeletedProposal,
     Para,
     Proposal,
@@ -48,6 +50,7 @@ from ax_workflow.models import (
 from planning_agent import idea_options, storyboard_svg, video_plan
 from planning_agent import proposals as ext
 
+log = logging.getLogger("ax.planning")
 PULL_CTX = "ctx_proposals"
 PULL_DONE = "pull_insights"  # 받아오기 결과 기록 (화면이 마지막 것을 보여 준다)
 PULL_FAILED = "pull_insights_failed"
@@ -433,6 +436,7 @@ class ProposalMixin:
                 created_at=self.clock(), follow_of=follow.id if follow else None,
                 past=[ProposalPast(**x.model_dump()) for x in inp.past],
                 options=options, scale=scale,
+                brand_character_record_id=inp.brand_character_record_id,
             )  # fmt: skip
             s.proposals.append(p)
             warn = f", 경고 {len(p.warnings)}" if p.warnings else ""
@@ -460,10 +464,15 @@ class ProposalMixin:
         if p is None:
             return res
         writer = self._proposal_writer  # 테스트 가짜는 llm이 없다 → 규칙 제작안
+        character = await self._company_character(p)
+        if character is not None:
+            p = p.model_copy(update={"company_character": character})
         video = await video_plan.write(getattr(writer, "llm", None), p, _ctx(p))
 
         async def keep(s: State) -> ActionResult:
             q = _find(s, pid)
+            if q is not None and q.company_character is None and character is not None:
+                q.company_character = character
             if q is not None and q.video_plan is None:
                 q.video_plan = video
             return ActionResult(outcome="created", output=res.output)
@@ -471,6 +480,23 @@ class ProposalMixin:
         await self._apply(keep)
         out = {**res.output, "video_plan": video.model_dump(mode="json")}
         return ActionResult(changed=res.changed, outcome=res.outcome, output=out)
+
+    async def _company_character(self: Any, p: Proposal) -> CompanyCharacter | None:
+        """의뢰에서 고른 회사 캐릭터를 마케팅 A2A로 읽는다(11/26). 번호가 없거나 못 읽으면 None
+        (회사 브랜드 기본 캐릭터, 지금 동작). 이미 읽었으면 그것."""
+        if p.company_character is not None or not p.brand_character_record_id:
+            return p.company_character
+        read = getattr(self._marketing, "character", None)
+        if read is None:
+            return None
+        try:
+            got = await read(_ctx(p), p.brand_character_record_id)
+        except Exception as exc:  # noqa: BLE001 - 못 읽으면 회사 브랜드로 (종류만 로그)
+            got = type(exc).__name__
+        if isinstance(got, CompanyCharacter):
+            return got
+        log.info("회사 캐릭터 못 읽음 → 회사 브랜드 캐릭터: %s %s", p.id, got)
+        return None
 
     async def _option_sources(
         self: Any, ctx: str

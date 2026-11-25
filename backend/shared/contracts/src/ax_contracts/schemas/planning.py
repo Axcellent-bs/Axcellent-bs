@@ -703,6 +703,10 @@ class ReceiveInsightInput(AxModel):
     # 아래는 예전 요청은 없다. 총괄 의뢰(홍보 영상)의 고객 문장 그대로 (11/23 재현 님: "30초 이내"가
     # 제작안에 안 갔다). untrusted라 기획은 LLM에 넘기지 않고 길이 같은 숫자만 코드로 읽는다
     request_text: str | None = Field(default=None, max_length=4000)
+    # 아래는 예전 요청은 없다. 의뢰에서 사람이 화면으로 고른 회사 캐릭터
+    # (마케팅 제작 기록 CR-…, 11/26). 고객 글이 아니다. 기획은 이 번호로 마케팅
+    # creative_record_get을 불러 주인공 외형·그림체를 쓴다
+    brand_character_record_id: str | None = Field(default=None, pattern=r"^CR-[0-9a-f]{12}$")
     # 아래는 예전 요청은 없다. 홍보 영상 방향 (11/24 재현 님 "재미 먼저, 브랜드는 끝에"). 데이터가
     # 회사 브랜드 설정(tenant.brand)과 의뢰 문장("책 소개"면 product)으로 정한 최종값을 보낸다.
     # None이면 기획은 fun_first·end_card로 본다
@@ -881,6 +885,15 @@ class VideoPlan(AxModel):
     # timeout = 포즈 호출 제한 시간 초과, bad_format = 포즈 답 형식 불일치, rejected = 답은 왔지만
     # 쓸 포즈가 하나도 없음(정리 규칙 탈락 포함), error = 그 밖의 호출 실패
     svg_reason: Literal["", "no_llm", "timeout", "bad_format", "rejected", "error"] = ""
+    # 아래는 예전 제작안은 없다. 주인공을 어디서 정했나
+    # (11/26 wr_012c98d9d9: 실사 가상 인물을 골랐는데 고양이 귀 일러스트로 나왔다).
+    # company_character = 의뢰에서 고른 회사 캐릭터(마케팅 제작 기록),
+    # brand = 회사 브랜드 기본 캐릭터(tenant [brand], 지금 동작)
+    character_source: Literal["company_character", "brand"] = "brand"
+    # 화면 "주인공" 줄: 회사 캐릭터 외형 요약(한국어, 시트 summary_ko)과 그림체(photo = 실사 그대로,
+    # illustration = 그림체 그대로). brand면 비어 있다
+    character_ko: str = Field(default="", max_length=300)
+    character_look: Literal["", "photo", "illustration"] = ""
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:

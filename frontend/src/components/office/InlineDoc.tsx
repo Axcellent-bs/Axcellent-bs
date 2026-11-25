@@ -64,6 +64,7 @@ export function InlinePlan({ plan, open }: { plan: VideoPlanView | null | undefi
         <>
           <p className="text-[13px] font-semibold text-ink-900">{v.concept}</p>
           <p className="text-ink-500">{v.meta}</p>
+          {v.lead && <p className="text-ink-700">주인공 · {v.lead}</p>}
           {v.fallback && <p className="text-amber-800">규칙 초안 · {v.fallback}</p>}
           {missing && <p className="text-amber-800">{missing}</p>}
           {v.svgWhy && <p className="text-amber-800">{v.svgWhy}</p>}
