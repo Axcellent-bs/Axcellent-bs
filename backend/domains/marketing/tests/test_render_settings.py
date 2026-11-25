@@ -241,10 +241,12 @@ def test_explore_failure_falls_back_to_known_models_only(
     explorer.fail = True
     out, source = asyncio.run(rs.models("catbooks"))
     assert source == "known"
-    assert {m.id for m in out.video} == {"kling_4_0_flash", "kling3_0_turbo"}
+    # 11/25 kling4_0을 아는 모델 표에 더했다 (Kling 4.x mode)
+    known = {"kling_4_0_flash", "kling4_0", "kling3_0_turbo"}
+    assert {m.id for m in out.video} == known
     assert [m.id for m in out.image] == ["nano_banana_pro"]
-    assert {m.id: m.min_s for m in out.video} == {"kling_4_0_flash": None, "kling3_0_turbo": None}
-    assert {m.id: m.aspects for m in out.video} == {"kling_4_0_flash": [], "kling3_0_turbo": []}
+    assert {m.id: m.min_s for m in out.video} == dict.fromkeys(known)
+    assert {m.id: m.aspects for m in out.video} == {k: [] for k in known}
 
 
 def test_no_connection_gives_known_models_without_calling(explorer: Explorer) -> None:
