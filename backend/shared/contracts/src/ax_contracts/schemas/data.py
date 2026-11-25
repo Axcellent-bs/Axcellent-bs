@@ -3383,7 +3383,10 @@ class DataChatListOutput(AxModel):
 # - 재구매 고객 = 이 기간 이전에도 결제 완료 주문이 있는 buyer_id
 # - 품질 관문에 걸리면 status "insufficient"이고 숫자 칸(kpis·categories·…)은 비운다
 SalesPeriod = Literal["today", "7d", "30d"]
-SalesKpiKey = Literal["revenue", "order_count", "aov", "repeat_rate"]
+# 추가만 (11/25): cancel_count 기간에 접수해 취소된 주문 수, refund_amount 기간에 일어난 환불 합(원)
+SalesKpiKey = Literal[
+    "revenue", "order_count", "aov", "repeat_rate", "cancel_count", "refund_amount"
+]
 
 
 class SalesAnalysisInput(AxModel):
@@ -4298,7 +4301,7 @@ class InstagramAudioInput(AxModel):
 
 
 class InstagramWhyFact(AxModel):
-    """"왜 떴나·왜 뜨나" 근거 한 줄. 숫자는 전부 코드가 계산한 값 (LLM 없음).
+    """ "왜 떴나·왜 뜨나" 근거 한 줄. 숫자는 전부 코드가 계산한 값 (LLM 없음).
 
     레이더 묶음: spread(퍼짐) · format(형식) · engagement(댓글률) · caption(첫 줄 질문·길이) ·
     time(올린 시간대) · cross(유튜브·네이버) · unknown(공식 API로 볼 수 없는 것).

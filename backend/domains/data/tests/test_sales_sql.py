@@ -21,7 +21,14 @@ from data_agent.sales_clean import counts_as_revenue
 from data_agent.sales_collect import collect_once
 from data_agent.sales_fake import FAKE_DIR, FakeSalesSource, load_config
 from data_agent.sales_quality import gate, quality, window
-from data_agent.sales_sql import Tally, add_amounts, allocate, line_nets, product_names
+from data_agent.sales_sql import (
+    CANCELLED_STATUSES,
+    Tally,
+    add_amounts,
+    allocate,
+    line_nets,
+    product_names,
+)
 from data_agent.sales_store import FAKE_SOURCE, SalesStore, StoredOrder
 from data_agent.skills import sales_analysis as sa
 
@@ -61,6 +68,11 @@ def old_tally(
             nets = line_nets(order)
             add_amounts(t, order, nets, allocate(-amount, [n.net for n in nets]), before)
     t.buyers, t.repeat_buyers = len(who), len(repeat)
+    # 취소·환불 (11/25): 파이썬으로 따로 센 기준값 — SQL(`cancel_refund`)과 같아야 한다
+    t.cancelled = sum(1 for o in created if o.status.lower() in CANCELLED_STATUSES)
+    t.refund_amount = sum(
+        r.amount for o in refunded for r in o.refunds if start <= r.refunded_at < end
+    )
     return t, created
 
 
@@ -197,3 +209,29 @@ def test_edge_orders_are_really_in_the_comparison(store: SalesStore) -> None:
     # 마지막에 다시 얹는다
     assert product_names(store, TENANT, t, {"edge_p3"}) == {"edge_p3": ("책", "book")}
     assert t.by_category[""] != 0  # 줄 없는 주문·분류 없는 줄
+
+
+def test_cancel_and_refund_kpis_count_only_this_company(tmp_path) -> None:
+    """취소 주문 수·환불액은 그 회사 주문만 센다(다른 회사 주문이 섞이지 않는다)."""
+    from data_agent.sales_sql import tally
+
+    store = SalesStore(str(tmp_path / "sales.db"))
+    t0 = NOW - timedelta(days=1)
+
+    def row(oid: str, status: str, refund: int = 0) -> SalesOrderRow:
+        return SalesOrderRow(
+            order_id=oid, buyer_id="b1", status=status, payment_status="succeeded",
+            created_at=t0, updated_at=t0, items_amount=10000, shipping_fee=0, points_used=0,
+            coupon_discount=0,
+            lines=[SalesOrderLine(product_id="p1", qty=1, unit_price=10000, category_code="c")],
+            refunds=[SalesOrderRefund(amount=refund, refunded_at=t0)] if refund else [],
+        )  # fmt: skip
+
+    store.upsert(
+        TENANT, [row("a1", "paid"), row("a2", "cancelled", 10000), row("a3", "CANCELED")], NOW
+    )
+    store.upsert("nubi-tour", [row("n1", "cancelled", 5000), row("n2", "cancelled")], NOW)
+    mine, _ = tally(store, TENANT, NOW - timedelta(days=7), NOW)
+    other, _ = tally(store, "nubi-tour", NOW - timedelta(days=7), NOW)
+    assert (mine.cancelled, mine.refund_amount) == (2, 10000)
+    assert (other.cancelled, other.refund_amount) == (2, 5000)
