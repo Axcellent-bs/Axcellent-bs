@@ -189,3 +189,41 @@ def test_mapping_path_must_be_local(adapter_dir: Path, bad: str) -> None:
     (adapter_dir / "mapping.json").write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(m.MappingError):
         m.load_mapping()
+
+
+def test_openapi_found_under_api_v1(monkeypatch) -> None:
+    """루트에 없고 `/api/v1/openapi.json`에 있는 사이트(스터디온)도 목록 경로를 찾는다 (11/26)."""
+    import httpx as _httpx
+
+    from ax_dashboard_api.site_adapter import upstream as _up
+
+    seen: list[str] = []
+
+    def handle(request: _httpx.Request) -> _httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path == "/api/v1/openapi.json":
+            return _httpx.Response(
+                200, json={"paths": {"/api/v1/orders": {"get": {}}, "/api/v1/courses": {"get": {}}}}
+            )
+        return _httpx.Response(404, json={"error": "nope"})
+
+    monkeypatch.setattr(_up, "TRANSPORT", _httpx.MockTransport(handle))
+    paths, _writes = asyncio.run(_up.get_all_paths("http://10.0.0.9:3200", {}))
+    assert paths == ["/api/v1/courses", "/api/v1/orders"]
+    assert seen[0] == "/openapi.json" and "/api/v1/openapi.json" in seen
+
+
+def test_openapi_stops_when_site_unreachable(monkeypatch) -> None:
+    import httpx as _httpx
+
+    from ax_dashboard_api.site_adapter import upstream as _up
+
+    calls: list[str] = []
+
+    def handle(request: _httpx.Request) -> _httpx.Response:
+        calls.append(request.url.path)
+        raise _httpx.ConnectError("down")
+
+    monkeypatch.setattr(_up, "TRANSPORT", _httpx.MockTransport(handle))
+    paths, _writes = asyncio.run(_up.get_all_paths("http://10.0.0.9:3200", {}))
+    assert paths == [] and len(calls) == 1

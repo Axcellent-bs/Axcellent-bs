@@ -209,15 +209,32 @@ WRITE_METHODS = ("post", "put", "patch", "delete")
 MAX_WRITE_PATHS = 200
 
 
+# `openapi.json`을 찾아볼 자리(앞이 먼저). 사이트마다 루트·`/api`·`/api/v1` 아래에 둔다
+# (스터디온은 `/api/v1/openapi.json`, 11/26). 처음으로 `paths`가 있는 문서를 쓴다
+OPENAPI_LOCATIONS = (
+    "/openapi.json",
+    "/api/openapi.json",
+    "/api/v1/openapi.json",
+    "/v1/openapi.json",
+    "/swagger.json",
+    "/api/swagger.json",
+)
+
+
 async def _openapi_paths(base: str, headers: dict[str, str]) -> dict[str, Any]:
-    """고객사 `openapi.json`의 `paths`. 없거나 못 읽으면 빈 표."""
-    try:
-        async with _client() as client:
-            body = await _get(client, base + "/openapi.json", {}, headers)
-    except UpstreamError:
-        return {}
-    paths = body.get("paths") if isinstance(body, dict) else None
-    return paths if isinstance(paths, dict) else {}
+    """고객사 `openapi.json`의 `paths`. 여러 흔한 자리를 차례로 보고, 없거나 못 읽으면 빈 표."""
+    async with _client() as client:
+        for where in OPENAPI_LOCATIONS:
+            try:
+                body = await _get(client, base + where, {}, headers)
+            except UpstreamError as exc:
+                if isinstance(exc.__cause__, httpx.HTTPError):
+                    return {}  # 주소에 닿지 않으면 다른 자리도 안 닿는다(시간만 든다)
+                continue
+            paths = body.get("paths") if isinstance(body, dict) else None
+            if isinstance(paths, dict) and paths:
+                return paths
+    return {}
 
 
 def list_paths(paths: dict[str, Any]) -> list[str]:
