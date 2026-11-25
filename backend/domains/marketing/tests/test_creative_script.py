@@ -401,3 +401,48 @@ def test_chat_image_and_story_make_sheet_script_and_storyboard(
     assert rec["script"]["source"] == "llm" and len(rec["script"]["scenes"]) == 9
     assert rec["storyboard"]["script_used"] is True and len(rec["storyboard"]["shots"]) == 9
     assert rec["storyboard"]["shots"][2]["caption_ko"] == "자막다"
+
+
+# ------------------------------------------------ 11/25 LLM이 칸을 비워도 대본이 채운다
+class ShotsLLM(FakeLLM):
+    """스토리보드 답의 칸만 바꿔 준다(대본은 FakeLLM 그대로)."""
+
+    def __init__(self, shots: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self.shots = shots
+
+    async def structured(self, prompt: str, schema: type, untrusted: dict | None = None, **kw: Any):
+        if schema is sb.StoryRead:
+            self.calls.append((schema, prompt, untrusted))
+            return sb.StoryRead.model_validate(
+                {"title_ko": "t", "logline_ko": "l", "shots": self.shots}
+            )
+        return await super().structured(prompt, schema, untrusted, **kw)
+
+
+@pytest.mark.parametrize(
+    "shots",
+    [
+        [],  # 장면 목록을 비운 답(CR-dfccfbbab82d "0칸")
+        [{"visual_ko": f"칸 {i}"} for i in range(1, 7)],  # 대본 칸 이름을 따라 쓴 답
+        [{"scene_ko": "칸 1", "shot_size": "close_up"}, {"scene_ko": ""}],  # 덜 주고 비운 답
+    ],
+)
+def test_script_storyboard_never_fails_with_missing_llm_panels(
+    store: cr.CreativeRecords, monkeypatch: pytest.MonkeyPatch, shots: list[dict[str, Any]]
+) -> None:
+    rid = store.add_sheet(SHEET, None, None)
+    _use(monkeypatch, ShotsLLM(shots))
+    _call("creative_script", {"record_id": rid, "scenes": 6}, {"story": STORY})
+    res = _call("storyboard_prompt", {}, {"story": STORY, "shots": 6, "record_id": rid})
+    assert res.status == TaskStatus.COMPLETED, res.output
+    out = res.output
+    assert out["script_used"] is True and len(out["shots"]) == 6
+    assert all(s["scene_ko"] for s in out["shots"])
+    assert out["shots"][0]["line_ko"] == "대사 가예요."  # 대사는 대본에서
+    assert store.get(rid)["storyboard"]["script_used"] is True
+
+
+def test_visual_ko_answer_is_read_as_the_scene() -> None:
+    shot = sb.LooseShot.model_validate({"visual_ko": "하늘 보며 외친다"})
+    assert shot.scene_ko == "하늘 보며 외친다"
