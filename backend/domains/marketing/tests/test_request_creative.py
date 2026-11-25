@@ -244,6 +244,73 @@ def test_prepare_skill_passes_the_record_to_generate_media(
     assert request_creative.INPUT_KEY not in missing["generate_media_input"]  # 지금 흐름 그대로
 
 
+EXTRA_JPEG = JPEG + b"extra-1"
+EXTRA_PNG = b"\x89PNG\r\n\x1a\n" + b"extra-2"
+
+
+def _virtual_brand(env: dict[str, Any], refs: list[int]) -> str:
+    """가상 인물 대표 캐릭터: 원본 + `references`에 적은 추가 번호(파일은 1번 jpg·2번 png만)."""
+    listed = [{"index": i, "label": "x"} for i in [0, *refs]]
+    sheet = SHEET_FULL | {"kind": "virtual_human", "references": listed}
+    rid = env["store"].add_sheet(sheet, "가상 인물", None)
+    rr.save_original(rid, JPEG, "image/jpeg")
+    rr.save_extra(rid, 1, EXTRA_JPEG, "image/jpeg")
+    rr.save_extra(rid, 2, EXTRA_PNG, "image/png")
+    env["store"].mark_brand(rid, "태윤")
+    return rid
+
+
+def test_prepare_copies_the_brand_extra_references(env: dict[str, Any]) -> None:
+    brand = _virtual_brand(env, [1, 2, 3])  # 3번은 파일이 없다 → 건너뜀
+    rid, why = _prepare(brand)
+    assert why is None and rid
+    folder = env["dir"] / "creative" / rid
+    assert (folder / "ref_1.jpg").read_bytes() == EXTRA_JPEG
+    assert (folder / "ref_2.png").read_bytes() == EXTRA_PNG
+    assert not list(folder.glob("ref_3.*"))
+    rec = env["store"].get(rid)
+    assert rr.extra_reference_bytes(rid, rec, None) == [EXTRA_JPEG, EXTRA_PNG]
+
+
+def test_prepare_fills_only_missing_extra_references_when_called_again(
+    env: dict[str, Any],
+) -> None:
+    brand = _virtual_brand(env, [1, 2])
+    rid, _ = _prepare(brand)
+    folder = env["dir"] / "creative" / str(rid)
+    (folder / "ref_2.png").unlink()  # 예전 복사(추가 참조 없음)처럼
+    (folder / "ref_1.jpg").write_bytes(b"kept")
+    assert _prepare(brand) == (rid, None)
+    assert (folder / "ref_2.png").read_bytes() == EXTRA_PNG  # 빠진 것만 채운다
+    assert (folder / "ref_1.jpg").read_bytes() == b"kept"  # 있는 파일은 그대로
+
+
+def test_extra_references_not_in_the_sheet_list_are_not_copied(env: dict[str, Any]) -> None:
+    rid, _ = _prepare(_virtual_brand(env, [1]))  # 2번 파일은 있지만 references에 없다
+    folder = env["dir"] / "creative" / str(rid)
+    assert (folder / "ref_1.jpg").exists() and not (folder / "ref_2.png").exists()
+
+
+def test_keyframe_image_references_include_the_copied_extra_references(
+    env: dict[str, Any],
+) -> None:
+    from marketing_agent import keyframes
+
+    rid, _ = _prepare(_virtual_brand(env, [1, 2]))
+    rec = env["store"].get(str(rid))
+    refs = keyframes._refs(str(rid), rec, b"layout", None)  # noqa: SLF001 - 그림 참조 조립 경로
+    assert refs[:2] == [b"layout", JPEG] and EXTRA_JPEG in refs[2:]
+
+
+def test_extra_references_are_not_copied_into_another_company_folder(
+    env: dict[str, Any],
+) -> None:
+    brand = _virtual_brand(env, [1, 2])  # 기본 회사
+    with company_scope.using("nubitour"):
+        assert _prepare(brand) == (None, "record_not_found")  # 다른 회사는 이 대표 캐릭터를 못 본다
+    assert not (env["dir"] / "companies" / "nubitour").exists()
+
+
 # ---------------------------------------------------------------- 영상 만들기
 
 

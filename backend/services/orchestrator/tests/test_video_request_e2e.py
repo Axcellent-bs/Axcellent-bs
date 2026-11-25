@@ -440,10 +440,6 @@ def test_flash_model_skips_keyframes_and_uses_reference_to_video(
     assert sent[-len(params["medias"])] == FRONT  # 대표(가상 인물 원본)가 먼저
 
 
-@pytest.mark.skip(
-    reason="보고서 버그 1: 의뢰 기록 복사(request_creative._copy_sheet_image·copy_for_request)가 "
-    "대표 캐릭터의 추가 참조 파일(ref_N)을 옮기지 않아 영상 참조가 대표 1장뿐"
-)
 def test_flash_model_sends_both_company_character_references(
     world: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
