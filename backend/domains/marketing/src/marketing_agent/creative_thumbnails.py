@@ -187,7 +187,7 @@ def _video_path(record_id: str, info: dict[str, Any]) -> Path | None:
 def aspect_for(record_id: str, part: str, info: dict[str, Any]) -> str:
     """Higgsfield 영상은 세로(9:16)다. 직접 올린 완성 영상은 파일 크기로 정하고, 모르면 가로."""
     if part == "video" and info.get("source") != "upload":
-        return _render.VIDEO_ASPECT
+        return _render.video_aspect()
     path = _video_path(record_id, info)
     size = PROBE(path) if path is not None and path.is_file() else None
     if size is None:  # 자막을 얹은 영상은 원본 칸(source_part)을 따른다

@@ -845,6 +845,28 @@ async def higgsfield_status_call() -> dict[str, Any]:
     raise ApiError(502, "UPSTREAM_FAILED", f"마케팅이 요청을 처리하지 못했다 ({result.outcome})")
 
 
+async def render_settings_options_call() -> dict[str, Any]:
+    """만들기 설정 화면용 모델 목록·서버 설정 기본값 skill(read, 크레딧 안 씀)."""
+    config.set_agent_name(AGENT_NAME)
+    request = AgentRequest(
+        meta=RequestMeta(
+            context_id=f"ctx_rsopts_{uuid.uuid4().hex[:12]}",
+            token=config.agent_token(AGENT_NAME),
+            deadline=datetime.now(UTC) + timedelta(seconds=45),
+            idempotency_key=f"ui:rsopts:{uuid.uuid4().hex}",
+            **tenant_meta(),
+        ),
+        skill="render_settings_options",
+        input={},
+    )
+    result = await SEND(TARGET, request)
+    if result.status == TaskStatus.COMPLETED:
+        return result.output or {}
+    if result.status == TaskStatus.CANCELED:
+        raise ApiError(504, "UPSTREAM_TIMEOUT", "마케팅 에이전트가 제때 응답하지 않았다")
+    raise ApiError(502, "UPSTREAM_FAILED", f"마케팅이 요청을 처리하지 못했다 ({result.outcome})")
+
+
 async def _creative_read(
     skill: str, payload: dict[str, Any], deadline_s: int = 20
 ) -> dict[str, Any]:

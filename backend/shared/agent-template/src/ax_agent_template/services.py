@@ -185,6 +185,7 @@ SERVICES: tuple[Service, ...] = (
             "creative_overlay_redo",
             "creative_thumbnails_request",
             "creative_thumbnail_select",
+            "render_settings_options",
             "brand_characters_list",
             "brand_character_mark",
             "brand_character_unmark",
