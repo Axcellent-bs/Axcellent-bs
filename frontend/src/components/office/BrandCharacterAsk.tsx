@@ -173,7 +173,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
                   </label>
                 ))}
               </fieldset>
-              <label className="block cursor-pointer rounded-xl border-[1.5px] border-dashed border-brand-500 bg-surface px-3 py-2.5 text-center text-xs text-ink-700">
+              <label className="relative block cursor-pointer rounded-xl border-[1.5px] border-dashed border-brand-500 bg-surface px-3 py-2.5 text-center text-xs text-ink-700">
                 {file ? file.name : kind === "real_photo" ? "캐릭터 이미지를 눌러서 고르기" : "정면 (대표) 이미지를 눌러서 고르기"}
                 <small className="block text-ink-500">{kind === "real_photo" ? UPLOAD_HINT : "PNG·JPG · 9:16 권장 · 올린 이미지를 그대로 참조로 써요"}</small>
                 <input type="file" accept={ACCEPT} className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
@@ -187,7 +187,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
                       const got = extras[key];
                       return (
                         <div key={s.key} className="relative">
-                          <label className="flex h-20 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-ink-200 bg-surface text-center text-[11px] text-ink-700">
+                          <label className="relative flex h-20 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-ink-200 bg-surface text-center text-[11px] text-ink-700">
                             {got ? <img src={got.preview} alt={s.label} className="h-full w-full object-contain" /> : <span>{s.label}<small className="block text-ink-500">눌러서 고르기</small></span>}
                             <input type="file" accept={ACCEPT} className="sr-only" disabled={busy}
                               onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) pickExtra(key, f); }} />

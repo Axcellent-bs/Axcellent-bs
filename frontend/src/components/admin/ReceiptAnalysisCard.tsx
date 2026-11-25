@@ -315,7 +315,7 @@ export function ReceiptAnalysisCard({ conversationId, activity = [] }: { convers
         {!running && (
           <label
             onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}
-            className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border-2 border-dashed px-3 text-center transition-colors focus-within:ring-2 focus-within:ring-brand-500 ${items.length ? "py-2.5" : "py-4"} ${over ? "border-brand-500 bg-brand-50" : "border-ink-300 hover:bg-ink-100"}`}>
+            className={`relative flex cursor-pointer flex-col items-center gap-1 rounded-xl border-2 border-dashed px-3 text-center transition-colors focus-within:ring-2 focus-within:ring-brand-500 ${items.length ? "py-2.5" : "py-4"} ${over ? "border-brand-500 bg-brand-50" : "border-ink-300 hover:bg-ink-100"}`}>
             {!items.length && <span className="text-lg" aria-hidden>🧾</span>}
             <span className="font-medium">영수증 사진을 끌어다 놓거나 눌러서 고르세요</span>
             <span className="text-[10px] text-ink-500">jpeg·png·webp · 한 장 4.5MB 이하 · 최대 {MAX_FILES}장 · 사진 한 장이 영수증 한 장입니다 (여러 쪽이면 올린 뒤 "한 영수증으로 묶기")</span>
