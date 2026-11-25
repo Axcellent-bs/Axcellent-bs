@@ -531,6 +531,6 @@ def test_writes_state_without_mapping_is_empty(client: TestClient, people: Any) 
     data = res.json()["data"]
     assert data["configured"] is False
     assert all(a["write"] is None and a["enabled"] is False for a in data["actions"])
-    assert data["inboxes"] == {"claims": None}
+    assert data["inboxes"] == {"claims": None, "inquiries": None}
     recent = client.get(SCREEN + "/writes/recent", headers=people["nubi"]).json()["data"]
     assert recent["items"] == []

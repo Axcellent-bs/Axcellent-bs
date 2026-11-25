@@ -15,7 +15,7 @@
 더한다. 여기서는 모양만 검사하고, 계산은 직접 쓰기(`direct.evaluate`)에서 한다.
 
 받은함 짝(`inboxes`, 받은함 → `ResourceMap`)도 추가 필드다. 지금은 `claims`(취소·환불 신청)만
-있고, 변환은 `claims.py`가 한다.
+있고(변환은 `claims.py`), `inquiries`(1:1 문의, `inquiries.py`)도 있다.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ MAPPING_FILE = "mapping.json"
 
 Resource = Literal["orders", "products"]
 # 고객지원 받은함 (① 읽기 중 접수함). 문의(`inquiries`)는 다음 PR
-Inbox = Literal["claims"]
+Inbox = Literal["claims", "inquiries"]
 # 쓰기 동작. shop-api 경로 → 동작은 변환기 코드(`writes.py`)에 고정한다(짝 파일이 정하지 않는다)
 WriteAction = Literal[
     "refund",

@@ -1,14 +1,15 @@
 """`/site-adapter` 주소: AI들이 shop-api로 알고 부르는 곳.
 
 - ① 짝 맞춘 읽기: 주문(목록·하나)·상품·분류·고객·판매 합계·내보내기·상태 확인,
-  신청 받은함(`GET /admin/claims`, 짝 `inboxes.claims`가 있을 때, `claims`)
+  신청 받은함(`GET /admin/claims`, 짝 `inboxes.claims`가 있을 때, `claims`),
+  문의 받은함(`GET /admin/inquiries`, 짝 `inboxes.inquiries`가 있을 때, `inquiries`)
 - ③ 사이트에 없는 자료: 각 주소의 응답 모양 그대로 빈 값 (`meta.source = "site_adapter"`)
 - 고객지원 접수 동기화(POST): 변환기 장부에 기록만 (에이전트 토큰 또는 판매 서버 서비스 키 필요)
 - ③-쓰기(환불·쿠폰·배너·신청 결과·문의 화면 값·롤백·장애 해제): `writes`가 판정한다.
   환불·쿠폰은 safety 실행 기록 확인(판정 2, `gate_check`)을 지나야 받는다. 짝 파일에 쓰기 짝이
   있고 회사 연결에서 그 동작을 켰으면 고객사에 직접 쓰고(`applied: "site"`, W3), 아니면 할 일함
   (`applied: "pending_human"`)
-- 그 밖: 404 `NOT_MAPPED` (문의 읽기는 다음 PR)
+- 그 밖: 404 `NOT_MAPPED`
 
 읽기는 shop-api처럼 토큰 없이 받는다(dashboard-api는 사내망에만 있다).
 """
@@ -27,7 +28,14 @@ from fastapi import APIRouter, Depends, Header, Query, Request
 from ax_agent_template.server import verify_token
 from ax_dashboard_api.auth import bearer
 from ax_dashboard_api.envelope import ApiError
-from ax_dashboard_api.site_adapter import bookkeeping, claims, resources, upstream, writes
+from ax_dashboard_api.site_adapter import (
+    bookkeeping,
+    claims,
+    inquiries,
+    resources,
+    upstream,
+    writes,
+)
 from ax_dashboard_api.site_adapter.mapping import (
     MappingError,
     Resource,
@@ -237,6 +245,70 @@ async def _claim_rows(m: SiteMapping, res: ResourceMap) -> list[dict[str, Any]]:
         raise ApiError(502, "MAPPING_BROKEN", str(exc)) from exc
 
 
+@router.get("/api/shop/admin/inquiries")
+async def inquiry_inbox(
+    state: str = "new",
+    limit: int | None = None,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """문의 받은함 (`inquiries`). 고객 글이 있어 접수 동기화와 같은 인증을 받는다.
+
+    짝(`inboxes.inquiries`)이 없으면 예전처럼 404 `NOT_MAPPED`.
+    """
+    _writer(authorization)
+    m = _mapping()
+    res = m.inboxes.get("inquiries")
+    if res is None:
+        return _not_mapped("GET", "/api/shop/admin/inquiries")
+    if state != "new":
+        raise ApiError(422, "INVALID_REQUEST", "state는 new예요")
+    size = max(1, min(limit or DEFAULT_LIMIT, MAX_LIMIT))
+    page, total, failed = inquiries.new_rows(await _inquiry_rows(m, res), size)
+    return _ok(page, total=total, failed=failed)
+
+
+@router.get("/api/shop/admin/inquiries/open")
+async def inquiry_open(
+    after: int = 0,
+    limit: int | None = None,
+    sweep: bool = False,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """읽어 간 문의의 고객 화면 값 목록. 사이트 화면 값은 아직 받지 않아 빈 쪽(③ 빈 값)."""
+    _writer(authorization)
+    if _mapping().inboxes.get("inquiries") is None:
+        return _not_mapped("GET", "/api/shop/admin/inquiries/open")
+    return _ok([], next_after=None)
+
+
+async def _inquiry_rows(m: SiteMapping, res: ResourceMap) -> list[dict[str, Any]]:
+    """고객사 문의 전체를 받은함 재료로 (주문 원본을 `order`로 붙이고 번호를 매긴다)."""
+    orders_map = m.resources.get("orders")
+    try:
+        raw, truncated = await upstream.fetch_all(m, res)
+        order_rows: list[dict[str, Any]] = []
+        # 짝 식이 주문 칸(`order.<칸>`)을 볼 때만 주문 목록을 읽는다
+        if orders_map is not None and any("order." in expr for expr in res.fields.values()):
+            order_rows, cut = await upstream.fetch_all(m, orders_map)
+            truncated = truncated or cut
+        if truncated:
+            raise ApiError(
+                503,
+                "UPSTREAM_TRUNCATED",
+                "고객사 문의·주문이 읽을 수 있는 양보다 많아 일부만 받았어요. 상한을 늘려 주세요",
+            )
+        by_id = (
+            {str(resources.to_order(o, orders_map)["order_id"]): o for o in order_rows}
+            if orders_map is not None
+            else {}
+        )
+        return inquiries.number([inquiries.to_inquiry(row, res, by_id) for row in raw])
+    except upstream.UpstreamError as exc:
+        raise ApiError(exc.status, exc.code, str(exc)) from exc
+    except resources.MappingBroken as exc:
+        raise ApiError(502, "MAPPING_BROKEN", str(exc)) from exc
+
+
 @router.get("/api/shop/products")
 async def products() -> dict[str, Any]:
     rows = await _rows("products")
@@ -414,7 +486,10 @@ async def _sync(
     request: Request, kind: str, key: str, action: str, authorization: str | None
 ) -> dict[str, Any]:
     _writer(authorization)
-    bookkeeping.record(kind, key, action, await _json_body(request))
+    body = await _json_body(request)
+    bookkeeping.record(kind, key, action, body)
+    if kind == "inquiries":
+        inquiries.record(key, action, body)  # 읽어 간 문의·실패를 받은함에서 뺀다
     return _ok({"ok": True})
 
 
