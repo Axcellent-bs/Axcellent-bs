@@ -145,7 +145,7 @@ export type DejafixView =
   | { state: "none" }
   | { state: "connected"; conn: ToolConnection; status: { tone: Tone; label: string } };
 
-/** 보관함에 예전에 화면으로 저장한 DejaFix 연결 (하나만). 지금은 화면에서 새로 넣지 않고 지우기만 한다 */
+/** 보관함에 화면으로 저장한 DejaFix 연결 (회사마다 하나). 관리자가 회원·서버 관리 › DejaFix 연결에서 넣는다 */
 export function dejafixView(connections: ToolConnection[]): DejafixView {
   const conn = connections.find((c) => c.kind === "dejafix");
   if (!conn) return { state: "none" };
@@ -153,7 +153,7 @@ export function dejafixView(connections: ToolConnection[]): DejafixView {
 }
 
 /** 프록시(dejafix-proxy) `GET /status`의 연결 출처.
- * builtin = AXcellent와 같이 설치된 DejaFix(서버 환경 변수) · custom = 화면에서 저장한 다른 DejaFix(보관함) · none = 둘 다 없음 */
+ * builtin = AXcellent와 같이 설치된 DejaFix(서버 환경 변수) · custom = 회사가 화면에서 연결한 DejaFix(보관함) · none = 연결 전 */
 export type DejafixSource = "builtin" | "custom" | "none";
 export interface DejafixStatus {
   source: DejafixSource;
@@ -177,7 +177,7 @@ export type SavedDejafix = Extract<DejafixView, { state: "connected" }>;
 export type DejafixCardView =
   /** 같이 설치된 DejaFix (설치 설정). 보관함에 남은 연결은 프록시가 쓰지 않으니 보여 주지 않는다 */
   | { mode: "builtin"; live: { tone: Tone; label: string }; detail: string }
-  /** 예전에 화면에서 저장한 다른 DejaFix (보관함). 화면은 "같이 설치된 DejaFix로 돌아가기"만 준다 */
+  /** 회사가 화면에서 연결한 DejaFix (보관함). 화면은 연결 바꾸기·끊기를 준다 */
   | { mode: "custom"; live: { tone: Tone; label: string }; detail: string; saved: SavedDejafix }
   | { mode: "none" }
   /** 상태를 못 읽었거나 목록과 맞지 않음. 저장한 연결이 있으면 그대로 보여 준다 */
@@ -203,9 +203,9 @@ export function dejafixCard(status: DejafixStatus | null, connections: ToolConne
 
 /** 카드 머리·다른 화면 칩에 쓰는 한 줄 상태 */
 export function dejafixSummary(card: DejafixCardView): { tone: Tone; label: string } {
-  if (card.mode === "none") return { tone: "wait", label: "같이 설치된 DejaFix 설정 안 됨" };
+  if (card.mode === "none") return { tone: "wait", label: "연결 전" };
   if (card.mode === "unknown") return { tone: "off", label: "확인할 수 없음" };
-  const who = card.mode === "builtin" ? "AXcellent와 같이 설치된 DejaFix" : "다른 DejaFix";
+  const who = card.mode === "builtin" ? "AXcellent와 같이 설치된 DejaFix" : "회사 DejaFix";
   if (card.live.tone === "ok") return { tone: "ok", label: `${who}에 연결됨` };
   if (card.live.tone === "bad") return { tone: "bad", label: `${who} 응답 없음` };
   return { tone: "off", label: `${who} · 확인할 수 없음` };
