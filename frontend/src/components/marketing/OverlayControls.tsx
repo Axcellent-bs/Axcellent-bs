@@ -8,16 +8,18 @@ import { CAPTION_MAX, canReapply, captionDrafts, overlayChip, reapplyBody, type 
 
 const TONE = { ok: "bg-emerald-50 text-emerald-800", busy: "bg-brand-50 text-brand-700", warn: "bg-amber-50 text-amber-800" } as const;
 
-export function OverlayControls({ recordId, overlay, shots, showOriginal, canToggle, onToggle, onChanged }: {
+export function OverlayControls({ recordId, overlay, speed, shots, showOriginal, canToggle, onToggle, onChanged }: {
   recordId: string;
   overlay?: OverlayState | null;
+  /** 영상 요약의 실제 배속(render.video.summary.speed) */
+  speed?: number | null;
   shots?: readonly CaptionShot[] | null;
   showOriginal: boolean;
   canToggle: boolean;
   onToggle: () => void;
   onChanged: () => void;
 }) {
-  const chip = overlayChip(overlay);
+  const chip = overlayChip(overlay, speed);
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<{ no: number; caption_ko: string }[]>([]);
   const [busy, setBusy] = useState(false);
@@ -46,6 +48,7 @@ export function OverlayControls({ recordId, overlay, shots, showOriginal, canTog
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className={`chip ${TONE[chip.tone]}`} role="status">{chip.text}</span>
+        {chip.note && <span className="text-amber-800">{chip.note}</span>}
         {canToggle && <button type="button" className="btn-ghost text-xs" onClick={onToggle}>{showOriginal ? "자막 입힌 영상 보기" : "원본 보기"}</button>}
         {showReapply && !editing && <button type="button" className="btn-ghost text-xs" onClick={open}>자막 고쳐서 다시 얹기</button>}
       </div>

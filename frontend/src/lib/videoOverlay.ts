@@ -9,6 +9,12 @@ export interface OverlayState {
   error?: string | null;
   captions?: number;
   source_part?: OverlaySource | string;
+  /** 11/25 재생 속도(#1760): 글꼴이 없거나 얹을 글이 없어 자막을 건너뛰고 배속만 했을 때의 이유 */
+  captions_skipped?: string | null;
+  /** 배속을 했나 (applied일 때) */
+  speed_applied?: boolean;
+  /** 서버가 이 얹기에 쓴 배속 (화면은 영상 요약 speed를 먼저 쓴다) */
+  speed?: number | null;
 }
 
 export type PlayPart = "video" | "final_video" | "overlay_video";
@@ -49,17 +55,35 @@ export function overlayVisibleFor(part: "video" | "final_video", render: Overlay
   return !!render?.overlay?.status && latestVideoPart(render) === part;
 }
 
-export interface OverlayChip { text: string; tone: "ok" | "busy" | "warn" }
+/** `note`: 칩 옆에 붙이는 이유 문구(배속만 하고 자막을 건너뛰었을 때만) */
+export interface OverlayChip { text: string; tone: "ok" | "busy" | "warn"; note?: string }
 
 const REASON_KO: Record<string, string> = {
   font_not_found: "서버에 한글 글꼴이 없어 자막 없이 나왔어요",
   ffmpeg_not_found: "서버에 영상 도구가 없어 자막 없이 나왔어요",
 };
 
-export function overlayChip(overlay: OverlayState | null | undefined): OverlayChip | null {
+/** 배속만 하고 자막을 건너뛴 이유 (#1760 `captions_skipped`) */
+const SKIPPED_KO: Record<string, string> = {
+  font_not_found: "서버에 한글 글꼴이 없어요",
+  nothing_to_overlay: "얹을 자막이 없어요",
+};
+
+const speedText = (n: number) => String(Math.round(n * 10) / 10);
+
+/** `speed`: 영상 요약(render.video.summary.speed). 없으면 얹기 기록의 speed */
+export function overlayChip(overlay: OverlayState | null | undefined, speed?: number | null): OverlayChip | null {
   const s = overlay?.status;
   if (!s) return null;
-  if (s === "applied") return { text: "자막·엔드카드 얹음", tone: "ok" };
+  if (s === "applied") {
+    const x = typeof speed === "number" && speed > 1 ? speed : typeof overlay?.speed === "number" && overlay.speed > 1 ? overlay.speed : null;
+    const times = x !== null ? `${speedText(x)}배속` : "배속";
+    if (overlay?.captions_skipped) {
+      return { text: `${times}만 · 자막 없음`, tone: "warn", note: SKIPPED_KO[overlay.captions_skipped] ?? "자막을 얹지 못했어요" };
+    }
+    if (overlay?.speed_applied) return { text: `자막·엔드카드 얹음 · ${times}`, tone: "ok" };
+    return { text: "자막·엔드카드 얹음", tone: "ok" };
+  }
   if (s === "running") return { text: "자막 얹는 중", tone: "busy" };
   if (s === "skipped" || s === "failed") return { text: (overlay?.error && REASON_KO[overlay.error]) || "자막을 얹지 못했어요", tone: "warn" };
   return null;

@@ -51,6 +51,22 @@ test("칩 문구와 이유", () => {
   assert.equal(overlayChip(ov("skipped", "video"))?.tone, "warn");
 });
 
+test("배속 칩 4가지 (#1760): 배속만·자막 없음 이유 2가지, 자막+배속, 필드 없음은 지금 그대로", () => {
+  const fontless = { ...ov("applied", "video"), captions: 0, captions_skipped: "font_not_found", speed_applied: true };
+  assert.deepEqual(overlayChip(fontless, 1.2), { text: "1.2배속만 · 자막 없음", tone: "warn", note: "서버에 한글 글꼴이 없어요" });
+  const empty = { ...ov("applied", "video"), captions: 0, captions_skipped: "nothing_to_overlay", speed_applied: true };
+  assert.deepEqual(overlayChip(empty, 1.5), { text: "1.5배속만 · 자막 없음", tone: "warn", note: "얹을 자막이 없어요" });
+  const both = { ...ov("applied", "video"), speed_applied: true, captions_skipped: null };
+  assert.deepEqual(overlayChip(both, 1.2), { text: "자막·엔드카드 얹음 · 1.2배속", tone: "ok" });
+  // 배속 값은 영상 요약(summary.speed)을 먼저, 없으면 얹기 기록의 speed
+  assert.equal(overlayChip({ ...both, speed: 1.333 })?.text, "자막·엔드카드 얹음 · 1.3배속");
+  // 새 필드가 없으면(옛 기록·배속 끔) 지금 그대로
+  assert.deepEqual(overlayChip(ov("applied", "video")), { text: "자막·엔드카드 얹음", tone: "ok" });
+  assert.deepEqual(overlayChip(ov("applied", "video"), 1), { text: "자막·엔드카드 얹음", tone: "ok" });
+  // 고르는 규칙은 그대로: 배속만 해도 applied면 overlay_video
+  assert.equal(pickVideoPart({ video: done, overlay: fontless }), "overlay_video");
+});
+
 test("다시 얹기 본문과 60자 상한", () => {
   const drafts = captionDrafts([{ no: 1, caption_ko: "안녕" }, { no: 2 }, { no: 3, caption_ko: "가".repeat(80) }]);
   assert.equal(drafts[0].caption_ko, "안녕");
