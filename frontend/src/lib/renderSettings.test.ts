@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ApiError } from "./apiError.ts";
 import {
-  FORBIDDEN_NOTE, aspectOptions, changeVideoModel, defaultHint, loadRenderSettings, parseRenderSettings, saveBody, saveErrorKo,
-  secondsOptions, startValues, videoModelOf, type RenderSettingsState,
+  FORBIDDEN_NOTE, SPEEDS, aspectOptions, changeVideoModel, defaultHint, loadRenderSettings, parseRenderSettings, sameValues, saveBody, saveErrorKo,
+  secondsOptions, speedLabel, startValues, videoModelOf, type RenderSettingsState,
 } from "./renderSettings.ts";
+import { speedLine, videoSummaryLine } from "./creativeVideo.ts";
 
 const RAW = {
   settings: null,
@@ -90,4 +91,29 @@ test("저장 오류: 422는 서버 문장 그대로, 403은 고정 문구", () =
   assert.equal(saveErrorKo(new ApiError("영상 길이는 3~20초예요", 422)), "영상 길이는 3~20초예요");
   assert.equal(saveErrorKo(new ApiError("forbidden", 403)), FORBIDDEN_NOTE);
   assert.equal(FORBIDDEN_NOTE, "회사 관리자만 바꿀 수 있어요");
+});
+
+test("재생 속도 칸: 서버 기본값에 speed가 있을 때만 보이고 저장 본문에 들어간다", () => {
+  assert.equal(state().speedSupported, false); // 옛 서버: 칸 숨김, 본문에도 없음
+  assert.ok(!("speed" in saveBody(startValues(state()), state().speedSupported)));
+  const s = parseRenderSettings({ ...RAW, defaults: { ...RAW.defaults, speed: "1.2" } });
+  assert.ok(s && s.speedSupported);
+  assert.equal(defaultHint(s, "speed"), "1.2 배속");
+  assert.equal(startValues(s).speed, null); // 비워 두면 서버 기본값
+  const body = saveBody({ ...startValues(s), speed: "1.0" }, true);
+  assert.equal(body.speed, "1.0");
+  assert.deepEqual(SPEEDS, ["1.0", "1.2", "1.5"]);
+  assert.equal(speedLabel("1.0"), "1.0 배속 끔");
+  assert.equal(speedLabel("1.5"), "1.5 배속");
+  // 모르는 값이면 모양이 틀린 응답으로 보고 칸을 숨긴다
+  assert.equal(parseRenderSettings({ ...RAW, defaults: { ...RAW.defaults, speed: "2.0" } }), null);
+  assert.ok(!sameValues({ ...startValues(s), speed: "1.5" }, startValues(s)));
+});
+
+test("영상 요약: 배속했으면 만든 길이 → 배속 → 기획 길이", () => {
+  assert.equal(speedLine({ speed: 1.2, generated_seconds: 18, seconds: 18 }), "18초 만들어 1.2배속 → 15초");
+  assert.equal(speedLine({ speed: 1, generated_seconds: 15, seconds: 15 }), null);
+  assert.equal(speedLine({ seconds: 15 }), null); // 옛 기록
+  const line = videoSummaryLine("awaiting_approval", { model: "kling4_0", seconds: 18, speed: 1.2, generated_seconds: 18, aspect: "9:16" });
+  assert.equal(line, "kling4_0 · 18초 만들어 1.2배속 → 15초 · 9:16");
 });

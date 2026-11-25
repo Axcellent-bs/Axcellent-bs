@@ -10,6 +10,8 @@
 - `image_credits_ok`: 그림에 크레딧을 써도 되나 (비어 있으면 true = 지금 동작)
 - `video_seconds`: `"plan"`(기획 길이) 또는 정수 초
 - `aspect`: `"plan"` | `"9:16"` | `"1:1"` | `"16:9"` (그림·영상 같은 비율)
+- `speed`: 재생 속도 `"1.0"` | `"1.2"` | `"1.5"`
+  (비어 있으면 서버 설정 `MARKETING_VIDEO_SPEED` → "1.2")
 """
 
 from __future__ import annotations
@@ -26,7 +28,8 @@ from ax_agent_template import tenant as tenants
 FILE_ENV = "AX_RENDER_SETTINGS_FILE"
 FILE = "render_settings.json"
 ASPECTS = ("plan", "9:16", "1:1", "16:9")
-FIELDS = ("image_model", "video_model", "image_credits_ok", "video_seconds", "aspect")
+FIELDS = ("image_model", "video_model", "image_credits_ok", "video_seconds", "aspect", "speed")
+SPEEDS = ("1.0", "1.2", "1.5")  # 재생 속도(11/25). 계약 `marketing_render_settings.SPEEDS`와 같다
 MODEL_MAX = 120
 SECONDS_MAX = 600
 lock = threading.Lock()  # 쓰는 쪽(dashboard-api)이 쓴다
@@ -57,6 +60,8 @@ def clean(row: Any) -> dict[str, Any]:
         out["video_seconds"] = secs
     if row.get("aspect") in ASPECTS:
         out["aspect"] = row["aspect"]
+    if row.get("speed") in SPEEDS:
+        out["speed"] = row["speed"]
     return out
 
 

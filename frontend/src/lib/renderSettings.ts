@@ -7,12 +7,19 @@ export const ASPECTS: Aspect[] = ["9:16", "1:1", "16:9"];
 /** 값이 "plan"이면 기획서를 따른다 */
 export type PlanOr<T> = "plan" | T;
 
+/** 재생 속도(11/25 AI 티 줄이기): 길게 만들고 빠르게 튼다. "1.0" = 배속 끔 */
+export type Speed = "1.0" | "1.2" | "1.5";
+export const SPEEDS: Speed[] = ["1.0", "1.2", "1.5"];
+const isSpeed = (x: unknown): x is Speed => x === "1.0" || x === "1.2" || x === "1.5";
+
 export interface RenderValues {
   image_model: string | null;
   video_model: string | null;
   image_credits_ok: boolean | null;
   video_seconds: PlanOr<number> | null;
   aspect: PlanOr<Aspect> | null;
+  /** 서버가 아직 이 칸을 모르면 늘 null (칸도 숨긴다: `speedSupported`) */
+  speed: Speed | null;
 }
 export interface ImageModelOption { id: string; name: string }
 export interface VideoModelOption { id: string; name: string; min_s: number; max_s: number; aspects: Aspect[] }
@@ -21,6 +28,8 @@ export interface RenderSettingsState {
   defaults: RenderValues;
   models: { image: ImageModelOption[]; video: VideoModelOption[] };
   can_edit: boolean;
+  /** 서버 기본값에 `speed` 칸이 있을 때만 재생 속도 칸을 보여 주고 저장 본문에 넣는다 */
+  speedSupported: boolean;
 }
 
 export const READ_ONLY_NOTE = "보기만 할 수 있어요. 바꾸는 건 회사 관리자가 해요.";
@@ -43,11 +52,14 @@ function parseValues(x: unknown): RenderValues | null {
   if (s !== null && s !== undefined && s !== "plan" && !(typeof s === "number" && Number.isInteger(s))) return null;
   const a = x.aspect;
   if (a !== null && a !== undefined && a !== "plan" && !isAspect(a)) return null;
+  const sp = x.speed;
+  if (sp !== null && sp !== undefined && !isSpeed(sp)) return null;
   return {
     image_model, video_model,
     image_credits_ok: c ?? null,
     video_seconds: (s as PlanOr<number> | null | undefined) ?? null,
     aspect: (a as PlanOr<Aspect> | null | undefined) ?? null,
+    speed: sp ?? null,
   };
 }
 
@@ -74,7 +86,8 @@ export function parseRenderSettings(raw: unknown): RenderSettingsState | null {
     video.push({ id: o.id, name: o.name, min_s: o.min_s, max_s: o.max_s, aspects: o.aspects.filter(isAspect) });
   }
   if (typeof raw.can_edit !== "boolean") return null;
-  return { settings, defaults, models: { image, video }, can_edit: raw.can_edit };
+  const speedSupported = isObj(raw.defaults) && "speed" in raw.defaults;
+  return { settings, defaults, models: { image, video }, can_edit: raw.can_edit, speedSupported };
 }
 
 /** 불러오기: 실패(404·네트워크·이상한 응답)는 모두 null = 칸 숨김 */
@@ -88,7 +101,7 @@ export async function loadRenderSettings(fetcher: () => Promise<unknown>): Promi
 
 /** 화면에 보이는 값(저장값이 없으면 전부 비움) */
 export function startValues(s: RenderSettingsState): RenderValues {
-  return s.settings ?? { image_model: null, video_model: null, image_credits_ok: null, video_seconds: null, aspect: null };
+  return s.settings ?? { image_model: null, video_model: null, image_credits_ok: null, video_seconds: null, aspect: null, speed: null };
 }
 
 export function videoModelOf(s: RenderSettingsState, id: string | null): VideoModelOption | null {
@@ -117,21 +130,29 @@ export function changeVideoModel(s: RenderSettingsState, cur: RenderValues, id: 
   return next;
 }
 
-/** 저장 본문: 5개 키 모두. 비워 둔 칸은 null(서버 기본값을 쓴다) */
-export function saveBody(v: RenderValues): RenderValues {
-  return {
+/** 저장 본문: 5개 키 모두(+ 서버가 알면 재생 속도). 비워 둔 칸은 null(서버 기본값을 쓴다).
+ *  서버가 아직 `speed`를 모르면 넣지 않는다(모르는 칸은 422) */
+export function saveBody(v: Omit<RenderValues, "speed"> & { speed?: Speed | null }, speedSupported = false): SaveBody {
+  const body: SaveBody = {
     image_model: v.image_model || null,
     video_model: v.video_model || null,
     image_credits_ok: v.image_credits_ok,
     video_seconds: v.video_seconds,
     aspect: v.aspect,
   };
+  if (speedSupported) body.speed = v.speed ?? null;
+  return body;
 }
+export type SaveBody = Omit<RenderValues, "speed"> & { speed?: Speed | null };
 
 export function sameValues(a: RenderValues, b: RenderValues): boolean {
   return a.image_model === b.image_model && a.video_model === b.video_model && a.image_credits_ok === b.image_credits_ok
-    && a.video_seconds === b.video_seconds && a.aspect === b.aspect;
+    && a.video_seconds === b.video_seconds && a.aspect === b.aspect && a.speed === b.speed;
 }
+
+/** 재생 속도 글: "1.0"은 배속 끔 */
+export const speedLabel = (v: Speed | null): string => (v === null ? "" : v === "1.0" ? "1.0 배속 끔" : `${v} 배속`);
+export const SPEED_NOTE = "길게 만들고 빠르게 틀어 AI 티를 줄여요. 영상 크레딧은 만든 길이만큼 써요";
 
 export const secondsLabel = (v: PlanOr<number> | null): string => (v === null ? "" : v === "plan" ? PLAN_LABEL : `${v}초`);
 export const aspectLabel = (v: PlanOr<Aspect> | null): string => (v === null ? "" : v === "plan" ? PLAN_LABEL : v);
@@ -147,6 +168,7 @@ export function defaultHint(s: RenderSettingsState, key: keyof RenderValues): st
     case "image_credits_ok": return creditsLabel(d as boolean);
     case "video_seconds": return secondsLabel(d as PlanOr<number>);
     case "aspect": return aspectLabel(d as PlanOr<Aspect>);
+    case "speed": return speedLabel(d as Speed);
   }
 }
 

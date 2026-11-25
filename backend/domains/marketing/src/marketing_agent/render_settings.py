@@ -20,6 +20,8 @@ import httpx
 
 from ax_agent_template import render_settings as store
 from ax_contracts.schemas.marketing_render_settings import (
+    DEFAULT_SPEED,
+    SPEEDS,
     RenderImageModel,
     RenderModels,
     RenderSettingsOptionsOutput,
@@ -56,6 +58,16 @@ class Effective:
     image_credits_ok: bool
     video_seconds: str | int  # "plan" 또는 정수
     aspect: str  # "plan" 또는 비율
+    speed: str = DEFAULT_SPEED  # 재생 속도 "1.0"(끔)·"1.2"·"1.5" (11/25)
+
+
+SPEED_ENV = "MARKETING_VIDEO_SPEED"
+
+
+def server_speed() -> str:
+    """서버 설정 재생 속도. 없거나 모르는 값이면 "1.2"."""
+    raw = os.getenv(SPEED_ENV, "").strip()
+    return raw if raw in SPEEDS else DEFAULT_SPEED
 
 
 def server_image_model() -> str:
@@ -75,16 +87,20 @@ def effective(cid: str | None = None) -> Effective:
         image_credits_ok=saved.get("image_credits_ok", True),
         video_seconds=saved.get("video_seconds", "plan"),
         aspect=saved.get("aspect", "plan"),
+        speed=saved.get("speed") or server_speed(),
     )
 
 
 def defaults() -> RenderSettingsValues:
-    return RenderSettingsValues(
-        image_model=server_image_model() or None,
-        video_model=server_video_model() or None,
-        image_credits_ok=True,
-        video_seconds="plan",
-        aspect="plan",
+    return RenderSettingsValues.model_validate(
+        {
+            "image_model": server_image_model() or None,
+            "video_model": server_video_model() or None,
+            "image_credits_ok": True,
+            "video_seconds": "plan",
+            "aspect": "plan",
+            "speed": server_speed(),
+        }
     )
 
 

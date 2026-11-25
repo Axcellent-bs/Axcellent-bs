@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { renderSettingsApi } from "@/lib/renderSettingsApi";
 import {
-  CREDITS_STOP_NOTE, PLAN_LABEL, READ_ONLY_NOTE, aspectOptions, changeVideoModel, defaultHint, loadRenderSettings, parseRenderSettings,
+  CREDITS_STOP_NOTE, PLAN_LABEL, READ_ONLY_NOTE, SPEEDS, SPEED_NOTE, aspectOptions, speedLabel, changeVideoModel, defaultHint, loadRenderSettings, parseRenderSettings,
   saveBody, saveErrorKo, sameValues, secondsOptions, startValues, videoModelOf,
-  type Aspect, type PlanOr, type RenderSettingsState, type RenderValues,
+  type Aspect, type PlanOr, type RenderSettingsState, type RenderValues, type Speed,
 } from "@/lib/renderSettings";
 
 // 계정·연결 › Higgsfield 아래 "만들기 설정": 그림·영상 모델, 그림 크레딧, 영상 길이, 비율 (이 회사에만 적용).
@@ -119,10 +119,23 @@ export function RenderSettings() {
         </select>
       </Row>
 
+      {state.speedSupported && (
+        <>
+          <Row label="재생 속도" hint={vals.speed === null ? defaultHint(state, "speed") : undefined}>
+            <select className="field w-auto text-sm" aria-label="재생 속도" disabled={!edit || busy} value={vals.speed ?? ""}
+              onChange={(e) => set({ speed: e.target.value === "" ? null : (e.target.value as Speed) })}>
+              <option value="">정하지 않음</option>
+              {SPEEDS.map((v) => <option key={v} value={v}>{speedLabel(v)}</option>)}
+            </select>
+          </Row>
+          <p className="text-xs text-ink-500">{SPEED_NOTE}</p>
+        </>
+      )}
+
       {edit ? (
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className="btn-primary text-xs" disabled={busy || !changed}
-            onClick={() => void run(() => renderSettingsApi.save(saveBody(vals)), "저장했어요. 다음 영상부터 이 설정으로 만들어요")}>
+            onClick={() => void run(() => renderSettingsApi.save(saveBody(vals, state.speedSupported)), "저장했어요. 다음 영상부터 이 설정으로 만들어요")}>
             {busy ? "저장하는 중…" : "저장"}
           </button>
           {!asking && (

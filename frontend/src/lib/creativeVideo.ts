@@ -10,6 +10,16 @@ export interface CreativeVideoSummary {
   aspect?: string | null;
   reference?: "character_original" | "storyboard_image" | string | null;
   credits_estimate?: number | null;
+  /** 11/25 재생 속도: 실제 배속(1.0이면 배속 안 함)과 만든 길이(= seconds) */
+  speed?: number | null;
+  generated_seconds?: number | null;
+}
+
+/** 배속한 영상이면 "18초 만들어 1.2배속 → 15초", 아니면 null */
+export function speedLine(s: Pick<CreativeVideoSummary, "speed" | "generated_seconds" | "seconds"> | null | undefined): string | null {
+  const made = s?.generated_seconds ?? s?.seconds;
+  if (!s || typeof s.speed !== "number" || s.speed <= 1 || typeof made !== "number" || made <= 0) return null;
+  return `${num(made)}초 만들어 ${num(s.speed)}배속 → ${num(made / s.speed)}초`;
 }
 
 const REFERENCE_KO: Record<string, string> = {
@@ -31,7 +41,7 @@ export function videoSummaryLine(status: string | null | undefined, s: CreativeV
   if (s.model) parts.push(s.model);
   if (typeof s.seconds === "number" && s.seconds > 0) {
     const from = typeof s.seconds_clamped_from === "number" && s.seconds_clamped_from > s.seconds ? `(${num(s.seconds_clamped_from)}초에서 줄임)` : "";
-    parts.push(`${num(s.seconds)}초${from}`);
+    parts.push(speedLine(s) ?? `${num(s.seconds)}초${from}`);
   }
   if (s.aspect) parts.push(s.aspect);
   if (typeof s.credits_estimate === "number") parts.push(`예상 약 ${num(s.credits_estimate)}`);

@@ -115,7 +115,8 @@ def test_admin_saves_and_the_file_has_only_this_company(client: TestClient, env:
     body = {"video_model": "vid_a", "video_seconds": 7, "aspect": "16:9",
             "image_credits_ok": False}  # fmt: skip
     got = _data(client.post(f"{URL}/save", json=body, headers=_who("a-1")))
-    assert got["settings"] == {"image_model": None, **body}
+    # 11/25 재생 속도 칸이 늘었다(보내지 않았으면 비움 = 서버 기본값)
+    assert got["settings"] == {"image_model": None, "speed": None, **body}
     on_disk = json.loads(path.read_text(encoding="utf-8"))["companies"]
     assert on_disk["other"] == {"image_model": "keep_me"}  # 다른 회사 값은 그대로
     assert on_disk["catbooks"]["video_seconds"] == 7
