@@ -89,6 +89,10 @@ CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-aut
 
 선택: `AX_BUSY_URLS`(공백으로 나눈 조회 주소. 응답 목록·`count` 가 0 이 아니거나 조회가 실패하면 재시작을 미룬다). 기본은 비어 있어 확인하지 않는다.
 
+`AX_BUSY_URLS` 가 읽는 응답 형식(`be_busy` 파서): JSON 객체의 최상위 키 `items`·`reviews`·`incidents`·`pending` 중 먼저 있는 **리스트**의 길이, 없으면 최상위 `count`·`busy` **숫자**. 0 이면 한가함, 0 보다 크면 미룸. 조회 실패·해석 실패도 미룸(또는 `skip-cycle`).
+
+총괄 `GET /api/busy`(인증 없음, 건수만)는 `{"data":{"in_flight":N,"waiting_async":N,"running":N,"held":N,"waiting_human":N,"video_in_flight":N,"checked_at":"..."},"meta":{}}` 를 준다. 이 모양은 **현재 파서에 맞지 않는다**(최상위에 위 키가 없고 `data` 안에 있어 `count` 도 없으므로 0건으로 읽는다). 그래서 지금은 `AX_BUSY_URLS` 에 넣어도 미룸 판단이 되지 않으니 넣지 않는다. 후속 단계에서 자동 배포 스크립트가 `data.in_flight`(필요하면 `held`·`waiting_human` 포함 여부는 정책으로)를 읽도록 고친다. 마케팅 안의 영상 생성 중 건수(메모리·장부)는 이 응답에 아직 없다(후속 단계).
+
 판정 순서: 이전 배포 흔적(`backend-in-progress`)·정지 표시 연결·배포 금지 잠금(`/etc/ax-gate/deploy.lock`) → 운영 트리 HEAD..dev 최신에 `backend/` 변경 → 이전 실패 SHA(`backend-skipped-ref`) → CI → 범위 안 커밋의 PR 라벨·`## 배포 메모`(PR 을 못 찾으면 보류) → 허용 시각 → 조용한 구간 → 최소 간격 → 대기 건 → (on) 공지 → 게이트. API 실패·해석 실패는 `skip-cycle`(이번 주기 건너뜀, 상태 기록 없음). 상태 파일(`/var/lib/ax-autodeploy/`): `backend-verdict`, `backend-notified`, `backend-last-restart`, `backend-in-progress`(되돌림까지 실패하면 `halted ...` 로 남고 사람이 확인해 지울 때까지 아무것도 안 한다), `backend-skipped-ref`, `backend-defer-since`.
 
 서버에 필요한 것(서버 작업은 사람이): 게이트 0.5.0 + `axautodeploy` 계정(권한 6개: `status deploy-bundle restart-backend rollback-bundle rollback-code uv-sync`, `docs/ops/ssh-gate/INSTALL.md`), `/etc/ax-autodeploy/gh-readonly-token`(Checks·Pull requests 읽기), `/etc/ax-autodeploy/slack-webhook`(root 600), `/etc/ax-autodeploy/env` 에 `AX_BACKEND_STAGE=on`·`AX_PAUSE_FILE=<게이트 정책 pause_file>`, `ax-gate-autodeploy-paused`.

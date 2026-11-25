@@ -281,6 +281,26 @@ def health() -> dict:
     return {"data": {"status": "ok"}, "meta": {}}
 
 
+@app.get("/api/busy")
+def busy() -> dict:
+    """진행 중인 의뢰 단계의 건수만 (자동 배포가 재시작을 미룰지 볼 때 읽는다). 인증 없음.
+
+    모든 회사의 열린 의뢰를 합한다. 의뢰 번호·의뢰자·문장·결과는 내지 않는다.
+    `in_flight`는 부서가 일하는 중(`waiting_async`+`running`)이고, 사람 승인·확인 대기
+    (`held`·`waiting_human`)는 따로 줘서 바쁨으로 셀지는 읽는 쪽이 정한다.
+    마케팅 안의 영상 생성(메모리·장부)은 도메인 간 호출이 없어 아직 안 센다(후속 단계)."""
+    total = {"waiting_async": 0, "running": 0, "held": 0, "waiting_human": 0, "video_in_flight": 0}
+    for manager in list(state.managers.values()):
+        for key, n in manager.work_requests.busy_counts().items():
+            total[key] += n
+    data = {
+        "in_flight": total["waiting_async"] + total["running"],
+        **total,
+        "checked_at": datetime.now(UTC).isoformat(),
+    }
+    return {"data": data, "meta": {}}
+
+
 def _require_mock() -> None:
     if not state.mock:
         raise HTTPException(501, "실제 연동은 아직 없음 (ORCHESTRATOR_MOCK=1로 실행)")
