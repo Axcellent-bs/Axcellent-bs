@@ -223,7 +223,7 @@ async def request_week(period: str | None, requested_by: str, meta: RequestMeta)
         )
     async with _request_lock():
         data = await _view(books, name, cached=False)
-        current = settlement_batches.STORE.get(name)
+        current = settlement_batches.store().get(name)
         if current and current["status"] in ("requested", "approved"):
             # 같은 기간은 한 번만 요청한다
             return RequestOutcome(settlement=data | {"meta": books.meta()}, requested=False)
@@ -242,7 +242,7 @@ async def request_week(period: str | None, requested_by: str, meta: RequestMeta)
                 )
             if record is not None:
                 settlement_batches.mark_approved(current, record)
-                settlement_batches.STORE.save()
+                settlement_batches.store().save()
                 after = await _view(books, name)
                 return RequestOutcome(settlement=after | {"meta": books.meta()}, requested=False)
         rows = settlement.ready(data)
@@ -287,7 +287,7 @@ async def request_week(period: str | None, requested_by: str, meta: RequestMeta)
                     "안전 장치에 닿지 않아 정산 묶음을 요청하지 않았다 (지급 기록 없음)",
                 )
             )
-        settlement_batches.STORE.put(
+        settlement_batches.store().put(
             name,
             {
                 "status": settlement_batches.batch_status(decision.status),

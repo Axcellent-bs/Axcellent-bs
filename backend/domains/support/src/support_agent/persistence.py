@@ -29,7 +29,7 @@ from support_agent.claim_schemas import Claim
 from support_agent.claims import ClaimStore
 from support_agent.compensation import SequenceLedger
 from support_agent.ideas import Idea, IdeaStore
-from support_agent.incident_queue import IncidentQueueStore, QueueItem
+from support_agent.incident_queue import IncidentQueueStore, QueueItem, key_of
 from support_agent.planning_question_inbox import PlanningQuestionInbox, PlanningQuestionRecord
 from support_agent.proposal_decisions import ProposalDecision, ProposalDecisionStore
 from support_agent.schemas import Conversation
@@ -479,7 +479,7 @@ class PersistentIncidentQueueStore(IncidentQueueStore):
         self._repo = repo
         for doc in repo.load("incident_compensation_items"):
             item = QueueItem.model_validate(doc)
-            self._items[(item.context_id, item.buyer_id, item.reason_code)] = item
+            self._items[key_of(item)] = item
 
     def _put(self, item: QueueItem) -> QueueItem:
         self._repo.upsert(

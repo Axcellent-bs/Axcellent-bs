@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Literal, get_args
 
+from ax_agent_template import company_scope
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT, AxModel
 from support_agent.store import now_iso
 
@@ -44,7 +45,18 @@ class QueueItem(AxModel):
     seq: int
 
 
-Key = tuple[str, str, str]  # (사건, 구매자, 사유)
+Key = tuple[str, str, str, str]  # (회사, 사건, 구매자, 사유)
+
+
+def key_of(item: QueueItem) -> Key:
+    """저장 열쇠. 회사(정식 id)가 들어 있어 다른 회사의 같은 사건·구매자·사유와 섞이지 않는다."""
+    return (company_scope.scope_id(item.tenant_id), item.context_id, item.buyer_id,
+            item.reason_code)  # fmt: skip
+
+
+def _here() -> str:
+    """지금 요청 회사(요청 밖이면 캣북스)."""
+    return company_scope.scope_id(company_scope.active())
 
 
 class IncidentQueueStore:
@@ -53,16 +65,20 @@ class IncidentQueueStore:
 
     def _put(self, item: QueueItem) -> QueueItem:
         """저장 지점. 영속 저장소가 여기서 DB에도 쓴다."""
-        self._items[(item.context_id, item.buyer_id, item.reason_code)] = item
+        self._items[key_of(item)] = item
         return item
 
     def get(self, context_id: str, buyer_id: str, reason_code: str) -> QueueItem | None:
-        return self._items.get((context_id, buyer_id, reason_code))
+        return self._items.get((_here(), context_id, buyer_id, reason_code))
 
     def find_buyer(self, context_id: str, buyer_id: str) -> QueueItem | None:
         """사건의 구매자 한 명의 줄 (사유가 여럿이면 먼저 올린 것)."""
         rows = [
-            i for i in self._items.values() if i.context_id == context_id and i.buyer_id == buyer_id
+            i
+            for i in self._items.values()
+            if i.context_id == context_id
+            and i.buyer_id == buyer_id
+            and company_scope.visible(i.tenant_id)
         ]
         return min(rows, key=lambda i: i.seq) if rows else None
 
@@ -74,6 +90,7 @@ class IncidentQueueStore:
             for i in self._items.values()
             if (context_id is None or i.context_id == context_id)
             and (statuses is None or i.status in statuses)
+            and company_scope.visible(i.tenant_id)  # 요청 안이면 그 회사 줄만 (11/25)
         ]
         return sorted(rows, key=lambda i: i.seq)
 

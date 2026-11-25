@@ -33,7 +33,8 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import company_files
+from ax_agent_template import company_files, company_scope
+from ax_agent_template.companies import company_path
 from ax_agent_template.config import agent_url
 from support_agent import settlement_config as sc
 
@@ -111,13 +112,45 @@ def build_store() -> BatchStore:
     return BatchStore(store_path(), Path(source) if source else None)
 
 
-STORE = build_store()
+STORE = build_store()  # 캣북스(설치 기본 회사) 묶음
+# 캣북스 밖 회사 ID → 그 회사 묶음 (11/25 회사 분리: 정산 묶음이 다른 회사에 보이지 않게)
+_COMPANY_STORES: dict[str, BatchStore] = {}
 
 
-def use_store(store: BatchStore) -> None:
-    """테스트가 저장소를 바꿔 끼운다."""
+def _company_path(cid: str) -> Path | None:
+    """캣북스 밖 회사의 묶음 파일. 옛 단일 파일은 캣북스 것이라 옮기지 않는다.
+
+    `SUPPORT_SETTLEMENT_FILE`을 정했으면 그 옆 `<이름>.<회사><확장자>`, 아니면 회사 폴더를 켰을 때
+    `<회사 폴더>/<회사>/<FILE_NAME>`, 둘 다 없으면 None(메모리에만).
+    """
+    raw = os.getenv(ENV_FILE, "").strip()
+    if raw:
+        pinned = Path(raw)
+        return pinned.with_name(f"{pinned.stem}.{cid}{pinned.suffix}")
+    if not company_files.folders_on():
+        return None
+    path = company_path(cid, FILE_NAME)
+    if path is not None:
+        path.parent.mkdir(mode=company_files.DIR_MODE, parents=True, exist_ok=True)
+    return path
+
+
+def store() -> BatchStore:
+    """지금 요청 회사의 정산 묶음. 요청 밖이면 캣북스."""
+    cid = company_scope.scope_id(company_scope.active())
+    if cid == company_scope.CATBOOKS:
+        return STORE
+    found = _COMPANY_STORES.get(cid)
+    if found is None:
+        found = _COMPANY_STORES[cid] = BatchStore(_company_path(cid))
+    return found
+
+
+def use_store(new: BatchStore) -> None:
+    """테스트가 캣북스 저장소를 바꿔 끼운다(다른 회사 묶음은 비운다)."""
     global STORE
-    STORE = store
+    STORE = new
+    _COMPANY_STORES.clear()
 
 
 def context_id_of(period: str) -> str:
@@ -246,19 +279,20 @@ async def _review_gone(batch: dict[str, Any], period: str) -> bool:
 
 async def refreshed(period: str) -> dict[str, Any] | None:
     """기간의 묶음을 안전 장치 상태로 맞춰 돌려준다."""
-    batch = STORE.get(period)
+    batch = store().get(period)
     if batch is not None and await refresh(batch, period):
-        STORE.save()
+        store().save()
     return batch
 
 
 async def refreshed_all() -> dict[str, dict[str, Any]]:
     changed = False
-    for period, batch in STORE.batches.items():
+    current = store()
+    for period, batch in current.batches.items():
         changed = await refresh(batch, period) or changed
     if changed:
-        STORE.save()
-    return STORE.batches
+        store().save()
+    return current.batches
 
 
 def batch_status(decision_status: str) -> str:

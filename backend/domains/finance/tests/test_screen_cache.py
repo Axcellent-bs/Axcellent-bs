@@ -31,7 +31,7 @@ def _live_like(monkeypatch: pytest.MonkeyPatch, fixed_now) -> list[bk.Books]:
     monkeypatch.setattr(sc, "enabled", lambda: True)
     sc.CACHE.clear()
     books = bk.seed_books()
-    monkeypatch.setattr(bk, "_live_cache", (time.monotonic(), books))
+    monkeypatch.setitem(bk._live_caches, "catbooks", (time.monotonic(), books))
     calls: list[bk.Books] = []
 
     async def loader() -> bk.Books:
@@ -69,7 +69,7 @@ def test_new_books_serve_the_old_answer_and_remake_behind(
     async def run() -> None:
         async with _client() as c:
             await c.get("/api/finance/statements")
-            monkeypatch.setattr(bk, "_live_cache", (time.monotonic(), bk.seed_books()))
+            monkeypatch.setitem(bk._live_caches, "catbooks", (time.monotonic(), bk.seed_books()))
             stale = await c.get("/api/finance/statements")
             assert stale.headers["x-finance-cache"] == "stale"
             assert sc.CACHE.worker is not None
@@ -77,7 +77,7 @@ def test_new_books_serve_the_old_answer_and_remake_behind(
             assert (await c.get("/api/finance/statements")).headers["x-finance-cache"] == "hit"
             # 너무 오래된 응답은 주지 않고 새로 만든다
             monkeypatch.setattr(sc, "MAX_STALE_SECONDS", 0.0)
-            monkeypatch.setattr(bk, "_live_cache", (time.monotonic(), bk.seed_books()))
+            monkeypatch.setitem(bk._live_caches, "catbooks", (time.monotonic(), bk.seed_books()))
             fresh = await c.get("/api/finance/statements")
             assert "x-finance-cache" not in fresh.headers
 
@@ -151,7 +151,7 @@ def test_starting_the_server_prepares_the_first_screens(
         await sc.prime()
         assert sc.CACHE.worker is not None
         await sc.CACHE.worker
-        assert set(sc.FIRST_SCREENS) <= set(sc.CACHE.entries)
+        assert {f"catbooks|{p}" for p in sc.FIRST_SCREENS} <= set(sc.CACHE.entries)
         assert {"seller_settlement", "seller_settlement_deadlines"} <= {k for k, _ in support.calls}
         async with _client() as c:
             first = await c.get("/api/finance/overview")
@@ -214,3 +214,42 @@ def test_records_fingerprint_follows_finance_records() -> None:
     assert persist.fingerprint(handlers.state()) == before
     handlers.state().records.recon_notes["pay_x"] = "확인함"
     assert persist.fingerprint(handlers.state()) != before
+
+
+def test_screen_answers_are_kept_per_company(
+    monkeypatch: pytest.MonkeyPatch, _live_like: list[bk.Books]
+) -> None:
+    """11/25 회사 분리: 캣북스 화면 응답이 누비투어 세션에 나가지 않는다(열쇠에 회사)."""
+    from ax_agent_template import human_auth as ha
+
+    monkeypatch.setenv(ha.SESSION_SECRET_ENV, "x" * 40)  # 테스트용 자리값 (실제 키 아님)
+    token, _ = ha.issue_session(account_id="acc-nubi", name="누비", role="admin",
+                                company_id="nubi-tour")  # fmt: skip
+    nubi = {"Authorization": f"Bearer {token}"}
+    monkeypatch.setitem(bk._live_caches, "nubi-tour", (time.monotonic(), bk.seed_books()))
+
+    async def run() -> None:
+        async with _client() as c:
+            await c.get("/api/finance/variance")
+            assert (await c.get("/api/finance/variance")).headers["x-finance-cache"] == "hit"
+            other = await c.get("/api/finance/variance", headers=nubi)
+            assert "x-finance-cache" not in other.headers  # 캣북스 응답을 주지 않고 새로 만든다
+            assert "catbooks|/api/finance/variance" in sc.CACHE.entries
+            assert "nubi-tour|/api/finance/variance" in sc.CACHE.entries
+
+    asyncio.run(run())
+
+
+def test_live_books_are_cached_per_company() -> None:
+    """장부 캐시·주문 모음도 회사마다 따로다."""
+    from ax_agent_template import company_scope
+
+    bk.clear_live_cache()
+    books = bk.seed_books()
+    bk._live_caches["catbooks"] = (time.monotonic(), books)
+    assert bk.live_cache() is not None
+    with company_scope.using("nubi-tour"):
+        assert bk.company() == "nubi-tour"
+        assert bk.live_cache() is None  # 캣북스 장부가 보이지 않는다
+    assert bk.live_cache("catbooks") is not None
+    bk.clear_live_cache()

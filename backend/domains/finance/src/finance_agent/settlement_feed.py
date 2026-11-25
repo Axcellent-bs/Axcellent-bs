@@ -32,9 +32,10 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from ax_agent_template import call_agent
+from ax_agent_template import call_agent, company_scope
 from ax_agent_template.services import route_target
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
+from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 
 SUPPORT = "support"
 CALL_SECONDS = 10.0
@@ -56,16 +57,23 @@ async def _call_support(skill: str, payload: dict[str, Any]) -> AgentResult | No
         return None
     meta = RequestMeta(
         context_id=f"ctx_finance_{skill}",
+        # 지금 요청 회사의 정산 (11/25: 없으면 고객지원이 캣북스로 읽었다). 캣북스는 예전 값 그대로
+        tenant_id=TENANT_ID_DEFAULT if _company() == company_scope.CATBOOKS else _company(),
         token="finance-dashboard",
         deadline=datetime.now(UTC) + timedelta(seconds=CALL_SECONDS),
     )
     return await call_agent(SUPPORT, AgentRequest(meta=meta, skill=skill, input=payload))
 
 
+def _company() -> str:
+    """지금 요청 회사(정식 id). 요청 밖이면 캣북스."""
+    return company_scope.scope_id(company_scope.active())
+
+
 _caller: Caller = _call_support
 _cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
 _inflight: dict[str, asyncio.Task[AgentResult | None]] = {}  # 가 있는 요청 (열쇠마다 하나)
-_preparing: dict[str, bool] = {}  # skill → 마지막 답이 "준비 중"이었는가
+_preparing: dict[str, bool] = {}  # "회사:skill" → 마지막 답이 "준비 중"이었는가
 
 
 def set_caller(caller: Caller | None) -> None:
@@ -84,7 +92,7 @@ def forget() -> None:
 
 def preparing(skill: str = "seller_settlement") -> bool:
     """그 skill의 마지막 답이 "첫 장부를 모으는 중"이었는가 (None을 503 준비 중으로 보여 줄 때)."""
-    return _preparing.get(skill, False)
+    return _preparing.get(f"{_company()}:{skill}", False)
 
 
 async def _call_once(key: str, skill: str, payload: dict[str, Any]) -> AgentResult | None:
@@ -103,7 +111,7 @@ async def _ask(
     skill: str, payload: dict[str, Any], *, strict: bool = False
 ) -> dict[str, Any] | None:
     """고객지원 응답 output. 못 받으면 None. `strict`면 `invalid_input`을 `InvalidPeriod`로 낸다."""
-    key = f"{skill}:{json.dumps(payload, sort_keys=True)}"
+    key = f"{_company()}:{skill}:{json.dumps(payload, sort_keys=True)}"  # 회사마다 따로 기억
     now = time.monotonic()
     hit = _cache.get(key)
     if hit is not None and now - hit[0] < (CACHE_SECONDS if hit[1] is not None else FAILED_SECONDS):
@@ -117,7 +125,9 @@ async def _ask(
         output = result.output if isinstance(result.output, dict) else None
     elif strict and result is not None and result.outcome == "invalid_input":
         raise InvalidPeriod(f"고객지원이 기간을 받지 않았다: {payload}")
-    _preparing[skill] = output is None and result is not None and result.outcome == PREPARING
+    _preparing[f"{_company()}:{skill}"] = (
+        output is None and result is not None and result.outcome == PREPARING
+    )
     _cache[key] = (now, output)
     return output
 

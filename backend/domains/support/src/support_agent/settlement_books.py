@@ -28,7 +28,7 @@ from typing import Any
 
 import httpx
 
-from ax_agent_template import config, pinned_http
+from ax_agent_template import company_scope, config, pinned_http
 from support_agent import settlement_config as sc
 from support_agent import shop_client
 
@@ -426,7 +426,22 @@ class OrderStore:
         return [row for k in self.orders for row in self.refunds.get(k, ())]
 
 
-_STORE = OrderStore()
+# 회사 ID → 모아 둔 주문 (11/25 회사 분리). 회사마다 판매 서버가 달라 섞이면 안 된다
+_STORES: dict[str, OrderStore] = {}
+
+
+def company() -> str:
+    """지금 요청의 회사(정식 id). 요청 밖(서버를 켤 때 등)이면 캣북스."""
+    return company_scope.scope_id(company_scope.active())
+
+
+def order_store(company_id: str | None = None) -> OrderStore:
+    """그 회사의 주문 모음 (없으면 지금 요청 회사)."""
+    cid = company_scope.scope_id(company_id) if company_id else company()
+    store = _STORES.get(cid)
+    if store is None:
+        store = _STORES[cid] = OrderStore()
+    return store
 
 
 def coupon_headers() -> dict[str, str] | None:
@@ -456,7 +471,7 @@ async def live_books(
     """
     client = http_client or httpx.AsyncClient(transport=pinned_http.company_transport())
     if store is None:
-        store = _STORE if http_client is None else OrderStore()
+        store = order_store() if http_client is None else OrderStore()
     async with store.lock:
         since = store.since(full, recent)
         shop = config.agent_url("shop-api")
@@ -533,28 +548,40 @@ class Preparing(Exception):
     """첫 장부를 아직 모으는 중이다(또는 지급 요청에 쓸 새 장부가 아직 안 끝났다)."""
 
 
-_cache: tuple[float, SettlementBooks] | None = None
-_inflight: asyncio.Task[SettlementBooks] | None = None
+# 회사 ID → (모은 시각, 장부)·돌고 있는 읽기
+# (11/25 회사 분리: 한 회사 장부가 다른 회사에 보이지 않게)
+_caches: dict[str, tuple[float, SettlementBooks]] = {}
+_inflights: dict[str, asyncio.Task[SettlementBooks]] = {}
 # 테스트가 장부를 바꿔 끼운다 (None이면 shop-api에서 읽는다)
 LOADER: Callable[[bool], Any] | None = None
 
 
 def clear_cache() -> None:
-    global _cache, _inflight, _STORE
-    _cache, _inflight, _STORE = None, None, OrderStore()
+    _caches.clear()
+    _inflights.clear()
+    _STORES.clear()
+
+
+def cached(company_id: str | None = None) -> tuple[float, SettlementBooks] | None:
+    """그 회사(없으면 지금 요청 회사)의 저장된 장부."""
+    return _caches.get(company_scope.scope_id(company_id) if company_id else company())
+
+
+def inflight(company_id: str | None = None) -> asyncio.Task[SettlementBooks] | None:
+    return _inflights.get(company_scope.scope_id(company_id) if company_id else company())
 
 
 async def _collect(recent: bool) -> SettlementBooks:
     """장부를 모아 미리 정렬·계산해 두고, 다 되면 캐시를 바꾼다. 못 받으면 직전 장부를 그대로
     둔다."""
-    global _cache
+    cid = company()  # 띄운 요청의 회사 (task가 contextvar를 잇는다)
     books = await live_books(recent=recent)
     if books.unavailable_core():
         return books
     from support_agent import settlement  # 순환 import를 피한다 (settlement가 이 모듈을 쓴다)
 
     await asyncio.to_thread(settlement.warm, books)
-    _cache = (time.monotonic(), books)
+    _caches[cid] = (time.monotonic(), books)
     return books
 
 
@@ -565,15 +592,18 @@ def _log_failure(task: asyncio.Task[SettlementBooks]) -> None:
 
 def _start(recent: bool) -> asyncio.Task[SettlementBooks]:
     """새로 읽기를 띄운다. 이미 돌고 있으면 그것을 쓴다(한 번에 하나)."""
-    global _inflight
-    if _inflight is None or _inflight.done():
-        _inflight = asyncio.create_task(_collect(recent))
-        _inflight.add_done_callback(_log_failure)
-    return _inflight
+    cid = company()
+    task = _inflights.get(cid)
+    if task is None or task.done():
+        task = _inflights[cid] = asyncio.create_task(_collect(recent))
+        task.add_done_callback(_log_failure)
+    return task
 
 
 def prime() -> asyncio.Task[SettlementBooks] | None:
-    """서버를 켤 때 한 번: 뒤에서 첫 장부를 모으고 미리 계산해 둔다. 테스트 장부면 띄우지 않는다."""
+    """서버를 켤 때 한 번: 뒤에서 첫 장부를 모으고 미리 계산해 둔다. 테스트 장부면 띄우지 않는다.
+
+    요청 밖이라 캣북스 장부다. 다른 회사는 그 회사 첫 조회 때 모은다(섞이지 않게)."""
     if LOADER is not None:
         return None
     return _start(recent=False)
@@ -596,7 +626,7 @@ async def load_books(fresh: bool = False) -> SettlementBooks:
     """
     if LOADER is not None:
         return await LOADER(fresh)
-    cached = _cache
+    cached = _caches.get(company())
     age = time.monotonic() - cached[0] if cached else None
     if fresh:
         if cached and age is not None and age < FRESH_SECONDS:

@@ -258,7 +258,7 @@ def enabled() -> bool:
 def _books_id() -> int | None:
     from finance_agent import books as bk
 
-    cached = bk._live_cache
+    cached = bk.live_cache()  # 지금 요청 회사의 장부
     return id(cached[1]) if cached else None
 
 

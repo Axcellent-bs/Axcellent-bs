@@ -1166,8 +1166,8 @@ async def test_first_load_answers_preparing_quickly(
     assert again.outcome == "settlement_preparing"
     assert len(fake_shop.calls) == 1  # 기다리는 동안 읽기를 겹쳐 띄우지 않는다
     fake_shop.gate.set()
-    assert sb._inflight is not None
-    await sb._inflight
+    assert sb.inflight() is not None
+    await sb.inflight()
     done = await sh.seller_settlement(_request("seller_settlement", {}))
     assert done.status == TaskStatus.COMPLETED
 
@@ -1179,16 +1179,16 @@ async def test_reads_answer_from_the_last_books_and_refresh_behind(
     first = await sb.load_books()
     assert fake_shop.calls == [(False, False)]
     # 장부가 오래돼도(10분 넘게) 조회는 기다리지 않고 직전 장부로 답한다. 새로 읽기는 하나만 뒤에서
-    stamp, books_ = sb._cache
-    sb._cache = (stamp - 3600, books_)
+    stamp, books_ = sb.cached()
+    sb._caches[sb.company()] = (stamp - 3600, books_)
     fake_shop.gate.clear()
     got = await asyncio.wait_for(asyncio.gather(*(sb.load_books() for _ in range(5))), 0.5)
     assert all(g is first for g in got)
     assert fake_shop.calls == [(False, False), (False, False)]
     fake_shop.gate.set()
-    assert sb._inflight is not None
-    await sb._inflight
-    assert sb._cache[1] is not first  # 뒤에서 읽은 새 장부로 바뀌었다
+    assert sb.inflight() is not None
+    await sb.inflight()
+    assert sb.cached()[1] is not first  # 뒤에서 읽은 새 장부로 바뀌었다
 
 
 @pytest.mark.asyncio
@@ -1196,8 +1196,8 @@ async def test_payout_request_refreshes_only_recent_orders(fake_shop: _FakeShop)
     """돈이 걸린 결정은 새로 읽은 장부로 하되, 매번 전체(30만 건)를 다시 읽지 않는다."""
     first = await sb.load_books()
     assert await sb.load_books(fresh=True) is first  # 60초 안에 모은 장부면 그대로
-    stamp, books_ = sb._cache
-    sb._cache = (stamp - sb.FRESH_SECONDS - 1, books_)
+    stamp, books_ = sb.cached()
+    sb._caches[sb.company()] = (stamp - sb.FRESH_SECONDS - 1, books_)
     fresh = await sb.load_books(fresh=True)
     assert fresh is not first
     assert fake_shop.calls == [(False, False), (False, True)]  # 두 번째는 최근 주문만
