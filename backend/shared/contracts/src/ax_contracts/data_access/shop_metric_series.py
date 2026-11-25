@@ -10,6 +10,8 @@
 - `coupon_order_count`: 버킷 안에 접수된 주문 중 쿠폰을 쓴 주문 수. 쿠폰 장수를 돌려받은
   주문(취소·전액 환불)은 뺀다. 결제 대기·실패 주문은 장수를 잡고 있어 센다
 - `coupon_discount_amount`: 위 쿠폰 주문의 `coupon_discount` 합계(원)
+- (11/25 추가, 사이트 변환기) `cancel_count`: 버킷 안에 취소 상태가 된 주문 수, `refund_amount`:
+  버킷 안 환불 합계(원), `inquiry_count`: 버킷 안에 들어온 문의 수
 
 조회 시각(`collected_at`)과 잘림 여부(`truncated`)는 MCP 공통 봉투와 같은 형태이며, 기존 소비자와
 호환되도록 선택 필드다.
@@ -31,6 +33,11 @@ MetricName = Literal[
     "order_amount",
     "coupon_order_count",
     "coupon_discount_amount",
+    # 추가만 (11/25): 사이트 변환기가 고객사 주문·문의 원본에서 센다.
+    # 캣북스 shop-api는 아직 계산하지 않는다
+    "cancel_count",
+    "refund_amount",
+    "inquiry_count",
 ]
 # 버킷은 5m만 합의됨(#67). 1m·15m·1h는 data 확인 뒤 추가한다(#86)
 Bucket = Literal["5m"]

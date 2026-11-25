@@ -40,7 +40,12 @@ def test_company_without_catalog_does_not_borrow_catbooks() -> None:
         assert not cat.sales.genres and not cat.sales.categories and not cat.sales.attributes
         assert "배송비" not in cat.sales.revenue_definition
         assert cat.connector == "shop-api"
-        assert {m.id for m in cat.metrics} == {"order_count", "inquiry_count"}
+        assert {m.id for m in cat.metrics} == {
+            "order_count",
+            "inquiry_count",
+            "cancel_count",
+            "refund_amount",
+        }
 
 
 def test_company_without_settings_counts_days_in_korea_time() -> None:

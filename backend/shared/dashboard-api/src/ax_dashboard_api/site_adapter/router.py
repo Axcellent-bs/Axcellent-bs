@@ -33,6 +33,7 @@ from ax_dashboard_api.site_adapter import (
     claims,
     inquiries,
     resources,
+    series,
     upstream,
     writes,
 )
@@ -453,9 +454,35 @@ for _path in _EMPTY_OBJECTS:
 
 
 @router.get("/api/shop/metric-series")
-def metric_series(metric: str = "order_count", bucket: str = "5m") -> dict[str, Any]:
-    """`ShopMetricSeriesResult` 모양: 물은 지표 그대로, 점은 없음."""
-    return _ok({"metric": metric, "bucket": bucket, "points": [], "truncated": False})
+async def metric_series(
+    metric: str = "order_count",
+    bucket: str = "5m",
+    from_: str | None = Query(default=None, alias="from"),
+    to: str | None = None,
+) -> dict[str, Any]:
+    """`ShopMetricSeriesResult` 모양. 주문·환불·취소·문의는 고객사 원본에서 센다(`series`).
+
+    사이트에 없는 지표(결제 시도·실패·쿠폰)와 기간을 모르는 요청은 예전처럼 점이 없다.
+    """
+    now = datetime.now(UTC).isoformat()
+    empty = {"metric": metric, "bucket": bucket, "points": [], "truncated": False,
+             "collected_at": now}  # fmt: skip
+    start, end = series.parse_time(from_), series.parse_time(to)
+    if metric not in series.COUNTED or start is None or end is None or end <= start:
+        return _ok(empty)
+    if metric == "inquiry_count":
+        m = _mapping()
+        res = m.inboxes.get("inquiries")
+        if res is None:
+            return _ok(empty)
+        rows = [{"created_at": q["created_at"]} for q in await _inquiry_rows(m, res)]
+        events = [(series.parse_time(r["created_at"]), 1.0) for r in rows]
+    elif metric == "refund_amount":
+        events = series.order_events(metric, [], await _rows("orders", None, resources.sales_row))
+    else:
+        events = series.order_events(metric, await _rows("orders"), [])
+    points, truncated = series.bucketize(events, start, end)
+    return _ok({**empty, "points": points, "truncated": truncated})
 
 
 @router.get("/api/shop/failed-orders")
