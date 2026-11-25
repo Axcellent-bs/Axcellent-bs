@@ -380,8 +380,25 @@ async def test_set_pause_goes_through_the_gate_as_a_and_leaves_an_audit_trail(
     assert read.output["auto_publish_off"] is True and read.output["manual_available"] is False
 
 
+@pytest.fixture
+def ticking_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """스위치 저장 시각을 부를 때마다 1초씩 가는 고정 시계로 (11/25).
+
+    승인 키에 "현재 상태 시각(updated_at)"이 들어간다. 실제 시계는 Windows에서 약 15.6ms 단위라
+    시험 안의 두 번 정지(control_set)가 같은 시각이 되면 옛 승인이 다음 재개에 다시 쓰였다."""
+    start = datetime(2026, 11, 25, 9, 0, tzinfo=UTC)
+    ticks = iter(range(10_000))
+
+    def now() -> str:
+        return (start + timedelta(seconds=next(ticks))).isoformat()
+
+    monkeypatch.setattr(pending, "_now", now)
+
+
 @pytest.mark.asyncio
-async def test_resume_is_held_until_a_person_approves_then_applies(set_gate: SetGate) -> None:
+async def test_resume_is_held_until_a_person_approves_then_applies(
+    set_gate: SetGate, ticking_clock: None
+) -> None:
     publisher.store().control_set("instagram", True, "계정 정지", "재헌")
     resume = _control_request("set_publish_control", paused=False, updated_by="재현")
     held = await handlers.set_publish_control_skill(resume)
