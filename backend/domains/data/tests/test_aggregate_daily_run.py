@@ -16,7 +16,7 @@ import pytest
 
 from ax_contracts.data_access.shop_sales import SalesOrderLine, SalesOrderRefund, SalesOrderRow
 from data_agent import catalog
-from data_agent.aggregate import daily
+from data_agent.aggregate import compare, daily
 from data_agent.aggregate.backfill import backfill
 from data_agent.aggregate.store import AggregateStore
 from data_agent.sales_collect import aggregate_daily, collect_once
@@ -145,3 +145,31 @@ def test_collector_hook_only_when_enabled_and_after_0030(tmp_path) -> None:  # n
         assert [r["status"] for r in a.runs(TENANT)] == ["done"]
     finally:
         a.close()
+
+
+def test_compare_history_checks_past_days_without_saving(cfg) -> None:  # noqa: ANN001
+    """지난 날짜 비교(3단계 병렬 B): 기준일마다 매출 분석을 견주고,
+    스냅샷 없는 날은 고객 구성을 건너뛴다."""
+    sales, agg = filled(), AggregateStore(":memory:")
+    run = daily.run_daily(sales, agg, TENANT, cfg, NOW, run_id="h1")
+    assert run is not None and run.status == "done"
+    saved = agg.compare_rows(TENANT, AS_OF)
+    results = compare.compare_history(sales, agg, TENANT, AS_OF, 10, NOW)
+    assert [r.as_of for r in results] == [AS_OF - timedelta(days=i) for i in range(9, -1, -1)]
+    assert all(r.different == 0 for r in results)
+    # 지난 날은 매출 분석 2줄만, 스냅샷이 있는 마지막 기준일은 고객 구성까지 4줄
+    assert all(len(r.rows) == 2 for r in results[:-1]) and len(results[-1].rows) == 4
+    assert agg.compare_rows(TENANT, AS_OF) == saved  # 저장하지 않는다
+    assert agg.compare_rows(TENANT, AS_OF - timedelta(days=3)) == []
+
+
+def test_compare_history_reports_a_real_difference(cfg) -> None:  # noqa: ANN001
+    """원본에만 있는 주문(집계를 다시 안 돈 날)은 다름으로 잡힌다."""
+    sales, agg = filled(), AggregateStore(":memory:")
+    daily.run_daily(sales, agg, TENANT, cfg, NOW, run_id="h2")
+    late = order("late1", "lb1", NOW - timedelta(days=3, hours=2), [line("p1", price=12345)])
+    sales.upsert(TENANT, [late], NOW)  # 일별 행은 그대로라 원본과 어긋난다
+    results = compare.compare_history(sales, agg, TENANT, AS_OF, 5, NOW)
+    assert any(r.different for r in results)
+    bad = [row for r in results for row in r.rows if not row.same]
+    assert bad and all(row.target.startswith("sales_analysis") for row in bad)

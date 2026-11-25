@@ -8,6 +8,11 @@
 - 고객 구성: 구매자·재구매 고객·새/재구매 매출 (기간 스냅샷 `all` 줄, 숨긴 칸은 원본도 k 미만인지)
 
 결과는 `agg_compare`에 한 대상마다 한 줄(다른 칸 이름과 두 값). 구매자 id·주문 id는 남기지 않는다.
+
+지난 날짜 비교(`compare_history`, 3단계 병렬 B, 11/25): 하루씩 쌓이는 비교를 기다리지 않고,
+이미 있는 `sales.db`·일별 행으로 지난 N일을 기준일마다 견준다. 저장하지 않고 결과만 돌려준다
+(`agg_compare`는 하루 계산이 쓰는 그대로). 지난 기준일의 구매자 스냅샷은 보관 규칙으로 지워졌을 수
+있어 매출 분석만 견주고, 스냅샷이 남은 날만 고객 구성도 견준다(없으면 건너뜀, 다름으로 세지 않음).
 """
 
 from __future__ import annotations
@@ -54,9 +59,17 @@ def _clean(d: dict) -> dict:
     return {k: v for k, v in d.items() if v}
 
 
-def compare_day(
-    sales: SalesStore, agg: AggregateStore, tenant_id: str, as_of: date, now: datetime
+def compare_day(  # noqa: PLR0913 - 두 저장소·회사·기준일·시각·저장 여부
+    sales: SalesStore,
+    agg: AggregateStore,
+    tenant_id: str,
+    as_of: date,
+    now: datetime,
+    *,
+    save: bool = True,
+    history: bool = False,
 ) -> CompareResult:
+    """`history`면 스냅샷 없는 고객 구성은 건너뛴다(지난 기준일). `save`가 아니면 남기지 않는다."""
     end_day = as_of + timedelta(days=1)
     result = CompareResult(as_of)
     snap = {r["period"]: r for r in agg.buyer_rows(tenant_id, as_of) if r["dim_kind"] == "all"}
@@ -75,6 +88,8 @@ def compare_day(
         result.rows.append(_row(tenant_id, as_of, f"sales_analysis:{n}d", diffs, now))
         diffs = []
         row = snap.get(f"{n}d")
+        if row is None and history:
+            continue  # 지난 기준일 스냅샷은 보관 규칙으로 지워졌을 수 있다
         if row is None:
             diffs.append("buyers: 스냅샷 없음")
         else:
@@ -89,8 +104,20 @@ def compare_day(
             _diff("new_revenue", t.new_revenue, row["new_revenue"], diffs)
             _diff("repeat_revenue", t.repeat_revenue, row["repeat_revenue"], diffs)
         result.rows.append(_row(tenant_id, as_of, f"customer_mix:{n}d", diffs, now))
-    agg.replace_compare(tenant_id, as_of, result.rows)
+    if save:
+        agg.replace_compare(tenant_id, as_of, result.rows)
     return result
+
+
+def compare_history(
+    sales: SalesStore, agg: AggregateStore, tenant_id: str, last: date, days: int, now: datetime
+) -> list[CompareResult]:
+    """`last`부터 거꾸로 `days`일을 기준일마다 견준다(저장 안 함). 오래된 날부터 돌려준다."""
+    out = []
+    for i in range(days - 1, -1, -1):
+        as_of = last - timedelta(days=i)
+        out.append(compare_day(sales, agg, tenant_id, as_of, now, save=False, history=True))
+    return out
 
 
 def _row(
