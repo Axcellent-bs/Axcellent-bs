@@ -183,7 +183,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   // 자막을 얹은 영상이 있으면 가장 나중 영상 칸이 그 파일을 재생한다(없으면 지금과 같다)
   const overlayVersion = `ov${overlayNonce}-${(render.overlay?.captions ?? 0)}-${(render.final_video?.sha256 ?? render.video?.sha256 ?? "").slice(0, 6)}`;
   const overlayControls = (part: "video" | "final_video") => overlayVisibleFor(part, render) && (
-    <OverlayControls recordId={recordId} overlay={render.overlay} shots={rec?.storyboard?.shots} showOriginal={showOriginal} canToggle={canToggleOriginal(render)}
+    <OverlayControls recordId={recordId} overlay={render.overlay} speed={render.video?.summary?.speed} shots={rec?.storyboard?.shots} showOriginal={showOriginal} canToggle={canToggleOriginal(render)}
       onToggle={() => setShowOriginal((v) => !v)} onChanged={() => { setOverlayNonce((n) => n + 1); setShowOriginal(false); void load(); }} />
   );
   const summaryLine = videoSummaryLine(video?.status, video?.summary);
