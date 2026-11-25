@@ -10,7 +10,7 @@
 import { useSyncExternalStore } from 'react'
 import { call, companyConnection } from '@/lib/companyConnection'
 import { DASHBOARD_API_URL } from '@/lib/env'
-import { getSession, onSessionChange } from '@/lib/humanSession'
+import { getSession, onPersonChange } from '@/lib/humanSession'
 import { pickCompany, publicFallbackOk, readPublicCompany, readTurns, refusedForThisPerson } from '@/lib/publicCompany'
 
 export type ConnectedCompany = {
@@ -102,7 +102,7 @@ function loadSiteCompany(): Promise<void> {
     })
     .catch((e: unknown) => {
       // 토큰이 없거나 받지 않으면(로그인 전·로그아웃) 지난 사람이 읽은 값을 지운다. 연결 실패면 지난 값 그대로
-      // (같은 사람의 값이다. 세션이 바뀌면 onSessionChange가 먼저 비운다)
+      // (같은 사람의 값이다. 세션이 바뀌면 onPersonChange가 먼저 비운다)
       if (turns.isCurrent(turn) && refusedForThisPerson(e)) { siteCompany = null; notify() }
     })
 }
@@ -138,10 +138,10 @@ export function refreshCompany(): Promise<void> {
 /** 회사 연결 저장·해제 뒤 (SiteConnect) */
 export const refreshServerCompany = refreshCompany
 try { void refreshCompany() } catch { loaded = true /* fetch가 없는 환경 */ }
-// 로그인·로그아웃하면(세션이 바뀌면) 앞 사람 값을 바로 비우고 그 사람 토큰으로 다시 읽는다.
+// 로그인·로그아웃하면(사람이 바뀌면. 같은 사람의 계정 값 다시 읽기는 빼고) 앞 사람 값을 바로 비우고 그 사람 토큰으로 다시 읽는다.
 // 비우지 않으면 새 응답이 오기 전·연결 실패 때 앞 사람 회사 정보가 보인다(사후 리뷰 11/23).
 // 아직 회사를 모르면 다 읽을 때까지 Guarded가 기다린다
-onSessionChange(() => {
+onPersonChange(() => {
   turns.next()
   keys = []
   company = null

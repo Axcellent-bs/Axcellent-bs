@@ -152,3 +152,20 @@ test("소속 회사가 빈 고객사 계정 로그인은 연결 대기(noCompany
   const op = { id: "acc-o", name: "운영", email: "o@example.com", role: "operator" };
   assert.equal(sessionFromLogin({ token: "axs1.a.b", expires_at: NOW + 60, account: op, companies: [] }, NOW)?.noCompany, undefined);
 });
+
+test("onPersonChange: 같은 사람의 계정 값 다시 읽기는 알리지 않고, 로그인·로그아웃·다른 사람이면 알린다", async () => {
+  const { onPersonChange } = await import("./humanSession.ts");
+  setStoreForTests(memoryStore());
+  setSession(session());
+  let calls = 0;
+  const stop = onPersonChange(() => { calls += 1; });
+  setSession({ ...session(), account: { ...account, name: "예진2" } }); // 창으로 돌아와 /auth/me로 다시 읽음
+  assert.equal(calls, 0);
+  setSession(session({ token: "axs1.other.sig" })); // 다른 사람으로 로그인
+  assert.equal(calls, 1);
+  setSession(null); // 로그아웃
+  assert.equal(calls, 2);
+  setSession(null); // 이미 로그아웃
+  assert.equal(calls, 2);
+  stop();
+});
