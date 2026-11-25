@@ -254,7 +254,8 @@ def test_planning_refusal_keeps_plan_for_retry(service: PlanningService, adapter
 
 
 def _settle(service: PlanningService, task_id: str) -> str:
-    deadline = time.monotonic() + 5
+    # 끝나면 바로 돌아온다. 한도는 CI에서 CPU를 나눠 쓸 때도 넉넉하게
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         st = _task(service, task_id).coding.status
         if st in ("merged", "waiting_human", "failed", "canceled"):

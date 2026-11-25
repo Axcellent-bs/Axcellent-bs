@@ -69,11 +69,18 @@ def test_run_forever_swaps_once_and_records_company_server(
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     swapped: list[SalesStore] = []
+    waits: list[float] = []
+
+    async def no_wait(seconds: float) -> None:  # 주기 사이 60초를 실제로 기다리지 않는다
+        waits.append(seconds)
+
+    monkeypatch.setattr(sales_memory.asyncio, "sleep", no_wait)
     asyncio.run(sales_memory.run_forever(
         env, swapped.append, every=60, source_factory=lambda _e: _source(),
         clock=lambda: NOW, rounds=2,
     ))  # fmt: skip
     assert len(swapped) == 1 and swapped[0].memory  # 처음 받기 뒤 한 번만 바꿔 끼운다
+    assert waits == [60]  # 두 주기 사이에 한 번, 주기만큼 쉰다
     assert not sales_db.exists()  # 원본은 디스크에 없다
     agg = AggregateStore(agg_db)
     try:
