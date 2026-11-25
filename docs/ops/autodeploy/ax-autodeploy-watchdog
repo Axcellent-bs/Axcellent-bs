@@ -16,7 +16,7 @@
 # 시험·설정용 환경 변수(모두 선택):
 #   AX_STATE_DIR(/var/lib/ax-autodeploy)  AX_ENV_FILE(/etc/ax-autodeploy/env)  AX_PAUSE_FILE(env 파일의 같은 키보다 우선)
 #   AX_WD_LOG_FILE(/var/log/ax-autodeploy.log)  AX_WD_NOW(현재 epoch)  AX_WD_STALE_S(1200)  AX_WD_WAIT_S(1800)
-#   AX_WD_LOCK_MAX_S(1500)  AX_WD_INPROGRESS_GRACE_S(120)  AX_WD_REPEAT_S(3600)  AX_WD_HEARTBEAT_S(86400)
+#   AX_WD_LOCK_MAX_S(1500)  AX_WD_SKIP_S(600)  AX_WD_INPROGRESS_GRACE_S(120)  AX_WD_REPEAT_S(3600)  AX_WD_HEARTBEAT_S(86400)
 #   AX_WD_TIMER_STATE(active|inactive|failed...)  AX_WD_SERVICE_STATE(ActiveState)  AX_WD_SERVICE_RESULT(Result)
 #   AX_WD_LOCK_HELD(1|0, flock 점유 여부를 주입)  AX_WD_SYSTEMCTL(systemctl)  AX_WD_TIMER_UNIT  AX_WD_SERVICE_UNIT
 #   AX_WD_SLACK_HOOK(/etc/ax-autodeploy/slack-webhook, 파일 경로. 내용은 어디에도 출력하지 않는다)  AX_WD_CURL(curl)
@@ -32,6 +32,7 @@ LOG_FILE="${AX_WD_LOG_FILE:-/var/log/ax-autodeploy.log}"
 NOW="${AX_WD_NOW:-$(date +%s)}"
 STALE_S="${AX_WD_STALE_S:-1200}"
 WAIT_S="${AX_WD_WAIT_S:-1800}"
+SKIP_S="${AX_WD_SKIP_S:-600}"                     # 같은 사유로 주기를 건너뛰는 상태가 이만큼 이어지면 경고(3배면 심각)
 LOCK_MAX_S="${AX_WD_LOCK_MAX_S:-1500}"            # ax-autodeploy.service 의 TimeoutStartSec
 INPROGRESS_GRACE_S="${AX_WD_INPROGRESS_GRACE_S:-120}"
 REPEAT_S="${AX_WD_REPEAT_S:-3600}"
@@ -44,7 +45,7 @@ CURL="${AX_WD_CURL:-curl}"
 NOTIFIED_FILE="${AX_WD_NOTIFIED_FILE:-${STATE_DIR}/watchdog-notified}"
 HOST_NAME="${AX_WD_HOST:-$(hostname 2>/dev/null || echo server)}"
 
-for v in NOW STALE_S WAIT_S LOCK_MAX_S INPROGRESS_GRACE_S REPEAT_S HEARTBEAT_S; do
+for v in NOW STALE_S WAIT_S SKIP_S LOCK_MAX_S INPROGRESS_GRACE_S REPEAT_S HEARTBEAT_S; do
   [[ "${!v}" =~ ^[0-9]{1,12}$ ]] || { printf '[watchdog] 설정 오류: %s 는 숫자여야 한다\n' "${v}" >&2; exit 64; }
 done
 
@@ -206,6 +207,39 @@ if [[ "${PAUSED}" != 1 && -r "${VERDICT_FILE}" ]]; then
         fi
       fi
     fi
+  fi
+fi
+
+# ---- 7) 같은 사유로 주기를 계속 건너뜀(skip-cycle) · git fetch 실패 ----------------------------------------
+# 자동 배포는 판정이 불확실하면 그 주기를 "건너뛰고" 종료 코드 0 으로 끝난다. 그래서 last-run 은 계속 새롭고 서비스도 정상으로 보이는데
+# 배포는 영영 안 되는 일이 생긴다(예: 토큰 처리 버그로 PR 조회가 매번 실패). 로그에서 같은 종류의 줄이 끊김 없이(줄 사이 간격 5분 이하)
+# 이어지고 지금도 진행 중이면(마지막 줄이 5분 안) 시작 시각부터의 길이를 잰다.
+GAP_S=300
+streak_age() { # $1=로그 줄 패턴(grep -E). 지금도 이어지는 연속 구간의 길이(초)를 출력, 아니면 아무것도 출력하지 않는다
+  [[ -r "${LOG_FILE}" ]] || return 0
+  local first="" last="" e
+  while IFS= read -r line; do
+    e="$(date -d "${line%% \[*}" +%s 2>/dev/null || true)"
+    [[ "${e}" =~ ^[0-9]+$ ]] || continue
+    if [[ -z "${last}" ]] || (( e - last > GAP_S )); then first="${e}"; fi
+    last="${e}"
+  done < <(grep -aE "$1" "${LOG_FILE}" 2>/dev/null | tail -n 600 || true)
+  [[ -n "${last}" ]] || return 0
+  (( NOW - last <= GAP_S )) || return 0
+  (( NOW - first >= 0 )) && printf '%s' $(( NOW - first ))
+  return 0
+}
+if [[ "${PAUSED}" != 1 ]]; then
+  SK_AGE="$(streak_age '\] backend: skip-cycle ')"
+  if [[ "${SK_AGE}" =~ ^[0-9]+$ ]] && (( SK_AGE >= SKIP_S )); then
+    sk_why="$(grep -aE '\] backend: skip-cycle ' "${LOG_FILE}" 2>/dev/null | tail -n 1 | sed -E 's/^.*\] backend: skip-cycle //' | cut -c1-120 || true)"
+    sev=1; (( SK_AGE >= 3 * SKIP_S )) && sev=2
+    add skip-cycle-repeat "${sev}" "백엔드 단계가 $(human_age "${SK_AGE}") 째 매 주기 건너뛰어진다 (마지막 사유: ${sk_why:-?}). 배포가 안 되고 있다"
+  fi
+  FF_AGE="$(streak_age '\] error: git fetch ')"
+  if [[ "${FF_AGE}" =~ ^[0-9]+$ ]] && (( FF_AGE >= SKIP_S )); then
+    sev=1; (( FF_AGE >= 3 * SKIP_S )) && sev=2
+    add fetch-failed-repeat "${sev}" "git fetch origin 이 $(human_age "${FF_AGE}") 째 계속 실패한다 (새 커밋을 못 받아 자동 배포가 안 된다)"
   fi
 fi
 

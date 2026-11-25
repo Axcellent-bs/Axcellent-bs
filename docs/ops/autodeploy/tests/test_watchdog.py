@@ -167,6 +167,44 @@ class WatchdogTest(unittest.TestCase):
             f.write(f"{ts(NOW - 100)} [2] done: 백엔드 배포 완료, 기준 ref -> 3d419637\n")
         self.assertEqual(self.js()[1]["primary"], "ok")
 
+    # ---- 같은 사유로 주기를 계속 건너뜀 · fetch 실패 ---------------------------------------------
+    def _streak(self, text, minutes, last_ago=30, step=65):
+        """minutes 분 길이로 step 초마다 이어지는 로그 줄을 쓴다(마지막 줄은 last_ago 초 전)"""
+        n = minutes * 60 // step
+        lines = [f"{ts(NOW - last_ago - (n - 1 - i) * step)} [{i}] {text}\n" for i in range(n)]
+        self.log.write_text("".join(lines), encoding="utf-8")
+
+    def test_skip_cycle_repeat(self):
+        self._streak("backend: skip-cycle PR 조회 API 실패(e47786b7; 보류, 이번 주기 건너뜀)", 20)
+        code, j = self.js()
+        self.assertEqual((code, j["primary"]), (1, "skip-cycle-repeat"))
+        self.assertIn("PR 조회 API 실패", j["detail"])
+        self._streak("backend: skip-cycle PR 조회 API 실패(e47786b7)", 40)
+        self.assertEqual(self.js()[0], 2)
+
+    def test_skip_cycle_short_or_ended_is_ok(self):
+        self._streak("backend: skip-cycle x", 5)
+        self.assertEqual(self.js()[1]["primary"], "ok")
+        self._streak("backend: skip-cycle x", 40, last_ago=900)   # 이미 끝난 구간
+        self.assertEqual(self.js()[1]["primary"], "ok")
+
+    def test_skip_cycle_gap_resets_streak(self):
+        # 30분 전 구간 + 10분 비움 + 최근 3분: 이어진 구간은 3분뿐
+        old = [f"{ts(NOW - 2400 - i * 65)} [1] backend: skip-cycle x\n" for i in range(20)]
+        new = [f"{ts(NOW - 30 - i * 65)} [2] backend: skip-cycle x\n" for i in range(3)]
+        self.log.write_text("".join(old + new), encoding="utf-8")
+        self.assertEqual(self.js()[1]["primary"], "ok")
+
+    def test_fetch_failed_repeat(self):
+        self._streak("error: git fetch origin dev 실패(다음 주기에 다시)", 20)
+        code, j = self.js()
+        self.assertEqual((code, j["primary"]), (1, "fetch-failed-repeat"))
+
+    def test_skip_cycle_not_reported_while_paused(self):
+        self._streak("backend: skip-cycle x", 30)
+        self.touch("pause", f"until_epoch={NOW + 3600}\n")
+        self.assertEqual(self.js(AX_PAUSE_FILE=str(self.state / "pause"))[1]["primary"], "paused-approved")
+
     # ---- 알림 ---------------------------------------------------------------------------------
     def test_notify_on_change_dedupes_and_recovers(self):
         env = {"AX_WD_TIMER_STATE": "inactive"}
