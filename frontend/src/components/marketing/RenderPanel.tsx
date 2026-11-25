@@ -11,6 +11,7 @@ import type { StoryboardResult } from "@/lib/storyboard";
 import { canToggleOriginal, overlayVisibleFor, playPartFor, type PlayPart } from "@/lib/videoOverlay";
 import { OverlayControls } from "./OverlayControls";
 import { videoSummaryLine } from "@/lib/creativeVideo";
+import { canAskVideo, usesOriginalReference } from "@/lib/videoAsk";
 import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
@@ -190,7 +191,8 @@ export function RenderPanel({ recordId }: { recordId: string }) {
   const summaryLine = videoSummaryLine(video?.status, video?.summary);
   const thumb = chosenThumb(render.thumbnails); // 인스타 릴스 표지 = 고른 썸네일(안 고르면 첫 장)
   const reelCover = thumb ? { url: thumbUrl(recordId, thumb.media_id), picked: thumb.picked } : null;
-  const canAsk = render.board_image?.status === "done" && !["awaiting_approval", "running", "done"].includes(video?.status ?? "");
+  // 11/25 AI 가상 인물·그림 캐릭터는 원본을 참조로 써서 스토리보드 그림 없이도 요청할 수 있다
+  const canAsk = canAskVideo(render.board_image?.status, video?.status, rec?.sheet?.kind);
   const ask = async () => {
     setAsking(true);
     setError(null);
@@ -226,6 +228,7 @@ export function RenderPanel({ recordId }: { recordId: string }) {
           </button>
         )}
         {!canAsk && !video?.status && render.board_image?.status !== "done" && <p className="text-xs text-ink-500">스토리보드 그림이 끝나면 영상을 요청할 수 있어요.</p>}
+        {canAsk && render.board_image?.status !== "done" && usesOriginalReference(rec?.sheet?.kind) && <p className="text-xs text-ink-500">AI 가상 인물·그림 캐릭터는 올린 원본을 참조로 써서 스토리보드 그림 없이 만들어요.</p>}
         {rec?.storyboard && <HiggsfieldWeb board={rec.storyboard} speed={video?.summary?.speed} reference={video?.summary?.reference} />}
       </div>
       <div className="border-t border-ink-100 pt-3">
