@@ -32,7 +32,7 @@ export interface CreativeRecordSummary {
   script_at?: string | null;
 }
 
-export type RenderPartKey = "sheet_image" | "board_image" | "video" | "final_video";
+export type RenderPartKey = "sheet_image" | "board_image" | "video" | "final_video" | "motion_video";
 export interface RenderPart {
   status?: string;
   error?: string | null;

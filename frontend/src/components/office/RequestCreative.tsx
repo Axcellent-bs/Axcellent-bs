@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { KeyframePairs } from "@/components/marketing/KeyframePairs";
 import { SheetBoard } from "@/components/marketing/SheetBoard";
 import { framesOf } from "@/lib/keyframes";
 import { StoryboardView } from "@/components/marketing/StoryboardMaker";
 import { approvalLink } from "@/lib/briefMedia";
-import { getCreativeRecord, redrawBoardImage, thumbSrc, type CreativeRecord } from "@/lib/creativeRecords";
+import { getCreativeRecord, redrawBoardImage, thumbSrc, uploadCreativeFile, type CreativeRecord } from "@/lib/creativeRecords";
+import { acceptFor, uploadProblem } from "@/lib/higgsfieldWeb";
 import { creativeButtons, creativeRecordOf, sceneCells, videoApproval } from "@/lib/requestCharacter";
 import type { VideoPlanView } from "@/lib/videoPlan";
 import type { WorkRequestRow } from "@/lib/workRequests";
@@ -92,6 +93,37 @@ function Panel({ recordId, plan, tab, setTab, version }: {
   );
 }
 
+/** 11/25 영상 승인 대기 동안 모션 참조 영상(MP4)을 올린다. 승인 뒤 영상이 그 동작만 따라 만든다 */
+function MotionUpload({ recordId }: { recordId: string }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [state, setState] = useState<"idle" | "busy" | "done">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const pick = async (file: File) => {
+    const problem = uploadProblem("motion_video", file);
+    if (problem) { setError(problem); return; }
+    setState("busy");
+    setError(null);
+    try {
+      await uploadCreativeFile(recordId, "motion_video", file);
+      setState("done");
+    } catch (e) {
+      setState("idle");
+      setError(e instanceof Error ? e.message : "모션 참조 영상을 올리지 못했어요");
+    }
+  };
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      <input ref={input} type="file" className="hidden" accept={acceptFor("motion_video")}
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void pick(f); }} />
+      <button type="button" className="btn-ghost btn-card" disabled={state === "busy"} onClick={() => input.current?.click()}>
+        {state === "busy" ? "올리는 중…" : state === "done" ? "모션 참조 영상 다시 올리기" : "모션 참조 영상 올리기 (선택)"}
+      </button>
+      {state === "done" && <span className="text-[11px] text-ink-500">올렸어요. 승인하면 이 동작을 따라 만들어요.</span>}
+      {error && <span className="text-[11px] text-red-700" role="alert">{error}</span>}
+    </span>
+  );
+}
+
 export function RequestCreative({ row, plan }: { row: WorkRequestRow; plan: Pick<VideoPlanView, "scenes"> | null }) {
   const [open, setOpen] = useState<Tab | null>(null);
   const buttons = creativeButtons(row, plan);
@@ -105,6 +137,7 @@ export function RequestCreative({ row, plan }: { row: WorkRequestRow; plan: Pick
         <p className="flex flex-wrap items-center gap-1.5">
           <span className="chip bg-amber-50 text-[11px] text-amber-800">영상 승인 대기</span>
           <Link className="btn-ghost btn-card inline-flex items-center" to={approvalLink(approval.reviewId)}>승인 화면 열기</Link>
+          {recordId && <MotionUpload recordId={recordId} />}
         </p>
       )}
       {(buttons.sheet || buttons.storyboard) && (

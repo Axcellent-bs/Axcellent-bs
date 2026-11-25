@@ -36,6 +36,7 @@ ESTIMATE_TOOLS = {"image": "estimate_image_cost", "video": "estimate_video_cost"
 GENERATE_TOOLS = {"image": "generate_image_batch", "video": "generate_video_batch"}
 IMAGE_REF_ROLE = "image_references"
 VIDEO_START_ROLE = "start_image"
+VIDEO_REF_ROLE = "video_references"  # 11/25 모션 참조 영상(동작·카메라 움직임만 따른다)
 # 11/24 영상 모델 능력 (models_explore로 확인한 것만).
 # 모르는 모델은 지금 동작 = start_image·기존 상한
 # - kling_4_0_flash: medias role start_image·image_references(최대 10)·video_references, 3~20초
@@ -48,13 +49,18 @@ VIDEO_MODELS: dict[str, dict[str, Any]] = {
         "max_image_references": 10,
         "max_s": 20,
         "modes": True,
+        "video_references": True,  # 11/25 모션 참조 영상
     },
     # 11/25 키프레임: image-to-video에서 start_image·end_image + 중간 프레임 image_references
     # (순서대로, 합계 10장)
     "kling4_0": {"image_references": True, "modes": True, "max_s": 30, "keyframes": True},
     "kling3_0_turbo": {"image_references": False},
 }
-MODE_BY_ROLE = {IMAGE_REF_ROLE: "reference-to-video", VIDEO_START_ROLE: "image-to-video"}
+MODE_BY_ROLE = {
+    IMAGE_REF_ROLE: "reference-to-video",
+    VIDEO_REF_ROLE: "reference-to-video",
+    VIDEO_START_ROLE: "image-to-video",
+}
 WAIT_TIMEOUT_S = 15  # jobs_wait 상한
 MAX_WAITS = 40  # 15초 × 40 = 10분
 FAILED = {"failed", "nsfw", "canceled", "ip_detected", "submission_failed"}
@@ -347,7 +353,7 @@ def video_mode(model: str, roles: list[str]) -> str | None:
     시작 그림만이면 image-to-video. 미디어가 없거나 mode 없는 모델·모르는 모델이면 None."""
     if not VIDEO_MODELS.get(str(model).strip(), {}).get("modes"):
         return None
-    for role in (IMAGE_REF_ROLE, VIDEO_START_ROLE):
+    for role in (IMAGE_REF_ROLE, VIDEO_REF_ROLE, VIDEO_START_ROLE):
         if role in roles:
             return MODE_BY_ROLE[role]
     return None
@@ -361,6 +367,17 @@ def _with_mode(params: dict[str, Any]) -> dict[str, Any]:
 
 def with_media(params: dict[str, Any], media_id: str, role: str) -> dict[str, Any]:
     return _with_mode({**params, "medias": [{"value": media_id, "role": role}]})
+
+
+def takes_video_references(model: str) -> bool:
+    """영상 모델이 모션 참조 영상(`video_references`)을 받는지. 모르는 모델이면 False."""
+    return bool(VIDEO_MODELS.get(str(model).strip(), {}).get("video_references"))
+
+
+def with_video_reference(params: dict[str, Any], media_id: str) -> dict[str, Any]:
+    """이미 붙인 미디어 뒤에 모션 참조 영상 하나를 더한다(mode는 다시 고른다)."""
+    medias = [*(params.get("medias") or []), {"value": media_id, "role": VIDEO_REF_ROLE}]
+    return _with_mode({**params, "medias": medias})
 
 
 def with_medias(params: dict[str, Any], media_ids: list[str], role: str) -> dict[str, Any]:

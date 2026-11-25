@@ -82,7 +82,7 @@ const MB = 1024 * 1024;
 /** dashboard-api `UPLOAD_MAX_BYTES`와 같은 상한 */
 export const UPLOAD_MAX_BYTES = { image: 20 * MB, video: 200 * MB } as const;
 
-const VIDEO_PARTS: ReadonlySet<RenderPartKey> = new Set<RenderPartKey>(["video", "final_video"]);
+const VIDEO_PARTS: ReadonlySet<RenderPartKey> = new Set<RenderPartKey>(["video", "final_video", "motion_video"]);
 export const isVideoPart = (part: RenderPartKey) => VIDEO_PARTS.has(part);
 
 /** `<input accept>`에 쓰는 값. 검사 규칙과 같은 형식이다 */
