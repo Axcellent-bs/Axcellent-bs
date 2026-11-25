@@ -1,5 +1,9 @@
 import { DEJAFIX_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
+import { SESSION_HEADER, sessionReadAuth } from "./humanToken";
 import { parseDejafixStatus, type DejafixStatus } from "./toolForms";
+import { parseZabbixSettings, type ZabbixSettings } from "./zabbixSettings";
+
+export { parseZabbixSettings, zabbixSummary, type ZabbixSettings } from "./zabbixSettings";
 
 // 장애 대응 탭: DejaFix 화면을 띄우지 않고 DejaFix API에서 데이터만 받는다.
 // 형식은 DejaFix/DejaFix contracts/api.md #10 `GET /api/incidents`, contracts/incident.schema.json 기준. 화면 없는 함수만 둔다.
@@ -55,7 +59,11 @@ export class DejafixNotConnectedError extends Error {
 }
 
 /** dejafix-proxy가 부르는 쪽 토큰을 확인한다. 다른 백엔드 호출처럼 사람 토큰(로그인 세션 우선, env.ts)을 붙인다 */
-const authHeaders = (): Record<string, string> => (SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {});
+// 같은 출처 nginx가 읽기의 Authorization을 공용 토큰으로 바꿔 붙여도 회사를 알 수 있게 세션은 X-AX-Session으로도 싣는다(11/25)
+const authHeaders = (): Record<string, string> => {
+  const session = sessionReadAuth()[SESSION_HEADER];
+  return { ...(SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {}), ...(session ? { [SESSION_HEADER]: session } : {}) };
+};
 
 /** dejafix-proxy가 화면 토큰을 막았을 때의 코드 (DejaFix 계정 문제의 401과 나눠 알린다) */
 const PROXY_AUTH_CODES = new Set(["AUTH_REQUIRED", "TOKEN_INVALID", "SESSION_EXPIRED", "SESSION_REVOKED", "SESSION_ENDED"]);
@@ -120,6 +128,34 @@ export async function dejafixStatus(): Promise<DejafixStatus | null> {
     return null;
   }
 }
+
+async function zabbixCall(method: "GET" | "POST", body?: unknown): Promise<ZabbixSettings> {
+  let res: Response;
+  try {
+    res = await fetch(`${DEJAFIX_API_URL}/settings/zabbix`, {
+      method,
+      cache: "no-store",
+      headers: { ...authHeaders(), ...(body ? { "Content-Type": "application/json" } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new Error("DejaFix 서버에 연결할 수 없습니다.");
+  }
+  const json: unknown = await res.json().catch(() => undefined);
+  if (!res.ok) {
+    const message = (json as { error?: { message?: string } } | undefined)?.error?.message;
+    throw new Error(message || `DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`);
+  }
+  const parsed = parseZabbixSettings(json);
+  if (!parsed) throw new Error("DejaFix 응답을 읽을 수 없습니다.");
+  return parsed;
+}
+
+/** 지금 Zabbix 연결 (운영자·관리자 로그인만) */
+export const zabbixSettings = () => zabbixCall("GET");
+
+/** Zabbix 주소·읽기 전용 토큰 저장. DejaFix가 저장 전에 연결을 확인한다. 토큰을 비우면 저장된 토큰을 쓴다 */
+export const saveZabbixSettings = (input: { url: string; token: string; verify_tls: boolean }) => zabbixCall("POST", input);
 
 type List = { data?: Incident[]; meta?: IncidentMeta };
 const list = (body: List) => ({ data: body.data ?? [], meta: body.meta ?? { next_cursor: null } });

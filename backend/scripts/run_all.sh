@@ -280,6 +280,8 @@ export AX_COMPANY_CONNECTION_FILE="${AX_COMPANY_CONNECTION_FILE:-$PWD/$DATA/comp
 export AX_HANDOFF_DB="$PWD/$DATA/handoffs.db"
 # 오피스 단톡방 대화 목록 (dashboard-api). 다시 켜도 단톡방 대화가 이어진다
 export AX_OFFICE_ROOM_DB="$PWD/$DATA/office_room.db"
+# 장애 상세의 확정 원인 (dashboard-api, 사람이 적은 실제 원인). 다시 켜도 남는다
+export AX_INCIDENT_CAUSES_DB="$PWD/$DATA/incident_causes.db"
 # 총괄 이벤트 저장소 (다시 켜도 이벤트 기록과 처리한 event_id가 남는다)
 export ORCHESTRATOR_DB="$PWD/$DATA/orchestrator.db"
 # 재무 기록(판매자 심사·정산 보류·장부·사람 결정). 다시 켜도 이어진다

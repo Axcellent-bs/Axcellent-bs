@@ -80,3 +80,11 @@ test("읽기 머리(sessionAuth): 세션이 있을 때만 세션 토큰을 싣�
   setSession(null);
   assert.deepEqual(live.sessionAuth(), {});
 });
+
+test("읽기 머리는 세션이 있으면 Authorization과 X-AX-Session을 같이 싣는다 (11/25 nginx가 읽기의 Authorization을 공용 토큰으로 바꿔도 회사를 알게)", () => {
+  setStoreForTests(memoryStore());
+  assert.deepEqual(live.sessionReadAuth(), {});
+  setSession(session());
+  assert.deepEqual(live.sessionReadAuth(), { Authorization: "Bearer axs1.body.sig", "X-AX-Session": "axs1.body.sig" });
+  assert.deepEqual(live.sessionAuth(), { Authorization: "Bearer axs1.body.sig" }); // 예전 머리는 그대로
+});

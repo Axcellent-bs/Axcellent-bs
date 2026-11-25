@@ -137,7 +137,7 @@ from data_agent.sales_store import (
     SegmentSession,
     customers_source,
 )
-from data_agent.skills.sales_analysis import FAKE_DATA, NO_CATEGORY, NO_PRODUCT
+from data_agent.skills.sales_analysis import FAKE_DATA, NO_PRODUCT, category_label
 
 SEGMENT_DAYS: dict[str, int] = {"1d": 1, "7d": 7, "30d": 30, "90d": 90, "365d": 365}
 SEGMENT_LABEL: dict[str, str] = {
@@ -517,7 +517,7 @@ def target_label(
     kind: SegmentTargetKind, code: str, cfg: CatalogSales | None, titles: dict[str, str]
 ) -> str:
     if kind == "category":
-        return (cfg.categories if cfg else {}).get(code, NO_CATEGORY)
+        return category_label(cfg, code)
     if kind == "genre":
         return (cfg.genres if cfg else {}).get(code, code)
     return titles.get(code, NO_PRODUCT)
@@ -776,7 +776,7 @@ def favorites(  # noqa: PLR0913
     if not suppressed:
         names: dict[str, Callable[[str], str | None]] = {
             "genre": cfg.genres.get,
-            "category": lambda c: cfg.categories.get(c, NO_CATEGORY),
+            "category": lambda c: category_label(cfg, c),
             "product": lambda c: titles.get(c, NO_PRODUCT),
         }
         for kind in ("genre", "category", "product"):
@@ -828,7 +828,7 @@ def favorites_from_snapshot(  # noqa: PLR0913 - 입력 칸 그대로
     titles = {r["item_code"]: r["title"] for r in rows if r["item_level"] == "product"}
     names: dict[str, Callable[[str], str | None]] = {
         "genre": cfg.genres.get,
-        "category": lambda c: cfg.categories.get(c, NO_CATEGORY),
+        "category": lambda c: category_label(cfg, c),
         "product": lambda c: titles.get(c) or NO_PRODUCT,
     }
     items: list[FavoriteItem] = []
@@ -1118,7 +1118,6 @@ async def favorites_with_external(  # noqa: PLR0913
 # ---------------------------------------------------------------- market_coverage
 
 
-
 def coverage_cells(
     pop: PopulationSource, cfg: CatalogSales, counts: Cells
 ) -> tuple[list[tuple[str, ...]], list[int], set[int], list[int]]:
@@ -1187,6 +1186,7 @@ def coverage_from_snapshot(
     shown = [None if cells[t]["buyers_hidden"] else cells[t]["buyers"] for t in texts]
     answered = answered_combos(pop, keys, combos)
     return coverage_rows(pop, cfg, combos, shown, total["buyers"] or 0, list(answered)), as_of
+
 
 def find_population(keys: Sequence[str], cfg: CatalogSales) -> PopulationSource | None:
     return next((p for p in cfg.population if set(p.attribute_keys) == set(keys)), None)

@@ -113,7 +113,7 @@ def _log_refusal(request: ExecuteRequest, reason_code: str) -> None:
     )
 
 
-def _review_scope(authorization: str | None) -> Any:
+def _review_scope(authorization: str | None, x_session: str | None = None) -> Any:
     """승인 대기·실행 기록을 회사로 거르는 함수(11/24 회사 격리, 격리 시험 5번. 실행 기록 11/25).
 
     - 다른 회사 로그인 세션: 그 회사 건만
@@ -122,9 +122,11 @@ def _review_scope(authorization: str | None) -> Any:
     """
     from ax_agent_template.companies import canonical_company_id, company_ids
 
-    token = human_auth.bearer(authorization)
+    # 같은 출처 nginx가 읽기의 Authorization을 공용 토큰으로 바꿔 붙여서,
+    # 세션 회사는 X-AX-Session으로도 받는다(11/25)
+    token = human_auth.screen_session_token(authorization, x_session)
     company: str | None = None
-    if token and human_auth.is_session_token(token):
+    if token:
         try:
             company = human_auth.verify_session(token).company_id
         except human_auth.HumanAuthError as err:
@@ -178,7 +180,9 @@ def create_app(
 
     @app.post("/api/safety/executions")
     async def execute(
-        http_request: Request, authorization: str | None = Header(default=None)
+        http_request: Request,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> JSONResponse:
         try:
             raw = await http_request.json()
@@ -225,7 +229,9 @@ def create_app(
 
     @app.post("/api/safety/connection-holds")
     async def connection_hold(
-        http_request: Request, authorization: str | None = Header(default=None)
+        http_request: Request,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> JSONResponse:
         """개발 서비스의 긴급 취약 판정: 이 연결의 쓰기를 보류하거나 해제한다."""
         try:
@@ -254,20 +260,26 @@ def create_app(
 
     @app.get("/api/safety/executions")
     def list_executions(
-        context_id: str | None = None, authorization: str | None = Header(default=None)
+        context_id: str | None = None,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict:
         """실행 기록. 로그인 세션이면 그 회사 것만(승인 대기와 같은 규칙, 11/25 회사 분리)."""
-        sees = _review_scope(authorization)
+        sees = _review_scope(authorization, x_ax_session)
         records = gate.store.list_executions(context_id)
         return _ok([r.model_dump(mode="json") for r in records if sees(r.request.tenant_id)])
 
     @app.get("/api/safety/executions/{execution_id}", response_model=None)
     def get_execution(
-        execution_id: str, authorization: str | None = Header(default=None)
+        execution_id: str,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict | JSONResponse:
         """실행 기록 하나 (목록과 같은 모양). 없거나 다른 회사 것이면 404 `NOT_FOUND`."""
         record = gate.store.get_execution(execution_id)
-        if record is None or not _review_scope(authorization)(record.request.tenant_id):
+        if record is None or not _review_scope(authorization, x_ax_session)(
+            record.request.tenant_id
+        ):
             return _error(404, "NOT_FOUND", "실행 기록이 없다")
         return _ok(record.model_dump(mode="json"))
 
@@ -275,9 +287,10 @@ def create_app(
     async def list_reviews(
         status: Literal["pending", "approved", "rejected", "expired"] | None = None,
         authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict:
         await gate.expire_reviews()
-        sees = _review_scope(authorization)
+        sees = _review_scope(authorization, x_ax_session)
         return _ok(
             [
                 r.model_dump(mode="json")
@@ -288,11 +301,13 @@ def create_app(
 
     @app.get("/api/safety/reviews/{review_id}", response_model=None)
     async def get_review(
-        review_id: str, authorization: str | None = Header(default=None)
+        review_id: str,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict | JSONResponse:
         await gate.expire_reviews()
         review = gate.store.get_review(review_id)
-        if review is None or not _review_scope(authorization)(review.tenant_id):
+        if review is None or not _review_scope(authorization, x_ax_session)(review.tenant_id):
             return _error(404, "NOT_FOUND", "보류 건이 없다")
         return _ok(review.model_dump(mode="json"))
 
@@ -301,13 +316,14 @@ def create_app(
         review_id: str,
         body: ReviewDecisionBody,
         authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict | JSONResponse:
         try:
             person = human_from_token(bearer(authorization))
         except PermissionError as exc:
             return _error(403, "HUMAN_ONLY", str(exc))
         found = gate.store.get_review(review_id)
-        if found is not None and not _review_scope(authorization)(found.tenant_id):
+        if found is not None and not _review_scope(authorization, x_ax_session)(found.tenant_id):
             return _error(404, "NOT_FOUND", "보류 건이 없다")  # 다른 회사 승인 대기는 없는 것처럼
         try:
             review = await gate.decide_review(
@@ -394,7 +410,9 @@ def create_app(
 
     @app.post("/api/safety/cost-policy/requests", response_model=None)
     async def cost_policy_request(
-        body: CostPolicyRequestBody, authorization: str | None = Header(default=None)
+        body: CostPolicyRequestBody,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict | JSONResponse:
         try:
             human = _policy_editor(authorization)
@@ -425,7 +443,9 @@ def create_app(
 
     @app.post("/api/safety/cost-policy/requests/{review_id}/apply", response_model=None)
     async def cost_policy_apply(
-        review_id: str, authorization: str | None = Header(default=None)
+        review_id: str,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict | JSONResponse:
         try:
             _policy_editor(authorization)
@@ -475,7 +495,9 @@ def create_app(
 
     @app.get("/api/safety/chat", response_model=None)
     def chat_list(
-        thread_id: str | None = None, authorization: str | None = Header(default=None)
+        thread_id: str | None = None,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict | JSONResponse:
         """목록. `?thread_id=`면 그 대화 하나 (`/chat/{id}`와 같다).
 
@@ -491,7 +513,9 @@ def create_app(
 
     @app.get("/api/safety/chat/{thread_id}", response_model=None)
     def chat_get(
-        thread_id: str, authorization: str | None = Header(default=None)
+        thread_id: str,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict | JSONResponse:
         try:
             return _ok(chat.get(_who(authorization, False), thread_id))
@@ -500,7 +524,9 @@ def create_app(
 
     @app.post("/api/safety/chat", response_model=None)
     async def chat_send(
-        body: ChatSendBody, authorization: str | None = Header(default=None)
+        body: ChatSendBody,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict | JSONResponse:
         try:
             who = _who(authorization, True)
@@ -512,7 +538,9 @@ def create_app(
 
     @app.post("/api/safety/chat/{thread_id}/close", response_model=None)
     def chat_close(
-        thread_id: str, authorization: str | None = Header(default=None)
+        thread_id: str,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict | JSONResponse:
         try:
             return _ok(chat.close(_who(authorization, True), thread_id))
@@ -523,7 +551,9 @@ def create_app(
 
     @app.post("/api/safety/chat/{thread_id}/remove", response_model=None)
     def chat_remove(
-        thread_id: str, authorization: str | None = Header(default=None)
+        thread_id: str,
+        authorization: str | None = Header(default=None),
+        x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
     ) -> dict | JSONResponse:
         try:
             removed = chat.remove(_who(authorization, True), thread_id)

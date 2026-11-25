@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Navigate } from "react-router";
 import { Link, useParams } from "@/lib/nav";
 import { ago, shortDateTime } from "@/lib/format";
@@ -6,9 +6,12 @@ import {
   ANALYSIS, CONFIDENCE, KNOWLEDGE_SOURCE, SEVERITY, SIMILAR_FACT_LABEL, TIER, UNKNOWN_REASON, incidentDetail, readableTitle,
   type Evidence, type IncidentDetail as Detail, type KnowledgeHit, type PlanStep, type Report,
 } from "@/lib/dejafix";
+import { CAUSE_TEXT_MAX, incidentCauseApi, type IncidentCauseState } from "@/lib/incidentCause";
 
 // 장애 상세 = DejaFix API #11(GET /api/incidents/{id}) 한 번으로 그린다. DejaFix 화면을 띄우지 않는다.
 // DejaFix가 저장한 리포트·원인·티어를 옮겨 보여 주기만 한다. 실행 버튼은 두지 않는다(DejaFix도 미리보기만).
+// 이 화면의 쓰기는 하나뿐이다: 사람이 적는 "확정 원인". AXcellent(dashboard-api `incident_causes.py`)에
+// 저장하고 DejaFix에는 쓰지 않는다(DejaFix 쓰기 API를 부르지 않는다). 원인 후보는 사람이 확정하기 전까지 "확정 아님"이다.
 
 function Chip({ map, k }: { map: Record<string | number, { label: string; tone: string }>; k: string | number }) {
   const v = map[k] ?? { label: String(k), tone: "bg-ink-100 text-ink-700" };
@@ -147,12 +150,117 @@ function SimilarIncidents({ report, hits, known, onPick }: { report: Report; hit
   );
 }
 
+/** 원인 후보 옆 확정 표시. 확정 원인을 못 읽었으면(불러오는 중·오류) 아무것도 보이지 않는다(모르는 것을 적지 않는다) */
+function CauseStatus({ cause, rank }: { cause: IncidentCauseState | null; rank: number }) {
+  if (!cause) return null;
+  return cause.confirmed?.from_rank === rank
+    ? <span className="chip bg-emerald-50 text-emerald-700">확정</span>
+    : <span className="chip bg-ink-100 text-ink-500">확정 아님</span>;
+}
+
+type Draft = { text: string; fromRank: number | null };
+
+/** 확정 원인: 사람이 실제 원인을 적어 저장한다. 저장은 AXcellent에만 한다(DejaFix에 쓰지 않는다) */
+function ConfirmedCause({ cause, error, draft, setDraft, onSave, textRef }: {
+  cause: IncidentCauseState | null;
+  error: string | null;
+  draft: Draft | null;
+  setDraft: (d: Draft | null) => void;
+  onSave: (d: Draft) => Promise<void>;
+  textRef: RefObject<HTMLTextAreaElement | null>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const sub = "사람이 확인해 적은 실제 원인 · AXcellent에 저장 (DejaFix에는 쓰지 않음)";
+  if (error) return <Section title="확정 원인" sub={sub}><p role="alert" className="text-sm text-red-700">{error}</p></Section>;
+  if (!cause) return <Section title="확정 원인" sub={sub}><p className="text-sm text-ink-500">확정 원인을 불러오는 중…</p></Section>;
+
+  const c = cause.confirmed;
+  const form = draft ?? (c ? null : { text: "", fromRank: null });
+  const text = form?.text.trim() ?? "";
+  const save = async () => {
+    if (!form || !text) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave({ text, fromRank: form.fromRank });
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "확정 원인을 저장하지 못했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Section title="확정 원인" sub={sub}>
+      {c ? (
+        <div className="space-y-1">
+          <p className="flex flex-wrap items-center gap-2">
+            <span className="chip bg-emerald-50 text-emerald-700">확정</span>
+            {c.from_rank !== null && <span className="text-xs text-ink-500">{c.from_rank}순위 후보에서 시작</span>}
+          </p>
+          <p className="whitespace-pre-line text-sm text-ink-900">{c.text}</p>
+          <p className="text-xs text-ink-500">{c.saved_by} · {shortDateTime(c.saved_at)} 저장</p>
+        </div>
+      ) : (
+        <p className="flex flex-wrap items-center gap-2 text-sm text-ink-500">
+          <span className="chip bg-ink-100 text-ink-500">확정 전</span>
+          아직 아무도 원인을 확정하지 않았습니다. 아래 원인 후보는 DejaFix AI의 추정입니다.
+        </p>
+      )}
+
+      {form ? (
+        <div className="mt-3 space-y-2">
+          {form.fromRank !== null && <p className="text-xs text-ink-500">{form.fromRank}순위 후보에서 시작 · 실제로 확인한 내용으로 고쳐 적어 주세요</p>}
+          <textarea
+            ref={textRef}
+            className="field h-24 resize-none text-sm"
+            placeholder="실제로 확인한 원인을 적어 주세요"
+            maxLength={CAUSE_TEXT_MAX}
+            value={form.text}
+            onChange={(e) => setDraft({ text: e.target.value, fromRank: form.fromRank })}
+            aria-label="확정 원인"
+          />
+          {saveError && <p role="alert" className="text-xs text-red-700">{saveError}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="btn-primary text-sm" disabled={saving || !text} onClick={() => void save()}>{saving ? "저장하는 중…" : "확정 원인 저장"}</button>
+            {(c || form.fromRank !== null || form.text) && (
+              <button type="button" className="btn-ghost text-sm" disabled={saving} onClick={() => { setDraft(null); setSaveError(null); }}>취소</button>
+            )}
+            <span className="ml-auto text-xs text-ink-500">{text.length}/{CAUSE_TEXT_MAX}</span>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="btn-ghost mt-3 text-sm" onClick={() => setDraft({ text: c?.text ?? "", fromRank: null })}>다시 적기</button>
+      )}
+
+      {cause.history.length > 0 && (
+        <details className="mt-3 text-xs text-ink-500">
+          <summary className="cursor-pointer">이전 기록 {cause.history.length}건</summary>
+          <ul className="mt-2 space-y-2">
+            {cause.history.map((h) => (
+              <li key={`${h.saved_at}:${h.replaced_at}`} className="border-l-2 border-l-ink-100 pl-3">
+                <p className="whitespace-pre-line text-ink-700">{h.text}</p>
+                <p>{h.saved_by} · {shortDateTime(h.saved_at)} 저장 · {shortDateTime(h.replaced_at)}에 바뀜</p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </Section>
+  );
+}
+
 export default function IncidentDetail() {
   const { id } = useParams<{ id: string }>();
   const num = Number(id);
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openEv, setOpenEv] = useState<string | null>(null);
+  const [cause, setCause] = useState<IncidentCauseState | null>(null);
+  const [causeError, setCauseError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!Number.isInteger(num)) return;
@@ -165,6 +273,18 @@ export default function IncidentDetail() {
     return () => { alive = false; };
   }, [num]);
 
+  useEffect(() => {
+    if (!Number.isInteger(num) || num < 1) return;
+    let alive = true;
+    setCause(null);
+    setCauseError(null);
+    setDraft(null);
+    incidentCauseApi.get(num)
+      .then((c) => alive && setCause(c))
+      .catch((e) => alive && setCauseError(e instanceof Error ? e.message : "확정 원인을 불러오지 못했습니다."));
+    return () => { alive = false; };
+  }, [num]);
+
   // 예전 DejaFix 화면 주소(/infra/reports 등)는 숫자가 아니라 현재 장애로 보낸다
   if (!Number.isInteger(num)) return <Navigate to="/infra" replace />;
 
@@ -173,6 +293,16 @@ export default function IncidentDetail() {
     setOpenEv(ev);
     requestAnimationFrame(() => { document.getElementById(`ev-${ev}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); });
   };
+  const saveCause = async (d: Draft) => {
+    setCause(await incidentCauseApi.save(num, d.text, d.fromRank));
+    setDraft(null);
+  };
+  /** 원인 후보에서 시작: 후보 제목을 채워 확정 칸을 연다. 저장은 사람이 고쳐 적고 누를 때만 */
+  const startFrom = (rank: number, title: string) => {
+    setDraft({ text: title, fromRank: rank });
+    requestAnimationFrame(() => { textRef.current?.focus(); textRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); });
+  };
+  const confirmedSection = <ConfirmedCause cause={cause} error={causeError} draft={draft} setDraft={setDraft} onSave={saveCause} textRef={textRef} />;
   const i = data?.incident;
   const r = data?.report;
   // 과거 유사 사례 행은 문장이 길어 수치 칸 대신 비슷한 과거 장애 카드에서 보여 준다
@@ -210,6 +340,7 @@ export default function IncidentDetail() {
           <p className="text-sm text-ink-500">아직 리포트가 없습니다. 분석 상태: {ANALYSIS[i!.analysis.status]?.label ?? i!.analysis.status}</p>
         </Section>
       )}
+      {data && !r && confirmedSection}
 
       {r && (
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -219,7 +350,9 @@ export default function IncidentDetail() {
               <p className="whitespace-pre-line text-sm leading-relaxed text-ink-900">{r.summary}</p>
             </Section>
 
-            <Section title="원인 후보" sub="DejaFix AI가 근거와 함께 남긴 순서">
+            {confirmedSection}
+
+            <Section title="원인 후보" sub="DejaFix AI가 근거와 함께 남긴 순서 · 사람이 확정하기 전에는 추정">
               {r.causes.length === 0 ? <p className="text-sm text-ink-500">원인 후보가 없습니다.</p> : (
                 <ol className="space-y-3">
                   {r.causes.map((c) => (
@@ -228,6 +361,10 @@ export default function IncidentDetail() {
                         <span className="text-xs text-ink-500">{c.rank}순위</span>
                         <span className="font-semibold">{c.title}</span>
                         <Chip map={CONFIDENCE} k={c.confidence} />
+                        <CauseStatus cause={cause} rank={c.rank} />
+                        {cause && cause.confirmed?.from_rank !== c.rank && (
+                          <button type="button" className="btn-ghost ml-auto text-xs" onClick={() => startFrom(c.rank, c.title)}>이 후보로 확정</button>
+                        )}
                       </div>
                       <p className="mt-1 text-sm text-ink-700">{c.reasoning}</p>
                       {c.verify && <p className="mt-1 text-xs text-ink-500">확인 방법: {c.verify}</p>}

@@ -71,14 +71,18 @@ def quality(
     """기간 [w.start, w.end)의 품질 보고. `orders`는 그 기간에 접수한 주문(상태 무관)."""
     with_orders = {kst_day(o.created_at) for o in orders}
     known = cfg.categories if cfg else {}
-    unknown = sorted(
-        {
-            line.category_code
-            for o in orders
-            for line in o.lines
-            if line.category_code and line.category_code not in known
-        }
-    )
+    unknown = (
+        sorted(
+            {
+                line.category_code
+                for o in orders
+                for line in o.lines
+                if line.category_code and line.category_code not in known
+            }
+        )
+        if known
+        else []
+    )  # 분류 표가 없는 회사는 사이트 분류 값을 그대로 이름으로 쓴다(모르는 값 아님)
     genres = cfg.genres if cfg else {}
     unknown_genres = sorted(
         {
@@ -121,7 +125,8 @@ def quality_counted(
         dropped_rows=sum(dropped.values()),
         dropped_reasons=dropped,
         last_synced_at=store.sync_state(tenant_id).last_synced_at,
-        unknown_category_codes=sorted(categories),
+        # 분류 표가 없는 회사는 사이트 분류 값을 그대로 이름으로 쓴다(모르는 값 아님)
+        unknown_category_codes=sorted(categories) if cfg and cfg.categories else [],
         unknown_genres=sorted(genres),
         unmapped_attribute_values=unmapped_attributes(store, tenant_id, cfg),
     )

@@ -20,6 +20,8 @@ test("Higgsfield 주소는 https 첫 화면이다", () => {
 test("영상 칸은 MP4만, 그림 칸은 JPG·PNG만 받는다", () => {
   assert.equal(uploadProblem("final_video", { name: "a.mp4", type: "video/mp4", size: 10 }), null);
   assert.equal(uploadProblem("video", { name: "a.mp4", type: "video/mp4", size: 10 }), null);
+  assert.equal(uploadProblem("motion_video", { name: "dance.mp4", type: "video/mp4", size: 10 }), null);
+  assert.equal(uploadProblem("motion_video", { name: "dance.png", type: "image/png", size: 10 }), "MP4 영상만 올릴 수 있어요");
   assert.equal(uploadProblem("final_video", { name: "a.mov", type: "video/quicktime", size: 10 }), "MP4 영상만 올릴 수 있어요");
   assert.equal(uploadProblem("video", { name: "a.png", type: "image/png", size: 10 }), "MP4 영상만 올릴 수 있어요");
   assert.equal(uploadProblem("board_image", { name: "a.png", type: "image/png", size: 10 }), null);

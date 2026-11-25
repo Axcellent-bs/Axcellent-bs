@@ -59,6 +59,7 @@ from marketing_agent import company_scope as _company_scope
 from marketing_agent import creative_mcp as _mcp
 from marketing_agent import creative_records as _creative
 from marketing_agent import higgsfield_mcp_auth as _mcp_auth
+from marketing_agent import motion_ref as _motion
 from marketing_agent import render_settings as _settings
 from marketing_agent.higgsfield_mcp import McpError, log_line
 from marketing_agent.higgsfield_mcp_auth import McpAuthError
@@ -115,6 +116,7 @@ FILES = {
     "board_image": "board.jpg",
     "video": "video.mp4",
     "overlay_video": "overlay.mp4",  # 자막·엔드카드를 얹은 영상(`creative_overlay`)
+    "motion_video": "motion.mp4",  # 11/25 사람이 올린 모션 참조 영상
 }
 OVERLAY_PART = "overlay_video"
 OVERLAY_STATE = "overlay"  # render.overlay: {status, error, captions, source_part, ...}
@@ -126,6 +128,7 @@ UPLOAD_FILES = {
     "board_image": ("board.jpg", "board.png"),
     "video": ("video.mp4",),
     "final_video": ("final.mp4",),
+    "motion_video": ("motion.mp4",),  # 11/25 모션 참조 영상(동작만 따른다, `motion_ref`)
 }
 _ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 PENDING = {"queued", "in_progress"}
@@ -595,8 +598,16 @@ def start_sheet(
     negative = str(sheet.get("negative_prompt_en") or "")
     _spawn(
         _render_image(
-            ledger, meta, record_id, "sheet_image", prompt, negative, ref,
-            image_aspect(SHEET_ASPECT, cid), via, cid,
+            ledger,
+            meta,
+            record_id,
+            "sheet_image",
+            prompt,
+            negative,
+            ref,
+            image_aspect(SHEET_ASPECT, cid),
+            via,
+            cid,
         )  # fmt: skip
     )
 
@@ -805,6 +816,7 @@ async def _mcp_render(
     extra_refs: list[bytes] | None = None,
     target: Path | None = None,
     uploaded: list[str] | None = None,
+    video_ref: bytes | None = None,
 ) -> str:
     """회사 계정으로: 참조 올리기 → 만들기 → 기다리기 → 내려받기. 돌려주는 값은 sha256.
 
@@ -829,6 +841,9 @@ async def _mcp_render(
                   else _mcp.with_media(params, media, role))  # fmt: skip
         if uploaded is not None:  # 11/25 키프레임: 올린 참조 media id(순서대로)를 부른 쪽에 남긴다
             uploaded.extend(ids)
+    if video_ref:  # 11/25 모션 참조 영상(동작·카메라 움직임만 따른다)
+        clip = await _mcp.upload(hf, video_ref, f"{record_id}-{part}-motion.mp4", "video/mp4")
+        params = _mcp.with_video_reference(params, clip)
     try:
         job = await _mcp.submit(hf, kind, params)
         if target is None:
@@ -858,6 +873,8 @@ async def request_video(
     video = render.get("video") or {}
     if video.get("status") in ("awaiting_approval", "running", "done"):
         return video
+    if render.get(SUPERSEDED):  # 11/26 의뢰 캐릭터를 바꿔 멈춘 기록으로는 영상을 요청하지 않는다
+        raise RenderError(CHARACTER_CHANGED)
     board = render.get("board_image") or {}
     cid = cid or board.get("company_id") or request_company(meta)
     via = route(cid)
@@ -897,7 +914,10 @@ async def request_video(
             credits = await _mcp_preflight(cid, "video", preview)
         except _ERRORS as error:
             raise RenderError(_code(error)) from None
-    key = f"{meta.context_id}:{VIDEO_ACTION}:{record_id}"
+    # 11/26 거절(사람·기한 지남) 뒤 다시 요청하면 새 키로 묻는다. 같은 키면 관문이 예전 거절을
+    # 그대로 돌려준다. 콘티·키프레임은 기록에 그대로 있어 다시 만들지 않는다
+    attempt = int(video.get("attempt") or 0) + (1 if video.get("status") == "rejected" else 0)
+    key = f"{meta.context_id}:{VIDEO_ACTION}:{record_id}" + (f":retry{attempt}" if attempt else "")
     now = _now()
     try:
         res = ledger.reserve(
@@ -926,7 +946,8 @@ async def request_video(
         "seconds_clamped_from": clamped,
         "aspect": aspect,
         "reference": "character_original"
-        if video_reference(rec, model)[0] == "sheet_image" else "storyboard_image",
+        if video_reference(rec, model)[0] == "sheet_image"
+        else "storyboard_image",
         "credits_estimate": credits,
         "speed": speed,
         "generated_seconds": seconds,
@@ -976,6 +997,8 @@ async def request_video(
         "summary": summary,
         "speed": speed,
         "plan_seconds": planned,
+        "attempt": attempt,
+        "reason": None,  # 거절 이유(review_timeout 등). 새 요청이면 지운다
     }
     if keyframed:
         base["keyframes"] = True  # 승인 뒤에도 같은 방식으로 만든다
@@ -988,6 +1011,7 @@ async def request_video(
             status="awaiting_approval",
             review_id=decision.review_id,
             error=None,
+            held_at=now.isoformat(),
             **base,
         )
     if decision.status == "executed":
@@ -1023,7 +1047,10 @@ async def check_video(ledger: MediaLedger, meta: RequestMeta, record_id: str) ->
         _spawn(_render_video(ledger, record_id, seq, decision))
         return
     _safe(lambda: ledger.release(seq))
-    _set(record_id, "video", status="rejected", error=f"gate_{decision.status}")
+    # 11/26 기한 지나 자동 취소(review_timeout)면 화면이 "기한 지나 취소됨" + [다시 승인 요청]
+    timed_out = decision.hold_reason == "review_timeout"
+    reason = "review_timeout" if timed_out else "rejected"
+    _set(record_id, "video", status="rejected", error=f"gate_{decision.status}", reason=reason)
 
 
 VIDEO_PROMPT_MAX = 2000  # 키 길(`_api_video`)·MCP 길(`creative_mcp.video_params`)이 자르는 길이
@@ -1145,8 +1172,10 @@ async def _render_video(
     seconds = int(video.get("seconds") or video_seconds())
     via = MCP if video.get("route") == MCP else API  # 승인받은 길 그대로
     cid = video.get("company_id")  # 승인에 올릴 때 정한 회사 그대로
+    # 11/25 모션 참조 영상이 있고 회사 계정 영상 모델이 받으면 동작을 따라 만든다(키프레임보다 먼저)
+    motion = _motion_ref_bytes(record_id, cid) if via == MCP else None
     try:
-        if via == MCP and video.get("keyframes"):  # 11/25 키프레임 방식 (승인받은 방식 그대로)
+        if via == MCP and video.get("keyframes") and not motion:  # 키프레임 (승인받은 방식 그대로)
             from marketing_agent import keyframes as _kf
 
             if not cid or not _mcp_auth.connected(cid):
@@ -1165,14 +1194,16 @@ async def _render_video(
             part, role = video_reference(rec, mcp_video_model(cid))
             ref = _ref_bytes(record_id, part, cid, rec)
             params = _video_mcp_params(rec, seconds, cid)
+            if motion:
+                params = _motion.with_prompt(params)
             extras: list[bytes] = []
             if role == _mcp.IMAGE_REF_ROLE:  # 11/25 참조 여러 장(모델 상한 안으로 자름)
                 room = _mcp.max_image_references(mcp_video_model(cid)) - 1
-                extras = extra_reference_bytes(record_id, rec, cid)[:max(room, 0)]
+                extras = extra_reference_bytes(record_id, rec, cid)[: max(room, 0)]
             await _mcp_preflight(cid, "video", params)  # 승인 사이에 크레딧이 줄었을 수 있다
             async with CLIENT() as client:
                 sha = await _mcp_render(client, cid, record_id, "video", "video", params, ref,
-                                        role=role, extra_refs=extras)  # fmt: skip
+                                        role=role, extra_refs=extras, video_ref=motion)  # fmt: skip
         else:
             ref = asset_path(record_id, "board_image", cid).read_bytes()
             async with CLIENT() as client:
@@ -1205,6 +1236,14 @@ async def _render_video(
     await _overlay_after_attach(record_id, cid)
 
 
+def _motion_ref_bytes(record_id: str, cid: str | None) -> bytes | None:
+    """모션 참조 영상(앞 몇 초, 소리 없음). 없거나 모델이 못 받거나 자르기에 실패하면 None."""
+    if not cid or not _mcp.takes_video_references(mcp_video_model(cid)):
+        return None
+    path = _motion.present(_creative.store().get_render(record_id), _dir(record_id, cid))
+    return _motion.trimmed_bytes(path) if path else None
+
+
 async def _overlay_after_attach(record_id: str, cid: str | None) -> None:
     """영상·완성 영상이 붙으면 최신 영상에 자막·엔드카드를 한 번 얹는다. 실패해도 흐름은 계속."""
     try:
@@ -1230,6 +1269,37 @@ async def _api_video(
     _set(record_id, "video", request_id=job)
     url = await _wait(client, job, "video", cid)
     return await _download(client, url, asset_path(record_id, "video", cid))
+
+
+# ---------------------------------------------------------------- 의뢰 캐릭터 바꾸기 (11/26)
+SUPERSEDED = "superseded"  # render 칸: 의뢰 캐릭터를 바꿔 멈춘 기록 {"at", "by"}
+CHARACTER_CHANGED = "character_changed"
+
+
+def superseded(record_id: str) -> bool:
+    """의뢰 캐릭터를 바꿔 멈춘 기록인가(그림을 더 그리지 않고 영상을 요청하지 않는다)."""
+    return bool(_creative.store().get_render(record_id).get(SUPERSEDED))
+
+
+def supersede(record_id: str, by: str | None) -> bool:
+    """멈춤 표시. 이미 영상을 요청한 기록은 건드리지 않는다(False)."""
+    store = _creative.store()
+    if store.get(record_id) is None:
+        return False
+    render = store.get_render(record_id)
+    if (render.get("video") or {}).get("status"):
+        return False
+    render[SUPERSEDED] = {"at": _now().isoformat(), "by": by}
+    store.set_render(record_id, render)
+    return True
+
+
+def unsupersede(record_id: str) -> None:
+    """같은 캐릭터로 되돌아오면 멈춤 표시를 지운다(그린 그림은 그대로 다시 쓴다)."""
+    store = _creative.store()
+    render = store.get_render(record_id)
+    if render.pop(SUPERSEDED, None) is not None:
+        store.set_render(record_id, render)
 
 
 def expire_stale(record_id: str) -> None:
@@ -1321,7 +1391,7 @@ def extra_reference_bytes(record_id: str, rec: dict[str, Any], cid: str | None) 
     return out
 
 
-PLAN_DURATION_KEY = "plan_duration_s" # 의뢰 스토리보드에 남긴 기획 제작안 길이 (request_creative)
+PLAN_DURATION_KEY = "plan_duration_s"  # 의뢰 스토리보드에 남긴 기획 제작안 길이 (request_creative)
 
 
 def _ref_bytes(record_id: str, part: str, cid: str | None, rec: dict[str, Any]) -> bytes:
@@ -1415,7 +1485,7 @@ def _plan_seconds(plan_s: Any, model: str) -> tuple[int, int | None]:
         return video_seconds(), None
     cap = _mcp.video_max_seconds(model) or MAX_VIDEO_S
     try:
-        if (raw := os.getenv(VIDEO_DURATION_ENV, "").strip()):
+        if raw := os.getenv(VIDEO_DURATION_ENV, "").strip():
             cap = min(cap, max(1, int(raw)))
     except ValueError:
         pass

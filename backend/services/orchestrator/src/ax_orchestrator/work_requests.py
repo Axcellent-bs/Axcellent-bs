@@ -35,6 +35,10 @@ OPEN_STATES = ("received", "classified", "running", "waiting")
 CLOSED_STATES = ("done", "failed", "rejected", "needs_human")
 STEP_DONE = ("completed", "failed", "skipped", "rejected_by_human")
 STEP_WAITING = ("held", "waiting_human", "waiting_async")
+# 바쁨 집계: 부서가 일하는 중인 단계 / 사람을 기다리는 단계, 영상 제작 단계의 부서 일 이름
+WORKING_STEP_STATES = ("waiting_async", "running")
+BUSY_STEP_STATES = ("waiting_async", "running", "held", "waiting_human")
+VIDEO_SKILL = "generate_media"
 READ_GRADE = "read"
 RESTART_UNCONFIRMED = "restart_unconfirmed"
 RESTART_NOTE = "재시작으로 보냄 여부를 알 수 없어 다시 보내지 않았다 (사람이 확인 필요)"
@@ -259,6 +263,12 @@ class WorkRequests:
         row["log"].append({"at": now().isoformat(), "message": f"{what} ({by or '사람'})"})
         self._save(row)
 
+    def set_replaced_record(self, request_id: str, record_id: str | None) -> None:
+        """11/26 캐릭터를 바꿔 다시 준비할 때 예전 의뢰 기록(CR-…). 영상 준비가 마케팅에 넘긴다."""
+        row = self._row(request_id)
+        row["replaces_creative_record_id"] = record_id
+        self._save(row)
+
     def set_carry(self, request_id: str, step_id: str, value: dict[str, Any] | None) -> None:
         """단계 결과 중 다음 단계가 그대로 받을 값을 둔다 (None이면 비운다). 쓰고 나면 지운다."""
         row = self._row(request_id)
@@ -465,6 +475,28 @@ class WorkRequests:
 
     def open_requests(self) -> list[dict[str, Any]]:
         return [r for r in self.list() if r["status"] in OPEN_STATES]
+
+    def busy_counts(self) -> dict[str, int]:
+        """열린 의뢰의 단계를 상태별로 센 건수만 (의뢰 번호·의뢰자·문장은 담지 않는다).
+
+        `running`·`waiting_async`는 부서가 일하는 중이라 재시작하면 결과를 못 받는 것이고,
+        `held`·`waiting_human`은 사람 승인·확인을 기다리는 것이다. 영상 제작 단계
+        (`generate_media`)가 일하는 중이면 `video_in_flight`에도 센다.
+        """
+        counts = dict.fromkeys(BUSY_STEP_STATES, 0)
+        counts["video_in_flight"] = 0
+        for row in self._rows.values():
+            if row.get("status") not in OPEN_STATES:
+                continue
+            skills = {p.get("step_id"): p.get("skill") for p in row.get("plan") or []}
+            for sid, step in (row.get("steps") or {}).items():
+                st = step.get("status")
+                if st not in counts:
+                    continue
+                counts[st] += 1
+                if st in WORKING_STEP_STATES and skills.get(sid) == VIDEO_SKILL:
+                    counts["video_in_flight"] += 1
+        return counts
 
     def _row(self, request_id: str) -> dict[str, Any]:
         row = self._rows.get(request_id)

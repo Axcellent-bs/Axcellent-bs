@@ -144,7 +144,7 @@ function ChannelValue({ tick }: { tick: number }) {
 function Body({ view, tick, calc }: { view: SalesOkView; tick: number; calc: string | null }) {
   return (
     <div className="space-y-4">
-      <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <ul className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         {view.kpis.map((k) => (
           <li key={k.label} className="card p-4">
             <p className="text-xs font-medium text-ink-500">{k.label}</p>

@@ -10,6 +10,7 @@ import {
 } from "@/lib/chatCards";
 import { REPORT_POLL_MS, REPORT_STATUS, reportHash, reportLabel } from "@/lib/trendReportView";
 import { CreativeChatCard } from "./CreativeChatCard";
+import { InlineReport, useExpand } from "./InlineDoc";
 
 // 데이터분석 1:1 대화(DirectChat, 데이터분석 AI만)의 메시지 카드 3종 (공통 계약 lib/planningData.ts ChatCard).
 // - 분석 의뢰 카드: 칸 요약(프리셋 꼬리표) · 이유 · 예상 호출 · [분석 의뢰 넣기](trend_report_create, 한 번만) · [분석 의뢰 탭에서 고치기] · [아니에요](접기)
@@ -153,6 +154,7 @@ export function DoneCard({ card }: { card: TrendReportDoneCard }) {
   const v = doneView(card);
   const tone = DONE_TONE[v.tone];
   const path = reportPath(card.report_path, card.report_id);
+  const expand = useExpand(); // 11/26 카드 안에서 보고서 펼쳐 보기
   return (
     <section aria-label="보고서 완료" className={`mt-2 w-full max-w-[80%] space-y-2 rounded-xl border-2 ${tone.border} bg-surface px-3.5 py-3 text-sm`}>
       <h4 className={`text-[13px] font-semibold ${tone.title}`}>{v.title}</h4>
@@ -161,9 +163,11 @@ export function DoneCard({ card }: { card: TrendReportDoneCard }) {
         <ul className="space-y-0.5">{v.evidence.map((e, i) => <li key={i} className="text-xs text-ink-700">· {e}</li>)}</ul>
       )}
       <div className="flex flex-wrap gap-2 pt-1">
+        {expand.button}
         <button type="button" className="btn-primary btn-card" onClick={() => navigate(path)}>보고서 열기</button>
         <button type="button" className="btn-ghost btn-card" onClick={() => navigate(path, { state: { trendReportPrint: true } satisfies TrendNavState })}>PDF로 저장</button>
       </div>
+      {expand.opened && <InlineReport reportId={card.report_id} open={expand.open} />}
     </section>
   );
 }

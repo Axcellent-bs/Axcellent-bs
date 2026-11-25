@@ -281,6 +281,26 @@ def health() -> dict:
     return {"data": {"status": "ok"}, "meta": {}}
 
 
+@app.get("/api/busy")
+def busy() -> dict:
+    """진행 중인 의뢰 단계의 건수만 (자동 배포가 재시작을 미룰지 볼 때 읽는다). 인증 없음.
+
+    모든 회사의 열린 의뢰를 합한다. 의뢰 번호·의뢰자·문장·결과는 내지 않는다.
+    `in_flight`는 부서가 일하는 중(`waiting_async`+`running`)이고, 사람 승인·확인 대기
+    (`held`·`waiting_human`)는 따로 줘서 바쁨으로 셀지는 읽는 쪽이 정한다.
+    마케팅 안의 영상 생성(메모리·장부)은 도메인 간 호출이 없어 아직 안 센다(후속 단계)."""
+    total = {"waiting_async": 0, "running": 0, "held": 0, "waiting_human": 0, "video_in_flight": 0}
+    for manager in list(state.managers.values()):
+        for key, n in manager.work_requests.busy_counts().items():
+            total[key] += n
+    data = {
+        "in_flight": total["waiting_async"] + total["running"],
+        **total,
+        "checked_at": datetime.now(UTC).isoformat(),
+    }
+    return {"data": data, "meta": {}}
+
+
 def _require_mock() -> None:
     if not state.mock:
         raise HTTPException(501, "실제 연동은 아직 없음 (ORCHESTRATOR_MOCK=1로 실행)")
@@ -486,6 +506,9 @@ async def set_request_brand_character(
     뒤 바꾸면 `plan_outdated: true`(기획서는 예전 캐릭터 기준, 화면 안내용).
 
     캐릭터를 쓰면 영상은 만들기 전에 사람 승인(C)을 한 번 받는다. 값이 없으면 지금 흐름 그대로다.
+
+    11/26: 영상 초안 준비가 시작된 뒤에도 영상 요청(사람 승인 요청) 전이면 바꾼다. 그 의뢰를 새
+    캐릭터로 다시 준비하고(`reprepared: true`, 그림 크레딧을 다시 쓴다) 영상 요청 뒤면 409.
     """
     runner = state.manager.request_runner if state.manager else None
     outcome, outdated = (
@@ -501,7 +524,19 @@ async def set_request_brand_character(
         raise HTTPException(422, "홍보 영상 의뢰가 아니에요")
     if outcome == "started":
         raise HTTPException(409, "영상 준비가 시작돼서 바꿀 수 없어요")
-    data = {"ok": True, "record_id": body.record_id, "plan_outdated": outdated}
+    # 11/26 영상 요청 전까지는 바꾼다(다시 준비). 그 뒤·준비 중·기획 결과 없음은 409
+    if outcome == "video_requested":
+        raise HTTPException(409, "영상 요청 뒤라 바꿀 수 없어요")
+    if outcome == "busy":
+        raise HTTPException(409, "영상 초안을 준비하는 중이에요. 잠시 뒤 다시 바꿔 주세요")
+    if outcome == "no_plan":
+        raise HTTPException(409, "기획 결과가 남아 있지 않아 다시 준비할 수 없어요")
+    data = {
+        "ok": True,
+        "record_id": body.record_id,
+        "plan_outdated": outdated,
+        "reprepared": outcome == "reprepared",
+    }
     return {"data": data, "meta": {}}
 
 

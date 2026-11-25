@@ -39,7 +39,12 @@ test("한 줄 문구: 고른 캐릭터는 이름(CR-…), 없음은 '캐릭터 �
   });
   assert.equal(chatCharacterLine(promo({ brand_character_record_id: "CR-0123456789ab" }))?.text, "회사 캐릭터: CR-0123456789ab");
   assert.deepEqual(chatCharacterLine(promo({ brand_character_record_id: null })), { text: CHAT_NONE_LINE, canChange: true });
-  assert.deepEqual(chatCharacterLine(promo({ brand_character_record_id: null }, "completed")), { text: "캐릭터 없이 진행", canChange: false });
+  // 11/26: 영상 준비가 끝나도 영상 요청 전이면 바꾼다(다시 준비). 예전 기대값: canChange false
+  assert.deepEqual(chatCharacterLine(promo({ brand_character_record_id: null }, "completed")), { text: "캐릭터 없이 진행", canChange: true });
+  const sent = promo({ brand_character_record_id: null }, "completed");
+  sent.steps.make = step("held");
+  assert.deepEqual(chatCharacterLine(sent), { text: "캐릭터 없이 진행", canChange: false }); // 영상 요청 뒤
+  assert.deepEqual(chatCharacterLine(promo({ brand_character_record_id: null }, "running")), { text: "캐릭터 없이 진행", canChange: false }); // 준비 중
   assert.equal(chatCharacterLine(promo({ task: "trend_report", brand_character_record_id: null })), null);
 });
 

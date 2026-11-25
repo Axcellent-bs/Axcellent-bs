@@ -1,7 +1,7 @@
 import { ApiError } from "./apiError";
 import { tokenFree } from "./apiDirect";
 import { ORCHESTRATOR_URL, RELAY_TOKEN, SAFETY_HUMAN_TOKEN } from "./env";
-import { sessionAuth } from "./humanToken";
+import { sessionReadAuth } from "./humanToken";
 import type { AgentDiagnosisRow, DiagnosisDelivery } from "./agentDiagnosis";
 import type { DemoRequest, OrchIncident } from "./agentChat";
 import type { WorkRequestRow, WorkRequestTask } from "./workRequests";
@@ -12,7 +12,7 @@ import type { Department, DepartmentsMeta } from "./adminRelay";
 async function callRaw<T, M = Record<string, unknown>>(path: string, init?: RequestInit): Promise<{ data: T; meta: M }> {
   // 머리 없는 읽기(GET)는 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이). 토큰을 안 보는 읽기는 싣지 않는다
   const read = (init?.method ?? "GET").toUpperCase() === "GET" && !new Headers(init?.headers).has("authorization") && !tokenFree("orch", path);
-  const res = await fetch(`${ORCHESTRATOR_URL}${path}`, { cache: "no-store", ...init, ...(read ? { headers: { ...Object.fromEntries(new Headers(init?.headers)), ...sessionAuth() } } : {}) });
+  const res = await fetch(`${ORCHESTRATOR_URL}${path}`, { cache: "no-store", ...init, ...(read ? { headers: { ...Object.fromEntries(new Headers(init?.headers)), ...sessionReadAuth() } } : {}) });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     // FastAPI HTTPException은 {detail}, 직접 만든 오류는 {error: {message}}
@@ -67,7 +67,7 @@ export const orchestrator = {
     getAuthed<WorkRequestRow>(`/api/requests/${encodeURIComponent(requestId)}`, SAFETY_HUMAN_TOKEN).then((r) => r.data),
   /** 홍보 영상 의뢰에 쓸 회사 대표 캐릭터(제작 기록 CR-…, null이면 캐릭터 없이). 영상 준비 전까지만(뒤면 409) (11/23) */
   setBrandCharacter: (requestId: string, recordId: string | null) =>
-    post<{ ok: boolean; record_id: string | null; plan_outdated?: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/brand-character`, { record_id: recordId }, SAFETY_HUMAN_TOKEN),
+    post<{ ok: boolean; record_id: string | null; plan_outdated?: boolean; reprepared?: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/brand-character`, { record_id: recordId }, SAFETY_HUMAN_TOKEN),
   /** 사람 확인·승인 대기 중인 의뢰 단계를 승인하거나 거절한다. 승인하면 다음 단계로 이어진다 */
   decideRequestStep: (requestId: string, stepId: string, approved: boolean) =>
     post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/steps/${encodeURIComponent(stepId)}/decision`, { approved }, SAFETY_HUMAN_TOKEN),

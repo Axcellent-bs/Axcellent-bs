@@ -40,7 +40,12 @@ def test_company_without_catalog_does_not_borrow_catbooks() -> None:
         assert not cat.sales.genres and not cat.sales.categories and not cat.sales.attributes
         assert "배송비" not in cat.sales.revenue_definition
         assert cat.connector == "shop-api"
-        assert {m.id for m in cat.metrics} == {"order_count", "inquiry_count"}
+        assert {m.id for m in cat.metrics} == {
+            "order_count",
+            "inquiry_count",
+            "cancel_count",
+            "refund_amount",
+        }
 
 
 def test_company_without_settings_counts_days_in_korea_time() -> None:
@@ -67,3 +72,20 @@ def test_site_companies_get_common_sales_section() -> None:
     with company_scope.using("catbooks"):
         sales = catalog.current().sales
         assert sales is not None and sales.item_noun == "책" and sales.genres
+
+
+def test_site_company_category_names_come_from_site_values() -> None:
+    """분류 표가 없는 회사(누비투어·스터디온)는 사이트가 준 분류 값을 그대로 이름으로 쓴다(11/25).
+    캣북스는 카탈로그 표 그대로(표에 없는 값은 이름 없는 분류)."""
+    from data_agent.skills.sales_analysis import NO_CATEGORY, category_label
+
+    with company_scope.using("nubi-tour"):
+        cfg = catalog.current().sales
+        assert cfg is not None and not cfg.categories
+        assert category_label(cfg, "JP") == "JP"
+        assert category_label(cfg, "") == NO_CATEGORY
+    with company_scope.using("catbooks"):
+        cfg = catalog.current().sales
+        assert category_label(cfg, "book") == "도서"
+        assert category_label(cfg, "JP") == NO_CATEGORY
+    assert category_label(None, "DEV") == "DEV"

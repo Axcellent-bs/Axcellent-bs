@@ -48,6 +48,20 @@ from data_agent.sales_store import FAKE_SOURCE, SalesStore
 FAKE_DATA = "가짜 데이터(데모용)"  # 저장소를 가짜 출처(`sales_fake`)가 채웠을 때 근거·요약에 붙인다
 TOP_PRODUCTS = 5
 NO_CATEGORY = "이름 없는 분류"
+
+
+def category_label(cfg: CatalogSales | None, code: str) -> str:
+    """분류 이름.
+
+    카탈로그에 분류 표가 없는 회사(사이트 변환기로 연결한 회사, 11/25)는 사이트가 준 분류 값
+    그대로(예: 누비투어 지역 JP, 스터디온 과목 DEV). 표가 있으면 표에 없는 값은 이름 없는 분류.
+    """
+    known = cfg.categories if cfg else {}
+    if not known:
+        return code or NO_CATEGORY
+    return known.get(code, NO_CATEGORY)
+
+
 NO_PRODUCT = "이름 없는 상품"
 DIRECT = "직접 유입"
 OTHER_SOURCE = "기타 경로"
@@ -97,6 +111,11 @@ def kpis(cur: Tally, prev: Tally) -> list[SalesKpi]:
                  change=change(aov, prev_aov)),
         SalesKpi(key="repeat_rate", label="재구매 고객 비율", unit="rate", value=repeat,
                  previous=prev_repeat, change=repeat_change, change_kind="points"),
+        # 취소·환불 (11/25): 원본에서 세지 못했으면 값 없음 ("확인할 수 없음")
+        SalesKpi(key="cancel_count", label="취소 주문", unit="count", value=cur.cancelled,
+                 previous=prev.cancelled, change=change(cur.cancelled, prev.cancelled)),
+        SalesKpi(key="refund_amount", label="환불액", unit="won", value=cur.refund_amount,
+                 previous=prev.refund_amount, change=change(cur.refund_amount, prev.refund_amount)),
     ]  # fmt: skip
 
 
@@ -105,7 +124,7 @@ def categories(cur: Tally, prev: Tally, cfg: CatalogSales) -> list[SalesCategory
     rows = [
         SalesCategoryRow(
             code=code,
-            label=cfg.categories.get(code, NO_CATEGORY),
+            label=category_label(cfg, code),
             revenue=cur.by_category.get(code, 0),
             share=share(cur.by_category.get(code, 0), cur.revenue),
             previous_revenue=prev.by_category.get(code, 0),
@@ -162,7 +181,7 @@ def products(
         return SalesProductMove(
             product_id=pid,
             label=title or NO_PRODUCT,
-            category_label=cfg.categories.get(code, NO_CATEGORY),
+            category_label=category_label(cfg, code),
             revenue=cur.by_product.get(pid, 0),
             previous_revenue=prev.by_product.get(pid, 0),
             change=moved,

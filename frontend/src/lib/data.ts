@@ -185,7 +185,8 @@ export interface KpiSummaryOutput {
 // ---------------------------------------------------------------- 매출 분석 (sales_analysis, 백엔드 계약과 같은 모양)
 export type SalesPeriod = "today" | "7d" | "30d";
 export interface SalesKpi {
-  key: "revenue" | "order_count" | "aov" | "repeat_rate";
+  /** cancel_count·refund_amount: 11/25 추가 (기간에 접수해 취소된 주문 수, 기간에 일어난 환불 합) */
+  key: "revenue" | "order_count" | "aov" | "repeat_rate" | "cancel_count" | "refund_amount";
   label: string;
   unit: "won" | "count" | "rate";
   value: number | null;

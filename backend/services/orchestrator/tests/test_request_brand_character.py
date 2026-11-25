@@ -191,8 +191,10 @@ async def test_brand_character_goes_only_to_the_prepare_step_and_its_record_is_t
     row = reqs.get(rid)
     assert row["steps"]["prepare"]["result_ref"] == MADE
     assert row["brand_character_record_id"] == BRAND
-    assert r.set_brand_character(rid, None) == "started"  # 영상 준비가 시작된 뒤에는 못 바꾼다
-    assert reqs.get(rid)["brand_character_record_id"] == BRAND
+    # 11/26: 영상 준비가 시작된 뒤에도 영상 요청 전이면 바꾼다(다시 준비). 예전 기대값: "started"
+    assert r.set_brand_character(rid, None) == "reprepared"
+    await r.wait_idle()
+    assert reqs.get(rid)["brand_character_record_id"] is None
 
 
 @pytest.mark.asyncio
@@ -392,7 +394,13 @@ def test_api_sets_and_clears_until_prepare_starts(client: Any, monkeypatch: Any)
     client.reqs.update_step(rid, "prepare", status="running")
     late = client.post(_path(rid), json={"record_id": BRAND}, headers=HUMAN)
     assert late.status_code == 409
-    assert late.json()["detail"] == "영상 준비가 시작돼서 바꿀 수 없어요"
+    # 11/26: 준비 중이면 잠시 뒤(예전 기대값: "영상 준비가 시작돼서 바꿀 수 없어요")
+    assert late.json()["detail"] == "영상 초안을 준비하는 중이에요. 잠시 뒤 다시 바꿔 주세요"
+    client.reqs.update_step(rid, "prepare", status="completed")
+    client.reqs.update_step(rid, "make", status="held", reason_code=VIDEO_APPROVAL)
+    sent = client.post(_path(rid), json={"record_id": BRAND}, headers=HUMAN)
+    assert sent.status_code == 409 and sent.json()["detail"] == "영상 요청 뒤라 바꿀 수 없어요"
+    assert client.reqs.get(rid)["brand_character_record_id"] is None  # 409면 그대로
 
 
 def test_api_other_company_request_is_404(client: Any) -> None:

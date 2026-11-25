@@ -11,6 +11,8 @@ import type { StoryboardResult } from "@/lib/storyboard";
 import { canToggleOriginal, overlayVisibleFor, playPartFor, type PlayPart } from "@/lib/videoOverlay";
 import { OverlayControls } from "./OverlayControls";
 import { KeyframePairs } from "./KeyframePairs";
+import { ApprovalDeadline, TimedOutRetry } from "./ApprovalDeadline";
+import { timedOut } from "@/lib/videoApprovalTime";
 import { framesOf, keyframesDone } from "@/lib/keyframes";
 import { videoSummaryLine } from "@/lib/creativeVideo";
 import { canAskVideo, usesOriginalReference } from "@/lib/videoAsk";
@@ -226,14 +228,21 @@ export function RenderPanel({ recordId }: { recordId: string }) {
           speed={video?.summary?.speed} onChanged={() => void load()} />
       )}
       <div className="space-y-2 border-t border-ink-100 pt-3">
+        {/* 11/25 모션 참조 영상: 올리면 승인 뒤 영상 모델이 그 동작·카메라 움직임만 따라 만든다 */}
+        <Picture recordId={recordId} part="motion_video" info={render.motion_video} label="모션 참조 영상 (선택)" onChanged={() => void load()} onError={setError} />
+        <p className="text-xs text-ink-500">따라 할 춤·동작 영상(MP4)을 올리면 영상을 만들 때 앞 10초의 동작과 카메라 움직임만 따라요. 배경·사람·글자는 따라 하지 않아요.</p>
+      </div>
+      <div className="space-y-2 border-t border-ink-100 pt-3">
         {summaryLine && <p className="text-xs text-ink-700" aria-label="영상 만들기 요약">{summaryLine}</p>}
         <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" onChanged={() => void load()} onError={setError}
           playPart={playPartFor("video", render, showOriginal)} version={overlayVersion} />
         {overlayControls("video")}
         {video?.status === "awaiting_approval" && (
-          <p className="text-xs text-ink-700">사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>
+          <p className="text-xs text-ink-700"><ApprovalDeadline reviewId={video.review_id} className="mr-1" />사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>
         )}
-        {canAsk && (
+        {/* 11/26 기한 지나 자동 취소: 같은 기록으로 영상 요청만 다시(콘티·키프레임 재사용) */}
+        {timedOut(video) && canAsk && <TimedOutRetry busy={asking} onRetry={() => void ask()} />}
+        {canAsk && !timedOut(video) && (
           <button type="button" className="btn-primary text-xs" disabled={asking} onClick={() => void ask()}>
             {asking ? "요청 중…" : video?.status ? "영상 다시 요청 (사람 승인)" : "영상 만들기 요청 (사람 승인)"}
           </button>

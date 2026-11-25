@@ -599,7 +599,8 @@ async function printReport() {
   printWithClass(PRINT_CLASS);
 }
 
-export function TrendReportBody({ report, onRebuild }: { report: TrendReport; onRebuild?: (brief: TrendReportBrief) => void }) {
+/** readOnly(11/26 대화방 카드 안 펼쳐 보기): 머리 버튼(의뢰 고치기·PDF·기획에 보내기)과 맨 아래 다음 단계 카드를 두지 않는다 */
+export function TrendReportBody({ report, onRebuild, readOnly = false }: { report: TrendReport; onRebuild?: (brief: TrendReportBrief) => void; readOnly?: boolean }) {
   const navigate = useNavigate();
   const st = REPORT_STATUS[report.status];
   const sec = report.sections;
@@ -636,13 +637,13 @@ export function TrendReportBody({ report, onRebuild }: { report: TrendReport; on
           <h2 className="text-lg font-bold text-ink-900">트렌드 분석 보고서{report.brief.product ? ` · ${report.brief.product}` : ""}</h2>
           <StatusChip label={st.label} t={st.tone} />
           <span className="chip bg-ink-100 text-xs font-semibold tabular-nums text-ink-700">{reportLabel(report.report_id)}</span>
-          <span className="ml-auto flex flex-wrap gap-2 print-hide">
-            {onRebuild && <button type="button" className="btn-quiet" onClick={() => onRebuild(report.brief)}>의뢰 고쳐서 다시 만들기</button>}
+          {!readOnly && <span className="ml-auto flex flex-wrap gap-2 print-hide">
+            {onRebuild &&<button type="button" className="btn-quiet" onClick={() => onRebuild(report.brief)}>의뢰 고쳐서 다시 만들기</button>}
             <button type="button" className="btn-ghost" onClick={() => void printReport()}>PDF로 저장</button>
             {finished && planPath && <button type="button" className="btn-primary" onClick={() => navigate(planPath)}>기획서 보기</button>}
             {finished && !planPath && (delivery.sent || sent) && <DeliveryBadge chip={delivery} />}
             {finished && !planPath && <HandoffButton reportId={report.report_id} already={delivery.sent || !!sent} onSent={setSent} className="btn-ghost" />}
-          </span>
+          </span>}
         </div>
         <p className="text-xs text-ink-500">
           {when(report.created_at)} 의뢰 · {CALLER_LABEL[report.caller] ?? report.caller}{report.finished_at && ` · ${when(report.finished_at)} 끝남`}
@@ -678,7 +679,7 @@ export function TrendReportBody({ report, onRebuild }: { report: TrendReport; on
         <CompetitorBody s={sec.competitors} brief={report.brief} />
       </Fold>
       {/* 다음 단계: 이 보고서에서 뽑은 기획 인사이트 (인사이트 탭과 같은 카드). 영상 안쪽 분석은 아직 준비 중이라 한 줄로만 */}
-      {finished && (
+      {finished && !readOnly && (
         <section className="space-y-1.5 print-hide" aria-label="다음 단계 · 기획 인사이트">
           <ul><ReportInsightCard reportId={report.report_id} createdAt={report.created_at} sent={sent} onSent={setSent} /></ul>
           <p className="flex flex-wrap items-center gap-2 text-xs text-ink-500">영상 안쪽 분석 · 유료 광고 — 담당자 업로드 <PreparingChip /></p>
