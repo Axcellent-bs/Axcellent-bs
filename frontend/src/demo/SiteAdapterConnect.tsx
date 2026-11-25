@@ -112,6 +112,13 @@ export default function SiteAdapterConnect({ onState, tenant }: { onState?: (s: 
           연결했어요.{result.counts ? ` 첫 쪽에서 주문 ${result.counts.orders}건·상품 ${result.counts.products}건을 바꿔 읽었어요.` : ''}
         </p>
       )}
+      {result?.saved && result.ai.inquiries && (
+        <p className="text-xs leading-5 text-ink-500">
+          {result.ai.inquiries.saved
+            ? `문의 받은함도 연결했어요(${result.ai.inquiries.path}, 첫 쪽 ${result.ai.inquiries.count ?? 0}건). 고객지원 AI가 답 전 문의를 읽어 가요.`
+            : `문의 받은함은 연결하지 않았어요: ${result.ai.inquiries.reason ?? '이유 모름'}.`}
+        </p>
+      )}
       {result && !result.saved && (
         <Notice tone="bad">연결하지 못했어요: {result.reason}. 사이트 API가 그 값을 주는지 확인한 뒤 다시 눌러 주세요.</Notice>
       )}

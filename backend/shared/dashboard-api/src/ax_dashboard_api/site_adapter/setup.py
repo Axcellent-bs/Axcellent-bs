@@ -32,7 +32,7 @@ from ax_agent_template.llm import LLMNotConfiguredError, LLMResponseError
 from ax_dashboard_api.accounts import require_session_role
 from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
-from ax_dashboard_api.site_adapter import ai_propose, propose, resources, upstream
+from ax_dashboard_api.site_adapter import ai_propose, inquiries, propose, resources, upstream
 from ax_dashboard_api.site_adapter.mapping import (
     MAPPING_FILE,
     MappingError,
@@ -319,12 +319,67 @@ async def _auto(
         return ok({"saved": False, "reason": exc.message, "mapping": mapping, "ai": ai})
     except ValidationError:
         return ok({"saved": False, "reason": "짝 모양이 맞지 않아요", "mapping": mapping, "ai": ai})
+    buyer = proposed["orders"]["fields"].get("buyer_id", "")
+    inquiry_map, inquiry = await auto_inquiries(base, headers, paths, buyer, m)
+    if inquiry_map is not None:
+        m = m.model_copy(update={"inboxes": {**m.inboxes, "inquiries": inquiry_map}})
+    ai["inquiries"] = inquiry
     token = _token(body.token, base)
     try:
         result = await _store(base, m, token, body.tenant, request)
     except ApiError as exc:
         return ok({"saved": False, "reason": exc.message, "mapping": mapping, "ai": ai})
     return ok({**result, "saved": True, "mapping": mapping, "ai": ai})
+
+
+async def auto_inquiries(
+    base: str, headers: dict[str, str], paths: list[str], order_buyer: str, m: SiteMapping
+) -> tuple[ResourceMap | None, dict[str, Any]]:
+    """알아서 연결이 문의 받은함 짝도 넣는다 (11/26). 규칙으로만 고르고 못 하면 이유만 준다.
+
+    - 이미 저장된 문의 짝이 있으면 건드리지 않는다(사람이 고친 짝을 덮지 않는다)
+    - 문의 목록 경로는 이름 규칙으로 찾는다. 필수 칸(문의 id·제목·내용)을 못 찾거나,
+      모르는 상태 낱말이 있거나, 첫 쪽을 받은함 줄로 바꾸지 못하면 넣지 않는다
+    - 문의 짝이 없어도 주문·상품 연결은 그대로 저장한다
+    """
+    if "inquiries" in m.inboxes:
+        return None, {"saved": False, "reason": "이미 저장된 문의 짝을 그대로 둬요"}
+    path = ai_propose.rule_inquiry_path(paths)
+    if not path:
+        return None, {"saved": False, "reason": "문의 목록 경로가 없어요"}
+    res = _resource(path)
+    try:
+        rows = await upstream.first_page(base + res.path, res.paging, headers)
+    except upstream.UpstreamError as exc:
+        return None, {"saved": False, "path": path, "reason": str(exc)}
+    fields = propose.inquiry_fields(rows, order_buyer)
+    empty = [k for k in propose.INQUIRY_REQUIRED if not fields.get(k)]
+    if empty:
+        return None, {
+            "saved": False,
+            "path": path,
+            "reason": f"문의 칸을 찾지 못했어요: {', '.join(empty)}",
+        }
+    values: dict[str, dict[str, str]] = {}
+    if "status" in fields:
+        table = propose.inquiry_statuses(propose.status_values(rows, fields["status"]))
+        unknown = [v for v, to in table.items() if not to]
+        if unknown:
+            return None, {
+                "saved": False,
+                "path": path,
+                "reason": f"문의 상태 낱말을 모르겠어요: {', '.join(unknown)}",
+            }
+        values["status"] = table
+    try:
+        rm = ResourceMap.model_validate(
+            {"path": path, "paging": Paging().model_dump(), "fields": fields, "values": values}
+        )
+        for row in rows:
+            inquiries.to_inquiry(row, rm, {})
+    except (ValidationError, resources.MappingBroken):
+        return None, {"saved": False, "path": path, "reason": "문의 첫 쪽을 바꾸지 못했어요"}
+    return rm, {"saved": True, "path": path, "fields": fields, "count": len(rows)}
 
 
 def _complete(m: SiteMapping) -> None:

@@ -30,7 +30,15 @@ from pydantic import BaseModel, ValidationError
 
 from ax_dashboard_api.auth import require_human
 from ax_dashboard_api.envelope import ApiError, ok
-from ax_dashboard_api.site_adapter import claims, direct, resources, setup, upstream, writes
+from ax_dashboard_api.site_adapter import (
+    claims,
+    direct,
+    inquiries,
+    resources,
+    setup,
+    upstream,
+    writes,
+)
 from ax_dashboard_api.site_adapter.mapping import (
     Inbox,
     MappingError,
@@ -53,6 +61,11 @@ FIRST: tuple[WriteAction, ...] = ("inquiry_answer", "refund")
 ACTIONS: tuple[WriteAction, ...] = FIRST + tuple(a for a in get_args(WriteAction) if a not in FIRST)
 # 신청 받은함 짝에 꼭 있어야 하는 칸 (`claims.to_claim`이 required로 읽는다)
 CLAIM_REQUIRED = ("claim_id", "order_id", "status")
+# 받은함마다 꼭 있어야 하는 칸 (`inquiries.to_inquiry`도 required로 읽는다)
+INBOX_REQUIRED: dict[Inbox, tuple[str, ...]] = {
+    "claims": CLAIM_REQUIRED,
+    "inquiries": ("inquiry_id", "subject", "message"),
+}
 MAX_REASONS = 5
 
 
@@ -173,8 +186,16 @@ def save_write_map(body: WriteMapIn, request: Request) -> dict:
     return ok(_state())
 
 
-async def _verify_claims(found: SiteMapping, rm: ResourceMap) -> int:
-    """신청 첫 쪽을 읽어 받은함 줄로 바꿔 본다. 안 되면 422. 읽은 줄 수."""
+def to_row(inbox: Inbox, row: dict[str, Any], rm: ResourceMap) -> None:
+    """받은함 한 줄을 바꿔 본다(안 되면 `MappingBroken`). 주문 원본은 비워 둔다."""
+    if inbox == "inquiries":
+        inquiries.to_inquiry(row, rm, {})
+    else:
+        claims.to_claim(row, rm, {})
+
+
+async def _verify_inbox(found: SiteMapping, inbox: Inbox, rm: ResourceMap) -> int:
+    """받은함 첫 쪽을 읽어 받은함 줄로 바꿔 본다. 안 되면 422. 읽은 줄 수."""
     try:
         base = upstream.base_url()
     except upstream.UpstreamError as exc:
@@ -186,7 +207,7 @@ async def _verify_claims(found: SiteMapping, rm: ResourceMap) -> int:
         raise ApiError(422, exc.code, str(exc)) from exc
     for row in rows:
         try:
-            claims.to_claim(row, rm, {})
+            to_row(inbox, row, rm)
         except resources.MappingBroken as exc:
             raise ApiError(422, "MAPPING_BROKEN", str(exc)) from exc
     return len(rows)
@@ -205,12 +226,12 @@ async def save_inbox_map(body: InboxMapIn, request: Request) -> dict:
             rm = ResourceMap.model_validate(body.map)
         except ValidationError as exc:
             raise _shape_error(exc, "받은함 짝") from exc
-        empty = [k for k in CLAIM_REQUIRED if not rm.fields.get(k, "").strip()]
+        empty = [k for k in INBOX_REQUIRED[body.inbox] if not rm.fields.get(k, "").strip()]
         if empty:
             raise ApiError(
                 422, "MAPPING_INCOMPLETE", f"아직 정하지 않은 칸이 있어요: {', '.join(empty)}"
             )
-        count = await _verify_claims(found, rm)
+        count = await _verify_inbox(found, body.inbox, rm)
         updated[body.inbox] = rm
     _save(found.model_copy(update={"inboxes": updated}))
     logger.info(

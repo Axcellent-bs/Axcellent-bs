@@ -277,3 +277,16 @@ async def pick_paths(paths: list[str], factory: ClientFactory | None = None) -> 
         if not found[kind] and value in paths:
             found[kind] = value
     return found
+
+
+# 문의 목록 경로 이름 (앞이 먼저). 문의는 이름 규칙으로만 찾는다(못 찾으면 문의 짝 없이 연결)
+INQUIRY_PATH_WORDS = ("inquiries", "questions", "qna", "tickets", "contacts", "inquiry", "question")
+
+
+def rule_inquiry_path(paths: list[str]) -> str:
+    """경로 이름으로 고른 문의 목록 경로 (못 찾으면 빈 글자)."""
+    for word in INQUIRY_PATH_WORDS:
+        hit = next((p for p in paths if p.rstrip("/").lower().endswith("/" + word)), "")
+        if hit:
+            return hit
+    return ""

@@ -534,3 +534,22 @@ def test_writes_state_without_mapping_is_empty(client: TestClient, people: Any) 
     assert data["inboxes"] == {"claims": None, "inquiries": None}
     recent = client.get(SCREEN + "/writes/recent", headers=people["nubi"]).json()["data"]
     assert recent["items"] == []
+
+
+def test_inquiry_inbox_map_is_checked_as_inquiries_not_claims(tmp_path, monkeypatch) -> None:
+    """문의 받은함 짝은 문의 칸(문의 id·제목·내용)으로 검사한다.
+
+    11/26: 신청 칸으로 검사해서 문의 짝이 저장되지 않았다.
+    """
+    from ax_dashboard_api.site_adapter import write_setup
+
+    assert write_setup.INBOX_REQUIRED["inquiries"] == ("inquiry_id", "subject", "message")
+    rm = write_setup.ResourceMap.model_validate(
+        {
+            "path": "/api/v1/inquiries",
+            "fields": {"inquiry_id": "id", "subject": "title", "message": "body"},
+        }
+    )
+    write_setup.to_row("inquiries", {"id": "iq_1", "title": "t", "body": "b"}, rm)
+    with pytest.raises(write_setup.resources.MappingBroken):
+        write_setup.to_row("claims", {"id": "iq_1", "title": "t", "body": "b"}, rm)
