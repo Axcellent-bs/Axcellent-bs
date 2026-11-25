@@ -126,7 +126,7 @@ depts:      # id: { folder, aliases, owners(첫 번째가 실행 토큰), env_pr
   dejafix:        { folder: agents/infra-dejafix, aliases: [infra-dejafix], owners: [NYejin], env_prefix: INFRA }
   support:        { folder: agents/support,       owners: [bxbae],          env_prefix: SUPPORT }
   dashboard-api:  { folder: dashboard-api,        owners: [bxbae],          env_prefix: DASHBOARD }
-  marketing:      { folder: agents/marketing,     owners: [2taeyoon, JangJaehyeonn, NYejin, areatmadm],  env_prefix: MARKETING }   # 메인1 태윤, 메인2 재현, 메인3 예진, 서브 재헌 (2026-11-20)
+  marketing:      { folder: agents/marketing,     owners: [2taeyoon, JangJaehyeonn, NYejin, bxbae, haakim7, areatmadm],  env_prefix: MARKETING }   # 메인 태윤·재현·예진·병환·준하, 서브 재헌 (2026-11-25)
   shop-api:       { folder: shop-api,             owners: [areatmadm],      env_prefix: SHOP }
   contracts:      { folder: contracts,            owners: [haakim7, 2taeyoon] }   # env_prefix 없음 → MOCK 변수 안 씀
 reviewers: (위 "리뷰어 배정" 표를 부서 id로 그대로)
