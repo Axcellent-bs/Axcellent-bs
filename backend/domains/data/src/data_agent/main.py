@@ -17,11 +17,11 @@ from ax_agent_template.config import agent_token
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard, RequestMeta
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
-from data_agent import campaign_update, llm_settings, sales_reads
+from data_agent import campaign_update, llm_settings, sales_memory, sales_reads
 from data_agent import catalog as metric_catalog
 from data_agent.clients.log_client import get_log_source
 from data_agent.connectors.shop_api import close_shared_client
-from data_agent.handlers import get_sales_store, scoped_handlers
+from data_agent.handlers import get_sales_store, scoped_handlers, use_sales_store
 from data_agent.monitor import run_snapshots_forever
 from data_agent.report_store import Snapshot, get_report_store
 from data_agent.skills.activity_report import build_day_snapshot
@@ -121,11 +121,19 @@ def build_app() -> FastAPI:
                 if sales_reads.warm_enabled()
                 else None
             )
+            # 원본을 메모리에만 (3-3 A안, DATA_SALES_STORE=memory): 뒤에서 받아 바꿔 끼운다
+            memory = (
+                asyncio.create_task(sales_memory.run_forever(dict(os.environ), use_sales_store))
+                if sales_memory.memory_mode(os.environ)
+                else None
+            )
             try:
                 yield
             finally:
                 if task:
                     task.cancel()
+                if memory:
+                    memory.cancel()
                 sends.cancel()
                 summary.cancel()
                 if warm:

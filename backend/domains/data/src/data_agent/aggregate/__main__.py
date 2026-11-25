@@ -36,6 +36,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="지난 N일을 임시 파일에 다시 계산해 원본과 견주기 (쓰지 않음)")
     parser.add_argument("--every", type=int, default=7, help="비교할 기준일 간격(일)")
     args = parser.parse_args(argv)
+    from data_agent.sales_memory import memory_mode
+
+    if memory_mode(os.environ):
+        print("[aggregate] 원본이 데이터 AI 메모리에만 있어서(DATA_SALES_STORE=memory) 이 명령은 "
+              "보관된 sales.db 기준이에요", flush=True)  # fmt: skip
     if args.verify_days > 0:
         return _verify(args)
     if not args.backfill:
