@@ -1,12 +1,13 @@
 """읽기 단계만 다시 보내고 상태를 바꾸거나 비용이 드는 단계는 한 번만 보낸다. 단계별 대기 시간."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
 from ax_contracts.schemas import AgentResult, RequestMeta, TaskStatus
-from ax_orchestrator import request_tasks
+from ax_orchestrator import request_runner, request_tasks
 from ax_orchestrator.registry import SkillEntry
 from ax_orchestrator.request_runner import RequestRunner
 from ax_orchestrator.work_requests import WorkRequests
@@ -86,7 +87,8 @@ async def test_a_read_step_is_still_retried_after_a_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_wait_time_is_set_per_step_and_defaults_to_thirty_seconds() -> None:
+async def test_a_step_waits_without_a_limit_unless_it_sets_one() -> None:
+    """11/25 의뢰 단계는 기본으로 끊지 않는다. 단계에 timeout_s가 있을 때만 그 시간으로 끊는다."""
     reqs, rid = make("read", timeout_s=300.0)
     fake = Fake("read", [result(TaskStatus.COMPLETED, "ok")])
     await runner(reqs, fake).run(rid)
@@ -95,16 +97,30 @@ async def test_the_wait_time_is_set_per_step_and_defaults_to_thirty_seconds() ->
     reqs2, rid2 = make("read")
     fake2 = Fake("read", [result(TaskStatus.COMPLETED, "ok")])
     await runner(reqs2, fake2).run(rid2)
-    assert 20 < (fake2.calls[0].meta.deadline - datetime.now(UTC)).total_seconds() <= 30
+    left = fake2.calls[0].meta.deadline - datetime.now(UTC)
+    assert left > timedelta(days=6)  # 마감 칸은 비울 수 없어 아주 먼 시각
+    assert request_runner.STEP_TIMEOUT is None
 
 
-def test_the_video_step_waits_long_and_is_a_paid_b_grade_step() -> None:
-    make_step = next(s for s in request_tasks.BY_NAME["promo_video"].steps if s.step_id == "make")
-    assert make_step.skill == "generate_media" and make_step.grade == "B"
-    assert make_step.timeout_s == request_tasks.MEDIA_TIMEOUT_S >= 300
+@pytest.mark.asyncio
+async def test_a_slow_step_without_a_limit_is_not_cut() -> None:
+    """기본 30초에 끊기던 기획 제작안처럼, 오래 걸려도 답이 오면 완료로 본다."""
+
+    class Slow(Fake):
+        async def caller(self, dept, req):
+            await asyncio.sleep(0.3)
+            return await super().caller(dept, req)
+
+    reqs, rid = make("read")
+    slow = Slow("read", [result(TaskStatus.COMPLETED, "ok")])
+    await RequestRunner(
+        reqs, lambda: slow, step_timeout=None, retry_delay=0, scope_check=lambda *_: True
+    ).run(rid)
+    assert reqs.get(rid)["status"] == "done"
+
+
+def test_the_video_and_plan_steps_have_no_time_limit() -> None:
+    steps = {s.step_id: s for s in request_tasks.BY_NAME["promo_video"].steps}
+    assert steps["make"].skill == "generate_media" and steps["make"].grade == "B"
     plan = request_tasks.plan_of(request_tasks.BY_NAME["promo_video"])
-    assert next(p for p in plan if p["step_id"] == "make")["timeout_s"] == 300.0
-    # 11/25 기획 제작안도 길게 기다린다(SVG 콘티까지 쓰면 30초를 넘는다). 그 밖은 기본값
-    assert next(p for p in plan if p["step_id"] == "plan")["timeout_s"] == 240.0
-    assert request_tasks.PLAN_TIMEOUT_S >= 180
-    assert all(p["timeout_s"] is None for p in plan if p["step_id"] not in ("make", "plan"))
+    assert all(p["timeout_s"] is None for p in plan)

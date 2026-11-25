@@ -129,7 +129,7 @@ def test_plan_of_has_what_work_requests_needs() -> None:
         "carry_keys": ["proposal_id", "video_plan"],
         "carry_from": None,
         "on_missing": "skip",
-        "timeout_s": 240.0,
+        "timeout_s": None,
     }
     assert plan[0]["kind"] == "human" and plan[0]["skill"] == "brand_character"
     assert plan[1]["ref_key"] == "report_id"  # 트렌드 보고서는 번호(report_id)만 다음 부서에 넘긴다
