@@ -175,3 +175,32 @@ def test_brand_look_companies_do_not_mix(
                       headers=people["a-1"]))  # fmt: skip
     saved = json.loads((env / "promo_style.json").read_text(encoding="utf-8"))["companies"]
     assert saved["nubi"] == nubi and saved["catbooks"]["setting_ko"] == "산속 마을"
+
+
+def test_new_company_without_tenant_folder_saves_under_its_id(
+    client: TestClient, env: Path
+) -> None:
+    """설정 폴더 없이 가입만 한 회사(서버 id c-cf2f0d)도 브랜드를 저장한다.
+
+    11/25 실서버: "회사 연결 파일 설정이 없어 저장할 수 없어요". 열쇠는 정식 회사 id,
+    캣북스 칸은 그대로 두고 서로 안 보인다."""
+    (env / "accounts.json").write_text(json.dumps({"accounts": ROWS}), encoding="utf-8")
+    token, _ = human_auth.issue_session(account_id="a-1", name="민지", role="admin",
+                                        company_id="c-cf2f0d", company_role="admin")  # fmt: skip
+    new = {"Authorization": f"Bearer {token}"}
+    cat = {"promo_style": "fun_first", "brand_exposure": "caption"}
+    (env / "promo_style.json").write_text(json.dumps({"companies": {"catbooks": cat}}), "utf-8")
+    got = _data(client.get(URL, headers=new))
+    assert got["editable"] is True
+    assert got["brand_exposure"] == "end_card"  # 캣북스 저장 값이 안 보인다
+    body = {"promo_style": "product", "brand_exposure": "prop"}
+    got = _data(client.post(f"{URL}/save", json=body, headers=new))
+    assert (got["promo_style"], got["brand_exposure"]) == ("product", "prop")
+    saved = json.loads((env / "promo_style.json").read_text(encoding="utf-8"))
+    assert saved["companies"]["catbooks"] == cat  # 캣북스 열쇠 그대로
+    assert {k: saved["companies"]["c-cf2f0d"][k] for k in body} == body
+    from ax_agent_template import company_scope
+
+    with company_scope.using("c-cf2f0d"):
+        assert tenants.promo() == body  # data가 읽는 값도 같은 열쇠
+    assert tenants.promo()["brand_exposure"] == "caption"  # 요청 밖(캣북스)은 그대로
