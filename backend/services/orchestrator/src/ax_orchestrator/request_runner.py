@@ -58,7 +58,11 @@ log = logging.getLogger("orchestrator.request_runner")
 
 MAX_FAILED_RETRIES = 2
 MAX_CANCELED_RETRIES = 1
-STEP_TIMEOUT = 30.0
+# 11/25 의뢰 단계는 기본으로 시간 제한을 두지 않는다(부서가 답할 때까지 기다린다). 30초로 끊으니
+# 기획 제작안처럼 길게 쓰는 단계가 일하는 중에 "응답 대기 시간 초과"로 실패했다.
+# 단계에 `timeout_s`를 주면 그때만 끊는다. 마감 칸은 계약상 비울 수 없어 아주 먼 시각을 넣는다
+STEP_TIMEOUT: float | None = None
+NO_LIMIT_DEADLINE = timedelta(days=7)
 RETRY_DELAY = 0.2
 WAITING = ("held", "waiting_human", "waiting_async")
 NOT_OK = ("failed", "skipped", "rejected_by_human")
@@ -130,7 +134,7 @@ class RequestRunner:
         requests: WorkRequests,
         get_engine: Callable[[], Engine | None],
         *,
-        step_timeout: float = STEP_TIMEOUT,
+        step_timeout: float | None = STEP_TIMEOUT,
         retry_delay: float = RETRY_DELAY,
         notify: Notifier | None = None,
         escalate: Escalator | None = None,
@@ -417,10 +421,12 @@ class RequestRunner:
         읽기 단계만 실패·취소를 정해진 횟수 다시 부른다. 상태를 바꾸거나 비용이 드는 단계(A·B·C)는
         한 번만 보낸다: 첫 호출이 이미 일을 시작했을 수 있어 다시 보내면 중복·충돌(예: 영상 제작이
         "이미 진행 중"으로 거절)이 난다. 기다리는 시간은 단계의 `timeout_s`, 없으면 기본값이다.
+        둘 다 없으면 끊지 않는다(11/25).
         """
         rid = row["request_id"]
         retry = grade == request_tasks.READ_GRADE  # 등급을 모르면 다시 보내지 않는다
-        timeout = float(spec.get("timeout_s") or self._step_timeout)
+        limit = spec.get("timeout_s") or self._step_timeout
+        timeout = float(limit) if limit else None
         failed = canceled = attempts = 0
         while True:
             attempts += 1
@@ -430,7 +436,7 @@ class RequestRunner:
                     context_id=row.get("context_id") or f"ctx_{rid}",
                     token="orchestrator",
                     path=["orchestrator"],
-                    deadline=now() + timedelta(seconds=timeout),
+                    deadline=now() + (timedelta(seconds=timeout) if timeout else NO_LIMIT_DEADLINE),
                     idempotency_key=f"{rid}:{spec['skill']}:{step_id}",
                     **self._tenant_meta(),
                 ),
@@ -438,10 +444,13 @@ class RequestRunner:
                 input=payload,
                 untrusted={"request_text": row["text"]},  # 고객 글은 데이터 칸으로만
             )
-            try:
-                result = await asyncio.wait_for(engine.caller(dept, req), timeout=timeout + 5)
-            except TimeoutError:
-                return "부서 응답 시간 초과"
+            if timeout is None:
+                result = await engine.caller(dept, req)
+            else:
+                try:
+                    result = await asyncio.wait_for(engine.caller(dept, req), timeout=timeout + 5)
+                except TimeoutError:
+                    return "부서 응답 시간 초과"
             if retry and result.status == TaskStatus.CANCELED and canceled < MAX_CANCELED_RETRIES:
                 canceled += 1
                 await asyncio.sleep(self._retry_delay)
