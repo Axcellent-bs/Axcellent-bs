@@ -36,7 +36,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from pydantic import ConfigDict, Field
+from pydantic import AliasChoices, ConfigDict, Field
 
 from ax_agent_template.llm import LLMFormatError, LLMNotConfiguredError, LLMResponseError
 from ax_contracts.schemas.common import AxModel
@@ -102,7 +102,8 @@ class LooseShot(AxModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    scene_ko: str = ""
+    # 11/25 대본 칸 이름(visual_ko)을 따라 쓴 답도 받는다(그대로 버려 "0칸"이 났다)
+    scene_ko: str = Field(default="", validation_alias=AliasChoices("scene_ko", "visual_ko"))
     shot_size: str = ""
     angle: str = ""
     composition_ko: str = ""
@@ -317,6 +318,22 @@ def with_script(
     return out.model_copy(update={"shots": shots, "script_used": True, "cta_ko": _cut(cta, 120)})
 
 
+def fill_from_script(read: StoryRead, scenes: list[dict[str, Any]]) -> StoryRead:
+    """대본을 따르는 스토리보드: 칸 n의 장면은 대본 장면 n이 정한다(11/25).
+
+    LLM이 장면 설명을 비우거나 칸을 덜 주면 그 칸은 대본 화면 설명으로 채운다(구도는 기본값,
+    SVG 없음 → 화면은 배치판). 대본이 있는데 "0칸"으로 실패하던 것을 막는다."""
+    shots = list(read.shots)
+    filled: list[LooseShot] = []
+    for i, scene in enumerate(scenes):
+        visual = _cut(scene.get("visual_ko"), 200)
+        shot = shots[i] if i < len(shots) else LooseShot()
+        if not _cut(shot.scene_ko, 200):
+            shot = shot.model_copy(update={"scene_ko": visual})
+        filled.append(shot)
+    return read.model_copy(update={"shots": filled})
+
+
 def _script_story(scenes: list[dict[str, Any]]) -> str:
     return _cut(" ".join(str(s.get("visual_ko") or "") for s in scenes), MAX_STORY)
 
@@ -377,6 +394,8 @@ async def make_storyboard(
                 else "LLM API를 부르지 못했다(시간 초과 등). 잠시 뒤 다시 해 보세요"
             )
             raise StoryboardRefused("llm_failed", message) from exc
+        if scenes:
+            read = fill_from_script(read, scenes)
         try:
             out = build_output(read, character, style, count)
             if scenes:
