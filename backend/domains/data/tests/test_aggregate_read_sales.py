@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -78,16 +80,30 @@ def cat():  # noqa: ANN201
     return catalog.load_catalog("catbooks")
 
 
-@pytest.fixture
-def world(tmp_path, cat, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN001, ANN201
-    """원본 + 그날 하루 계산을 마친 집계 파일. 스위치는 시험마다 켠다."""
-    path = tmp_path / "aggregates.db"
-    monkeypatch.setenv(DB_ENV, str(path))
-    monkeypatch.delenv(read.READ_ENV, raising=False)
+@pytest.fixture(scope="module")
+def _built(tmp_path_factory: pytest.TempPathFactory) -> tuple[SalesStore, Path]:
+    """원본과 그날 하루 계산을 파일에서 한 번만 만든다 (시험마다 다시 하면 CI에서 10초씩).
+    원본은 시험이 읽기만 하고, 집계 파일은 시험마다 복사본을 쓴다 (read_buyers 시험과 같다)."""
+    path = tmp_path_factory.mktemp("agg") / "aggregates.db"
     sales, agg = filled(), AggregateStore(path)
-    run = daily.run_daily(sales, agg, TENANT, cat.sales, NOW, run_id="d1")
+    run = daily.run_daily(sales, agg, TENANT, catalog.load_catalog("catbooks").sales, NOW,
+                          run_id="d1")  # fmt: skip
     assert run is not None and run.status == "done"
     agg.close()
+    return sales, path
+
+
+@pytest.fixture
+def world(_built, tmp_path, monkeypatch: pytest.MonkeyPatch) -> SalesStore:  # noqa: ANN001
+    """원본 + 그날 하루 계산을 마친 집계 파일(복사본). 스위치는 시험마다 켠다."""
+    sales, built = _built
+    path = tmp_path / "aggregates.db"
+    for suffix in ("", "-wal", "-shm"):
+        src = built.with_name(built.name + suffix)
+        if src.exists():
+            shutil.copyfile(src, path.with_name(path.name + suffix))
+    monkeypatch.setenv(DB_ENV, str(path))
+    monkeypatch.delenv(read.READ_ENV, raising=False)
     return sales
 
 
