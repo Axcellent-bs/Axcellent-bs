@@ -26,7 +26,12 @@ NOW = datetime(2026, 11, 16, 3, 0, tzinfo=UTC)  # 한국 11/16 12:00
 
 
 def _source() -> FakeSalesSource:
-    return FakeSalesSource(load_config(FAKE_DIR / "catbooks.toml"), clock=lambda: NOW)
+    # 시험은 메모리·파일 저장소가 같은지만 견주고 가장 긴 창이 30일이다. 데모 설정(90일 × 하루 60건)
+    # 대신 40일 × 하루 20건 (11/25 CI 시간 줄이기, 집계 시험들과 같다)
+    cfg = load_config(FAKE_DIR / "catbooks.toml").model_copy(
+        update={"period_days": 40, "orders_per_day": 20}
+    )
+    return FakeSalesSource(cfg, clock=lambda: NOW)
 
 
 def test_memory_mode_switch() -> None:

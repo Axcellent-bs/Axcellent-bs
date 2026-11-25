@@ -32,9 +32,10 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 # 패키지마다 tests/test_smoke.py 이름이 겹쳐서 importlib 모드를 쓴다
-# CPU 수만큼 나눠 돌린다(pytest-xdist). 같은 파일의 시험은 한 워커에서 돈다(파일 단위 준비를 한 번만).
-# 한 프로세스로 돌리려면 `-n 0`. 끝에 가장 느린 시험 20개를 찍는다(CI 시간 확인용, 1초 미만은 뺀다)
-addopts = "--import-mode=importlib -n auto --dist loadfile --durations=20 --durations-min=1"
+# CPU 수만큼 나눠 돌린다(pytest-xdist). worksteal: 먼저 끝난 워커가 남은 시험을 나눠 가져가
+# 느린 파일 하나가 끝을 붙잡지 않는다. 한 프로세스로 돌리려면 `-n 0`.
+# 끝에 가장 느린 시험 20개를 찍는다(CI 시간 확인용, 1초 미만은 뺀다)
+addopts = "--import-mode=importlib -n auto --dist worksteal --durations=20 --durations-min=1"
 testpaths = [
     "shared",
     "domains",
