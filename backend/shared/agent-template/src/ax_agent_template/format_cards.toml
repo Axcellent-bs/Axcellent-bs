@@ -12,6 +12,7 @@
 # - ai_difficulty: AI 영상으로 만들기 (쉬움 · 보통 · 어려움)
 # - audio_names: 인스타 인기 오디오 이름 "Reels Sound - <형식>"의 <형식>과 맞춰 볼 이름 (형식 신호)
 # - note: 한 줄 설명
+# - recommend: 추천에 쓸지 (없으면 true). 한 화면 인물이 2명 넘는 카드는 false여야 한다 (load_cards 검사)
 
 [[cards]]
 id = "F-01"
@@ -78,7 +79,7 @@ id = "F-06"
 name = "전날의 나 vs 당일의 나"
 beats = [["전날", 0.3], ["당일", 0.3], ["펀치", 0.2], ["엔드카드", 0.2]]
 punch_beat = 2
-hook = "화면을 둘로 나누거나 날짜 자막으로 '전날'과 '당일'을 나란히"
+hook = "날짜 자막('전날' → '당일')을 붙인 컷 둘을 차례로 잇는다 (화면 나누기 없이 컷으로만)"
 punchline = "표정"
 people = 1
 ai_difficulty = "보통"
@@ -102,24 +103,24 @@ id = "F-08"
 name = "1인 2역 대화"
 beats = [["질문", 0.25], ["대답", 0.25], ["펀치 대답", 0.3], ["엔드카드", 0.2]]
 punch_beat = 2
-hook = "두 역할을 자막 이름표로 구분해 바로 대화로"
+hook = "두 역할을 자막 이름표로 구분해 바로 대화로. 두 역할은 번갈아 컷(한 화면에 같은 사람 둘 금지)"
 punchline = "자막"
 people = 2
 ai_difficulty = "보통"
 audio_names = ["Conversation", "Dialogue"]
-note = "한 사람이 두 역할을 번갈아 한다고 보고 짠다 (AI 영상은 두 인물 일관성 주의)"
+note = "한 사람이 두 역할을 번갈아 컷으로 한다. 한 화면에 같은 사람 둘을 넣지 않는다 (역할마다 한 컷씩)"
 
 [[cards]]
 id = "F-09"
-name = "계획 붕괴 타임랩스"
-beats = [["계획", 0.2], ["시간 경과", 0.35], ["결과", 0.25], ["엔드카드", 0.2]]
+name = "계획 붕괴"
+beats = [["계획", 0.2], ["시간 경과 컷", 0.35], ["결과", 0.25], ["엔드카드", 0.2]]
 punch_beat = 2
 hook = "계획표·체크리스트를 크게 보여 준다"
 punchline = "컷"
 people = 1
 ai_difficulty = "보통"
-audio_names = ["Timelapse", "Time Lapse"]
-note = "빨라지는 시계와 줄지 않는 할 일로 시간이 새는 것을 보여 준다"
+audio_names = ["Time Skip"]
+note = "시계·창밖이 바뀐 컷을 이어 붙여 시간이 흐른 것을 보여 주고, 줄지 않는 할 일로 끝낸다"
 
 [[cards]]
 id = "F-10"
@@ -180,3 +181,5 @@ people = 3
 ai_difficulty = "어려움"
 audio_names = ["Group", "Squad"]
 note = "인물이 많아 AI 영상은 어렵다. 반응을 한 사람씩 잘라 이어도 된다"
+# 한 화면 인물 2명 이하 규칙(MAX_PEOPLE)과 부딪혀 추천에서 뺀다 (라이브러리에는 남긴다)
+recommend = false
