@@ -139,8 +139,14 @@ def test_only_finance_and_orchestrator_may_ask(org, client) -> None:
     assert denied["status"] != "completed"
 
 
-def test_other_company_gets_no_example_roster(svc, org, client) -> None:
+def test_other_company_gets_no_example_roster(svc, org, client, monkeypatch) -> None:
     """회사 분리(11/25): 예시 명부(팀원 6명)는 캣북스만. 누비투어는 입력한 발령이 없으면 0명."""
+    # #1783부터 다른 회사는 환경변수 조직도(AX_ORG_CONFIG)를 보지 않고 그 회사 폴더 조직도만 읽는다.
+    # 이 시험엔 회사 연결이 없어, 누비투어 조직도 자리에 시험 조직도를 넣는다
+    from ax_agent_template.routing import load_org
+    from hr_agent.org import roster
+
+    monkeypatch.setattr(roster, "load_org", lambda path=None: load_org(path or str(org)))
     body = _body()
     body["meta"]["tenant_id"] = "nubi-tour"
     res = client.post("/a2a", json=body).json()

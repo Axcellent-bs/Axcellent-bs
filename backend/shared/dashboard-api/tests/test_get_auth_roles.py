@@ -72,6 +72,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.delenv(human_auth.ALLOW_SHARED_ENV, raising=False)
     monkeypatch.setenv(human_auth.SESSION_SECRET_ENV, "s" * 40)  # 테스트용 자리값
     monkeypatch.setenv(accounts.BOOTSTRAP_ENV, f"{BOOT_EMAIL}:{BOOT_PW}")
+    # 이 파일은 시험마다 로그인 5번(380여 개)이라 해시 강도만 낮춘다 (11/25 CI 시간).
+    # 비밀번호 검사 자체는 그대로 돈다 (해시에 n이 적혀 있어 검사도 같은 n을 쓴다)
+    monkeypatch.setattr(accounts, "SCRYPT_N", 2**4)
     accounts.reset_failures_for_tests()
     human_auth.reset_revoked_for_tests()
     # 사람 검사를 지난 뒤 부서 AI 호출 설정이 없어 나는 예외는 500으로 받는다(401·403만 본다)
