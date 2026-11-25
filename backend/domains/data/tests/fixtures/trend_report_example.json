@@ -218,5 +218,11 @@
   "related_terms": [],
   "topic_evidence": [],
   "excluded": [],
-  "sample": null
+  "sample": null,
+  "humor_status": null,
+  "humor_reason": null,
+  "humor_situations": [],
+  "format_signals": [],
+  "recommended_formats": [],
+  "recommended_cards": []
 }

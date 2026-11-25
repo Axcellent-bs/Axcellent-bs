@@ -4866,6 +4866,49 @@ class TrendReportSample(AxModel):
     instagram_read: int | None = Field(default=None, ge=0)  # 이번 보고서가 읽은 인스타 계정 수
 
 
+# 11/26 추가: 웃음 재료 · 형식 카드. 상황 요약은 공식 API로 받은 제목·캡션·해시태그(의뢰 주제 근거,
+# 공지·광고 제외)에서 LLM이 쓴 요약만 담는다 (원문·링크는 담지 않는다)
+HumorSourceKind = Literal["shorts_title", "reels_caption", "hashtag"]
+
+
+class TrendHumorSituation(AxModel):
+    # 상황 한 줄 요약 (원문과 연속 10자 넘게 같으면 버림)
+    text: str = Field(min_length=1, max_length=40)
+    format_id: str = ""  # 형식 카드 id (F-01…) 또는 "" (모름)
+    source_kind: HumorSourceKind  # 화면 근거 칸에는 출처 종류만
+
+
+class TrendFormatSignal(AxModel):
+    """인스타 인기 오디오 이름 "Reels Sound - <형식>"의 형식별 개수.
+
+    보조 신호라 결론에 쓰지 않는다."""
+
+    name: str  # <형식> 그대로 ("Before & After")
+    count: int = Field(ge=0)  # 최근 날 목록에서 그 이름 오디오 수
+    days_seen: int = Field(ge=0)  # 관측한 날 수 (최근 30일)
+    new: bool = False  # 관측 3일 미만 → 칩 "새로 N일 · 아직 추세 아님"
+    format_id: str | None = None  # 맞는 형식 카드 id (없으면 None)
+
+
+class TrendFormatCardBeat(AxModel):
+    label: str
+    ratio: float = Field(gt=0, le=1)  # 영상 길이 중 이 구간 비율
+    punch: bool = False  # 펀치라인 구간
+
+
+class TrendFormatCard(AxModel):
+    """형식 카드 (agent-template format_cards.toml 사본. 보고서에는 추천한 카드만)."""
+
+    id: str
+    name: str
+    beats: list[TrendFormatCardBeat] = Field(default_factory=list)
+    hook: str = ""
+    punchline: Literal["자막", "표정", "컷"]
+    people: int = Field(ge=0)
+    ai_difficulty: Literal["쉬움", "보통", "어려움"]
+    note: str = ""
+
+
 class TrendLimitGroups(AxModel):
     """근거와 한계를 셋으로 (v2). limits는 그대로 채운다."""
 
@@ -4895,6 +4938,15 @@ class TrendReport(AxModel):
     excluded: list[TrendExcludedEvidence] = Field(default_factory=list)
     # 11/26 추가: 표본 수·인스타 상태 (예전 저장본은 None)
     sample: TrendReportSample | None = None
+    # 11/26 추가: 웃음 재료(상황 요약 최대 5 · 형식 신호) · 추천 형식 카드(1~3, 코드 점수).
+    # humor_status는 이 묶음의 상태 (LLM 실패면 unknown + humor_reason, 보고서는 계속).
+    # 예전 저장본은 None
+    humor_status: SectionStatus | None = None
+    humor_reason: str | None = None
+    humor_situations: list[TrendHumorSituation] = Field(default_factory=list)
+    format_signals: list[TrendFormatSignal] = Field(default_factory=list)
+    recommended_formats: list[str] = Field(default_factory=list)  # 카드 id (점수 순)
+    recommended_cards: list[TrendFormatCard] = Field(default_factory=list)  # 위 id의 카드 내용
 
 
 class TrendReportListItem(AxModel):

@@ -11,6 +11,7 @@ import { waitForImages } from "@/lib/printImages";
 import { COMPACT, METRIC, ago } from "@/components/data/InstagramRadar";
 import { TrendTopicEvidence } from "@/components/data/TrendTopicEvidence";
 import { IgWarningBanner, TrendSample } from "@/components/data/TrendSample";
+import { TrendHumor } from "@/components/data/TrendHumor";
 import {
   dataAi, type InstagramRadarPost, type SectionStatus, type TrendReport, type TrendReportBeat, type TrendReportBrief, type TrendReportCompetitorRow,
   type TrendReportHandoffOutput, type TrendReportMaterial, type TrendReportSections, type TrendThemeSection,
@@ -659,6 +660,7 @@ export function TrendReportBody({ report, onRebuild, readOnly = false }: { repor
       {!keepPolling(report.status) && <IgWarningBanner report={report} />}
       <Conclusion s={sec.recommendation} summaryReason={report.summary_reason} onJump={jump} />
       <TrendTopicEvidence report={report} />
+      <TrendHumor report={report} />
       <TrendSample report={report} />
 
       <div className="flex flex-wrap items-center gap-2 pt-2">

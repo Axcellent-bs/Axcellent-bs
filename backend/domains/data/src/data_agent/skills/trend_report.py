@@ -1510,6 +1510,16 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
                           " 결론 근거에서 뺌")  # fmt: skip
     except Exception as error:  # noqa: BLE001 - 주제 근거 표만 비운다
         limits.append(f"의뢰 주제 근거를 고르지 못함 ({type(error).__name__})")
+    # 11/26 E 웃음 재료(상황 요약 LLM 1번)·형식 신호·추천 형식 카드. 실패해도 보고서는 계속
+    try:
+        from data_agent.skills.trend_report_humor import humor_section
+
+        report.calls.llm += await humor_section(report, deps.llm, deps.env, now,
+                                                context_id=context_id)  # fmt: skip
+    except Exception as error:  # noqa: BLE001 - 웃음 재료 칸만 비운다
+        report.humor_status = "unknown"
+        report.humor_reason = f"웃음 재료를 만들지 못함 ({type(error).__name__})"
+    await save()
 
     async def run_recommendation() -> None:
         # 11/24 홍보 방향: 회사 설정(화면 저장 → tenant.toml) + 의뢰 문장이 제품을 직접 말하는지

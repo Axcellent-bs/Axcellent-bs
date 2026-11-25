@@ -484,7 +484,9 @@ def test_full_report_uses_at_most_two_llm_calls(tmp_path: Path) -> None:
     asyncio.run(tr.build(report, request, _deps(tmp_path, llm, graph, memes=MEMES),
                          TrendReportStore(), now=NOW))  # fmt: skip
     assert report.status == "done", report.model_dump()
-    assert len(llm.calls) == 2 and report.calls.llm == 2
+    # 11/26 E: 추출 1 + 추천 1 + 웃음 재료 상황 요약 1 = 3번 (예전 기대: 2번)
+    assert len(llm.calls) == 3 and report.calls.llm == 3
+    assert [schema for schema, _ in llm.calls] == ["_Extracted", "_Situations", "_Recommendation"]
     assert report.calls.instagram == 34 and report.calls.naver == 6
     assert report.summary_line and report.sections.recommendation.materials
     assert report.sections.recommendation.beats == []

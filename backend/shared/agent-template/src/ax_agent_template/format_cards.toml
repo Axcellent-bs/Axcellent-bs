@@ -1,0 +1,182 @@
+# 짧은 영상 형식 카드 라이브러리 (11/26 초안, 재현 님 검토 필요).
+# 일반 형식만 적는다: 특정 영상·채널·실존 인물·남의 대사를 넣지 않는다.
+# 읽기: ax_agent_template.format_cards (표준 라이브러리 tomllib). 형식 검사는 load_cards가 한다.
+#
+# 칸
+# - id: F-01… (겹치지 않게)
+# - name: 형식 이름
+# - beats: 구간 [이름, 비율]. 비율 합은 1. punch_beat = 펀치라인 구간 번호(0부터)
+# - hook: 첫 1~2초에 붙잡는 방식
+# - punchline: 펀치라인이 어디서 터지는지 (자막 · 표정 · 컷)
+# - people: 화면에 나오는 사람 수 (0 = 손·사물만)
+# - ai_difficulty: AI 영상으로 만들기 (쉬움 · 보통 · 어려움)
+# - audio_names: 인스타 인기 오디오 이름 "Reels Sound - <형식>"의 <형식>과 맞춰 볼 이름 (형식 신호)
+# - note: 한 줄 설명
+
+[[cards]]
+id = "F-01"
+name = "POV"
+beats = [["POV 자막", 0.15], ["상황", 0.55], ["리액션", 0.15], ["엔드카드", 0.15]]
+punch_beat = 2
+hook = "첫 화면 자막으로 'POV: ~한 나'를 보여 주고 바로 상황으로"
+punchline = "표정"
+people = 1
+ai_difficulty = "쉬움"
+audio_names = ["POV"]
+note = "1인칭 시점. 손·책상·화면 위주라 인물 일관성 부담이 적다"
+
+[[cards]]
+id = "F-02"
+name = "기대 vs 현실"
+beats = [["기대", 0.2], ["현실", 0.25], ["펀치 리액션", 0.35], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "자막 라벨 '기대'로 시작해 같은 구도로 '현실'을 잇는다"
+punchline = "자막"
+people = 1
+ai_difficulty = "쉬움"
+audio_names = ["Expectation vs Reality", "Expectation Reality", "기대 vs 현실"]
+note = "같은 구도 두 컷의 차이로 웃긴다. 라벨 자막이 핵심"
+
+[[cards]]
+id = "F-03"
+name = "반전 컷"
+beats = [["설정", 0.27], ["다짐", 0.2], ["반전", 0.33], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "다짐 한 줄 자막('오늘은 진짜 한다')으로 기대를 세운다"
+punchline = "컷"
+people = 1
+ai_difficulty = "보통"
+audio_names = ["Plot Twist", "Twist", "Transition"]
+note = "시계·조명·옷이 바뀐 컷 하나로 시간이 흐른 반전을 보여 준다"
+
+[[cards]]
+id = "F-04"
+name = "리스티클 (N가지)"
+beats = [["제목", 0.13], ["항목 1", 0.2], ["항목 2", 0.2], ["항목 3", 0.27], ["엔드카드", 0.2]]
+punch_beat = 3
+hook = "'○○할 때 꼭 나오는 3가지' 같은 숫자 제목 자막"
+punchline = "자막"
+people = 1
+ai_difficulty = "쉬움"
+audio_names = ["Listicle", "Top 3", "Top 5", "Ranking"]
+note = "마지막 항목에 가장 공감 가는 것을 둔다"
+
+[[cards]]
+id = "F-05"
+name = "Before & After"
+beats = [["Before", 0.3], ["전환", 0.1], ["After", 0.4], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "Before 상태를 과장해서 바로 보여 준다"
+punchline = "컷"
+people = 1
+ai_difficulty = "보통"
+audio_names = ["Before & After", "Before and After", "Before After", "Glow Up"]
+note = "전환 순간(손뼉·화면 가리기)으로 이어 붙인다"
+
+[[cards]]
+id = "F-06"
+name = "전날의 나 vs 당일의 나"
+beats = [["전날", 0.3], ["당일", 0.3], ["펀치", 0.2], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "화면을 둘로 나누거나 날짜 자막으로 '전날'과 '당일'을 나란히"
+punchline = "표정"
+people = 1
+ai_difficulty = "보통"
+audio_names = ["Me vs Me", "Yesterday vs Today"]
+note = "같은 사람의 두 상태(여유 vs 다급)를 맞세운다. 시험·마감·여행 전날 등에 쓴다"
+
+[[cards]]
+id = "F-07"
+name = "공감 독백"
+beats = [["첫 줄", 0.2], ["상황 나열", 0.4], ["펀치 한 줄", 0.2], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "'나만 그래?'처럼 묻는 첫 줄 자막"
+punchline = "자막"
+people = 1
+ai_difficulty = "쉬움"
+audio_names = ["Storytime", "Relatable"]
+note = "카메라를 보고 혼잣말하듯. 상황은 자막으로 빠르게"
+
+[[cards]]
+id = "F-08"
+name = "1인 2역 대화"
+beats = [["질문", 0.25], ["대답", 0.25], ["펀치 대답", 0.3], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "두 역할을 자막 이름표로 구분해 바로 대화로"
+punchline = "자막"
+people = 2
+ai_difficulty = "보통"
+audio_names = ["Conversation", "Dialogue"]
+note = "한 사람이 두 역할을 번갈아 한다고 보고 짠다 (AI 영상은 두 인물 일관성 주의)"
+
+[[cards]]
+id = "F-09"
+name = "계획 붕괴 타임랩스"
+beats = [["계획", 0.2], ["시간 경과", 0.35], ["결과", 0.25], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "계획표·체크리스트를 크게 보여 준다"
+punchline = "컷"
+people = 1
+ai_difficulty = "보통"
+audio_names = ["Timelapse", "Time Lapse"]
+note = "빨라지는 시계와 줄지 않는 할 일로 시간이 새는 것을 보여 준다"
+
+[[cards]]
+id = "F-10"
+name = "체크리스트"
+beats = [["리스트", 0.2], ["체크", 0.35], ["마지막 항목", 0.25], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "손이 체크리스트를 화면 가득 펼친다"
+punchline = "자막"
+people = 0
+ai_difficulty = "쉬움"
+audio_names = ["Checklist", "To Do"]
+note = "손·사물만 나와 인물이 없다. 마지막 항목에 반전"
+
+[[cards]]
+id = "F-11"
+name = "그 사람 유형"
+beats = [["유형 소개", 0.2], ["행동", 0.4], ["펀치", 0.2], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "'○○할 때 꼭 있는 유형' 자막"
+punchline = "표정"
+people = 1
+ai_difficulty = "보통"
+audio_names = ["Types of", "Types"]
+note = "특정 실존 인물이 아니라 누구나 아는 행동 유형을 과장한다"
+
+[[cards]]
+id = "F-12"
+name = "자막 리액션"
+beats = [["상황 자막", 0.3], ["리액션", 0.5], ["엔드카드", 0.2]]
+punch_beat = 1
+hook = "상황을 한 줄 자막으로 먼저 보여 준다"
+punchline = "표정"
+people = 1
+ai_difficulty = "쉬움"
+audio_names = ["Reaction", "React"]
+note = "얼굴 클로즈업 하나로 끝나서 가장 짧고 만들기 쉽다"
+
+[[cards]]
+id = "F-13"
+name = "손 시점 작업"
+beats = [["손 등장", 0.2], ["과정", 0.4], ["결과", 0.2], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "책상 위로 손이 들어오는 첫 컷"
+punchline = "컷"
+people = 0
+ai_difficulty = "쉬움"
+audio_names = ["Satisfying", "ASMR", "Unboxing"]
+note = "손과 사물만. 결과 컷에 의외의 것을 둔다"
+
+[[cards]]
+id = "F-14"
+name = "여럿이 동시에 반응"
+beats = [["상황", 0.3], ["동시 반응", 0.3], ["펀치", 0.2], ["엔드카드", 0.2]]
+punch_beat = 2
+hook = "여러 사람이 한 화면에서 같은 소식을 듣는다"
+punchline = "표정"
+people = 3
+ai_difficulty = "어려움"
+audio_names = ["Group", "Squad"]
+note = "인물이 많아 AI 영상은 어렵다. 반응을 한 사람씩 잘라 이어도 된다"

@@ -2083,6 +2083,29 @@ export interface TrendReport {
   excluded?: TrendExcludedEvidence[];
   /** 표본 수·인스타 상태 (11/26, 예전 저장본은 없음) */
   sample?: TrendReportSample | null;
+  /** 웃음 재료·추천 형식 카드 (11/26, 예전 저장본은 없음) */
+  humor_status?: SectionStatus | null;
+  humor_reason?: string | null;
+  humor_situations?: TrendHumorSituation[];
+  format_signals?: TrendFormatSignal[];
+  recommended_formats?: string[];
+  recommended_cards?: TrendFormatCard[];
+}
+export type HumorSourceKind = "shorts_title" | "reels_caption" | "hashtag";
+/** 상황 한 줄 요약 (원문 아님) · 형식 카드 id("" = 모름) · 출처 종류 */
+export interface TrendHumorSituation { text: string; format_id: string; source_kind: HumorSourceKind }
+/** 인기 오디오 이름 "Reels Sound - <형식>" 형식별 개수 (보조 신호) */
+export interface TrendFormatSignal { name: string; count: number; days_seen: number; new: boolean; format_id: string | null }
+export interface TrendFormatCardBeat { label: string; ratio: number; punch: boolean }
+export interface TrendFormatCard {
+  id: string;
+  name: string;
+  beats: TrendFormatCardBeat[];
+  hook: string;
+  punchline: "자막" | "표정" | "컷";
+  people: number;
+  ai_difficulty: "쉬움" | "보통" | "어려움";
+  note: string;
 }
 export interface TrendReportSample {
   total: number;
