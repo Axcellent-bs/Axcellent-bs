@@ -25,6 +25,7 @@ from data_agent.sales_fake import FAKE_DIR, FakeSalesSource, load_config
 from data_agent.sales_store import SalesStore
 from data_agent.skills import basket_pairs as bp
 from data_agent.skills import channel_value as cv
+from data_agent.skills import event_proposal as ep
 from data_agent.skills import retention as rt
 from data_agent.skills import segment_analysis as seg
 from data_agent.skills.retention import HISTORY_FROM
@@ -229,3 +230,18 @@ def test_coverage_reads_yesterday_snapshot(world, cat, monkeypatch) -> None:  # 
         assert want.status == "ok" and any(not r.suppressed for r in want.rows)
         assert out.rows == want.rows
         assert out.summary.endswith("(11월 15일 기준)")
+
+
+def test_event_base_reads_yesterday_snapshot(world, cat, monkeypatch) -> None:  # noqa: ANN001
+    """이벤트 제안 후보는 어제 기준 스냅샷.
+    같은 기간(90일, 대상 고객 끝 = 기준일 24시) 원본과 같다."""
+    with monkeypatch.context() as m:
+        end = _same_window(m, "90d")
+        want = ep.read_base(world, TENANT, cat.sales, cat.id, end)
+    monkeypatch.setenv(read.READ_ENV, read.READ_AGGREGATE)
+    got = ep.read_base(world, TENANT, cat.sales, cat.id, NOW)
+    assert want.candidates and got.as_of == AS_OF
+    assert got.candidates == want.candidates
+    assert got.basis.period_to == end
+    later = ep.read_base(world, TENANT, cat.sales, cat.id, NOW + timedelta(days=2))
+    assert later.as_of is None  # 그 기준일 스냅샷이 없으면 원본

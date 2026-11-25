@@ -115,6 +115,10 @@ CREATE TABLE IF NOT EXISTS agg_channel_value (
     horizon_days INTEGER NOT NULL,
     PRIMARY KEY (tenant_id, as_of, period, source_label)
 );
+CREATE TABLE IF NOT EXISTS agg_event_base (
+    {_COMMON}, as_of TEXT NOT NULL, catalog_version TEXT NOT NULL, candidates TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, as_of)
+);
 CREATE TABLE IF NOT EXISTS agg_compare (
     tenant_id TEXT NOT NULL, as_of TEXT NOT NULL, target TEXT NOT NULL, same INTEGER NOT NULL,
     diffs TEXT NOT NULL DEFAULT '[]', compared_at TEXT NOT NULL,
@@ -400,7 +404,7 @@ class AggregateStore:
         oldest = _months_back(as_of, KEEP_SNAPSHOT_MONTHS).isoformat()
         removed = 0
         with self._tx() as conn:
-            for table in (*SNAPSHOT_TABLES, *MORE_TABLES):
+            for table in (*SNAPSHOT_TABLES, *MORE_TABLES, "agg_event_base"):
                 removed += conn.execute(
                     f"DELETE FROM {table} WHERE tenant_id = ? AND (as_of < ? OR (as_of < ? AND "
                     f"as_of != (SELECT MAX(t2.as_of) FROM {table} t2 WHERE t2.tenant_id = "
@@ -448,6 +452,35 @@ class AggregateStore:
             conn.executemany(_INSERT_PAIR, [_pair_values(tenant_id, a, r) for r in pairs])
             conn.executemany(_INSERT_PROFILE, [_profile_values(tenant_id, a, r) for r in profiles])
             conn.executemany(_INSERT_CHANNEL, [_channel_values(tenant_id, a, r) for r in channels])
+
+    def replace_event_base(  # noqa: PLR0913 - 계산 기록 칸
+        self,
+        tenant_id: str,
+        as_of: date,
+        run_id: str,
+        computed_at: datetime,
+        catalog_version: str,
+        candidates: Sequence[dict],
+        source_cursor: str | None = None,
+    ) -> None:
+        """이벤트 제안 후보(90일, 사람 수는 k 이상만) 스냅샷을 그 기준일만 바꿔 넣는다 (3-2 ⑦)."""
+        a = as_of.isoformat()
+        with self._tx() as conn:
+            conn.execute(
+                "DELETE FROM agg_event_base WHERE tenant_id = ? AND as_of = ?", (tenant_id, a)
+            )
+            conn.execute(
+                f"INSERT INTO agg_event_base ({_COMMON_COLS}, as_of, catalog_version, candidates) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (tenant_id, run_id, _iso(computed_at), source_cursor, a, catalog_version,
+                 json.dumps(list(candidates), ensure_ascii=False)),
+            )  # fmt: skip
+
+    def event_base(self, tenant_id: str, as_of: date) -> sqlite3.Row | None:
+        return self._conn.execute(
+            "SELECT * FROM agg_event_base WHERE tenant_id = ? AND as_of = ?",
+            (tenant_id, as_of.isoformat()),
+        ).fetchone()
 
     def more_rows(self, table: str, tenant_id: str, as_of: date) -> list[sqlite3.Row]:
         if table not in MORE_TABLES:
