@@ -339,14 +339,16 @@ def test_video_prompt_carries_the_script_flow(
     _call("storyboard_prompt", {}, {"story": STORY, "record_id": rid})
     prompt = rr._video_prompt(store.get(rid))
     assert prompt.startswith(BASE)
-    assert 'Scene 1 (0-5s): 칸 1 / 소녀: "대사 가예요." / on-screen text "자막가".' in prompt
-    assert 'Scene 2 (5-10s): 칸 2 / narration: "대사 나예요."' in prompt
-    assert prompt.endswith('End with the call to action "지금 만나 보세요".')
+    # 11/25: 자막·CTA는 프롬프트에 넣지 않고(코드가 얹는다), 대사는 따옴표 없이 장면 내용으로만
+    assert "Scene 1 (0-5s): 칸 1 / the action conveys: 대사 가예요.." in prompt
+    assert "Scene 2 (5-10s): 칸 2 / the action conveys: 대사 나예요.." in prompt
+    assert "자막가" not in prompt and "지금 만나 보세요" not in prompt and '"' not in prompt
+    assert prompt.endswith(rr.NO_TEXT)
     params = rr._video_mcp_params(store.get(rid), 10)
     assert params["prompt"] == prompt
 
 
-def test_video_prompt_stays_within_the_limit_and_keeps_the_cta() -> None:
+def test_video_prompt_stays_within_the_limit_and_keeps_the_no_text_line() -> None:
     shots = [
         {
             "no": i,
@@ -358,18 +360,18 @@ def test_video_prompt_stays_within_the_limit_and_keeps_the_cta() -> None:
         }
         for i in range(1, 13)
     ]
-    prompt = rr.storyboard_video_prompt("soft anime " * 15, shots, "지금 만나 보세요")
+    prompt = rr.storyboard_video_prompt("soft anime " * 15, shots)
     assert len(prompt) <= rr.VIDEO_PROMPT_MAX
     assert "Scene 12 (60-65s)" in prompt
-    assert prompt.endswith('End with the call to action "지금 만나 보세요".')
+    assert prompt.endswith(rr.NO_TEXT)
 
 
 def test_video_prompt_without_script_is_unchanged() -> None:
     assert rr.storyboard_video_prompt("flat 2D") == f"{BASE} flat 2D"
     board = {"style_en": "flat 2D", "shots": [{"no": 1, "scene_ko": "x"}], "script_used": False}
     assert rr._video_prompt({"storyboard": board}) == f"{BASE} flat 2D"
-    assert rr.storyboard_video_prompt(None, [{"no": 1, "start_s": 0.25, "end_s": 2.25}], "") == (
-        f"{BASE} Follow this script panel by panel: Scene 1 (0.3-2.3s): ."
+    assert rr.storyboard_video_prompt(None, [{"no": 1, "start_s": 0.25, "end_s": 2.25}]) == (
+        f"{BASE} Follow this script panel by panel: Scene 1 (0.3-2.3s): . {rr.NO_TEXT}"
     )
 
 

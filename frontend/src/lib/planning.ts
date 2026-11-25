@@ -8,8 +8,10 @@ import { useVisibleInterval } from './visibleInterval'
 import { createLatestGate, toStamps } from './devChatView'
 import { RELAY_TOKEN, SAFETY_API_URL, SAFETY_HUMAN_TOKEN } from '@/lib/env'
 import { isNginxBlocked, NGINX_BLOCKED_CODE, NGINX_BLOCKED_MESSAGE } from '@/lib/apiError'
+import { tokenFree } from '@/lib/apiDirect'
 import { sessionAuth } from '@/lib/humanToken'
-import { getSession } from '@/lib/humanSession'
+import { getSession, onSessionChange } from '@/lib/humanSession'
+import { openStateStream } from '@/lib/stateStream'
 import { actorAccount } from '@/lib/actor'
 import { auditOf, paramLines, routeAction, routeWhyOf, tokenFor } from '@/lib/devView'
 import { type Action, type FillPreview, type Activity, type ChatThread, type CodingMode, type CrossEvidence, type CrossReview, type Doc, type Incident, type OutMsg, type PR, type Request, type State, type Thread } from '@/lib/planningData'
@@ -199,9 +201,9 @@ export async function approveReview(reviewId: string, note = '교차검증 대�
 }
 
 async function call<T>(base: string, path: string, init?: RequestInit): Promise<T> {
-  // 머리 없는 읽기(GET)는 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이).
-  // state도 싣는다(11/25 회사 분리): 서버가 세션 회사로 그 회사 상태를 고른다. 안 실으면 누비투어 화면에 캣북스 상태가 보였다
+  // 머리 없는 읽기(GET)는 로그인 세션이 있으면 세션 토큰을 싣는다(없으면 지금처럼 헤더 없이). 토큰을 안 보는 읽기(state)는 싣지 않는다
   const read = (init?.method ?? 'GET').toUpperCase() === 'GET' && !new Headers(init?.headers).has('authorization')
+    && !tokenFree(base === DEV_API ? 'dev' : 'planning', `/api/planning${path}`)
   const res = await fetch(`${base}/api/planning${path}`, { cache: 'no-store', ...init, ...(read ? { headers: { ...Object.fromEntries(new Headers(init?.headers)), ...sessionAuth() } } : {}) })
   const parsed: unknown = await res.json().catch(() => undefined)
   const body = parsed ?? {}
@@ -613,6 +615,10 @@ export function useSharedStore(base: string): [State, SendAction, boolean] {
   const reviews = useRef(state.reviews)
   reviews.current = state.reviews
 
+  // 로그인·로그아웃·다른 회사로 다시 로그인하면 그 세션 회사 상태로 다시 잇는다 (11/25 회사 분리)
+  const [sessionKey, setSessionKey] = useState(() => getSession()?.token ?? '')
+  useEffect(() => onSessionChange(() => setSessionKey(getSession()?.token ?? '')), [])
+
   useEffect(() => {
     let alive = true
     // 갱신마다 교차검증 대기열을 따로 읽으므로 늦게 끝난 오래된 갱신이 최신을 덮을 수 있다 → 버린다
@@ -622,18 +628,20 @@ export function useSharedStore(base: string): [State, SendAction, boolean] {
       const queue = await api.reviewQueue().catch(() => [] as QueueItem[])
       if (alive && gate.fresh(n)) setState(fromBackend(raw, queue))
     }
-    const es = new EventSource(api.eventsUrl())
-    es.addEventListener('state', (e) => {
-      setConnected(true)
-      void apply(JSON.parse((e as MessageEvent).data) as Record<string, unknown>)
+    // 세션이 있으면 세션 토큰을 실어 받는다(서버가 그 회사 상태를 보낸다). EventSource는 머리를 못 실어 캣북스로 읽혔다
+    const close = openStateStream(api.eventsUrl(), sessionKey ? `Bearer ${sessionKey}` : null, {
+      onState: (data) => {
+        setConnected(true)
+        void apply(JSON.parse(data) as Record<string, unknown>)
+      },
+      onOpen: () => setConnected(true),
+      onError: (open) => setConnected(open),
     })
-    es.onopen = () => setConnected(true)
-    es.onerror = () => setConnected(es.readyState === EventSource.OPEN)
     return () => {
       alive = false
-      es.close()
+      close()
     }
-  }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [base, sessionKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 성공하면 true. 실패는 여기서 토스트로 알리고 false (부른 쪽은 성공 토스트를 성공 뒤에만 띄운다)
   const dispatch = useCallback(async (a: Action): Promise<boolean> => {

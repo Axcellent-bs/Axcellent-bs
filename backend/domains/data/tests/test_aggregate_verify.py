@@ -62,3 +62,19 @@ def test_sample_days_and_missing_source(capsys, monkeypatch, tmp_path: Path) -> 
     monkeypatch.setenv(SALES_DB_ENV, str(tmp_path / "none.db"))
     assert main(["--verify-days", "30"]) == 0
     assert "판매 원본이 없음" in capsys.readouterr().out
+
+
+def test_basket_hidden_slots_kept_when_no_pair_is_shown(tmp_path: Path) -> None:
+    """보이는 쌍 없이 숨긴 자리만 있는 날(구매자가 적은 초기)도 집계가 원본과 같다 (11/25 서버 비교
+    basket_pairs product 다름 19건). 가짜 판매 첫 주문 며칠 뒤가 그런 날이다."""
+    path = tmp_path / "sales.db"
+    store = SalesStore(path)
+    late = datetime(2026, 11, 25, 3, 0, tzinfo=UTC)
+    src = FakeSalesSource(load_config(FAKE_DIR / "catbooks.toml"), clock=lambda: late)
+    assert asyncio.run(collect_once(src, store, source_name="fake", now=late)).errors == []
+    store.close()
+    early = datetime(2026, 9, 2, 3, 0, tzinfo=UTC)  # 어제 = 9/1
+    report = v.verify(path, TENANT, catalog.load_catalog("catbooks"), early, days=1, every=7)
+    t = report.analyses["basket_pairs"]
+    assert t.different == 0, t.diffs
+    assert t.same > 0

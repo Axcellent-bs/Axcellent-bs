@@ -82,6 +82,18 @@ def test_nubi_session_sees_no_catbooks_rows_on_any_planning_screen(services) -> 
     assert state["specs"] == [] and state["requests"] == [] and state["tasks"] == []
 
 
+def test_state_stream_follows_session_company(services) -> None:  # noqa: ANN001
+    """화면 상태 SSE(`/events`)도 세션 회사 상태를 보낸다 (11/25: 화면이 SSE에 세션 토큰을 싣는다).
+
+    예전 화면은 EventSource라 머리를 못 실어 누비투어 화면에 캣북스 제안이 보였다."""
+    client = TestClient(app)
+    nubi = client.get(f"{BASE}/events?max_events=1", headers=_session("nubi")).text
+    assert "event: state" in nubi
+    assert "nubi 여행 숏츠" in nubi and "catbooks 여행 숏츠" not in nubi
+    cat = client.get(f"{BASE}/events?max_events=1", headers=_session("catbooks")).text
+    assert "catbooks 여행 숏츠" in cat and "nubi 여행 숏츠" not in cat
+
+
 def test_catbooks_session_and_anonymous_stay_on_catbooks(services) -> None:  # noqa: ANN001
     client = TestClient(app)
     for headers in (_session("catbooks"), {}):

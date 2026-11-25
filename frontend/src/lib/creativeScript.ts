@@ -103,3 +103,16 @@ export function stageChips(r: { script_scenes?: number; shot_count: number }): s
   if (r.shot_count) chips.push(`스토리보드 ${r.shot_count}칸`);
   return chips.length ? chips : ["시트만"];
 }
+
+/** 스토리보드가 대본을 따르지 않거나, 대본을 스토리보드보다 나중에 고쳤다 (11/25, 영상은 스토리보드 장면으로 만든다) */
+export function boardBehindScript(rec: {
+  script?: Pick<CreativeScript, "at"> | null;
+  storyboard?: { script_used?: boolean } | null;
+  storyboard_at?: string | null;
+}): boolean {
+  if (!rec.script || !rec.storyboard) return false;
+  if (!rec.storyboard.script_used) return true;
+  const scriptAt = rec.script.at ? Date.parse(rec.script.at) : NaN;
+  const boardAt = rec.storyboard_at ? Date.parse(rec.storyboard_at) : NaN;
+  return Number.isFinite(scriptAt) && Number.isFinite(boardAt) && scriptAt > boardAt;
+}
