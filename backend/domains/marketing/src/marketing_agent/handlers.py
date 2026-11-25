@@ -815,7 +815,13 @@ async def storyboard_prompt(request: AgentRequest) -> AgentResult:
     out = out.model_copy(update={"record_id": _record_storyboard(out, request.untrusted)})
     rid = out.record_id
     if rid:
-        _safe_render(lambda: _render.maybe_start_board(STATE.media_ledger, request.meta, rid))
+        # [Higgsfield 그림으로 다시 그리기]: 사람이 고를 때만 untrusted.board_higgsfield=true
+        redraw = request.untrusted.get("board_higgsfield") is True
+        _safe_render(
+            lambda: _render.maybe_start_board(
+                STATE.media_ledger, request.meta, rid, force=redraw
+            )
+        )
     return _result(
         request,
         TaskStatus.COMPLETED,

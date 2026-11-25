@@ -582,10 +582,12 @@ def _story_sha(rec: dict[str, Any]) -> str:
 
 
 def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
-                      cid: str | None = None) -> None:  # fmt: skip
+                      cid: str | None = None, force: bool = False) -> None:  # fmt: skip
     """스토리보드가 붙었고 이미지 시트 그림이 있으면 스토리보드 그림을 만든다.
 
-    회사: `cid` → 시트 그림을 만들 때 남긴 회사 → `request_company(meta)`."""
+    회사: `cid` → 시트 그림을 만들 때 남긴 회사 → `request_company(meta)`.
+    11/25: 영상이 가상 인물 원본을 참조로 쓰면(`board_needed`가 False) 그림을 만들지 않는다(크레딧
+    예약 없음). 사람이 [Higgsfield 그림으로 다시 그리기]를 고르면 `force=True`."""
     rec = _creative.store().get(record_id)
     if rec is None or not rec.get("storyboard"):
         return
@@ -600,6 +602,8 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
         return  # 시트 그림이 끝나면 다시 부른다
     cid = cid or sheet.get("company_id") or request_company(meta)
     via = route(cid)
+    if not force and not board_needed(rec, via):
+        return
     _log_route(via, cid, "board_image", record_id)
     why = configured("image", via, cid)
     if why:
@@ -611,6 +615,7 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
         _set(record_id, "board_image", status="failed", error="sheet_file_missing")
         return
     board_out = rec["storyboard"]
+    _creative.store().set_board_source(record_id, "higgsfield")
     _set(
         record_id,
         "board_image",
@@ -801,11 +806,11 @@ async def request_video(
     video = render.get("video") or {}
     if video.get("status") in ("awaiting_approval", "running", "done"):
         return video
-    if (render.get("board_image") or {}).get("status") != "done":
-        raise RenderError("board_image_not_ready")
     board = render.get("board_image") or {}
     cid = cid or board.get("company_id") or request_company(meta)
     via = route(cid)
+    if board.get("status") != "done" and board_needed(rec, via):
+        raise RenderError("board_image_not_ready")
     _log_route(via, cid, "video", record_id)
     why = configured("video", via, cid)
     if why:
@@ -1145,10 +1150,24 @@ def video_reference(rec: dict[str, Any], model: str) -> tuple[str, str]:
     자리)을 `image_references`로. 아니면(모르는 모델 포함) 지금처럼 스토리보드 그림을
     `start_image`로."""
     sheet = (rec.get("render") or {}).get("sheet_image") or {}
-    original = sheet.get("source") == ORIGINAL_SOURCE and sheet.get("status") == "done"
+    # 의뢰 기록은 대표 캐릭터의 원본을 복사해 오므로(`source="brand_copy"`) `original`로 이어 본다
+    original = (sheet.get("source") == ORIGINAL_SOURCE or sheet.get("original") is True) and (
+        sheet.get("status") == "done"
+    )
     if is_reference_kind(rec) and original and _mcp.takes_image_references(model):
         return "sheet_image", _mcp.IMAGE_REF_ROLE
     return "board_image", _mcp.VIDEO_START_ROLE
+
+
+def board_needed(rec: dict[str, Any], via: str) -> bool:
+    """영상 입력으로 Higgsfield 스토리보드 그림이 필요한가(11/25).
+
+    회사 계정(MCP)으로 만들고 영상 모델이 `image_references`를 받으며 캐릭터가 올린 원본이면
+    그 원본을 참조로 쓰므로 필요 없다. 그 밖(start_image 모델·real_photo·캐릭터 없음·키 길)은
+    지금처럼."""
+    if via != MCP:
+        return True
+    return video_reference(rec, mcp_video_model())[0] != "sheet_image"
 
 
 def plan_seconds(plan_s: Any, model: str) -> tuple[int, int | None]:

@@ -179,6 +179,27 @@ class CreativeRecords:
             )
         return cur.rowcount == 1
 
+    def set_board_source(self, record_id: str, source: str) -> bool:
+        """스토리보드 JSON의 `board_source`만 바꾼다(`storyboard_at` 그대로). 없으면 False."""
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT storyboard FROM marketing_creative_records"
+                " WHERE record_id = ? AND tenant_id = ?",
+                (record_id, self.company_id),
+            ).fetchone()
+            if row is None or not row["storyboard"]:
+                return False
+            board = json.loads(row["storyboard"])
+            if board.get("board_source") == source:
+                return True
+            board["board_source"] = source
+            self._conn.execute(
+                "UPDATE marketing_creative_records SET storyboard = ?"
+                " WHERE record_id = ? AND tenant_id = ?",
+                (json.dumps(board), record_id, self.company_id),
+            )
+        return True
+
     def attach_script(self, record_id: str, script: dict[str, Any], story: str | None) -> bool:
         """기록에 대본을 붙인다(다시 쓰거나 고치면 바꾼다). 줄거리를 주면 같이 남긴다.
 

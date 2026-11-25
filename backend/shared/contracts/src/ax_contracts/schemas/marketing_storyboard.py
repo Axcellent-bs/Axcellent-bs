@@ -13,11 +13,14 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 
 from ax_contracts.schemas.common import AxModel
 
 STORYBOARD_SKILL = "storyboard_prompt"
+MAX_SVG_BYTES = 8192  # 칸 하나의 SVG 원문 상한(정리한 뒤 UTF-8 바이트)
 
 MAX_STORY = 1000
 MAX_CHARACTER_EN = 1500
@@ -73,6 +76,8 @@ class StoryboardShot(AxModel):
     speaker_ko: str = Field(default="", max_length=40)
     line_ko: str = Field(default="", max_length=200)
     caption_ko: str = Field(default="", max_length=60)
+    # 11/25 추가: 정리한 SVG 원문(칸당 8KB 이하). 없으면 코드로 그린 배치판을 쓴다
+    svg: str | None = Field(default=None, max_length=MAX_SVG_BYTES)
 
 
 class StoryboardPromptOutput(AxModel):
@@ -87,3 +92,5 @@ class StoryboardPromptOutput(AxModel):
     record_id: str | None = None  # 붙인 제작 기록 번호. 붙이지 않았으면 None
     script_used: bool = False  # 기록의 대본 장면을 칸으로 썼는지(11/23, 추가)
     cta_ko: str = Field(default="", max_length=120)  # 대본의 끝 CTA(대본이 없으면 빈 칸)
+    # 11/25 추가: 콘티 그림 출처. 옛 기록은 기본값(Higgsfield 그림)으로 읽힌다
+    board_source: Literal["svg", "higgsfield", "layout"] = "higgsfield"
