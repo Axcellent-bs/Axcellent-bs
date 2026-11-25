@@ -185,6 +185,8 @@ export interface PlanLookup {
   title: string;
   idea: string;
   videoPlan?: Pick<VideoPlanView, "concept" | "durationS" | "aspect" | "scenes">;
+  /** 11/26 카드 안 [펼쳐 보기]용 영상 제작안 전체(같은 기획 기록, 새 API 없음) */
+  fullPlan?: VideoPlanView;
   /** 기획이 받은 성과 (receive_campaign_update result) · 그 캠페인 번호 (의뢰 영상이면 wr_…) */
   result?: { direction: string; summary?: string };
   campaign?: string;

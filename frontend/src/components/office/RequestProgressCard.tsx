@@ -21,6 +21,8 @@ import { DoneCard, ProgressCard } from "@/components/office/ChatCards";
 import { RequestCoverCell } from "@/components/marketing/CoverPicker";
 import { refreshWorkRequests, useWorkRequests } from "@/components/office/useWorkRequests";
 import { RequestActions } from "@/components/office/RequestActions";
+import { InlinePlan, useExpand } from "@/components/office/InlineDoc";
+import type { VideoPlanView } from "@/lib/videoPlan";
 
 // 대화방 "의뢰 진행" 카드 (총괄에게 맡긴 고객 의뢰 하나, 11/20). 전체 대화방·이슈 방·총괄 1:1에서 의뢰 번호가 처음 나온 총괄 말풍선 아래에 붙는다.
 // - 데이터: 의뢰 목록(useWorkRequests, 10초)에서 찾고, 없으면 GET /api/requests/{id}를 한 번. 사람 토큰이 없으면 카드 없이 지금 글만
@@ -72,7 +74,7 @@ function loadPlanLookup(force = false): Promise<PlanLookup[]> {
   if (!force && planCache.list && !planLookupDue(planCache.at, Date.now())) return Promise.resolve(planCache.list);
   const inflight = planningApi(apiBase("planning")).state()
     .then((raw) => (fromBackend(raw, []).proposals ?? []).map((p): PlanLookup => ({
-      id: p.id, insightId: p.insightId, spec: p.spec, title: p.title, idea: p.idea, videoPlan: p.videoPlan,
+      id: p.id, insightId: p.insightId, spec: p.spec, title: p.title, idea: p.idea, videoPlan: p.videoPlan, fullPlan: p.videoPlan,
       result: p.result ? { direction: p.result.direction, summary: p.result.summary } : undefined,
       campaign: p.handoff?.campaign,
     })))
@@ -174,16 +176,19 @@ function PerfCell({ view }: { view: PerfStepView }) {
 }
 
 /** 기획 단계 칸 (보고서 완료 카드와 같은 모양): 영상 제작안 요약 · 콘셉트 한 줄 · [기획서 열기] [PDF로 저장] */
-function PlanCell({ card }: { card: PlanCardView }) {
+function PlanCell({ card, plan }: { card: PlanCardView; plan?: VideoPlanView }) {
   const navigate = useNavigate();
+  const expand = useExpand(); // 11/26 카드 안에서 기획서 펼쳐 보기 (콘셉트·장면 카드·3D 콘티)
   return (
     <section aria-label={card.head} className="mt-1.5 w-full space-y-1.5 rounded-xl border border-ink-100 bg-ink-50 px-3 py-2.5">
       <h4 className="text-[12.5px] font-semibold text-ink-900">{card.head}</h4>
       {card.line && <p className="line-clamp-2 break-words text-[12.5px] text-ink-700">{card.line}</p>}
       <div className="flex flex-wrap gap-1.5 pt-0.5">
+        {expand.button}
         <button type="button" className="btn-primary btn-card" onClick={() => navigate(card.openPath)}>기획서 열기</button>
         <button type="button" className="btn-ghost btn-card" onClick={() => navigate(card.printPath)}>PDF로 저장</button>
       </div>
+      {expand.opened && <InlinePlan plan={plan} open={expand.open} />}
     </section>
   );
 }
@@ -289,7 +294,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                   </>
                 )}
                 {report && <ReportCell reportId={report} />}
-                {isInsight && plan && <PlanCell card={plan} />}
+                {isInsight && plan && <PlanCell card={plan} plan={found?.fullPlan} />}
                 {isInsight && proposal && !plan && (
                   <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(planDocPath({ id: proposal, request: row.request_id }))}>기획 제안 열기</button>
                 )}
