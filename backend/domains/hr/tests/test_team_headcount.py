@@ -139,8 +139,14 @@ def test_only_finance_and_orchestrator_may_ask(org, client) -> None:
     assert denied["status"] != "completed"
 
 
-def test_other_company_gets_no_example_roster(svc, org, client) -> None:
-    """회사 분리(11/25): 예시 명부(팀원 6명)는 캣북스만. 누비투어는 입력한 발령이 없으면 0명."""
+def test_other_company_gets_no_example_roster(svc, org, client, monkeypatch) -> None:
+    """회사 분리(11/25): 예시 명부(팀원 6명)는 캣북스만. 누비투어는 입력한 발령이 없으면 0명.
+
+    다른 회사 요청은 설치 환경변수(AX_ORG_CONFIG, 캣북스 것)를 보지 않고 그 회사 연결의 설정
+    폴더 조직도를 읽는다(#1783). 누비투어 연결이 `nubi` 폴더를 고른 상태로 둔다."""
+    from ax_agent_template import tenant
+
+    monkeypatch.setattr(tenant, "current", lambda: "nubi")
     body = _body()
     body["meta"]["tenant_id"] = "nubi-tour"
     res = client.post("/a2a", json=body).json()
