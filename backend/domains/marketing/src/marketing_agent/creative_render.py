@@ -873,6 +873,8 @@ async def request_video(
     video = render.get("video") or {}
     if video.get("status") in ("awaiting_approval", "running", "done"):
         return video
+    if render.get(SUPERSEDED):  # 11/26 의뢰 캐릭터를 바꿔 멈춘 기록으로는 영상을 요청하지 않는다
+        raise RenderError(CHARACTER_CHANGED)
     board = render.get("board_image") or {}
     cid = cid or board.get("company_id") or request_company(meta)
     via = route(cid)
@@ -1258,6 +1260,37 @@ async def _api_video(
     _set(record_id, "video", request_id=job)
     url = await _wait(client, job, "video", cid)
     return await _download(client, url, asset_path(record_id, "video", cid))
+
+
+# ---------------------------------------------------------------- 의뢰 캐릭터 바꾸기 (11/26)
+SUPERSEDED = "superseded"  # render 칸: 의뢰 캐릭터를 바꿔 멈춘 기록 {"at", "by"}
+CHARACTER_CHANGED = "character_changed"
+
+
+def superseded(record_id: str) -> bool:
+    """의뢰 캐릭터를 바꿔 멈춘 기록인가(그림을 더 그리지 않고 영상을 요청하지 않는다)."""
+    return bool(_creative.store().get_render(record_id).get(SUPERSEDED))
+
+
+def supersede(record_id: str, by: str | None) -> bool:
+    """멈춤 표시. 이미 영상을 요청한 기록은 건드리지 않는다(False)."""
+    store = _creative.store()
+    if store.get(record_id) is None:
+        return False
+    render = store.get_render(record_id)
+    if (render.get("video") or {}).get("status"):
+        return False
+    render[SUPERSEDED] = {"at": _now().isoformat(), "by": by}
+    store.set_render(record_id, render)
+    return True
+
+
+def unsupersede(record_id: str) -> None:
+    """같은 캐릭터로 되돌아오면 멈춤 표시를 지운다(그린 그림은 그대로 다시 쓴다)."""
+    store = _creative.store()
+    render = store.get_render(record_id)
+    if render.pop(SUPERSEDED, None) is not None:
+        store.set_render(record_id, render)
 
 
 def expire_stale(record_id: str) -> None:

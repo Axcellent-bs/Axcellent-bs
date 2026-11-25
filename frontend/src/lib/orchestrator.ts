@@ -67,7 +67,7 @@ export const orchestrator = {
     getAuthed<WorkRequestRow>(`/api/requests/${encodeURIComponent(requestId)}`, SAFETY_HUMAN_TOKEN).then((r) => r.data),
   /** 홍보 영상 의뢰에 쓸 회사 대표 캐릭터(제작 기록 CR-…, null이면 캐릭터 없이). 영상 준비 전까지만(뒤면 409) (11/23) */
   setBrandCharacter: (requestId: string, recordId: string | null) =>
-    post<{ ok: boolean; record_id: string | null; plan_outdated?: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/brand-character`, { record_id: recordId }, SAFETY_HUMAN_TOKEN),
+    post<{ ok: boolean; record_id: string | null; plan_outdated?: boolean; reprepared?: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/brand-character`, { record_id: recordId }, SAFETY_HUMAN_TOKEN),
   /** 사람 확인·승인 대기 중인 의뢰 단계를 승인하거나 거절한다. 승인하면 다음 단계로 이어진다 */
   decideRequestStep: (requestId: string, stepId: string, approved: boolean) =>
     post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/steps/${encodeURIComponent(stepId)}/decision`, { approved }, SAFETY_HUMAN_TOKEN),

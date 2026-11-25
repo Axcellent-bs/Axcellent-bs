@@ -506,6 +506,9 @@ async def set_request_brand_character(
     뒤 바꾸면 `plan_outdated: true`(기획서는 예전 캐릭터 기준, 화면 안내용).
 
     캐릭터를 쓰면 영상은 만들기 전에 사람 승인(C)을 한 번 받는다. 값이 없으면 지금 흐름 그대로다.
+
+    11/26: 영상 초안 준비가 시작된 뒤에도 영상 요청(사람 승인 요청) 전이면 바꾼다. 그 의뢰를 새
+    캐릭터로 다시 준비하고(`reprepared: true`, 그림 크레딧을 다시 쓴다) 영상 요청 뒤면 409.
     """
     runner = state.manager.request_runner if state.manager else None
     outcome, outdated = (
@@ -521,7 +524,19 @@ async def set_request_brand_character(
         raise HTTPException(422, "홍보 영상 의뢰가 아니에요")
     if outcome == "started":
         raise HTTPException(409, "영상 준비가 시작돼서 바꿀 수 없어요")
-    data = {"ok": True, "record_id": body.record_id, "plan_outdated": outdated}
+    # 11/26 영상 요청 전까지는 바꾼다(다시 준비). 그 뒤·준비 중·기획 결과 없음은 409
+    if outcome == "video_requested":
+        raise HTTPException(409, "영상 요청 뒤라 바꿀 수 없어요")
+    if outcome == "busy":
+        raise HTTPException(409, "영상 초안을 준비하는 중이에요. 잠시 뒤 다시 바꿔 주세요")
+    if outcome == "no_plan":
+        raise HTTPException(409, "기획 결과가 남아 있지 않아 다시 준비할 수 없어요")
+    data = {
+        "ok": True,
+        "record_id": body.record_id,
+        "plan_outdated": outdated,
+        "reprepared": outcome == "reprepared",
+    }
     return {"data": data, "meta": {}}
 
 

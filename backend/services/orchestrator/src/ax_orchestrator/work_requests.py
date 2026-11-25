@@ -263,6 +263,12 @@ class WorkRequests:
         row["log"].append({"at": now().isoformat(), "message": f"{what} ({by or '사람'})"})
         self._save(row)
 
+    def set_replaced_record(self, request_id: str, record_id: str | None) -> None:
+        """11/26 캐릭터를 바꿔 다시 준비할 때 예전 의뢰 기록(CR-…). 영상 준비가 마케팅에 넘긴다."""
+        row = self._row(request_id)
+        row["replaces_creative_record_id"] = record_id
+        self._save(row)
+
     def set_carry(self, request_id: str, step_id: str, value: dict[str, Any] | None) -> None:
         """단계 결과 중 다음 단계가 그대로 받을 값을 둔다 (None이면 비운다). 쓰고 나면 지운다."""
         row = self._row(request_id)
