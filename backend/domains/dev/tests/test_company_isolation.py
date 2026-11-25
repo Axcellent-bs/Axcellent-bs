@@ -7,9 +7,13 @@
 - 다른 회사 세션으로 저장한 연결은 그 회사에만 있고 캣북스 목록에는 없다. 운영자 토큰으로 쓰는
   저장도 `X-AX-Session` 머리의 세션 회사 자리에 들어간다
 - 개발 서비스(작업·PR·배포 상태)도 회사마다 따로, 다른 회사는 빈 상태·따로 상태 파일
+- 개발 AI 대화(dev_chat)도 회사 서비스에 있어 누비투어 요청으로 캣북스 대화가 안 보인다. 회사마다
+  겹치는 대화 id(chat-1)의 턴 번호도 서로 섞이지 않는다
 """
 
 from __future__ import annotations
+
+import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,7 +21,7 @@ from fastapi.testclient import TestClient
 from ax_agent_template import company_scope
 from ax_agent_template import human_auth as ha
 from ax_workflow import store
-from dev_agent import runtime, vcs
+from dev_agent import dev_chat, runtime, vcs
 from dev_agent.main import app
 from dev_agent.service import DevService
 
@@ -94,5 +98,38 @@ def test_dev_service_is_separate_per_company(env) -> None:  # noqa: ANN001
             "/api/planning/state", headers={"Authorization": f"Bearer {_session('nubi')}"}
         ).json()["data"]
         assert not state["tasks"] and not state["prs"]
+    finally:
+        runtime._service, runtime._by_company = old_main, old_by
+
+
+def test_dev_chat_is_separate_per_company(env) -> None:  # noqa: ANN001
+    old_main, old_by = runtime._service, dict(runtime._by_company)
+    try:
+
+        async def _gate(action, params, meta, evidence):  # noqa: ANN001, ANN202
+            from ax_contracts.schemas import ExecuteDecision
+
+            return ExecuteDecision(execution_id="exe_ok", grade="A", status="executed")
+
+        cat = runtime.set_service(DevService(gate=_gate, real_example=True))
+        runtime._by_company.clear()
+        with company_scope.using("nubi"):
+            nubi = runtime.get_service()
+        nubi._gate = _gate
+        # 같은 계정 이름이라도 회사가 다르면 안 보여야 한다 (계정이 아니라 회사로 나뉨을 본다)
+        who = {"origin": "screen", "account": "acc-nubi"}
+        cat_th = asyncio.run(cat.chat_add(None, "user", "캣북스 배너 고쳐 줘", **who))
+        nubi_th = asyncio.run(nubi.chat_add(None, "user", "누비 예약 버튼", **who))
+        assert cat_th.id == nubi_th.id == "chat-1"  # 회사마다 id가 겹친다
+        client = TestClient(app)
+        rows = client.get(
+            "/api/planning/dev-chat", headers={"Authorization": f"Bearer {_session('nubi')}"}
+        ).json()["data"]
+        assert "캣북스 배너" not in str(rows)
+        assert [r["id"] for r in rows] == ["chat-1"] and "누비 예약" in str(rows)
+        # 같은 id라도 턴 번호는 회사마다 따로 (한쪽 새 턴이 다른 쪽 답을 버리게 하지 않는다)
+        turn = dev_chat._new_turn(cat, "chat-1")
+        dev_chat._new_turn(nubi, "chat-1")
+        assert dev_chat._same_turn(cat, "chat-1", turn)
     finally:
         runtime._service, runtime._by_company = old_main, old_by
