@@ -6,6 +6,10 @@
 전용 파일은 `ARCHIVE_DB_PATH`(archive.db)다. 없으면 예전처럼 `HR_DB_PATH`를 읽는다.
 옛 파일의 기록은 `scripts/migrate_archive_db.py`로 옮긴다.
 모든 테이블에 `tenant_id`를 둔다. 스키마는 전 문장 `IF NOT EXISTS`다.
+
+회사 분리(11/25, 로드맵 6단계): 요청 회사(`company_scope.active()`)마다 파일을 따로 연다.
+캣북스(또는 회사를 모를 때)는 예전 파일 그대로, 다른 회사는 `archive.<회사>.db`(메모리면 회사마다
+메모리). 결정 카드·후보 카드(`mock_cards`)·기록이 회사끼리 섞이지 않는다.
 """
 
 from __future__ import annotations
@@ -13,8 +17,10 @@ from __future__ import annotations
 import sqlite3
 import threading
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
+from ax_agent_template import company_scope
 from ax_contracts.schemas import TENANT_ID_DEFAULT
 
 SCHEMA = f"""
@@ -63,8 +69,8 @@ CREATE TABLE IF NOT EXISTS gate_decisions (
 """
 
 
-class Store:
-    """SQLite 연결 하나를 스레드 잠금으로 감싼 얇은 래퍼."""
+class _OneStore:
+    """SQLite 연결 하나를 스레드 잠금으로 감싼 얇은 래퍼 (회사 하나)."""
 
     def __init__(self, path: str = ":memory:") -> None:
         self.path = path
@@ -111,3 +117,49 @@ class Store:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+
+def company_path(path: str, company_id: str) -> str:
+    """회사 파일 경로. 캣북스는 그대로, 다른 회사는 이름 뒤에 `.<회사>`(메모리는 메모리)."""
+    if company_id == company_scope.CATBOOKS or path == ":memory:":
+        return path
+    p = Path(path)
+    return str(p.with_name(f"{p.stem}.{company_id}{p.suffix}"))
+
+
+class Store:
+    """요청 회사마다 `_OneStore`를 따로 여는 저장소. 부르는 쪽은 예전과 같은 메서드를 쓴다."""
+
+    def __init__(self, path: str = ":memory:") -> None:
+        self.path = path
+        self._guard = threading.Lock()
+        self._stores: dict[str, _OneStore] = {company_scope.CATBOOKS: _OneStore(path)}
+
+    def for_company(self, company_id: str | None = None) -> _OneStore:
+        cid = company_scope.scope_id(company_id if company_id is not None
+                                     else company_scope.active())  # fmt: skip
+        with self._guard:
+            one = self._stores.get(cid)
+            if one is None:
+                one = self._stores[cid] = _OneStore(company_path(self.path, cid))
+        return one
+
+    def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> int:
+        return self.for_company().execute(sql, params)
+
+    def one(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> dict[str, Any] | None:
+        return self.for_company().one(sql, params)
+
+    def all(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> list[dict[str, Any]]:
+        return self.for_company().all(sql, params)
+
+    @contextmanager
+    def transaction(self):  # type: ignore[no-untyped-def]
+        with self.for_company().transaction():
+            yield self
+
+    def close(self) -> None:
+        with self._guard:
+            stores = list(self._stores.values())
+        for one in stores:
+            one.close()
