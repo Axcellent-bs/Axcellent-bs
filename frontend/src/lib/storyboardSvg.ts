@@ -36,6 +36,17 @@ export function svgCell(shot: StoryboardShot): SvgCell {
 export type RedrawStep = "idle" | "confirm" | "running";
 export type RedrawEvent = "click" | "ok" | "cancel" | "done";
 
+/** 다시 그리기 전용 경로: POST …/creative-records/{id}/board-image (LLM 없이 그림만, 그림 크레딧) */
+export const boardImagePath = (recordId: string): string =>
+  `/api/dashboard/marketing/creative-records/${encodeURIComponent(recordId)}/board-image`;
+
+/** 요청 실패 뒤: 404(서버에 아직 경로가 없거나 다른 회사 기록)면 버튼을 숨기고, 그 밖은 오류 문장을 보여 준다 */
+export function redrawFailure(e: unknown): { hide: boolean; message: string | null } {
+  const status = typeof e === "object" && e !== null && "status" in e ? (e as { status: unknown }).status : null;
+  if (status === 404) return { hide: true, message: null };
+  return { hide: false, message: e instanceof Error && e.message ? e.message : "그림을 요청하지 못했어요" };
+}
+
 export function redrawNext(step: RedrawStep, ev: RedrawEvent): RedrawStep {
   if (step === "idle" && ev === "click") return "confirm";
   if (step === "confirm" && ev === "ok") return "running";

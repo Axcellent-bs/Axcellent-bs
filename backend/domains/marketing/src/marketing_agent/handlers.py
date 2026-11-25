@@ -100,6 +100,7 @@ from ax_contracts.schemas.marketing_youtube_stats import (
 )
 from ax_contracts.schemas.planning import CampaignBriefInput, CampaignBriefOutput
 from marketing_agent import ad_metrics as _ad_metrics
+from marketing_agent import board_svg as _board_svg
 from marketing_agent import (
     brief_media,
     brief_publish,
@@ -2138,8 +2139,52 @@ async def draft_sns_post_skill(request: AgentRequest) -> AgentResult:
 
 
 async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentResult:
-    """총괄용: 영상 제작안(video_plan)으로 SNS 초안·장면 템플릿을 정한다(생성·게시 안 함)."""
-    return video_draft.prepare_video_draft(request, STATE.sns)
+    """총괄용: 영상 제작안(video_plan)으로 SNS 초안·장면 템플릿을 정한다(생성·게시 안 함).
+
+    11/25: 캐릭터 의뢰 기록에 스토리보드가 붙으면 회사 LLM을 한 번 불러 칸별 SVG 콘티를 채운다
+    (`board_svg`, 그림 크레딧 0). 실패해도 결과는 그대로다."""
+    result = video_draft.prepare_video_draft(request, STATE.sns)
+    rid = (result.output or {}).get("creative_record_id")
+    if result.status == TaskStatus.COMPLETED and isinstance(rid, str) and rid:
+        try:
+            await _board_svg.draw(rid, request.meta.context_id)
+        except Exception:  # noqa: BLE001 - SVG 콘티는 부가 기능이라 영상 준비를 막지 않는다
+            _board_svg.logger.exception("의뢰 SVG 콘티를 채우지 못함")
+    return result
+
+
+async def creative_board_redraw(request: AgentRequest) -> AgentResult:
+    """[Higgsfield 그림으로 다시 그리기] 전용(read). LLM 없이 스토리보드 그림만 만든다.
+
+    안전 관문(generate_media B)·그림 크레딧 예약·`image_credits_ok`는 지금 스토리보드 그림
+    규칙 그대로(`creative_render.maybe_start_board(force=True)`). 다른 회사 기록이면 not_found."""
+    data = _parse(request, CreativeRecordGetInput)
+    if isinstance(data, AgentResult):
+        return data
+    rec = _creative.store().get(data.record_id)
+    if rec is None:
+        return _not_found(request)
+    if not rec.get("storyboard"):
+        return _result(
+            request,
+            TaskStatus.FAILED,
+            outcome="no_storyboard",
+            output={"message": "스토리보드가 없는 기록이다"},
+        )
+    rid = data.record_id
+    _safe_render(
+        lambda: _render.maybe_start_board(STATE.media_ledger, request.meta, rid, force=True)
+    )
+    item = _creative.store().get_render(rid).get("board_image") or {}
+    out = CreativeRecordAttachOutput(record_id=rid, part="board_image", item=item)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill], f"스토리보드 그림 다시 그리기 {rid}: {item.get('status')}", [rid]
+        ),
+    )
 
 
 async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
@@ -2698,6 +2743,7 @@ HANDLERS = {
     "higgsfield_status": higgsfield_status,
     "creative_records_list": creative_records_list,
     "creative_record_get": creative_record_get,
+    "creative_board_redraw": creative_board_redraw,
     "creative_video_request": creative_video_request,
     "creative_youtube_draft": creative_youtube_draft,
     "creative_youtube_request": creative_youtube_request,

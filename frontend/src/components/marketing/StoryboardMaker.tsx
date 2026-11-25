@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { StoryboardResult, StoryboardShot } from "@/lib/storyboard";
-import { isSvgBoard, redrawNext, svgCell, type RedrawStep } from "@/lib/storyboardSvg";
+import { isSvgBoard, redrawFailure, redrawNext, svgCell, type RedrawStep } from "@/lib/storyboardSvg";
 import { spanLabel } from "@/lib/creativeScript";
 import { CopyButton, PromptBox } from "./PromptParts";
 
@@ -125,17 +125,25 @@ function SvgCellItem({ shot }: { shot: StoryboardShot }) {
 function RedrawControl({ onRedraw }: { onRedraw: () => Promise<void> }) {
   const [step, setStep] = useState<RedrawStep>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+  // 서버에 아직 전용 경로가 없거나(404) 다른 회사 기록이면 버튼을 숨긴다
+  const [hidden, setHidden] = useState(false);
   const go = async () => {
     setStep((s) => redrawNext(s, "ok"));
     setError(null);
     try {
       await onRedraw();
+      setSent(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "그림을 요청하지 못했어요");
+      const f = redrawFailure(e);
+      if (f.hide) setHidden(true);
+      setError(f.message);
     } finally {
       setStep((s) => redrawNext(s, "done"));
     }
   };
+  if (hidden) return null;
+  if (sent) return <p role="status" className="text-xs text-ink-500">그림을 요청했어요. 다 그리면 이 기록에 붙어요.</p>;
   return (
     <div className="space-y-1.5">
       {step === "idle" && <button type="button" className="btn-ghost text-xs" onClick={() => setStep((s) => redrawNext(s, "click"))}>Higgsfield 그림으로 다시 그리기</button>}
