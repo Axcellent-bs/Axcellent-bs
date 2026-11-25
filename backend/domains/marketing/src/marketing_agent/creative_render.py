@@ -45,6 +45,7 @@ import math
 import os
 import re
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -473,8 +474,51 @@ async def _wait(client: httpx.AsyncClient, job: str, kind: str, cid: str | None 
     raise RenderError("job_timeout")
 
 
+# 11/26 K: 다시 만들기 동안 "이 파일 자리 대신 이 임시 파일로" (그 영상 작업 안에서만)
+_STAGED: ContextVar[dict[Path, Path] | None] = ContextVar("creative_render_staged", default=None)
+
+
+def staging_path(final: Path) -> Path:
+    """다시 만든 영상을 먼저 받을 임시 파일 (같은 폴더라 이름 바꾸기로 바꿔 넣는다)."""
+    return final.with_name(f".regen-{final.name}")
+
+
+def _discard(path: Path) -> None:
+    _safe(lambda: path.unlink(missing_ok=True))
+
+
+def _probe_video(path: Path) -> float | None:
+    from marketing_agent import creative_overlay
+
+    return creative_overlay.probe_duration(path)
+
+
+# 테스트가 바꾸는 자리: 받은 영상 길이 읽기 (ffprobe)
+PROBE_VIDEO: Callable[[Path], float | None] = _probe_video
+
+
+def _swap_in(temp: Path, final: Path) -> str | None:
+    """끝까지 받은 임시 영상의 길이를 확인한 뒤에만 예전 파일 자리로 바꿔 넣는다. 안 되면 이유."""
+    if not temp.is_file() or temp.stat().st_size == 0:
+        return "regen_download_missing"
+    try:
+        seconds = PROBE_VIDEO(temp)
+    except Exception:  # noqa: BLE001 - 확인 못 하면 바꿔 넣지 않는다
+        seconds = None
+    if not seconds or seconds <= 0:
+        return "regen_duration_unknown"
+    try:
+        os.replace(temp, final)
+    except OSError:
+        return "regen_swap_failed"
+    return None
+
+
 async def _download(client: httpx.AsyncClient, url: str, path: Path) -> str:
-    """결과 내려받기 (키 길·회사 계정 길 둘 다). 인증 헤더 없이, 예외는 stage=download로."""
+    """결과 내려받기 (키 길·회사 계정 길 둘 다). 인증 헤더 없이, 예외는 stage=download로.
+
+    11/26 K: 다시 만들기 중이면(`_STAGED`) 그 파일 자리 대신 임시 파일로 받는다."""
+    path = (_STAGED.get() or {}).get(path, path)
     target = url.strip()
     r = await _http("download", lambda: client.get(target))
     if r.status_code != 200:
@@ -1043,18 +1087,22 @@ PREVIOUS_VIDEO = "previous"  # render.video.previous: 다시 만들기 전 다 �
 REGENERATE_RESULT = "regenerate"
 
 
-def _regen_result(reason: str, attempt: Any) -> dict[str, Any]:
-    return {"status": "rejected", "reason": reason, "attempt": attempt, "at": _now().isoformat()}
+def _regen_result(reason: str, attempt: Any, status: str = "rejected") -> dict[str, Any]:
+    return {"status": status, "reason": reason, "attempt": attempt, "at": _now().isoformat()}
 
 
 def _previous_video(video: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in video.items() if k not in (PREVIOUS_VIDEO, REGENERATE_RESULT)}
 
 
-def _restore_previous_video(record_id: str, reason: str) -> dict[str, Any] | None:
+def _restore_previous_video(
+    record_id: str, reason: str, status: str = "rejected"
+) -> dict[str, Any] | None:
     """승인 대기였던 다시 만들기 요청이 거절·기한 지남으로 끝나면 예전 다 만든 영상으로 되돌린다.
+    11/26 K: 승인 뒤 만들기가 실패해도(`status="failed"`) 같은 식으로 되돌린다.
 
-    새 영상은 승인 뒤에야 같은 파일 자리에 받으므로, 여기까지 오면 예전 파일이 그대로다.
+    새 영상은 승인 뒤에야 받고, 다시 만들기면 임시 파일로 받아 확인 뒤에만 바꿔 넣으므로
+    (`_render_video`), 여기까지 오면 예전 파일이 그대로다.
     시도 번호(attempt)는 거절된 것으로 두어 다음 다시 만들기가 또 새 키를 쓰게 한다.
     되돌릴 영상이 없으면(보통 요청) None."""
     store = _creative.store()
@@ -1065,7 +1113,7 @@ def _restore_previous_video(record_id: str, reason: str) -> dict[str, Any] | Non
         return None
     restored = dict(previous)
     restored["attempt"] = video.get("attempt") or previous.get("attempt")
-    restored[REGENERATE_RESULT] = _regen_result(reason, video.get("attempt"))
+    restored[REGENERATE_RESULT] = _regen_result(reason, video.get("attempt"), status)
     render["video"] = restored
     store.set_render(record_id, render)
     return restored
@@ -1225,6 +1273,13 @@ async def _render_video(
     cid = video.get("company_id")  # 승인에 올릴 때 정한 회사 그대로
     # 11/25 모션 참조 영상이 있고 회사 계정 영상 모델이 받으면 동작을 따라 만든다(키프레임보다 먼저)
     motion = _motion_ref_bytes(record_id, cid) if via == MCP else None
+    # 11/26 K 다시 만들기(예전 다 만든 영상이 있는 시도)면 새 영상을 예전 파일 자리에 바로 쓰지 않고
+    # 같은 폴더 임시 이름으로 받는다. 끝까지 받고 길이를 확인한 뒤에만 이름 바꾸기로 바꿔 넣는다
+    previous = video.get(PREVIOUS_VIDEO)
+    regen = isinstance(previous, dict) and previous.get("status") == "done"
+    final = asset_path(record_id, "video", cid)
+    temp = staging_path(final)
+    token = _STAGED.set({final: temp}) if regen else None
     try:
         if via == MCP and video.get("keyframes") and not motion:  # 키프레임 (승인받은 방식 그대로)
             from marketing_agent import keyframes as _kf
@@ -1263,8 +1318,15 @@ async def _render_video(
         code = _code(error)
         logger.warning("%s", log_line("creative_render: Higgsfield video", error, record_id))
         _safe(lambda: ledger.mark_failed(seq, _now()))
+        if regen:
+            _discard(temp)
+            if _restore_previous_video(record_id, code, "failed") is not None:
+                return  # 게시·썸네일은 다시 예전 영상
         _set(record_id, "video", status="failed", error=code)
         return
+    finally:
+        if token is not None:
+            _STAGED.reset(token)
     _safe(
         lambda: ledger.settle(
             seq,
@@ -1275,6 +1337,15 @@ async def _render_video(
             now=_now(),
         )
     )
+    if regen:
+        why = _swap_in(temp, final)
+        if why:
+            logger.warning("creative_render: 다시 만든 영상 확인 실패 %s (%s)", record_id, why)
+            _discard(temp)
+            if _restore_previous_video(record_id, why, "failed") is not None:
+                return
+            _set(record_id, "video", status="failed", error=why)
+            return
     _set(
         record_id,
         "video",
