@@ -3,7 +3,8 @@ import { Navigate } from 'react-router'
 import { DangerRow, Facts, PageHead, SectionHead, StatusChip, Tabs, TONE_DOT, type Tone } from '@/components/connect/parts'
 import CompanyAiTools from '@/components/connect/CompanyAiTools'
 import type { ConnectionState } from '@/lib/companyConnection'
-import { useHosts } from './store'
+import { usePcs } from '@/components/connect/ConnectedPcs'
+import { pcMapNode, pcSummary, type PcLoad } from '@/lib/connectedPcs'
 import { SERVICES } from './services'
 import { DEFAULT_INDUSTRY, INDUSTRIES, checkKey, connectWithKey, disconnect, moveCompany, updateCompanyInfo, useCompany, type CompanyInfo, type IssuedKey } from './company'
 import { sessionFromLogin, setSession } from '@/lib/humanSession'
@@ -59,7 +60,7 @@ function CompanyConnectScreen() {
   const [confirmOff, setConfirmOff] = useState(false)
   const [editing, setEditing] = useState(false)
   const [showKey, setShowKey] = useState(false)
-  const [hosts] = useHosts()
+  const { load: pcLoad } = usePcs()
   /** 판매 서버 연결 상태 (아래 판매 서버 구역이 받아 온 값을 연결 지도도 같이 쓴다) */
   const [shop, setShop] = useState<ConnectionState | 'error' | null>(null)
 
@@ -127,7 +128,7 @@ function CompanyConnectScreen() {
     setEditing(false)
   }
 
-  const online = hosts.filter((h) => h.status === 'online').length
+  const pcNode = pcMapNode(pcLoad)
   const connected = !!company && phase.at === 'key'
   const keyForm = (
     <form onSubmit={submitKey} className="flex flex-wrap gap-2">
@@ -146,7 +147,7 @@ function CompanyConnectScreen() {
       <Tabs label="회사 연결" items={TABS} value={tab} onPick={(t) => { setTab(t); writeTab(t) }} />
 
       {tab === 'ai' ? <CompanyAiTools me={account?.name ?? ''} /> : <>
-      <ConnectionMap company={company?.name ?? null} shop={company ? shop : null} pcs={{ online, total: hosts.length }} />
+      <ConnectionMap company={company?.name ?? null} shop={company ? shop : null} pcs={pcNode} />
 
       <section className="space-y-4">
         <SectionHead title="AXcellent 연결" desc="운영팀이 발급한 연결 키로 이 워크스페이스를 회사와 이어요."
@@ -198,7 +199,7 @@ function CompanyConnectScreen() {
                   <Facts cols={2} items={[
                     ['연결 키', <span className="font-mono">{company.key ? `${company.key.slice(0, 8)}••••-••••` : '—'}</span>],
                     ['사용 중인 서비스', `${SERVICES.length}개`],
-                    ['연결된 사내 PC', `${online} / ${hosts.length}대`],
+                    ['연결된 사내 PC', pcFact(pcLoad)],
                   ]} />
                   <div className="border-l-2 border-ink-100 pl-4 text-sm leading-6 text-ink-700">
                     <p className="text-xs text-ink-500">AXcellent로 보내는 것</p>
@@ -313,7 +314,14 @@ const hostOf = (url: string) => {
 }
 
 /** 연결 지도: 이 서버에서 회사·판매 서버·사내 PC까지 어디까지 이어졌는지 한 줄로. 끊긴 곳이 바로 보이게 한다 */
-function ConnectionMap({ company, shop, pcs }: { company: string | null; shop: ConnectionState | 'error' | null; pcs: { online: number; total: number } }) {
+/** 회사 정보 칸의 "연결된 사내 PC": 지도와 같은 출처(DejaFix 호스트 목록) */
+function pcFact(load: PcLoad | null): string {
+  if (!load || !('rows' in load) || load.fromIncidents) return pcMapNode(load).value
+  const s = pcSummary(load.rows)
+  return `${s.connected} / ${s.total}대`
+}
+
+function ConnectionMap({ company, shop, pcs }: { company: string | null; shop: ConnectionState | 'error' | null; pcs: ReturnType<typeof pcMapNode> }) {
   const shopNode: MapNode = !company
     ? { name: '사이트 서버', value: '회사 연결 뒤', tone: 'off', note: '회사를 먼저 연결해요' }
     : shop === 'error' ? { name: '사이트 서버', value: '읽지 못함', tone: 'bad', note: '연결 상태를 받지 못했어요' }
@@ -325,11 +333,8 @@ function ConnectionMap({ company, shop, pcs }: { company: string | null; shop: C
     { name: 'AXcellent', value: '상태 신호만', tone: company ? 'ok' : 'off', note: '업무 데이터는 보내지 않아요' },
     { name: '우리 회사', value: company ?? '연결 전', tone: company ? 'ok' : 'off', note: company ? '연결 키로 연결됨' : '아래에서 키를 넣어요' },
     shopNode,
-    {
-      name: '사내 PC', value: `${pcs.online} / ${pcs.total}대`,
-      tone: pcs.total === 0 ? 'off' : pcs.online === pcs.total ? 'ok' : 'wait',
-      note: pcs.total === 0 ? '등록한 PC가 없어요' : pcs.online === pcs.total ? '모두 연결됨' : `${pcs.total - pcs.online}대 끊김`,
-    },
+    // DejaFix 호스트 목록(Zabbix 에이전트 응답) 기준. 연결 전·못 읽음이면 숫자를 만들지 않는다
+    { name: '사내 PC', value: pcs.value, tone: pcs.tone, note: pcs.note },
   ]
   return (
     <ol className="grid gap-px border border-ink-100 bg-ink-100 sm:grid-cols-2 lg:grid-cols-4" aria-label="연결 지도">

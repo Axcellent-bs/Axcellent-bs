@@ -63,3 +63,16 @@ test("호스트 목록(DejaFix #7): 상태·열린 Problem 수 그대로, 응답
     "down:db-01:2", "unknown:office-pc:0", "up:api-01:3", "up:web-01:0",
   ]);
 });
+
+test("회사 연결 지도의 사내 PC 칸: 연결 전·못 읽음·읽기 전에는 숫자를 만들지 않는다", async () => {
+  const { pcMapNode } = await import("./connectedPcs.ts");
+  assert.deepEqual(pcMapNode(null), { value: "확인 중…", tone: "off", note: "" });
+  assert.equal(pcMapNode({ notConnected: true }).value, "DejaFix 연결 전");
+  assert.equal(pcMapNode({ error: "HTTP 500" }).tone, "bad");
+  const hosts = (states: ("up" | "down" | "unknown")[]) =>
+    ({ rows: fromHosts(states.map((st, i) => ({ id: String(i), name: `pc${i}`, state: st, problems: 0 }))), checkedAt: "", fromIncidents: false });
+  assert.deepEqual(pcMapNode(hosts(["up", "up"])), { value: "2 / 2대", tone: "ok", note: "모두 연결됨" });
+  assert.deepEqual(pcMapNode(hosts(["up", "down"])), { value: "1 / 2대", tone: "wait", note: "1대 응답 없음" });
+  assert.deepEqual(pcMapNode(hosts(["up", "unknown"])), { value: "1 / 2대", tone: "off", note: "1대 확인할 수 없음" });
+  assert.equal(pcMapNode(hosts([])).value, "0대");
+});

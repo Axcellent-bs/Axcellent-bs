@@ -61,3 +61,23 @@ export function pcSummary(rows: PcRow[]): { connected: number; unknown: number; 
   const total = rows.length;
   return { connected, unknown, total, pct: total ? Math.round((connected / total) * 100) : 0 };
 }
+
+/** 연결한 PC 읽기 결과 (ConnectedPcs·회사 연결 지도가 같이 쓴다) */
+export type PcLoad =
+  | { rows: PcRow[]; checkedAt: string; fromIncidents: boolean }
+  | { error: string }
+  | { notConnected: true };
+
+/** 회사 연결 지도의 "사내 PC" 칸. 읽기 전·DejaFix 연결 전·못 읽음은 숫자를 만들지 않는다 */
+export function pcMapNode(load: PcLoad | null): { value: string; tone: "ok" | "wait" | "bad" | "off"; note: string } {
+  if (!load) return { value: "확인 중…", tone: "off", note: "" };
+  if ("notConnected" in load) return { value: "DejaFix 연결 전", tone: "off", note: "회원·서버 관리 › DejaFix 연결에서 이어요" };
+  if ("error" in load) return { value: "읽지 못함", tone: "bad", note: load.error };
+  const s = pcSummary(load.rows);
+  if (s.total === 0) return { value: "0대", tone: "off", note: "Zabbix가 감시하는 PC가 없어요" };
+  if (load.fromIncidents) return { value: `응답 없음 ${s.total - s.connected - s.unknown}대`, tone: "wait", note: "장애 기록 기준이라 연결 여부는 일부만 알아요" };
+  const down = s.total - s.connected - s.unknown;
+  const tone = down > 0 ? "wait" : s.unknown > 0 ? "off" : "ok";
+  const note = down > 0 ? `${down}대 응답 없음` : s.unknown > 0 ? `${s.unknown}대 확인할 수 없음` : "모두 연결됨";
+  return { value: `${s.connected} / ${s.total}대`, tone, note };
+}
