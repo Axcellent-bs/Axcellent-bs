@@ -442,6 +442,8 @@ class IgRead:
     calls: int = 0
     reused: int = 0
     stopped: str | None = None
+    connected: bool = True  # 인스타 토큰·계정 id가 있는지 (11/26 D)
+    radar_media: dict[str, list[dict[str, Any]]] = field(default_factory=dict)  # 최근 레이더 저장분
 
 
 AccountProgress = Callable[[int, int], Awaitable[None] | None]
@@ -462,8 +464,10 @@ async def read_accounts(accounts: Sequence[str], graph: Any, store: Any,
     cached = store.media(day, accounts)
     radar_day, radar, _ = st.radar_latest(st.path_of(env, st.RADAR_ENV))
     radar_today = radar if radar_day == day else {}
+    out.radar_media = dict(radar)  # 표본(계정 언어)용. 날짜와 상관없이 최근 한 바퀴
     if graph is None or not getattr(graph, "configured", False):
         out.stopped = f"인스타 토큰·계정 id 없음 ({NO_KEY})"
+        out.connected = False
     for n, account in enumerate(accounts, start=1):
         try:
             await _read_one(account, graph, store, day, cached, radar_today, out,
@@ -1394,6 +1398,11 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
         posts = burst_posts(ig.media, now)
     except Exception:  # noqa: BLE001 - 터짐 계산 실패는 섹션 2·3에서 이유로
         posts = []
+    # 11/26 D 표본: 계정 언어(최근 캡션 한글 비율). 대상층이 한국이면 한국어 계정 근거를 앞으로
+    from data_agent.skills import trend_report_sample as rs
+
+    languages = rs.account_languages(ig.media, ig.radar_media)
+    korea = rs.korea_target(report.brief, getattr(request, "request_text", None))
 
     async def run_theme() -> None:
         from data_agent.skills import trend_report_theme as tt
@@ -1465,6 +1474,8 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
         from data_agent.skills.instagram import load_config as ig_config
 
         more.extend(mark_ad_excluded(section, ig_config(deps.env).blocked_words))
+        if korea:  # 빼지 않고 순서만 (근거 id content:N은 이 순서로 매긴다)
+            section.posts = rs.korean_first(section.posts, languages)
         report.sections.content = section
         limits.extend(more)
 
@@ -1481,6 +1492,14 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
         report.limit_groups = limit_groups(limits)
         await save()
 
+    # 11/26 D 표본 한 줄 (저장분만, 실패해도 보고서는 계속)
+    try:
+        report.sample = rs.sample(report.brief, languages,
+                                  rs.metas_of(deps.radar() if deps.radar is not None else None),
+                                  korean_first=korea, connected=ig.connected,
+                                  read=len(ig.media))  # fmt: skip
+    except Exception as error:  # noqa: BLE001 - 표본 줄만 비운다
+        limits.append(f"표본 수를 세지 못함 ({type(error).__name__})")
     # 11/26 의뢰 주제로 찾은 근거 (주제가 없으면 그대로). 실패해도 보고서는 계속
     try:
         from data_agent.skills import trend_report_topic as tt

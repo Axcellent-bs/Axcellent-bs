@@ -2081,6 +2081,20 @@ export interface TrendReport {
   related_terms?: string[];
   topic_evidence?: TrendTopicEvidenceRow[];
   excluded?: TrendExcludedEvidence[];
+  /** 표본 수·인스타 상태 (11/26, 예전 저장본은 없음) */
+  sample?: TrendReportSample | null;
+}
+export interface TrendReportSample {
+  total: number;
+  /** 한국어 계정이면서 대상층 태그가 맞는 곳 */
+  matched: number;
+  /** 대상층 태그를 사람이 확인한 곳 */
+  human_checked: number;
+  korean: number;
+  /** 한국어 계정 근거를 순위 앞으로 옮겼는지 */
+  korean_first: boolean;
+  instagram_connected: boolean | null;
+  instagram_read: number | null;
 }
 export type TopicEvidenceKind = "scan" | "search" | "shopping" | "hashtag" | "shorts" | "content" | "mega" | "meme";
 /** 의뢰 주제로 찾은 근거 한 줄 (값은 서버가 만든 짧은 글) */

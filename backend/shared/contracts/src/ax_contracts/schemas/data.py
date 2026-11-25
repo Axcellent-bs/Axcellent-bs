@@ -4849,6 +4849,23 @@ class TrendExcludedEvidence(AxModel):
     evidence_id: str | None = None  # 근거 목록에서 뺀 id ("content:2"). 없으면 처음부터 안 넣은 것
 
 
+class TrendReportSample(AxModel):
+    """11/26 추가: 표본 한 줄 "전체 N곳 · 대상 맞음 M곳 · 사람 확인 K곳" + 인스타 상태.
+
+    계정 언어는 레이더·보고서 저장분 최근 캡션의 한글 비율(코드 계산). 대상 맞음 = 한국어 계정이면서
+    계정 대상층 태그가 의뢰 대상층과 맞는 것(대상층이 전체면 한국어만). 사람 확인 = 대상층 태그를
+    사람이 확인한(tag_source human) 계정 수. 계정 추가는 사람이 레이더에서 한다(코드로 넣지 않음)
+    """
+
+    total: int = Field(default=0, ge=0)  # 레이더·의뢰 계정 전체 (중복은 하나)
+    matched: int = Field(default=0, ge=0)  # 대상 맞음
+    human_checked: int = Field(default=0, ge=0)  # 사람 확인
+    korean: int = Field(default=0, ge=0)  # 그중 한국어 계정 (한글 비율 기준 이상)
+    korean_first: bool = False  # 대상층이 한국이라 한국어 계정 근거를 순위 앞으로 옮겼는지
+    instagram_connected: bool | None = None  # 인스타 토큰·계정 id가 있는지 (모르면 None)
+    instagram_read: int | None = Field(default=None, ge=0)  # 이번 보고서가 읽은 인스타 계정 수
+
+
 class TrendLimitGroups(AxModel):
     """근거와 한계를 셋으로 (v2). limits는 그대로 채운다."""
 
@@ -4876,6 +4893,8 @@ class TrendReport(AxModel):
     related_terms: list[str] = Field(default_factory=list)
     topic_evidence: list[TrendTopicEvidenceRow] = Field(default_factory=list)
     excluded: list[TrendExcludedEvidence] = Field(default_factory=list)
+    # 11/26 추가: 표본 수·인스타 상태 (예전 저장본은 None)
+    sample: TrendReportSample | None = None
 
 
 class TrendReportListItem(AxModel):
