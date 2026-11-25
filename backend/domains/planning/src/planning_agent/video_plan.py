@@ -658,6 +658,14 @@ def keyframe_texts(s: _SceneOut) -> list[str]:
     return [s.start_frame, s.end_frame, s.action_en, s.camera_en]
 
 
+def keyframe_problems(s: _SceneOut) -> list[str]:
+    """키프레임 칸이 걸린 규칙 코드 (없으면 빈 목록). 값은 담지 않는다."""
+    return sorted({code for t in keyframe_texts(s) if t for code in prompt_problems(t)})
+
+
+KEYFRAME_FIELDS = ("start_frame", "end_frame", "action_en", "camera_en")
+
+
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 
 
@@ -723,8 +731,8 @@ def reject_reason(
         return "scene_count"
     if any(prompt_problems(s.prompt) for s in got.scenes):
         return "prompt_rule"
-    if any(prompt_problems(t) for s in got.scenes for t in keyframe_texts(s) if t):
-        return "keyframe_rule"  # 첫·끝 화면·동작·카메라도 prompt와 같은 금지 (11/25)
+    # 키프레임 칸(첫·끝 화면·동작·카메라)이 걸리면 제작안을 버리지 않고 그 장면의 칸만 비운다
+    # (11/25, `_keyframes`). 버리면 키프레임 칸 없는 규칙 제작안으로 돌아간다
     if has_real_name(p, got):
         return "real_name_in_scene"
     ad = purpose in PURPOSE_DIRECTION
@@ -739,6 +747,21 @@ def reject_reason(
     if any(REPORT_WORD in " ".join(w.split()) for w in words):  # 보고서 이름이 소재로 (PROP-26)
         return "report_title_as_topic"
     return None
+
+
+def _keyframes(i: int, s: _SceneOut) -> dict[str, str]:
+    """장면 키프레임 네 칸. 한 칸이라도 prompt와 같은 금지에 걸리면 그 장면 네 칸을 모두 비운다
+    (장면 prompt·visual·caption은 그대로). 로그는 장면 번호와 이유 코드만."""
+    problems = keyframe_problems(s)
+    if problems:
+        log.info("영상 제작안 장면 %d 키프레임 칸 비움: %s", i, ",".join(problems))
+        return dict.fromkeys(KEYFRAME_FIELDS, "")
+    return {
+        "start_frame": _short(s.start_frame, 200),
+        "end_frame": _short(s.end_frame, 200),
+        "action_en": _short(s.action_en, 400),
+        "camera_en": _short(s.camera_en, 120),
+    }
 
 
 def _from_llm(
@@ -768,10 +791,7 @@ def _from_llm(
                 visual=_short(s.visual, 200),
                 caption=_short(s.caption, 60),
                 prompt=_short(s.prompt, 800),
-                start_frame=_short(s.start_frame, 200),
-                end_frame=_short(s.end_frame, 200),
-                action_en=_short(s.action_en, 400),
-                camera_en=_short(s.camera_en, 120),
+                **_keyframes(i, s),
             )  # fmt: skip
             for i, ((start, end), s) in enumerate(zip(cuts, got.scenes, strict=True), start=1)
         ]

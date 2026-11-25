@@ -179,21 +179,61 @@ def test_old_style_llm_answer_without_new_fields_still_works() -> None:
     assert plan.written_by == "llm" and all(s.end_frame == "" for s in plan.scenes)
 
 
+EMPTY_KEYFRAMES = ("", "", "", "")
+
+
+def _keyframes(s: VideoScene) -> tuple[str, str, str, str]:
+    return (s.start_frame, s.end_frame, s.action_en, s.camera_en)
+
+
 @pytest.mark.parametrize(
-    ("field", "value", "reason"),
+    ("field", "value", "code"),
     [
-        ("end_frame", "고양이가 가게 간판 앞에 선다", "keyframe_rule"),  # 글자
-        ("action_en", "The cat writes a slogan on the wall", "keyframe_rule"),
-        ("start_frame", "유명인 닮은 고양이가 서 있다", "keyframe_rule"),  # 실존 인물
-        ("camera_en", "Close-up on a Starbucks cup", "keyframe_rule"),  # 실제 브랜드
+        ("end_frame", "고양이가 가게 간판 앞에 선다", "text_request"),  # 글자
+        ("action_en", "The cat writes a slogan on the wall", "text_request"),
+        ("start_frame", "유명인 닮은 고양이가 서 있다", "real_person"),  # 실존 인물
+        ("camera_en", "Close-up on a Starbucks cup", "real_brand"),  # 실제 브랜드
     ],
 )
-def test_forbidden_words_in_keyframe_fields_fall_back_to_rule(
-    field: str, value: str, reason: str
+def test_forbidden_words_in_keyframe_fields_clear_only_that_scene(
+    field: str, value: str, code: str
 ) -> None:
+    # 11/25 바꾼 기대값: 예전엔 keyframe_rule로 제작안 전체를 버렸다 → 이제 그 장면 네 칸만 비운다
     out = _out()
     setattr(out.scenes[1], field, value)
-    assert vp.reject_reason(_prop(), out) == reason
+    assert vp.reject_reason(_prop(), out) is None
+    assert code in vp.keyframe_problems(out.scenes[1])
+    plan = asyncio.run(vp.write(_mock(out), _prop(), "ctx"))
+    assert plan is not None and plan.written_by == "llm"
+    assert _keyframes(plan.scenes[1]) == EMPTY_KEYFRAMES
+    kept = plan.scenes[1]
+    assert (kept.visual, kept.caption) == ("장면 1 화면", "자막 1")
+    assert kept.prompt == "The cat mascot reads under a warm lamp, slow dolly in"
+    for i in (0, 2, 3):
+        assert plan.scenes[i].action_en.startswith("The cat slowly turns")
+        assert plan.scenes[i].camera_en == "Medium shot, slow push-in"
+
+
+def test_instagram_in_one_action_keeps_the_plan_and_clears_that_scene(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    out = _out()
+    out.scenes[2].action_en = "The cat scrolls instagram on a phone and smiles"
+    with caplog.at_level("INFO"):
+        plan = asyncio.run(vp.write(_mock(out), _prop(), "ctx"))
+    assert plan is not None and plan.written_by == "llm" and len(plan.scenes) == 4
+    assert _keyframes(plan.scenes[2]) == EMPTY_KEYFRAMES
+    assert plan.scenes[2].visual == "장면 2 화면"
+    assert all(_keyframes(plan.scenes[i]) != EMPTY_KEYFRAMES for i in (0, 1, 3))
+    assert plan.scenes[3].start_frame.startswith("고양이 한 마리가 가운데")
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "키프레임 칸 비움" in logged and "instagram" not in logged  # 값 없이 이유 코드만
+
+
+def test_forbidden_scene_prompt_still_falls_back_to_rule() -> None:
+    out = _out()
+    out.scenes[0].prompt = "Close-up on a Starbucks cup"
+    assert vp.reject_reason(_prop(), out) == "prompt_rule"
     plan = asyncio.run(vp.write(_mock(out), _prop(), "ctx"))
     assert plan == vp.rule_plan(_prop())
 
