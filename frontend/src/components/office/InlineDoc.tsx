@@ -66,6 +66,7 @@ export function InlinePlan({ plan, open }: { plan: VideoPlanView | null | undefi
           <p className="text-ink-500">{v.meta}</p>
           {v.fallback && <p className="text-amber-800">규칙 초안 · {v.fallback}</p>}
           {missing && <p className="text-amber-800">{missing}</p>}
+          {v.svgWhy && <p className="text-amber-800">{v.svgWhy}</p>}
           {v.script && <p className="whitespace-pre-line break-words text-ink-700">{v.script}</p>}
           <ol className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {v.scenes.map((s) => (

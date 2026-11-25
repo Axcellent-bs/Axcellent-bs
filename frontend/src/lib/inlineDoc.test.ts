@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { PLAN_MISSING, REPORT_LOADING, expandLabel, inlinePlan, inlineScene, loadFailedKo, missingSvgKo } from "./inlineDoc.ts";
-import type { VideoPlanView, VideoSceneView } from "./videoPlan.ts";
+import { VIDEO_SVG_LINE, toVideoPlan, type VideoFallbackReason, type VideoPlanView, type VideoSceneView } from "./videoPlan.ts";
 
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 16"><rect width="9" height="16" fill="#f3efe7"/><text>책</text></svg>';
 const scene = (n: number, extra: Partial<VideoSceneView> = {}): VideoSceneView => ({
@@ -53,6 +53,23 @@ test("기획서 요약: 콘셉트·길이 · 규칙 초안 이유 · 콘티 없�
   assert.equal(missingSvgKo(0, 3), null);
   const rule = inlinePlan(plan([scene(1)], { writtenBy: "rule", fallbackReason: "timeout" }));
   assert.equal(rule.fallback, "AI가 제한 시간 안에 답하지 못해 규칙으로 썼어요");
+});
+
+test("콘티 실패 이유 한 줄: 기획 화면과 같은 문구(VIDEO_SVG_LINE) · 빈 값이면 없음 · 규칙 초안 이유와 같이", () => {
+  for (const why of Object.keys(VIDEO_SVG_LINE) as VideoFallbackReason[]) {
+    assert.equal(inlinePlan(plan([scene(1)], { svgReason: why })).svgWhy, VIDEO_SVG_LINE[why]);
+  }
+  assert.equal(inlinePlan(plan([scene(1)])).svgWhy, null); // 없으면 지금 그대로
+  // 서버 ""는 toVideoPlan이 칸을 두지 않는다 → 줄 없음
+  const raw = { concept: "c", duration_s: 10, scenes: [{ n: 1, start_s: 0, end_s: 5, visual: "v", prompt: "p" }], svg_reason: "" };
+  assert.equal(inlinePlan(toVideoPlan(raw)!).svgWhy, null);
+  assert.equal(inlinePlan(toVideoPlan({ ...raw, svg_reason: "timeout" })!).svgWhy, "AI가 제한 시간 안에 포즈를 주지 못했어요");
+  const both = inlinePlan(plan([scene(1)], { writtenBy: "rule", fallbackReason: "timeout", svgReason: "no_llm" }));
+  assert.equal(both.fallback, "AI가 제한 시간 안에 답하지 못해 규칙으로 썼어요");
+  assert.equal(both.svgWhy, "회사 AI가 연결되지 않아 콘티를 못 그렸어요");
+  // 카드에서 규칙 초안 이유 줄과 같은 모양으로 장면 카드 위에 그린다
+  const src = readFileSync(new URL("../components/office/InlineDoc.tsx", import.meta.url), "utf8");
+  assert.match(src, /\{v\.svgWhy && <p className="text-amber-800">\{v\.svgWhy\}<\/p>\}[\s\S]*<ol/);
 });
 
 test("카드 안 그림은 <img src={data URI}>로만 그린다 (SVG 글을 화면에 직접 넣지 않는다)", () => {
