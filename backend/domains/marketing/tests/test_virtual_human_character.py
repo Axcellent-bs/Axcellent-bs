@@ -61,16 +61,18 @@ def _sheet_request(kind: str | None, confirmed: bool = False, company: str | Non
 
 
 def _upload(env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, kind: str | None,
-            confirmed: bool = False, company: str | None = None) -> Any:  # fmt: skip
+            confirmed: bool = False, company: str | None = None, real_photo: bool = True
+            ) -> Any:  # fmt: skip
     # 실사풍 가상 인물: LLM이 실제 사람 사진으로 읽고, 그림체도 flat illustration이라고 답한다
-    llm = C._llm(C._read(real_person_photo=True, art_style_en=FLAT))  # noqa: SLF001
+    llm = C._llm(C._read(real_person_photo=real_photo, art_style_en=FLAT))  # noqa: SLF001
     monkeypatch.setattr(handlers, "CHARACTER_SHEET_LLM", lambda: llm)
     monkeypatch.setattr(handlers.STATE, "media_ledger", env["ledger"])
 
     async def go() -> Any:
         with company_scope.using(company):
             out = await handlers.HANDLERS["character_sheet_prompt"](
-                _sheet_request(kind, confirmed, company))
+                _sheet_request(kind, confirmed, company)
+            )
             await rr.wait_idle()
             return out
 
@@ -99,7 +101,8 @@ def test_real_photo_still_makes_the_sheet_image(env: dict[str, Any], monkeypatch
 def test_reference_kinds_keep_the_original_and_spend_no_credit(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
-    out = _upload(env, monkeypatch, kind, confirmed=True)
+    # 그림(illustration)은 LLM도 그림으로 읽은 경우 (실사로 읽으면 아래 시험)
+    out = _upload(env, monkeypatch, kind, confirmed=True, real_photo=kind == "virtual_human")
     assert out.status == TaskStatus.COMPLETED and out.output["kind"] == kind
     assert out.output["stylized_from_photo"] is False  # 그림체로 바꾸지 않는다
     rid = out.output["record_id"]
@@ -109,6 +112,20 @@ def test_reference_kinds_keep_the_original_and_spend_no_credit(
     assert sheet["status"] == "done" and sheet["source"] == rr.ORIGINAL_SOURCE
     assert (env["dir"] / "creative" / rid / "sheet.jpg").read_bytes() == JPEG  # 원본 그대로
     assert env["store"].get(rid)["sheet"]["kind"] == kind
+
+
+def test_illustration_that_is_a_real_photo_is_stylized(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """11/25: "그림"으로 골라도 LLM이 실제 사람 사진으로 읽으면 실사 얼굴을 쓰지 않는다."""
+    out = _upload(env, monkeypatch, "illustration", real_photo=True)
+    assert out.status == TaskStatus.COMPLETED and out.output["kind"] == "real_photo"
+    assert out.output["stylized_from_photo"] is True  # 그림체로 바꾼다
+    rid = out.output["record_id"]
+    assert [a for a, _p, _k in env["gate"].calls] == ["generate_media"]  # 지금처럼 시트 그림
+    sheet = env["store"].get_render(rid)["sheet_image"]
+    assert sheet.get("source") != rr.ORIGINAL_SOURCE  # 원본을 저장하지 않는다
+    assert env["store"].get(rid)["sheet"]["kind"] == "real_photo"
 
 
 def test_virtual_human_prompt_has_no_flat_illustration(

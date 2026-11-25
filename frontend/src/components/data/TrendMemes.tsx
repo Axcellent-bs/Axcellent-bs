@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ErrorBox, Panel, TONE, Waiting } from "@/components/finance/bits";
+import { ErrorBox, Panel, Skeleton, TONE } from "@/components/finance/bits";
 import { useSkill, type SkillState } from "@/components/data/useSkill";
 import { safeLink } from "@/lib/safeLink";
 import { judgedByShare, shareLine } from "@/lib/memeView";
@@ -306,7 +306,8 @@ export function TrendMemes({ focus = "all", summaryCards }: { focus?: DetectView
           {summaryCards}
         </div>
       )}
-      {s.kind === "loading" ? <Waiting what="유행을 받는 중…" />
+      {/* 받는 중에도 표(머리 + 몇 줄)만큼 자리를 잡아 아래 영상 탐색이 밀려 내려가지 않게 한다 (CLS) */}
+      {s.kind === "loading" ? <Skeleton label="유행을 받는 중…" stats={0} lines={6} minHeight="280px" />
         : s.kind === "failed" ? <ErrorBox message={s.reason} onRetry={res.reload} />
         : (
           <div className="space-y-2">

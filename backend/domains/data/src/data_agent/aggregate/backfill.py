@@ -16,7 +16,7 @@ from ax_contracts.data_access.sales_aggregates import AggRun
 from ax_contracts.schemas.data import CatalogSales
 from data_agent.aggregate.build_day import build_day
 from data_agent.aggregate.build_more import build_more
-from data_agent.aggregate.build_snapshots import build_snapshots
+from data_agent.aggregate.build_snapshots import build_snapshots, windows
 from data_agent.aggregate.store import AggregateStore
 from data_agent.sales_quality import kst_day
 from data_agent.sales_store import SalesStore, iso
@@ -58,9 +58,36 @@ def snapshot_day(  # noqa: PLR0913 - 두 저장소·회사·기준일·카탈로
     pairs, profiles, channels = build_more(sales, tenant_id, day, cfg, run.run_id, now,
                                            source_cursor=cur)  # fmt: skip
     agg.replace_more(tenant_id, day, pairs, profiles, channels)
+    events = event_base(sales, agg, tenant_id, day, cfg, run, now)
     return {"agg_buyers_period": len(buyers), "agg_cohorts": len(cohorts),
             "agg_at_risk": len(at_risk), "agg_pairs": len(pairs),
-            "agg_segment_profile": len(profiles), "agg_channel_value": len(channels)}  # fmt: skip
+            "agg_segment_profile": len(profiles), "agg_channel_value": len(channels),
+            "agg_event_base": events}  # fmt: skip
+
+
+def event_base(  # noqa: PLR0913
+    sales: SalesStore,
+    agg: AggregateStore,
+    tenant_id: str,
+    day: date,
+    cfg: CatalogSales,
+    run: AggRun,
+    now: datetime,
+) -> int:
+    """이벤트 제안 후보(90일, 대상 고객은 기준일 24시까지)를 화면과 같은 함수로 세어 둔다
+    (3-2 ⑦). 속성·장르·이벤트 종류 설정이 없으면 화면도 후보를 세지 않으므로 만들지 않는다."""
+    from data_agent.skills import event_proposal as ep  # noqa: PLC0415 - skill → 집계 순환 import
+
+    if not (cfg.attributes and cfg.genres and cfg.event_kinds):
+        return 0
+    w = next(x for x in windows(day) if x.period == ep.ANALYSIS_PERIOD)
+    keys = [a.key for a in cfg.attributes]
+    with sales.segment_session(tenant_id, w.start, w.end, keys) as s:
+        found = ep.count_candidates(s, cfg, w.end)
+    agg.replace_event_base(tenant_id, day, run.run_id, now, cfg.version or "",
+                           [ep.candidate_dump(c) for c in found],
+                           source_cursor=run.source_cursor)  # fmt: skip
+    return len(found)
 
 
 def source_cursor(sales: SalesStore, tenant_id: str) -> str | None:

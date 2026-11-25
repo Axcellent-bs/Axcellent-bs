@@ -185,6 +185,18 @@
       "priority": "recommended"
     },
     {
+      "id": "creative_overlay_redo",
+      "description": "제작 기록(input.record_id: CR-…)의 최신 영상(완성 영상 final_video 우선, 없으면 video)에 장면 자막(스토리보드 칸 caption_ko, 사람이 고친 글 input.captions[].no·caption_ko 우선, 빈 글이면 그 칸 자막 없음)과 마지막 2초 엔드카드(회사 표시 이름 + cta_ko)를 코드(ffmpeg drawtext)로 다시 얹는다. 영상이 붙을 때 자동으로 한 번 얹은 것을 사람이 자막을 고친 뒤 다시 만드는 길이다. 결과는 render.overlay(status applied·skipped·failed·running, error, captions, source_part)와 새 칸 render.overlay_video(overlay.mp4)이며 원본 영상은 그대로다. 글꼴(MARKETING_OVERLAY_FONT)·ffmpeg가 없으면 skipped(font_not_found·ffmpeg_not_found)로 끝나고 영상·게시 흐름은 멈추지 않는다. 크레딧을 쓰지 않고 외부 공급자를 부르지 않으며 안전 관문이 없다. 거절 outcome: not_found·video_not_ready·in_progress·invalid_input.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeOverlayRedoInput",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeOverlayRedoOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "optional"
+    },
+    {
       "id": "creative_thumbnails_request",
       "description": "제작 기록(input.record_id: CR-…) 영상(완성 영상 우선, 없으면 Higgsfield 영상)의 썸네일 후보 3장(캐릭터 클로즈업+제목 자리·핵심 장면·액션/감정 순간, 영상 비율 16:9 또는 9:16, 글자 없음) 만들기를 사람 결정(C generate_creative_thumbnails)에 올린다. 회사 Higgsfield 계정(MCP, 구독 크레딧)이 있으면 그 계정, 없으면 키 길, 둘 다 없으면 not_connected. 키 길만 이미지 월 예산을 건다. 보류되면 render.thumbnails.status=awaiting_approval·review_id, 승인 뒤 기록을 읽을 때(creative_record_get) 같은 키로 다시 물어 executed면 만들고 AI 표시(XMP)를 붙여 creative/<기록>/thumbs/에 저장한다. 영상이 생기면 기록을 읽을 때 한 번 저절로 요청된다. 후보가 있으면 regenerate=true일 때만 다시 만든다. 거절 outcome: not_found·video_not_ready·not_connected·model_not_configured·credits_insufficient·higgsfield_reconnect_needed·quota_exceeded·quota_not_configured·storage_error·in_progress·cover_locked.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeThumbnailsRequestInput",

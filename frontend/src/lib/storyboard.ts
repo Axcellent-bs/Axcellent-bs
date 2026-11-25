@@ -21,6 +21,8 @@ export interface StoryboardShot {
   speaker_ko?: string;
   line_ko?: string;
   caption_ko?: string;
+  /** AI가 그린 SVG 콘티 글(board_source가 "svg"일 때). 없으면 구도 그림 칸. 늘 <img data URI>로만 보인다 */
+  svg?: string | null;
 }
 
 export interface StoryboardResult {
@@ -36,6 +38,8 @@ export interface StoryboardResult {
   /** 기록의 대본 장면을 칸으로 썼는지, 대본의 끝 CTA(11/23) */
   script_used?: boolean;
   cta_ko?: string;
+  /** 칸 그림의 출처. 없으면 "higgsfield"(지금 화면) */
+  board_source?: "svg" | "higgsfield" | "layout";
 }
 
 export const SHOT_COUNTS = [6, 9, 12] as const;

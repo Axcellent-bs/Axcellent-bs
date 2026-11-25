@@ -58,7 +58,7 @@ CATEGORY_ID = "28"  # Science & Technology
 STATUS_TTL = 60.0
 PENDING = ("awaiting_approval", "uploading")
 Privacy = Literal["private", "unlisted", "public"]
-VideoPart = Literal["video", "final_video"]
+VideoPart = Literal["video", "final_video", "overlay_video"]
 # 설명 끝 해시태그: 태그에서 골라 설명 전체 해시태그가 3~5개가 되게(#AXcellent 포함, 중복 없이)
 HASHTAG_MAX = 5
 HASHTAG_DEFAULTS = ("AI직원", "AI")  # 태그가 모자랄 때만 채워 최소 3개를 맞춘다
@@ -263,11 +263,7 @@ def _clean(title: str, description: str, tags: list[str]) -> tuple[str, str, lis
 
 
 def _default_part(rec: dict[str, Any]) -> str | None:
-    render = rec.get("render") or {}
-    for part in ("final_video", "video"):
-        if (render.get(part) or {}).get("status") == "done":
-            return part
-    return None
+    return _render.publish_video_part(rec)  # 고르는 규칙은 한 곳(약속 B)
 
 
 def _fallback(rec: dict[str, Any]) -> DraftRead:

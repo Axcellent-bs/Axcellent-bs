@@ -58,6 +58,8 @@ from ax_contracts.schemas.marketing_creative import (
     CreativeInstagramDraftInput,
     CreativeInstagramOutput,
     CreativeInstagramRequestInput,
+    CreativeOverlayRedoInput,
+    CreativeOverlayRedoOutput,
     CreativeRecordAttachInput,
     CreativeRecordAttachOutput,
     CreativeRecordGetInput,
@@ -112,6 +114,7 @@ from marketing_agent import (
     video_providers,
 )
 from marketing_agent import character_sheet as _character_sheet
+from marketing_agent import creative_overlay as _overlay
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import creative_script as _script
@@ -1172,6 +1175,32 @@ async def creative_thumbnail_select(request: AgentRequest) -> AgentResult:
     )
 
 
+async def creative_overlay_redo(request: AgentRequest) -> AgentResult:
+    """사람이 고친 자막으로 최신 영상에 자막·엔드카드를 다시 얹는다(read, 크레딧·관문 없음)."""
+    data = _parse(request, CreativeOverlayRedoInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        done = await _overlay.redo(
+            data.record_id, {str(c.no): c.caption_ko for c in data.captions}
+        )
+    except _overlay.OverlayRefused as error:
+        return _result(
+            request, TaskStatus.FAILED, outcome=error.code, output={"message": error.code}
+        )
+    out = CreativeOverlayRedoOutput(record_id=data.record_id, **done)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out.model_dump(mode="json"),
+        evidence=_evidence(
+            [request.skill],
+            f"자막 다시 얹기 {data.record_id}: {out.overlay.get('status')}",
+            [data.record_id],
+        ),
+    )
+
+
 async def creative_record_attach(request: AgentRequest) -> AgentResult:
     """사람이 올린 그림·영상을 제작 기록에 붙인다(A `attach_creative_file`)."""
     data = _parse(request, CreativeRecordAttachInput)
@@ -1451,7 +1480,7 @@ async def character_sheet_prompt(request: AgentRequest) -> AgentResult:
             output={"message": refused.message},
         )
     out = out.model_copy(update={"record_id": _record_sheet(out, request.untrusted)})
-    if out.record_id and kind in REFERENCE_KINDS:
+    if out.record_id and out.kind in REFERENCE_KINDS:  # 그림인데 실사면 real_photo로 바뀐다
         # 11/24 가상 인물·일러스트: 시트 그림을 만들지 않고(크레딧 0) 올린 원본을 시트 그림 자리에
         _save_original(request, out.record_id)
     elif out.record_id:  # Higgsfield로 이미지 시트 그림(키·모델이 없으면 기록에 이유만)
@@ -2645,6 +2674,7 @@ HANDLERS = {
     "youtube_video_stats": youtube_video_stats,
     "youtube_uploads_list": youtube_uploads_list,
     "creative_record_attach": creative_record_attach,
+    "creative_overlay_redo": creative_overlay_redo,
     "creative_thumbnails_request": creative_thumbnails_request,
     "creative_thumbnail_select": creative_thumbnail_select,
     "brand_characters_list": brand_characters_list,
