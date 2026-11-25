@@ -7,6 +7,7 @@ import type { CharacterSheetResult } from "./characterSheet";
 import type { StoryboardResult } from "./storyboard";
 import type { CreativeScript } from "./creativeScript";
 import type { OverlayState, PlayPart } from "./videoOverlay";
+import { videoRequestBody, type RegenerateResult, type VideoQcState } from "./videoQcView";
 import type { CreativeVideoSummary } from "./creativeVideo";
 import { boardImagePath } from "./storyboardSvg";
 import { keyframeRedrawPath, type KeyframePart, type KeyframesState } from "./keyframes";
@@ -55,6 +56,8 @@ export interface RenderPart {
   attempt?: number;
   /** 승인 대기를 시작한 시각 */
   held_at?: string | null;
+  /** 기술 검사 [영상 다시 만들기]가 거절·기한 지남·막힘으로 끝나 예전 영상으로 되돌렸을 때(11/26) */
+  regenerate?: RegenerateResult | null;
 }
 
 export interface CreativeRecord {
@@ -70,7 +73,7 @@ export interface CreativeRecord {
   /** 영상 대본(11/23). 옛 기록은 없다 */
   script?: CreativeScript | null;
   /** Higgsfield 그림·영상 */
-  render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState; thumbnails?: ThumbnailsState; instagram?: InstagramPostState; overlay?: OverlayState; keyframes?: KeyframesState };
+  render?: Partial<Record<RenderPartKey, RenderPart>> & { youtube?: YoutubeState; thumbnails?: ThumbnailsState; instagram?: InstagramPostState; overlay?: OverlayState; keyframes?: KeyframesState; qc?: VideoQcState };
 }
 
 const PATH = "/api/dashboard/marketing/creative-records";
@@ -93,12 +96,13 @@ export const getCreativeRecord = (id: string) => get<CreativeRecord>(`${PATH}/${
 export const assetUrl = (id: string, part: RenderPartKey | PlayPart | KeyframePart, version: string | null) =>
   `${DASHBOARD_API_URL}${PATH}/${encodeURIComponent(id)}/asset/${part}${version ? `?v=${encodeURIComponent(version.slice(0, 12))}` : ""}`;
 
-/** 스토리보드 그림으로 영상 만들기를 사람 승인에 올린다(POST, C 등급). 승인 전에는 만들지 않는다 */
-export async function requestCreativeVideo(id: string): Promise<{ record_id: string; video: RenderPart }> {
+/** 스토리보드 그림으로 영상 만들기를 사람 승인에 올린다(POST, C 등급). 승인 전에는 만들지 않는다.
+ *  `regenerate`(11/26): 다 만든 영상이 기술 검사 확인 필요일 때만 서버가 새 승인 요청을 만든다 */
+export async function requestCreativeVideo(id: string, opts?: { regenerate?: boolean }): Promise<{ record_id: string; video: RenderPart }> {
   const res = await fetch(`${DASHBOARD_API_URL}${PATH}/${encodeURIComponent(id)}/video`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...dashboardAuth() },
-    body: "{}",
+    body: videoRequestBody(opts),
     cache: "no-store",
   });
   const parsed: unknown = await res.json().catch(() => undefined);

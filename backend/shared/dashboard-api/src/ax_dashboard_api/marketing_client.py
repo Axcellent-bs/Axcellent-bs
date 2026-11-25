@@ -986,11 +986,17 @@ async def brief_creative_call(proposal_id: str) -> dict[str, Any]:
     return await _creative_read("prepare_brief_creative", {"proposal_id": proposal_id})
 
 
-async def creative_video_call(record_id: str, who: str | None) -> dict[str, Any]:
-    """스토리보드 영상 만들기를 사람 승인에 올린다(마케팅 `creative_video_request`)."""
+async def creative_video_call(
+    record_id: str, who: str | None, *, regenerate: bool = False
+) -> dict[str, Any]:
+    """스토리보드 영상 만들기를 사람 승인에 올린다(마케팅 `creative_video_request`).
+
+    `regenerate`(11/26): 기술 검사 확인 필요인 다 만든 영상을 다시 만들기 (사람 버튼에서만)."""
     payload: dict[str, Any] = {"record_id": record_id}
     if who:
         payload["who"] = who
+    if regenerate:
+        payload["regenerate"] = True
     return await _creative_read("creative_video_request", payload)
 
 

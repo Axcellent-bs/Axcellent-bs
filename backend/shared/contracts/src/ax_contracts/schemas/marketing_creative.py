@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -79,6 +79,29 @@ class CreativeVideoRequestInput(AxModel):
 
     record_id: str = Field(pattern=RECORD_ID_PATTERN)
     who: str | None = Field(default=None, max_length=80)  # 요청한 사람(대시보드 사람 토큰)
+    # 11/26 추가: 다 만든 영상을 다시 만들기 (화면 버튼에서만). 그 기록 render.qc에 warn이 있을
+    # 때만 done이어도 새 멱등 키로 영상 승인을 다시 요청한다(사람 승인·영상 예산 그대로)
+    regenerate: bool = False
+
+
+# 11/26 추가: 영상 기술 검사(ffmpeg) 결과. 기록 render.qc 모양
+# (`marketing_agent.creative_qc`). 자막·소리는 우리 후처리가 얹어 늘 있으므로 검사하지 않는다
+CreativeQcCheckId = Literal["black", "freeze", "duration"]
+CreativeQcStatus = Literal["pass", "warn", "error"]  # error = 확인 못 함(ffmpeg 없음·실패)
+
+
+class CreativeQcCheck(AxModel):
+    id: CreativeQcCheckId
+    status: CreativeQcStatus
+    detail_ko: str
+    ranges: list[list[float]] = Field(default_factory=list)  # [[시작 초, 끝 초], …]
+
+
+class CreativeVideoQc(AxModel):
+    video_sha: str | None = None  # 검사한 영상 파일 sha256 (같으면 다시 돌리지 않는다)
+    part: str | None = None  # 검사한 칸 (overlay_video · final_video · video)
+    checks: list[CreativeQcCheck] = Field(default_factory=list)
+    at: str | None = None
 
 
 class CreativeVideoRequestOutput(AxModel):
