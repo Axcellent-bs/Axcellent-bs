@@ -180,7 +180,13 @@ def test_nubi_uses_its_own_catalog_and_reads_through_the_site_adapter() -> None:
     from data_agent.catalog import load_catalog
 
     catalog = load_catalog("nubi")
-    assert {m.id for m in catalog.metrics} == {"order_count", "inquiry_count"}
+    # 변환기가 원본에서 세는 지표만 (11/25: 취소·환불액 추가, site_adapter/series.py)
+    assert {m.id for m in catalog.metrics} == {
+        "order_count",
+        "inquiry_count",
+        "cancel_count",
+        "refund_amount",
+    }
     assert catalog.impact.unit_label == "예약"
 
 
@@ -191,5 +197,11 @@ def test_studyon_uses_its_own_catalog_and_reads_through_the_site_adapter() -> No
     from data_agent.catalog import load_catalog
 
     catalog = load_catalog("studyon")
-    assert {m.id for m in catalog.metrics} == {"order_count", "inquiry_count"}
+    # 변환기가 원본에서 세는 지표만 (11/25: 취소·환불액 추가, site_adapter/series.py)
+    assert {m.id for m in catalog.metrics} == {
+        "order_count",
+        "inquiry_count",
+        "cancel_count",
+        "refund_amount",
+    }
     assert catalog.impact.customer_label == "수강생"
