@@ -23,22 +23,14 @@ function Player({ v }: { v: RequestVideo }) {
   return <video className="max-h-96 rounded-xl bg-black" src={src} controls preload="metadata" aria-label="AI 표시가 들어간 영상" />;
 }
 
-function Item({ v, focus, onChanged }: { v: RequestVideo; focus: boolean; onChanged: () => void }) {
+/**
+ * 영상 한 건의 속 내용(재생·썸네일 고르기·유튜브/인스타 올리기). `<li>` 바깥에 두어 다른 목록(제작 기록
+ * 전체 탭의 펼친 줄 등)이 자기 `<li>` 안에서 그대로 끼워 쓸 수 있다(11/25, CreativeRecords 전체 탭에서 재사용).
+ */
+export function VideoCard({ v, onChanged }: { v: RequestVideo; onChanged: () => void }) {
   const pane = videoPane(v);
-  const ref = useRef<HTMLLIElement>(null);
-  const scrolled = useRef(false);
-  useEffect(() => {
-    if (!focus || scrolled.current) return; // 들어왔을 때 한 번만
-    scrolled.current = true;
-    ref.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
-  }, [focus]);
   return (
-    <li
-      ref={ref}
-      className={`space-y-2 px-4 py-3 text-xs ${focus ? "rounded-2xl border-2 border-accent bg-accent-50" : ""}`}
-      aria-current={focus ? "true" : undefined}
-      data-focus={focus ? "request" : undefined}
-    >
+    <div className="space-y-2 px-4 py-3 text-xs">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-mono text-ink-700">{v.request_id}</span>
         <span className="chip bg-ink-50 text-ink-700">{statusKo(v.status)}</span>
@@ -55,6 +47,26 @@ function Item({ v, focus, onChanged }: { v: RequestVideo; focus: boolean; onChan
             cover={v.cover_media_id ? { url: requestVideoCoverUrl(v.post_draft_id, v.cover_media_id), picked: v.cover_picked === true } : null} />
         </>
         : <p className="text-ink-500">AI 표시가 입혀진 뒤에 회사 유튜브·인스타그램에 올릴 수 있어요.</p>}
+    </div>
+  );
+}
+
+function Item({ v, focus, onChanged }: { v: RequestVideo; focus: boolean; onChanged: () => void }) {
+  const ref = useRef<HTMLLIElement>(null);
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (!focus || scrolled.current) return; // 들어왔을 때 한 번만
+    scrolled.current = true;
+    ref.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  }, [focus]);
+  return (
+    <li
+      ref={ref}
+      className={focus ? "rounded-2xl border-2 border-accent bg-accent-50" : undefined}
+      aria-current={focus ? "true" : undefined}
+      data-focus={focus ? "request" : undefined}
+    >
+      <VideoCard v={v} onChanged={onChanged} />
     </li>
   );
 }
