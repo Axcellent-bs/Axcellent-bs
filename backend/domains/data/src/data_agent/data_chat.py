@@ -254,7 +254,8 @@ def request_card(text: str, resolved: Any, names: Mapping[str, str]) -> dict[str
                "related_terms": list(getattr(resolved, "related_terms", []) or [])},
         preset=b.preset,
         # 카드 칸 값으로 접수하면 의뢰문을 다시 읽지 않아 보고서 쪽 AI는 추천 1번
-        cost_note=cost_note(len(resolved.accounts), len(b.keywords), 1 if filled else 2),
+        # 11/26 E: 웃음 재료 상황 요약 1번이 늘었다 (추천 1 + 상황 1, 칸이 비면 추출 1 더)
+        cost_note=cost_note(len(resolved.accounts), len(b.keywords), 2 if filled else 3),
         brief_reason=resolved.extract_error,
     )  # fmt: skip
     return card.model_dump(mode="json")

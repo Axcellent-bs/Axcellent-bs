@@ -144,7 +144,8 @@ def test_trend_request_gets_a_card_not_a_report() -> None:
     assert b.competitor_names["toun28_official"] == "톤28(보고서)"
     assert b.competitor_names["beplain_official"] == "비플레인"
     assert set(b.competitor_names) == set(b.competitors)
-    assert card.brief_reason is None and card.cost_note.endswith("AI 1번")
+    # 11/26 E: 웃음 재료 상황 요약 1번이 늘어 "AI 2번" (예전 기대: "AI 1번")
+    assert card.brief_reason is None and card.cost_note.endswith("AI 2번")
     assert th["messages"][0]["card"] is None  # 사람 말은 카드 없음
     # 의뢰문은 데이터 블록으로만, LLM은 1번
     assert llm.calls == [("_Extracted", {"의뢰문": ECO})]
