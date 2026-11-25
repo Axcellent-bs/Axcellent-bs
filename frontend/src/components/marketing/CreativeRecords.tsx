@@ -4,6 +4,8 @@ import { Tabs } from "@/components/connect/parts";
 import { shortDateTime } from "@/lib/format";
 import { RECORD_ID, getCreativeRecord, listCreativeRecords, redrawBoardImage, thumbSrc, type CreativeRecord, type CreativeRecordSummary } from "@/lib/creativeRecords";
 import { thumbChip } from "@/lib/creativeThumbnails";
+import { listRequestVideos } from "@/lib/requestVideos";
+import { REQUEST_VIDEOS_PATH, statusKo, type RequestVideo } from "@/lib/requestVideoView";
 import { SheetBoard } from "./SheetBoard";
 import { StoryboardView } from "./StoryboardMaker";
 import { PromptBox } from "./PromptParts";
@@ -13,7 +15,9 @@ import { ScriptPanel } from "./ScriptPanel";
 import { RecordBoardFromScript, RecordScriptWrite } from "./RecordScriptStart";
 import { boardBehindScript, nearestCount, stageChips } from "@/lib/creativeScript";
 
-// 마케팅 › 제작 기록 (/marketing/records). 탭 두 개:
+// 마케팅 › 제작 기록 (/marketing/records). 탭 세 개:
+// - 전체(시간순, 기본): 이미지 시트·스토리보드 기록과 의뢰로 만든 영상을 만든 시각 하나로 모아 최신순으로 본다
+//   (11/25, 두 길이 둘로 나뉘어 보이던 것을 합침). 영상 줄을 누르면 의뢰로 만든 영상 탭으로 가 그 영상에 스크롤한다
 // - 이미지 시트 · 스토리보드: SNS·미디어 탭에서 만든 이미지 시트와 이어 만든 대본·스토리보드를 기록마다 다시 본다.
 //   상세의 대본은 고쳐서 저장하거나 AI로 다시 쓸 수 있다(11/23). 목록에는 단계 칩(대본·스토리보드)
 //   목록을 누르면 ?id=CR-… 로 상세가 열린다(상세의 RenderPanel에서 영상·유튜브 올리기)
@@ -105,8 +109,37 @@ function Row({ r }: { r: CreativeRecordSummary }) {
   );
 }
 
-type View = "records" | "videos";
+/** 전체(시간순) 목록의 영상 줄. 의뢰로 만든 영상 탭으로 가 그 영상에 스크롤·테두리 표시한다(RequestVideos의 기존 동작, 11/23) */
+function VideoRow({ v }: { v: RequestVideo }) {
+  return (
+    <li>
+      <Link to={`${REQUEST_VIDEOS_PATH}&request=${encodeURIComponent(v.request_id)}`} className="flex items-center gap-4 rounded-2xl px-3 py-3 hover:bg-ink-50">
+        <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-surface text-xs text-ink-500 ring-1 ring-ink-100">영상</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-ink-900">{v.caption_ko ?? v.request_id}</span>
+          <span className="block truncate text-xs text-ink-500">의뢰 {v.request_id}</span>
+        </span>
+        <span className="flex shrink-0 flex-col items-end gap-1 text-xs">
+          <span className="chip bg-ink-50 text-ink-700">{statusKo(v.status)}</span>
+          <span className="tabular-nums text-ink-500">{shortDateTime(v.created_at)}</span>
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+type MergedRow = { kind: "record"; at: number; r: CreativeRecordSummary } | { kind: "video"; at: number; v: RequestVideo };
+
+/** 이미지 시트·스토리보드 기록과 의뢰로 만든 영상을 만든 시각(created_at) 기준 최신순으로 합친다 */
+function mergeByTime(items: CreativeRecordSummary[], videos: RequestVideo[]): MergedRow[] {
+  const a: MergedRow[] = items.map((r) => ({ kind: "record", at: new Date(r.created_at).getTime(), r }));
+  const b: MergedRow[] = videos.map((v) => ({ kind: "video", at: new Date(v.created_at).getTime(), v }));
+  return [...a, ...b].sort((x, y) => y.at - x.at);
+}
+
+type View = "all" | "records" | "videos";
 const VIEW_TABS: readonly { id: View; label: string }[] = [
+  { id: "all", label: "전체(시간순)" },
   { id: "records", label: "이미지 시트 · 스토리보드" },
   { id: "videos", label: "의뢰로 만든 영상" },
 ];
@@ -114,16 +147,26 @@ const VIEW_TABS: readonly { id: View; label: string }[] = [
 export function CreativeRecords() {
   const [params, setParams] = useSearchParams();
   const id = params.get("id");
-  const view: View = params.get("view") === "videos" || (params.get("request") && !id) ? "videos" : "records";
-  const pick = (next: View) => setParams(next === "videos" ? { view: "videos" } : {}, { replace: true });
+  const askedView = params.get("view");
+  const view: View = askedView === "videos" || (params.get("request") && !id) ? "videos" : askedView === "records" ? "records" : "all";
+  const pick = (next: View) => setParams(next === "all" ? {} : { view: next }, { replace: true });
   const [items, setItems] = useState<CreativeRecordSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 전체(시간순) 탭에서 합칠 의뢰 영상 목록. 이미지 시트·스토리보드와 오류를 따로 가진다(하나가 막혀도 나머지는 본다)
+  const [videos, setVideos] = useState<RequestVideo[] | null>(null);
+  const [videosError, setVideosError] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
       setItems(await listCreativeRecords(100));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "제작 기록을 읽지 못했어요");
+    }
+    try {
+      setVideos(await listRequestVideos(null, 100));
+      setVideosError(null);
+    } catch (e) {
+      setVideosError(e instanceof Error ? e.message : "의뢰로 만든 영상을 읽지 못했어요");
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -138,9 +181,22 @@ export function CreativeRecords() {
         <Link to="/marketing/sns" className="btn-ghost ml-auto text-xs">새로 만들기 ›</Link>
       </header>
       <Tabs label="제작 기록 보기" items={VIEW_TABS} value={view} onPick={pick} />
-      <section className="card p-6" role="tabpanel" aria-label={view === "videos" ? "의뢰로 만든 영상" : "이미지 시트 · 스토리보드"}>
+      <section className="card p-6" role="tabpanel" aria-label={view === "videos" ? "의뢰로 만든 영상" : view === "records" ? "이미지 시트 · 스토리보드" : "전체(시간순)"}>
         {view === "videos" ? <RequestVideos />
           : id && RECORD_ID.test(id) ? <Detail id={id} />
+          : view === "all" ? (
+            error ? <p className="text-sm text-accent" role="alert">{error}</p>
+            : videosError ? <p className="text-sm text-accent" role="alert">{videosError}</p>
+            : items === null || videos === null ? <p className="text-sm text-ink-500">불러오는 중…</p>
+            : items.length === 0 && videos.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">아직 기록이 없어요. SNS·미디어에서 이미지 시트를 만들거나, 총괄에 홍보 영상을 의뢰하면 여기에 쌓여요.</p>
+            : (
+              <ul className="divide-y divide-ink-100" aria-label="제작 기록 전체(시간순)">
+                {mergeByTime(items, videos).map((row) => row.kind === "record"
+                  ? <Row key={`r-${row.r.record_id}`} r={row.r} />
+                  : <VideoRow key={`v-${row.v.post_draft_id}`} v={row.v} />)}
+              </ul>
+            )
+          )
           : error ? <p className="text-sm text-accent" role="alert">{error}</p>
           : items === null ? <p className="text-sm text-ink-500">불러오는 중…</p>
           : items.length === 0 ? <p className="py-6 text-center text-sm text-ink-500">아직 기록이 없어요. SNS·미디어에서 이미지 시트를 만들면 여기에 쌓여요.</p>
