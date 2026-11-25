@@ -145,7 +145,7 @@ NEGATIVE = (
     "overlapping panels, busy background, text artifacts, watermark, logo, signature, blurry, "
     "low resolution, multiple different characters"
 )
-# 11/26 원본 그대로 참조로 쓰는 종류(REFERENCE_KINDS: virtual_human·illustration)의 읽기 지시.
+# 11/26 원본 그대로 참조로 쓰는 가상 인물(virtual_human)의 읽기 지시 (REFERENCE_PROMPT_KINDS).
 # 운영 증거 11/25 CR-4dc50bc2cc75: virtual_human인데 "실사 사진으로 보여 그림체 캐릭터로 바꿔 외형을
 # 정리한다"가 나왔다(위 PROMPT의 사진 규칙을 그대로 따름)
 PHOTO_RULE = (
@@ -162,12 +162,20 @@ REFERENCE_RULE = (
 )
 
 
+# PROMPT 문구가 조금만 바뀌어도 replace가 조용히 안 바뀌므로 불러올 때 막는다 (11/26 태윤 님 리뷰)
+if PHOTO_RULE not in PROMPT:  # pragma: no cover - 문구를 고치면 여기서 바로 깨진다
+    raise RuntimeError("character_sheet: PHOTO_RULE이 PROMPT 안에 그대로 있어야 한다")
+
 KEEP_SUMMARY = "올린 이미지 그대로의 외형을 참조로 씀"  # 요약이 그림체 문장뿐이면 이 문장
+# 원본 얼굴 그대로 적는 읽기 지시는 virtual_human(실존 인물 아님·쓸 권리 확인)에만.
+# illustration은 사진 규칙을 남긴다: "그림"으로 골랐어도 실제 사람 사진이면 build_output이
+# real_photo로 바꾸는데(#1746), 그때 얼굴 설명이 face_en·consistency_en으로 퍼지면 안 된다
+REFERENCE_PROMPT_KINDS = ("virtual_human",)
 
 
 def prompt_for(kind: str) -> str:
-    """올린 이미지 종류별 읽기 지시문. virtual_human·illustration은 원본 그대로의 외형."""
-    return PROMPT.replace(PHOTO_RULE, REFERENCE_RULE) if kind in REFERENCE_KINDS else PROMPT
+    """올린 이미지 종류별 읽기 지시문. virtual_human만 원본 그대로의 외형, 나머지는 사진 규칙."""
+    return PROMPT.replace(PHOTO_RULE, REFERENCE_RULE) if kind in REFERENCE_PROMPT_KINDS else PROMPT
 
 
 # 결과 글에서 뺄 "그림체로 바꿈/바꿔" 문장 (원본 그대로 참조로 쓰는 종류만)

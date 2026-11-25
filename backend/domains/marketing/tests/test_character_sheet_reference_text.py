@@ -66,11 +66,16 @@ def test_real_photo_keeps_current_rule() -> None:
 
 
 def test_prompt_by_kind() -> None:
-    for kind in ("virtual_human", "illustration"):
-        p = cs.prompt_for(kind)
-        assert "원본 그대로의 외형" in p and "그림체 캐릭터(art_style_en)로 바꾼 외형" not in p
-        assert "real_person_photo=true" in p
+    p = cs.prompt_for("virtual_human")
+    assert "원본 그대로의 외형" in p and "그림체 캐릭터(art_style_en)로 바꾼 외형" not in p
+    assert cs.REFERENCE_RULE in p and cs.PHOTO_RULE not in p
+    assert "real_person_photo=true" in p
+    # 11/26 태윤 님 리뷰: illustration은 사진 규칙을 남긴다(사진이면 얼굴을 옮기지 않음)
+    assert cs.prompt_for("illustration") == cs.PROMPT
+    assert cs.PHOTO_RULE in cs.prompt_for("illustration")
+    assert cs.REFERENCE_RULE not in cs.prompt_for("illustration")
     assert cs.prompt_for("real_photo") == cs.PROMPT
+    assert cs.PHOTO_RULE in cs.PROMPT  # 문구가 바뀌면 replace가 조용히 안 바뀐다
     assert "그림체 캐릭터(art_style_en)로 바꾼 외형" in cs.PROMPT
 
 
@@ -91,3 +96,48 @@ def test_llm_gets_reference_prompt_for_virtual_human() -> None:
                                               kind="virtual_human"))  # fmt: skip
     assert "원본 그대로의 외형" in seen[0]
     assert "그림체" not in _all_text(out)
+
+
+EXACT_FACE = "exact likeness: mole under left eye, crooked smile"  # 실제 사람 얼굴 그대로의 묘사
+
+
+def _fake_llm(seen: list[str]):  # noqa: ANN202
+    """가짜 LLM: 받은 지시문대로 답한다. 사진 규칙이면 얼굴을 옮기지 않은 그림체 외형,
+    원본 그대로 지시면 실제 얼굴 묘사."""
+
+    class LLM:
+        async def structured(self, prompt, schema, untrusted=None, images=None,  # noqa: ANN001
+                             context_id=None):  # noqa: ANN001, ANN201
+            seen.append(prompt)
+            if cs.REFERENCE_RULE in prompt:
+                return _read(face_en=EXACT_FACE)
+            return _read(face_en="simple stylized oval face, dot eyes")
+
+    return LLM()
+
+
+def _png() -> dict:
+    import base64
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    return {"media_type": "image/png", "data_base64": base64.b64encode(png).decode()}
+
+
+def test_illustration_real_photo_does_not_spread_face() -> None:
+    """11/26 태윤 님 리뷰: "그림"으로 올린 실제 사람 사진의 얼굴이 모든 칸 프롬프트로 퍼지던 것."""
+    seen: list[str] = []
+    out = asyncio.run(cs.make_character_sheet({"image": _png()}, lambda: _fake_llm(seen),
+                                              kind="illustration"))  # fmt: skip
+    assert cs.PHOTO_RULE in seen[0] and cs.REFERENCE_RULE not in seen[0]
+    assert out.kind == "real_photo" and out.stylized_from_photo is True
+    blob = " ".join([out.consistency_en, out.prompt_en, *(p.prompt_en for p in out.panels)])
+    assert EXACT_FACE not in blob and "mole under left eye" not in blob
+    assert "Do not copy the likeness of the real person" in out.consistency_en
+
+
+def test_virtual_human_gets_reference_rule_and_keeps_face() -> None:
+    seen: list[str] = []
+    out = asyncio.run(cs.make_character_sheet({"image": _png()}, lambda: _fake_llm(seen),
+                                              kind="virtual_human"))  # fmt: skip
+    assert cs.REFERENCE_RULE in seen[0] and cs.PHOTO_RULE not in seen[0]
+    assert out.kind == "virtual_human" and EXACT_FACE in out.consistency_en
