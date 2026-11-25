@@ -266,7 +266,8 @@ AXcellent 규격(shop-api)이 아닌 고객사 자기 API를 AI들이 shop-api�
 - `event_id`는 변화 내용으로 정한다(`chg:<회사>:payment.refunded:<주문>:<환불>`, `chg:<회사>:order.cancelled:<주문>`)
 - 취소 사유(`cancel_reason_code`)가 없는 취소는 이벤트를 만들지 않고 건수만 센다
 - 판매 서버에는 dashboard-api 토큰을 붙인다. 캣북스 `sales-export`가 이 토큰을 받아야 한다
-- 상태: `GET /api/dashboard/change-detector/status` (사람 토큰)
+- 회사별: 한 주기에 캣북스와 회사 연결이 켜진 다른 회사를 차례로 읽는다. 다른 회사는 그 회사 변환기(`/site-adapter/<회사>`)를 부르는 회사 머리글과 함께 읽고, 상태 파일(`state.<회사>.json`)·이벤트 회사 값을 따로 둔다. 캣북스는 예전 그대로(`state.json`). 한 회사가 실패해도 다른 회사는 돈다
+- 상태: `GET /api/dashboard/change-detector/status` (사람 토큰). 캣북스 칸은 맨 위, 회사별은 `companies`
 
 ## 4. 의존
 ax-contracts, ax-agent-template

@@ -437,6 +437,64 @@ async def test_adapter_connection_is_read_after_adapter_fix(
 
 
 @pytest.mark.asyncio
+async def test_each_connected_company_is_read_on_its_own(
+    shop: FakeShop, bus: list[EventEnvelope], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """회사별(로드맵 7단계): 캣북스는 예전 그대로, 연결된 다른 회사는 그 회사 변환기를 따로 읽는다.
+
+    상태 파일·이벤트 회사 값·부르는 회사 머리글이 회사마다 따로다.
+    한 회사가 실패해도 다른 회사는 돈다.
+    """
+    nubi = FakeShop()
+    adapter = cc.Connection(
+        shop_api_url="http://dashboard-api:8000/site-adapter/nubi",
+        verified_at=None,
+        updated_at=None,
+        updated_by="tester",
+        kind="adapter",
+        adapter={"base_url": "https://nubi.example"},
+        tenant="nubi",
+    )
+    monkeypatch.setattr(
+        cc, "read_connection", lambda company_id=None: adapter if company_id == "nubi" else None
+    )
+    monkeypatch.setattr(cd, "company_ids", lambda: ["catbooks", "nubi", "studyon"])
+    headers: list[tuple[str, str]] = []
+
+    def route(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/site-adapter/nubi/"):
+            headers.append(("nubi", request.headers.get(cc.CALLER_COMPANY_HEADER, "")))
+            inner = request.copy_with(url=request.url.copy_with(
+                path=request.url.path.removeprefix("/site-adapter/nubi")))  # fmt: skip
+            return nubi.handle(inner)
+        return shop.handle(request)
+
+    monkeypatch.setattr(cd, "TRANSPORT", httpx.MockTransport(route))
+    assert cd.watched_companies() == ["catbooks", "nubi"]  # 연결 없는 studyon은 읽지 않는다
+
+    shop.put(order("ord_1", "2026-11-20T01:00:00Z"))
+    nubi.put(order("NB-1", "2026-11-20T01:00:00Z"))
+    first = await cd.run_all()
+    assert first["catbooks"].baseline and first["nubi"].baseline
+    assert (Path(cd._state_path("catbooks")).name, Path(cd._state_path("nubi")).name) == (
+        "state.json",
+        "state.nubi.json",
+    )
+
+    nubi.put(order("NB-1", "2026-11-20T03:00:00Z", status="cancelled", cancel_reason_code="buyer"))
+    shop.fail_status = 503  # 캣북스가 실패해도 누비투어는 돈다
+    result = await cd.run_all()
+    assert result["catbooks"].error is not None
+    assert [e.event_id for e in result["nubi"].events] == ["chg:nubi:order.cancelled:NB-1"]
+    assert result["nubi"].events[0].tenant_id == "nubi"
+    assert all(company == value == "nubi" for company, value in headers)
+    status = cd.status()
+    assert set(status["companies"]) == {"catbooks", "nubi"}
+    assert status["companies"]["nubi"]["last_error"] is None
+    assert status["companies"]["catbooks"]["last_error"] == status["last_error"]
+
+
+@pytest.mark.asyncio
 async def test_no_tenant_is_not_read(
     shop: FakeShop, bus: list[EventEnvelope], monkeypatch: pytest.MonkeyPatch
 ) -> None:
