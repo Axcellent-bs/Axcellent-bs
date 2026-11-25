@@ -359,8 +359,11 @@ def test_orchestrator_request_length_sets_video_plan_duration() -> None:
     assert out.video_plan.scenes[-1].end_s == 30
     p = next(x for x in svc.state.proposals if x.id == out.proposal_id)
     assert p.format == "숏폼 30초"
-    sent = plan_calls(writer.llm)[-1]
-    assert "30초 이내" not in str(sent)  # 고객 문장은 LLM에 넘기지 않는다 (숫자만 코드로)
+    sent = str(plan_calls(writer.llm)[-1])
+    # 11/26 바뀐 기대값: 예전 "고객 문장은 LLM에 넘기지 않는다". 이제 연출 지시를 뽑게 데이터 칸
+    # (untrusted request_text)으로만 넘기고 지시문에는 붙이지 않는다. 길이는 여전히 코드가 읽는다
+    head, _, data = sent.partition("<untrusted_data>")
+    assert "30초 이내" not in head and "30초 이내" in data
 
 
 def test_no_length_in_request_keeps_planning_format() -> None:

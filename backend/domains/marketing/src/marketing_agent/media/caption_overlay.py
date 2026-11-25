@@ -137,12 +137,18 @@ def _quote(path: Path) -> str:
     return "'" + text.replace(":", "\\:") + "'"
 
 
+TOP_RATIO = 0.12  # 11/26 엔드카드와 겹치는 자막은 화면 위쪽 12% 자리로
+TOP_SIZE = "h/26 "  # 위쪽 자막 표시(글자 크기는 아래 자막과 같고, 끝 공백으로 자리만 가른다)
+
+
 def _drawtext(font: Path, textfile: Path, start: float, end: float, *, size: str) -> str:
+    top = size == TOP_SIZE
+    y = f"h*{TOP_RATIO:.2f}" if top else f"h*{1 - BOTTOM_RATIO:.2f}"
     return (
         f"drawtext=fontfile={_quote(font)}:textfile={_quote(textfile)}"
-        f":fontcolor=white:fontsize={size}:line_spacing=8:text_align=center"
+        f":fontcolor=white:fontsize={size.strip()}:line_spacing=8:text_align=center"
         f":box=1:boxcolor=black@0.55:boxborderw=14"
-        f":x=(w-text_w)/2:y=h*{1 - BOTTOM_RATIO:.2f}"
+        f":x=(w-text_w)/2:y={y}"
         f":enable='between(t,{_sec(start)},{_sec(end)})'"
     )
 
@@ -223,20 +229,27 @@ def apply_overlay(
     card = "\n".join(
         [ln for part in (end_card or "").split("\n") if (ln := wrap_text(part))]
     ).strip()
-    shown = [c for c in captions if c.text and c.start_s < (card_from if card else duration_s)]
+    # 11/26 엔드카드(아래 22% 자리) 동안의 자막은 자르지 않고 화면 위쪽으로 옮긴다
+    # (의뢰 "마지막 대사는 정확히 …"가 마지막 장면 자막이라 엔드카드와 겹친다)
+    shown = [c for c in captions if c.text and c.start_s < duration_s]
     if not shown and not card and not fast:
         raise OverlayError("nothing_to_overlay")
     binary = ffmpeg or ffmpeg_bin()
     tmp_out = output.with_name(f"{output.stem}.tmp{output.suffix}")
     with tempfile.TemporaryDirectory(prefix="overlay-") as folder:
         items: list[tuple[Path, float, float, str]] = []
+        count = 0
         for i, cap in enumerate(shown):
-            end = min(cap.end_s, card_from) if card else cap.end_s
-            if end <= cap.start_s:
+            parts = [(cap.start_s, min(cap.end_s, card_from) if card else cap.end_s, "h/26")]
+            if card and cap.end_s > card_from:
+                parts.append((max(cap.start_s, card_from), cap.end_s, TOP_SIZE))
+            parts = [(s, e, size) for s, e, size in parts if e > s]
+            if not parts:
                 continue
             path = Path(folder) / f"cap{i}.txt"
             path.write_text(wrap_text(cap.text), encoding="utf-8")
-            items.append((path, cap.start_s, end, "h/26"))
+            items.extend((path, s, e, size) for s, e, size in parts)
+            count += 1
         if card:
             path = Path(folder) / "end.txt"
             path.write_text(card, encoding="utf-8")
@@ -263,7 +276,7 @@ def apply_overlay(
     return OverlayResult(
         output_path=output,
         sha256=hashlib.sha256(data).hexdigest(),
-        captions=sum(1 for _, _, _, size in items if size == "h/26"),
+        captions=count,
         end_card=bool(card),
         commands=(tuple(args),),
         ffmpeg_bin=binary,

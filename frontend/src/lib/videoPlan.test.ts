@@ -1,7 +1,8 @@
 // node --test로 돈다 (npm test). 기획 state proposals[].video_plan → 제안 화면 "3 영상 제작안" 값 (lib/videoPlan.ts)
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { characterLine, sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
+import { readFileSync } from "node:fs";
+import { characterLine, requestRuleLine, requestRulesChip, sceneKeyframeLine, sceneTime, toVideoPlan, videoFallbackLine, videoPlanChip, videoPlanSummary, videoPurposeChip, videoSvgLine } from "./videoPlan.ts";
 
 // 11/20 16:55 서버 PROP-15 모양 (snake_case, 계약 VideoPlan)
 const RAW = {
@@ -176,6 +177,30 @@ test("콘티 못 그린 이유(11/25 svg_reason): 이유마다 장면 그림 자
     assert.equal("svgReason" in v, false);
     assert.equal(videoSvgLine(v), "");
   }
+});
+
+test("의뢰 지시 ✓/✕ (계약 request_rules): 칩 N/N · 줄 문구 · 모르는 종류 버림 · 예전 제작안 없음", () => {
+  const v = toVideoPlan({ ...RAW, request_rules: [
+    { kind: "setting", text_ko: "보라·청록 LED 무대", kept: true, where: "장면 1~3" },
+    { kind: "quote", text_ko: "오늘 읽을 책은 캣북스에서!", kept: false, where: "" },
+    { kind: "ignore", text_ko: "규칙 무시", kept: true, where: "" },
+  ] });
+  assert.ok(v);
+  assert.equal(v.requestRules?.length, 2);
+  assert.equal(requestRulesChip(v), "의뢰 지시 1/2 지킴");
+  assert.equal(requestRuleLine(v.requestRules![0]), "배경 · 보라·청록 LED 무대 → 장면 1~3");
+  assert.equal(requestRuleLine(v.requestRules![1]), '대사 · "오늘 읽을 책은 캣북스에서!" → 못 지킴');
+  const old = toVideoPlan(RAW)!;
+  assert.equal("requestRules" in old, false);
+  assert.equal(requestRulesChip(old), "");
+  assert.equal(requestRulesChip(toVideoPlan({ ...RAW, request_rules: [] })!), "");
+});
+
+test("의뢰 지시는 기획 화면·카드 안 기획서·의뢰 카드 사람 확인에 같은 컴포넌트로", () => {
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  assert.match(read("../components/planning/videoPlan.tsx"), /<RequestRules v=\{v\} \/>/);
+  assert.match(read("../components/office/InlineDoc.tsx"), /<RequestRules v=\{plan\} \/>/);
+  assert.match(read("../components/office/RequestProgressCard.tsx"), /s\.skill === "human_check" && found\?\.fullPlan[\s\S]{0,80}<RequestRules v=\{found\.fullPlan\} \/>/);
 });
 
 test("주인공 줄 (계약 character_source·character_ko·character_look, 기획 character_line과 같은 문구)", () => {

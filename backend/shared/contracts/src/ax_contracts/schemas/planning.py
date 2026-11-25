@@ -853,6 +853,20 @@ class VideoScene(AxModel):
         return self
 
 
+class RequestRule(AxModel):
+    """의뢰문에 적힌 연출 지시 하나와 제작안이 지켰는지.
+
+    (11/26 wr_012c98d9d9 "마지막 대사는 정확히 …")
+
+    kind: quote = 대사·자막 문장 그대로, ending = 마지막 장면, setting = 배경, prop = 소품,
+    action = 동작, look = 외형. kept·where는 기획 코드 검사 결과(LLM이 정하지 않는다)."""
+
+    kind: Literal["quote", "ending", "setting", "prop", "action", "look"]
+    text_ko: str = Field(min_length=1, max_length=120)
+    kept: bool = False
+    where: str = Field(default="", max_length=60)  # 지킨 곳 (예: "장면 4 자막", "장면 1~3")
+
+
 class VideoPlan(AxModel):
     """기획 → 마케팅 영상 제작안: 콘셉트·대본·장면별 스토리보드·영상 생성 프롬프트.
 
@@ -894,6 +908,9 @@ class VideoPlan(AxModel):
     # illustration = 그림체 그대로). brand면 비어 있다
     character_ko: str = Field(default="", max_length=300)
     character_look: Literal["", "photo", "illustration"] = ""
+    # 아래는 예전 제작안은 없다. 의뢰문의 연출 지시와 지켰는지 (11/26).
+    # 지시가 없는 의뢰·규칙 초안은 []
+    request_rules: list[RequestRule] = Field(default_factory=list, max_length=6)
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:

@@ -46,6 +46,32 @@ export interface VideoPlanView {
   characterSource?: 'company_character' | 'brand'
   characterKo?: string // 회사 캐릭터 외형 요약 (마케팅 시트 summary_ko)
   characterLook?: 'photo' | 'illustration'
+  requestRules?: RequestRuleView[] // 11/26 의뢰 연출 지시와 지켰는지 (계약 VideoPlan.request_rules). 없으면 칸 없음
+}
+
+export type RequestRuleKind = 'quote' | 'ending' | 'setting' | 'prop' | 'action' | 'look'
+export interface RequestRuleView { kind: RequestRuleKind; textKo: string; kept: boolean; where: string }
+export const RULE_KIND: Record<RequestRuleKind, string> = {
+  quote: '대사', ending: '마지막 장면', setting: '배경', prop: '소품', action: '동작', look: '외형',
+}
+/** "의뢰 지시 3/3 지킴". 지시가 없으면 '' (줄을 그리지 않는다) */
+export function requestRulesChip(v: Pick<VideoPlanView, 'requestRules'>): string {
+  const rules = v.requestRules ?? []
+  return rules.length ? `의뢰 지시 ${rules.filter((r) => r.kept).length}/${rules.length} 지킴` : ''
+}
+/** 지시 한 줄 "보라 무대 → 장면 1~3" / "… → 못 지킴" */
+export const requestRuleLine = (r: RequestRuleView) =>
+  `${RULE_KIND[r.kind]} · ${r.kind === 'quote' ? `"${r.textKo}"` : r.textKo} → ${r.kept ? r.where || '지킴' : '못 지킴'}`
+const RULE_KINDS = new Set<string>(Object.keys(RULE_KIND))
+function toRules(raw: unknown): RequestRuleView[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((x) => {
+    const o = obj(x)
+    if (!o) return []
+    const kind = str(o.kind), textKo = str(pick(o, 'textKo', 'text_ko'))
+    if (!RULE_KINDS.has(kind) || !textKo) return []
+    return [{ kind: kind as RequestRuleKind, textKo, kept: o.kept === true, where: str(o.where) }]
+  })
 }
 
 const LOOK_LABEL: Record<'photo' | 'illustration', string> = { photo: '실사 그대로', illustration: '그림체 그대로' }
@@ -141,6 +167,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
   const source = str(pick(o, 'characterSource', 'character_source'))
   const characterKo = str(pick(o, 'characterKo', 'character_ko'))
   const look = str(pick(o, 'characterLook', 'character_look'))
+  const rules = toRules(pick(o, 'requestRules', 'request_rules'))
   return {
     concept, durationS, aspect, script: str(o.script),
     scenes: (scenes as VideoSceneView[]).slice().sort((a, b) => a.n - b.n),
@@ -155,6 +182,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     ...(source === 'company_character' || source === 'brand' ? { characterSource: source } : {}),
     ...(source === 'company_character' && characterKo ? { characterKo } : {}),
     ...(source === 'company_character' && (look === 'photo' || look === 'illustration') ? { characterLook: look } : {}),
+    ...(rules.length ? { requestRules: rules } : {}),
   }
 }
 

@@ -67,8 +67,17 @@ def test_caption_overlapping_the_end_card_is_cut_before_it(files: dict[str, Path
     late = [co.Caption("끝까지", 3.0, 6.0), co.Caption("카드 뒤", 5.0, 6.0)]
     _apply(files, runner, captions=late)
     filters = runner.calls[0][runner.calls[0].index("-vf") + 1]
-    assert "enable='between(t,3,4)'" in filters  # 엔드카드 시작(4초)에서 끊는다
-    assert filters.count("drawtext=") == 2  # 카드 뒤에 시작하는 자막은 건너뛴다
+    parts = filters.split(",drawtext=")
+    bottom = f"y=h*{1 - co.BOTTOM_RATIO:.2f}"
+    top = f"y=h*{co.TOP_RATIO:.2f}"
+    # 아래 자리는 엔드카드 시작(4초)에서 끊는다 (지금 그대로)
+    assert any("between(t,3,4)" in p and bottom in p for p in parts)
+    # 11/26 바뀐 기대값: 예전에는 엔드카드 동안의 자막을 버렸다(drawtext 2개 = 자막 1 + 카드).
+    # 이제 엔드카드(아래 22%)와 겹치지 않게 화면 위쪽으로 옮겨 끝까지 보인다
+    assert any("between(t,4,6)" in p and top in p for p in parts)  # "끝까지" 위쪽
+    assert any("between(t,5,6)" in p and top in p for p in parts)  # "카드 뒤" 위쪽
+    assert sum(1 for p in parts if "between(t,4,6)" in p and bottom in p) == 1  # 엔드카드만 아래
+    assert filters.count("drawtext=") == 4
 
 
 def test_text_goes_through_textfile_and_is_removed_after(

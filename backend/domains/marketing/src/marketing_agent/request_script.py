@@ -139,6 +139,39 @@ def apply_request(script: CreativeScript, request_text: str | None) -> CreativeS
     return script.model_copy(update={"scenes": rows})
 
 
+def _bare(text: Any) -> str:
+    return re.sub(r"[\s\W_]+", "", str(text or "")).lower()
+
+
+def plan_quotes(plan: Any) -> list[str]:
+    """기획 제작안 의뢰 지시(request_rules, 11/26) 중 대사 문장(quote). 예전 제작안은 []."""
+    out = []
+    for r in getattr(plan, "request_rules", None) or []:
+        kind = r.get("kind") if isinstance(r, dict) else getattr(r, "kind", None)
+        text = r.get("text_ko") if isinstance(r, dict) else getattr(r, "text_ko", None)
+        if kind == "quote" and _cut(text, MAX_SCRIPT_LINE):
+            out.append(_cut(text, MAX_SCRIPT_LINE))
+    return out
+
+
+def keep_quotes(script: CreativeScript, quotes: list[str]) -> CreativeScript:
+    """의뢰 대사 문장을 대본 대사에 글자 그대로 넣는다(11/26, 작가가 빠뜨리면 코드가 넣는다).
+
+    이미 어떤 대사에 있으면 그대로. 없으면 그 문장이 자막인 장면, 없으면 마지막 장면의 대사로."""
+    rows = list(script.scenes)
+    for q in quotes:
+        if not rows or any(_bare(q) in _bare(s.line_ko) for s in rows):
+            continue
+        at = next((i for i, s in enumerate(rows) if _bare(q) in _bare(s.caption_ko)), len(rows) - 1)
+        rows[at] = rows[at].model_copy(update={"line_ko": q})
+    return script.model_copy(update={"scenes": rows})
+
+
+def missing_quotes(script: CreativeScript, quotes: list[str]) -> list[str]:
+    """대본 검사: 대사에 글자 그대로 없는 의뢰 대사 문장."""
+    return [q for q in quotes if not any(_bare(q) in _bare(s.line_ko) for s in script.scenes)]
+
+
 async def write_request_script(
     plan: Any,
     request_text: str | None,
@@ -166,7 +199,12 @@ async def write_request_script(
             script = written
     except _script.ScriptRefused:
         pass
-    return apply_request(script, request_text)
+    script = apply_request(script, request_text)
+    quotes = plan_quotes(plan)
+    if missing_quotes(script, quotes):  # 작가가 빠뜨린 의뢰 대사는 코드가 넣는다 (LLM 다시 안 부름)
+        logger.info("의뢰 대본: 빠진 의뢰 대사 %d개를 넣음", len(missing_quotes(script, quotes)))
+        script = keep_quotes(script, quotes)
+    return script
 
 
 def board_with_script(board: dict[str, Any], script: CreativeScript) -> dict[str, Any]:

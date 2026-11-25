@@ -437,6 +437,7 @@ class ProposalMixin:
                 past=[ProposalPast(**x.model_dump()) for x in inp.past],
                 options=options, scale=scale,
                 brand_character_record_id=inp.brand_character_record_id,
+                request_text=inp.request_text if requester == "orchestrator" else None,
             )  # fmt: skip
             s.proposals.append(p)
             warn = f", 경고 {len(p.warnings)}" if p.warnings else ""

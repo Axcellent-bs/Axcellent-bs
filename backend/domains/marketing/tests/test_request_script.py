@@ -152,3 +152,45 @@ def test_a_role_speaker_gets_the_requested_voice() -> None:
     out = rs.apply_request(base.model_copy(update={"scenes": rows}), ASK)
     assert [s.speaker_ko for s in out.scenes] == ["여자 직장인", "여자 직원", ""]
     assert out.scenes[0].line_ko == "엑설런트, 얼마나 좋아!!"
+
+
+# ---------------------------------------------------------------- 기획 의뢰 대사 (11/26)
+
+QUOTE = "오늘 읽을 책은 캣북스에서! 지금 캣북스에서 만나요!"
+
+
+def _quoted_plan(caption_last: bool = True) -> VideoPlanIn:
+    plan = _plan().model_dump()
+    if caption_last:
+        plan["scenes"][-1]["caption"] = QUOTE
+    plan["request_rules"] = [
+        {"kind": "quote", "text_ko": QUOTE, "kept": True, "where": "장면 4 자막"},
+        {"kind": "prop", "text_ko": "마이크", "kept": True, "where": "장면 2"},
+    ]
+    return VideoPlanIn.model_validate(plan)
+
+
+def test_the_plan_quote_goes_into_the_script_word_for_word(store: cr.CreativeRecords) -> None:
+    plan = _quoted_plan()
+    assert rs.plan_quotes(plan) == [QUOTE]
+    rid = _record(store, plan)
+    assert asyncio.run(rs.attach(rid, plan, "홍보 영상", lambda: ScriptLLM(4), "ctx")) is True
+    scenes = (store.get(rid) or {})["script"]["scenes"]
+    assert scenes[3]["line_ko"] == QUOTE  # 작가가 "대사 4"로 썼어도 자막 장면에 그대로
+    assert [s["line_ko"] for s in scenes[:3]] == ["대사 1", "대사 2", "대사 3"]
+
+
+def test_without_a_caption_the_quote_is_the_last_line_and_kept_if_already_there() -> None:
+    base = rs.plan_script(_plan())
+    assert base is not None
+    out = rs.keep_quotes(base, [QUOTE])
+    assert out.scenes[-1].line_ko == QUOTE and rs.missing_quotes(out, [QUOTE]) == []
+    said = base.model_copy(
+        update={"scenes": [base.scenes[0].model_copy(update={"line_ko": f"자, {QUOTE}"}),
+                           *base.scenes[1:]]}
+    )  # fmt: skip
+    assert rs.keep_quotes(said, [QUOTE]) == said  # 이미 있으면 그대로
+
+
+def test_old_plans_without_rules_keep_the_script_as_today() -> None:
+    assert rs.plan_quotes(_plan()) == []

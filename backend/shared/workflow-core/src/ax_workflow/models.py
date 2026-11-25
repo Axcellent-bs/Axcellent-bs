@@ -730,6 +730,9 @@ class Proposal(DomainModel):
     # 못 읽었으면 company_character는 None(회사 브랜드 기본 캐릭터, 지금 동작)
     brand_character_record_id: str | None = None
     company_character: CompanyCharacter | None = None
+    # 11/26 총괄 의뢰의 고객 문장 그대로(untrusted). 제작안 LLM에 데이터 칸으로만 넘겨 연출 지시
+    # (대사·장면·배경·소품·동작·외형)를 뽑아 지키게 한다. 지시문에는 붙이지 않는다
+    request_text: str | None = None
 
 
 class DeletedProposal(DomainModel):
