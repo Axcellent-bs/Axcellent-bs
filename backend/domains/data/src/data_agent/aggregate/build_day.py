@@ -181,7 +181,8 @@ def _quality(  # noqa: PLR0913 - 품질 행에 필요한 것들
     unknown: Counter[str] = Counter()
     for o in created:
         for ln in o.lines:
-            if ln.category_code and ln.category_code not in known_cat:
+            # 분류 표가 없는 회사는 사이트 분류 값을 그대로 쓴다(모르는 값으로 세지 않는다)
+            if ln.category_code and known_cat and ln.category_code not in known_cat:
                 unknown[f"category:{ln.category_code}"] += 1
             if ln.genre_code and ln.genre_code not in known_genre:
                 unknown[f"genre:{ln.genre_code}"] += 1
