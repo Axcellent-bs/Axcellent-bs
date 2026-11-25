@@ -99,6 +99,32 @@ def _copy_sheet_image(brand_id: str, record_id: str) -> None:
     )
 
 
+EXTRA_REF_INDEXES = (1, 2, 3)  # 추가 참조 번호 (creative_render.save_extra와 같은 범위)
+
+
+def _copy_extra_refs(brand_id: str, record_id: str) -> None:
+    """대표 캐릭터 `sheet.references`의 추가 참조 파일(`ref_<번호>.jpg|png`)을 의뢰 기록으로.
+
+    같은 회사 폴더 규칙(`_render._dir`)이라 다른 회사 폴더로는 가지 않는다. 파일이 없으면 건너뛰고,
+    이미 있는 파일은 두며(다시 불려도 빠진 것만 채운다), 복사 실패는 경고 로그만 남긴다."""
+    brand = _creative.store().get(brand_id) or {}
+    refs = (brand.get("sheet") or {}).get("references") or []
+    indexes = {int(r.get("index") or 0) for r in refs}
+    for index in sorted(indexes.intersection(EXTRA_REF_INDEXES)):
+        for ext in ("jpg", "png"):
+            name = f"ref_{index}.{ext}"
+            source = _render._dir(brand_id) / name  # noqa: SLF001 - 같은 모듈 묶음의 파일 자리
+            target = _render._dir(record_id) / name  # noqa: SLF001
+            if not source.is_file() or target.is_file():
+                continue
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+            except OSError:
+                logger.warning("대표 캐릭터 추가 참조 복사 실패: %s %s → %s",
+                               brand_id, name, record_id)  # fmt: skip
+
+
 def plan_storyboard(plan: Any, sheet: dict[str, Any]) -> dict[str, Any] | None:
     """기획 제작안 장면으로 스토리보드(StoryboardPromptOutput 모양)를 코드로 만든다.
 
@@ -154,6 +180,7 @@ def prepare_storyboard(brand_id: str, context_id: str, plan: Any) -> tuple[str |
         return None, "record_not_found"
     _render.unsupersede(record_id)  # 11/26 바꿨다가 이 캐릭터로 되돌아오면 다시 쓴다
     _copy_sheet_image(brand_id, record_id)
+    _copy_extra_refs(brand_id, record_id)  # 11/26: 추가 참조도 (전에는 대표 1장만 갔다)
     rec = store.get(record_id) or {}
     board = plan_storyboard(plan, rec.get("sheet") or {})
     if board is None:
