@@ -160,16 +160,24 @@ def paid_orders(orders: Sequence[StoredOrder]) -> list[StoredOrder]:
 
 
 def gate(
-    report: SalesQuality, paid_count: int, cfg: CatalogSales | None, now: datetime
+    report: SalesQuality,
+    paid_count: int,
+    cfg: CatalogSales | None,
+    now: datetime,
+    *,
+    aggregate_ready: bool = False,
 ) -> list[str]:
-    """품질 관문. 걸리면 이유 문장 목록(비었으면 통과)."""
+    """품질 관문. 걸리면 이유 문장 목록(비었으면 통과).
+
+    `aggregate_ready`(3-2 ⑨): 집계 읽기가 켜지고 어제 기준 스냅샷이 있으면 숫자는 스냅샷에서
+    나오므로 "마지막 수집" 대신 마지막 집계 기준일로 본 것으로 하고 수집 시각은 막지 않는다."""
     if cfg is None:
         return [f"{INSUFFICIENT}: 회사 카탈로그에 매출 분석 설정([sales])이 없음"]
     reasons: list[str] = []
     synced = report.last_synced_at
-    if synced is None:
+    if not aggregate_ready and synced is None:
         reasons.append(f"{INSUFFICIENT}: 판매 기록을 아직 끝까지 받은 적이 없음")
-    else:
+    elif not aggregate_ready and synced is not None:
         age = now - synced
         if age > timedelta(minutes=cfg.max_staleness_minutes):
             minutes = int(age.total_seconds() // 60)
