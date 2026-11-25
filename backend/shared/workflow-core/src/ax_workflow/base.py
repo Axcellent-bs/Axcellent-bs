@@ -59,6 +59,7 @@ from ax_workflow.dev_handoff import (
 )
 from ax_workflow.models import (
     PR,
+    AutoPolicy,
     AutoReview,
     HandoffFailure,
     OutMsg,
@@ -376,7 +377,11 @@ class PlanningCore(StateService):
 
     def _seed(self) -> State:
         if self.company:  # 다른 회사는 빈 상태로 시작한다 (캣북스 예시를 섞지 않는다)
-            return State(auto_policy=initial_state().auto_policy, tenant_id=self.company)
+            # 자동 처리 범위도 새로: 캣북스 예시의 허용 경로(shop-web/)·변경 기록 한 줄을
+            # 가져오지 않는다
+            base = initial_state().auto_policy
+            policy = AutoPolicy(level=base.level, paths="")
+            return State(auto_policy=policy, tenant_id=self.company)
         return real_state() if self.real_example else initial_state()
 
     # ---- 적용 틀

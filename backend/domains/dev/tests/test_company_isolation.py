@@ -133,3 +133,14 @@ def test_dev_chat_is_separate_per_company(env) -> None:  # noqa: ANN001
         assert dev_chat._same_turn(cat, "chat-1", turn)
     finally:
         runtime._service, runtime._by_company = old_main, old_by
+
+
+def test_new_company_policy_has_no_catbooks_change_log(env) -> None:  # noqa: ANN001
+    """개발 지표 › 변경 기록: 새 회사는 캣북스 예시의 "L1 … 시작" 한 줄과 허용 경로(shop-web/)를
+    가져오지 않는다. 캣북스는 예전 그대로."""
+    other = DevService(real_example=True, tenant_id="nubi", company="nubi")
+    pol = other.state.auto_policy
+    assert pol.log == [] and pol.history == [] and pol.paths == ""
+    assert pol.level == 1
+    mine = DevService(real_example=True)
+    assert mine.state.auto_policy.log and mine.state.auto_policy.paths == "shop-web/"
