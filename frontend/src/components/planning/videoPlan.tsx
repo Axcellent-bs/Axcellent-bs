@@ -6,6 +6,7 @@
 // [다음 단계 진행]·[여기서 멈추기]. 대화 카드와 같은 동작(orchestrator.decideRequestStep)이다
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Tag } from '@/components/planning-common/parts'
+import { RequestRules } from '@/components/planning/PlanChecks'
 import { usePrinting } from '@/lib/print'
 import { svgDataUri } from '@/lib/storyboardSvg'
 import { characterLine, sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoPurposeChip, videoSvgLine, type VideoPlanView } from '@/lib/videoPlan'
@@ -55,6 +56,7 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
           <li key={s.n} className={`sb-c${i % 4}`} style={{ flexBasis: `${shares[i]}%` }} title={`장면 ${s.n} · ${sceneTime(s)}`}>{s.n} · {sceneTime(s)}</li>
         ))}
       </ol>
+      <RequestRules v={v} />
       {svgWhy && <p className="sb-fallback sb-svg-why">{svgWhy}</p>}
       <ol className="sb-cards" style={{ '--n': v.scenes.length } as CSSProperties}>
         {v.scenes.map((s, i) => {

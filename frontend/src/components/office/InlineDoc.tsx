@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { TrendReportBody } from "@/components/data/TrendReportView";
+import { RequestRules } from "@/components/planning/PlanChecks";
 import { dataAi, type TrendReport } from "@/lib/data";
 import {
   PLAN_MISSING, REPORT_LOADING, expandLabel, inlinePlan, loadFailedKo, missingSvgKo, type InlineLoad,
@@ -68,6 +69,7 @@ export function InlinePlan({ plan, open }: { plan: VideoPlanView | null | undefi
           {v.fallback && <p className="text-amber-800">규칙 초안 · {v.fallback}</p>}
           {missing && <p className="text-amber-800">{missing}</p>}
           {v.svgWhy && <p className="text-amber-800">{v.svgWhy}</p>}
+          {plan && <RequestRules v={plan} />}
           {v.script && <p className="whitespace-pre-line break-words text-ink-700">{v.script}</p>}
           <ol className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {v.scenes.map((s) => (
