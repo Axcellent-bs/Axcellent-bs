@@ -132,6 +132,8 @@ from ax_contracts.schemas.data import (
     TrendScanInput,
 )
 from ax_contracts.schemas.planning import InsightFact, ReceiveInsightInput, ReceiveInsightOutput
+from data_agent.aggregate import read_buyers as rb
+from data_agent.aggregate.store import AggregateStore
 from data_agent.clients.customer_reaction import MIN_SOLD, Reactions
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.event_proposal_store import EventProposalStore, StoredProposal
@@ -145,7 +147,7 @@ from data_agent.explain import (
 )
 from data_agent.llm_budget import LLMDailyCapReached
 from data_agent.sales_quality import KST
-from data_agent.sales_store import Cells, SalesStore, StoredOrder
+from data_agent.sales_store import Cells, SalesStore, SegmentSession, StoredOrder
 from data_agent.skills import segment_analysis as seg
 from data_agent.skills.basket_pairs import pair_rows
 from data_agent.skills.sales_analysis import NO_PRODUCT, line_nets
@@ -238,6 +240,7 @@ class Base:
     report: SalesQuality
     basis: SalesBasis | None
     candidates: list[Candidate] = field(default_factory=list)
+    as_of: date | None = None  # 어제 기준 스냅샷에서 읽었으면 그 기준일 (3-2 ⑦)
 
 
 @dataclass
@@ -321,26 +324,42 @@ def read_base(
     reasons = problems + snap.reasons
     if reasons or cfg is None:
         return Base(reasons, snap.report, snap.basis)
+    sales_cfg = cfg
+    got = rb.from_snapshot(tenant_id, now, lambda agg, day: base_from_snapshot(
+        agg, tenant_id, sales_cfg, day))  # fmt: skip
+    if got is not None:
+        stored, as_of = got
+        basis = rb.basis_at(snap.basis, rb.window_of(ANALYSIS_PERIOD, as_of))
+        return Base([], snap.report, basis, stored, as_of=as_of)
+    keys = [a.key for a in cfg.attributes]
+    with snap.session(keys) as s:
+        candidates = count_candidates(s, cfg, now)
+    return Base([], snap.report, snap.basis, candidates)
+
+
+
+def count_candidates(s: SegmentSession, cfg: CatalogSales, now: datetime) -> list[Candidate]:
+    """열린 세션(분석 기간)에서 묶음 × 장르·묶음 할인 후보를 센다. 화면과 하루 계산(어제 기준
+    스냅샷, 3-2 ⑦)이 같이 쓴다. `now` = 대상 고객 기간 끝."""
     least = cfg.min_group_size
     keys = [a.key for a in cfg.attributes]
     pairs: list[tuple[BundleBasis, float, Cells]] = []
-    with snap.session(keys) as s:
-        cells = s.buyer_cells()
-        by_genre = {code: c for code, c in s.genre_cells().items() if code in cfg.genres}
-        active = s.active_cells(*active_window(cfg.active_days, now))
-        aov = genre_aov(*s.genre_nets())
-        products = genre_products(s.genre_products(), s.titles(genre_only=True))
-        if any(k.code == BUNDLE_KIND for k in cfg.event_kinds):
-            items, together = s.pair_counts("genre", {}, least)  # 숨긴 쌍은 후보가 아니다
-            rows = pair_rows(items, together, sum(cells.values()), cfg.genres.get, len(together))
-            for p in rows:
-                if p.suppressed or p.lift is None or p.lift < MIN_LIFT:
-                    continue
-                basis = BundleBasis(a_code=p.a_code, a_label=p.a_label, b_code=p.b_code,
-                                    b_label=p.b_label, lift=p.lift,
-                                    together_buyers=p.together_buyers)  # fmt: skip
-                pairs.append((basis, p.confidence or 0.0, s.together_cells("genre", p.a_code,
-                                                                           p.b_code)))  # fmt: skip
+    cells = s.buyer_cells()
+    by_genre = {code: c for code, c in s.genre_cells().items() if code in cfg.genres}
+    active = s.active_cells(*active_window(cfg.active_days, now))
+    aov = genre_aov(*s.genre_nets())
+    products = genre_products(s.genre_products(), s.titles(genre_only=True))
+    if any(k.code == BUNDLE_KIND for k in cfg.event_kinds):
+        items, together = s.pair_counts("genre", {}, least)  # 숨긴 쌍은 후보가 아니다
+        rows = pair_rows(items, together, sum(cells.values()), cfg.genres.get, len(together))
+        for p in rows:
+            if p.suppressed or p.lift is None or p.lift < MIN_LIFT:
+                continue
+            basis = BundleBasis(a_code=p.a_code, a_label=p.a_label, b_code=p.b_code,
+                                b_label=p.b_label, lift=p.lift,
+                                together_buyers=p.together_buyers)  # fmt: skip
+            pairs.append((basis, p.confidence or 0.0, s.together_cells("genre", p.a_code,
+                                                                       p.b_code)))  # fmt: skip
     overall_n = sum(cells.values())
     candidates: list[Candidate] = []
     group_list = groups(cfg)
@@ -371,7 +390,32 @@ def read_base(
                 base_share=base, lift=lift, target_customers=target, aov=aov[genre],
                 products=products.get(genre, []),
             ))  # fmt: skip
-    return Base([], snap.report, snap.basis, candidates)
+    return candidates
+
+def candidate_dump(c: Candidate) -> dict[str, Any]:
+    """스냅샷 저장용 (구매자 id 없음: 묶음 조건·장르·사람 수·금액·상품 id와 이름)."""
+    return {
+        "filters": c.filters, "label": c.label, "genre": c.genre, "genre_label": c.genre_label,
+        "segment_size": c.segment_size, "buyers": c.buyers, "share": c.share,
+        "base_share": c.base_share, "lift": c.lift, "target_customers": c.target_customers,
+        "aov": c.aov, "products": [list(p) for p in c.products],
+        "bundle": c.bundle.model_dump(mode="json") if c.bundle else None,
+    }  # fmt: skip
+
+
+def candidate_load(d: dict[str, Any]) -> Candidate:
+    bundle = BundleBasis.model_validate(d["bundle"]) if d.get("bundle") else None
+    return Candidate(**{**d, "products": [tuple(p) for p in d["products"]], "bundle": bundle})
+
+
+def base_from_snapshot(
+    agg: AggregateStore, tenant_id: str, cfg: CatalogSales, as_of: date
+) -> tuple[list[Candidate], date] | None:
+    """어제 기준 후보 스냅샷 (3-2 ⑦). 없거나 계산 때 카탈로그 판이 지금과 다르면 None(원본)."""
+    row = agg.event_base(tenant_id, as_of)
+    if row is None or row["catalog_version"] != (cfg.version or ""):
+        return None
+    return [candidate_load(d) for d in json.loads(row["candidates"])], as_of
 
 
 def merged_products(*lists: list[tuple[str, str]]) -> list[tuple[str, str]]:
@@ -1093,7 +1137,10 @@ async def propose(  # noqa: PLR0913 - 저장소·커넥터를 바꿔 끼울 수 
         notes.append(f"제목·요약을 템플릿으로 대체함 {len(fallbacks)}건: "
                      + ", ".join(sorted(set(fallbacks))))  # fmt: skip
     out = EventProposalOutput(**common, proposals=items, excluded=excluded)
-    out = out.model_copy(update={"summary": summary_of(out, len(base.candidates), cfg)})
+    text = summary_of(out, len(base.candidates), cfg)
+    if base.as_of is not None:
+        text = rb.with_note(text, base.as_of)
+    out = out.model_copy(update={"summary": text})
     return ProposalRun(
         out, evidence_of(out, now, queries, notes), bool(fallbacks),
         fallbacks[0] if fallbacks else None,
