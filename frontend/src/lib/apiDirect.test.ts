@@ -88,6 +88,20 @@ test("직접 호스트로 감: 주소·헤더 확인, 세션 토큰 실음", asy
   } finally { restore(); }
 });
 
+test("직접 호스트로 갈 때는 X-AX-Session을 뗀다(CORS 허용 머리에 없음), 같은 출처는 그대로", async () => {
+  const seen: { url: unknown; init?: RequestInit }[] = [];
+  const restore = installApiDirect(cfg, { fetch: (async (u: unknown, i?: RequestInit) => { seen.push({ url: u, init: i }); return new Response("{}"); }) as typeof fetch, sessionToken: () => S })!;
+  try {
+    await globalThis.fetch("/orch/api/incidents", { headers: { Authorization: `Bearer ${S}`, "X-AX-Session": S } });
+    assert.equal(seen[0].url, `${BASE}/orch/api/incidents`);
+    assert.equal(new Headers(seen[0].init?.headers).get("x-ax-session"), null);
+    assert.equal(new Headers(seen[0].init?.headers).get("authorization"), `Bearer ${S}`);
+    await globalThis.fetch("/orch/api/finance-opinions", { headers: { "X-AX-Session": S } });
+    assert.equal(seen[1].url, "/orch/api/finance-opinions");
+    assert.equal(new Headers(seen[1].init?.headers).get("x-ax-session"), S);
+  } finally { restore(); }
+});
+
 test("직접 호스트 실패(TypeError)면 같은 출처로 다시 보내고 쉬는 동안은 바로 같은 출처", async () => {
   const calls: string[] = [];
   let t = 1000;

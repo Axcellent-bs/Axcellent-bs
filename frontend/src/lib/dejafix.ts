@@ -1,4 +1,5 @@
 import { DEJAFIX_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
+import { SESSION_HEADER, sessionReadAuth } from "./humanToken";
 import { parseDejafixStatus, type DejafixStatus } from "./toolForms";
 
 // 장애 대응 탭: DejaFix 화면을 띄우지 않고 DejaFix API에서 데이터만 받는다.
@@ -55,7 +56,11 @@ export class DejafixNotConnectedError extends Error {
 }
 
 /** dejafix-proxy가 부르는 쪽 토큰을 확인한다. 다른 백엔드 호출처럼 사람 토큰(로그인 세션 우선, env.ts)을 붙인다 */
-const authHeaders = (): Record<string, string> => (SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {});
+// 같은 출처 nginx가 읽기의 Authorization을 공용 토큰으로 바꿔 붙여도 회사를 알 수 있게 세션은 X-AX-Session으로도 싣는다(11/25)
+const authHeaders = (): Record<string, string> => {
+  const session = sessionReadAuth()[SESSION_HEADER];
+  return { ...(SAFETY_HUMAN_TOKEN ? { Authorization: `Bearer ${SAFETY_HUMAN_TOKEN}` } : {}), ...(session ? { [SESSION_HEADER]: session } : {}) };
+};
 
 /** dejafix-proxy가 화면 토큰을 막았을 때의 코드 (DejaFix 계정 문제의 401과 나눠 알린다) */
 const PROXY_AUTH_CODES = new Set(["AUTH_REQUIRED", "TOKEN_INVALID", "SESSION_EXPIRED", "SESSION_REVOKED", "SESSION_ENDED"]);

@@ -146,3 +146,34 @@ def test_executions_are_kept_per_session_company(
         account_id="acc-x", name="끊긴회원", role="member", no_company=True
     )[0]
     assert ids(_bearer(no_company)) == set()
+
+
+def test_shared_token_with_session_header_reads_only_that_company(
+    client: Any, coupon: Any, session: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """같은 출처 nginx는 읽기의 Authorization을 공용 토큰으로 바꿔 붙인다(11/25 실서버).
+
+    화면이 같이 싣는 X-AX-Session으로 회사를 고른다: 누비투어 세션이면 누비투어 기록만.
+    위조된 머리는 무시(예전처럼 전부)."""
+    cat = coupon(1, 1000, key="cat-h").model_dump(mode="json")
+    nubi_req = coupon(1, 1000, key="nubi-h").model_copy(update={"tenant_id": "nubi"})
+    cat_id = client.post("/api/safety/executions", json=cat, headers=MARKETING).json()["data"][
+        "execution_id"
+    ]
+    nubi_id = client.post(
+        "/api/safety/executions", json=nubi_req.model_dump(mode="json"), headers=MARKETING
+    ).json()["data"]["execution_id"]
+    nubi = human_auth.issue_session(
+        account_id="acc-n", name="누비관리", role="admin", company_id="nubi", company_role="admin"
+    )[0]
+
+    def ids(headers: dict[str, str]) -> set[str]:
+        rows = client.get("/api/safety/executions", headers=headers).json()["data"]
+        return {r["execution_id"] for r in rows}
+
+    assert ids({"X-AX-Session": nubi}) == {nubi_id}  # 공용 토큰 주입 = 사람 토큰 아님과 같은 경우
+    assert ids({"X-AX-Session": _forged(nubi)}) >= {
+        cat_id,
+        nubi_id,
+    }  # 위조: 회사를 안 고름(예전 그대로)
+    assert ids({}) >= {cat_id, nubi_id}  # 머리 없음: 예전 그대로

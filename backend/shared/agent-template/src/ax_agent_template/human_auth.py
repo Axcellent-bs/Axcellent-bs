@@ -116,6 +116,23 @@ def is_session_token(token: str) -> bool:
     return token.startswith(PREFIX + ".")
 
 
+SESSION_HEADER = "X-AX-Session"
+
+
+def screen_session_token(authorization: str | None, x_session: str | None) -> str | None:
+    """화면 요청의 로그인 세션 토큰(회사 고르기 전용). 검증은 부르는 쪽이 `verify_session`으로 한다.
+
+    `Authorization`이 세션 토큰이면 그것, 아니면 `X-AX-Session` 머리의 세션 토큰.
+    같은 출처 nginx가 읽기(GET)의 `Authorization`을 공용 토큰으로 바꿔 붙여
+    서버가 세션 회사를 못 보던 것(11/25)을 막는다.
+    권한은 여전히 `Authorization`이 정한다(이 값으로 권한을 주지 않는다)."""
+    token = bearer(authorization)
+    if token and is_session_token(token):
+        return token
+    extra = (x_session or "").strip()
+    return extra if extra and is_session_token(extra) else None
+
+
 def shared_tokens_allowed() -> bool:
     return os.getenv(ALLOW_SHARED_ENV, "1").strip() != "0"
 

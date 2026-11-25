@@ -117,6 +117,23 @@ async def test_each_company_uses_its_own_vault_and_login() -> None:
     assert rec.logins == ["nubi-viewer", "cat-viewer"]
 
 
+async def test_session_header_picks_company_when_authorization_is_not_a_session() -> None:
+    """같은 출처 nginx가 읽기의 Authorization을 공용 토큰으로 바꿔 붙여도(11/25 실서버)
+    화면이 같이 싣는
+    X-AX-Session으로 회사를 고른다. 위조 머리는 무시(캣북스 그대로)."""
+    _save("cat-viewer", "pw-cat")
+    rec = Recorder()
+    nubi = _session(NUBI)
+    async with _client(rec, AGENT_TOKEN, {"X-AX-Session": nubi}) as c:
+        assert (await c.get("/api/incidents")).status_code == 503  # 누비투어: 연결 없음
+    prefix, body, sig = nubi.split(".")
+    async with _client(
+        rec, AGENT_TOKEN, {"X-AX-Session": f"{prefix}.{body}.{'A' * len(sig)}"}
+    ) as c:
+        assert (await c.get("/api/incidents")).status_code == 200  # 위조: 회사 안 고름 = 캣북스
+    assert rec.logins == ["cat-viewer"]
+
+
 async def test_agent_token_follows_company_header() -> None:
     _save("cat-viewer", "pw-cat")
     rec = Recorder()

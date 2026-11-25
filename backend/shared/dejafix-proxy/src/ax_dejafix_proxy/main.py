@@ -131,6 +131,15 @@ def caller_company(request: Request) -> str | None:
         except human_auth.HumanAuthError:
             return None  # check_caller가 먼저 거른다. 여기 오면 회사를 모르는 것으로 본다
         return human.company_id
+    # 같은 출처 nginx가 읽기의 Authorization을 공용 토큰으로 바꿔 붙여서
+    # X-AX-Session으로도 받는다(11/25).
+    # 회사 고르기에만 쓰고, 검증에 실패하면 무시한다(권한은 Authorization)
+    extra = human_auth.screen_session_token(None, request.headers.get(human_auth.SESSION_HEADER))
+    if extra:
+        try:
+            return human_auth.verify_session(extra, allow_no_company=True).company_id
+        except human_auth.HumanAuthError:
+            pass
     header = request.headers.get(company_connection.CALLER_COMPANY_HEADER, "")
     return canonical_company_id(header.strip()) or company_scope.CATBOOKS
 

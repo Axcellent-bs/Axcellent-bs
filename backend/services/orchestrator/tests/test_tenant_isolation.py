@@ -156,6 +156,29 @@ async def test_screen_reads_follow_the_login_session_company() -> None:
 
 
 @pytest.mark.asyncio
+async def test_shared_token_with_session_header_reads_that_company() -> None:
+    """같은 출처 nginx는 읽기의 Authorization을 공용 토큰으로 바꿔 붙인다(11/25 실서버).
+    화면이 같이 싣는 X-AX-Session으로 회사를 고른다. 위조된 머리는 무시(기본 회사)."""
+    mine = await _open("nubitour", "evt_h1")
+    cat = await _open(None, "evt_h2")
+    client = TestClient(app)
+    nubi = _session("nubitour")["Authorization"].removeprefix("Bearer ")
+
+    def listed(headers: dict[str, str]) -> set[str]:
+        return {
+            row["context_id"]
+            for row in client.get("/api/incidents", headers=headers).json()["data"]
+        }
+
+    shared = {"Authorization": "Bearer shared-human-token"}
+    assert listed({**shared, "X-AX-Session": nubi}) == {mine}
+    prefix, body, sig = nubi.split(".")
+    forged = f"{prefix}.{body}.{'A' * len(sig)}"
+    assert listed({**shared, "X-AX-Session": forged}) == {cat}
+    assert listed(shared) == {cat}  # 머리 없음: 예전 그대로
+
+
+@pytest.mark.asyncio
 async def test_chat_threads_are_kept_per_company() -> None:
     with company_scope.using("nubitour"):
         threads.get_store().create("누비 대화", "u1")
