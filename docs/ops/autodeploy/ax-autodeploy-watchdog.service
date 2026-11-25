@@ -1,0 +1,16 @@
+# /etc/systemd/system/ax-autodeploy-watchdog.service  (예시. 서버 책임자가 설치한다)
+# 알림 전용: 상태 파일을 읽고 슬랙으로 알리기만 한다. 배포·재시작·복구는 하지 않는다.
+[Unit]
+Description=ax-autodeploy watchdog (alert only)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/usr/local/sbin/ax-autodeploy-watchdog --notify --heartbeat
+TimeoutStartSec=60
+Nice=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ax-autodeploy
+PrivateTmp=yes

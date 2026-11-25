@@ -1,0 +1,326 @@
+#!/usr/bin/env bash
+# ax-autodeploy-watchdog — 자동 배포(ax-autodeploy)가 멈췄는지 감시하고 알린다. (알림 전용)
+#
+# 서버에 /usr/local/sbin/ax-autodeploy-watchdog 로 설치(root:root 755), 실행은 ubuntu(5분 주기 systemd 타이머).
+#
+# 읽기만 한다: /var/lib/ax-autodeploy/ 의 상태 파일, /etc/ax-autodeploy/env 의 AX_PAUSE_FILE,
+#   정지 표시 파일, 로그, systemctl is-active/show(상태 조회만).
+# 쓰는 것은 딱 하나: 알림 기록 ${STATE_DIR}/watchdog-notified (--notify 일 때만).
+# 하지 않는 것: 배포·restart-backend·rollback·deploy-bundle·ax-gate 호출, 파일 삭제, systemctl 변경(start/stop/restart/reset-failed 등),
+#   복구 동작(이번 버전은 알림 전용. --recover 는 거절한다).
+#
+# 모드:   --check(기본, 출력만)   --notify(상태가 바뀔 때만 슬랙)   --heartbeat(하루 1회 정상 알림, --notify 를 함께 켠다)
+#         --json(출력을 JSON 으로)
+# 끝 코드: 0 정상, 1 경고, 2 심각, 64 사용법 오류
+#
+# 시험·설정용 환경 변수(모두 선택):
+#   AX_STATE_DIR(/var/lib/ax-autodeploy)  AX_ENV_FILE(/etc/ax-autodeploy/env)  AX_PAUSE_FILE(env 파일의 같은 키보다 우선)
+#   AX_WD_LOG_FILE(/var/log/ax-autodeploy.log)  AX_WD_NOW(현재 epoch)  AX_WD_STALE_S(1200)  AX_WD_WAIT_S(1800)
+#   AX_WD_LOCK_MAX_S(1500)  AX_WD_INPROGRESS_GRACE_S(120)  AX_WD_REPEAT_S(3600)  AX_WD_HEARTBEAT_S(86400)
+#   AX_WD_TIMER_STATE(active|inactive|failed...)  AX_WD_SERVICE_STATE(ActiveState)  AX_WD_SERVICE_RESULT(Result)
+#   AX_WD_LOCK_HELD(1|0, flock 점유 여부를 주입)  AX_WD_SYSTEMCTL(systemctl)  AX_WD_TIMER_UNIT  AX_WD_SERVICE_UNIT
+#   AX_WD_SLACK_HOOK(/etc/ax-autodeploy/slack-webhook, 파일 경로. 내용은 어디에도 출력하지 않는다)  AX_WD_CURL(curl)
+#   AX_WD_NOTIFIED_FILE(${STATE_DIR}/watchdog-notified)  AX_WD_HOST(알림에 적을 서버 이름)
+
+set -Eeuo pipefail
+IFS=$' \t\n'
+export LC_ALL=C
+
+STATE_DIR="${AX_STATE_DIR:-/var/lib/ax-autodeploy}"
+ENV_FILE="${AX_ENV_FILE:-/etc/ax-autodeploy/env}"
+LOG_FILE="${AX_WD_LOG_FILE:-/var/log/ax-autodeploy.log}"
+NOW="${AX_WD_NOW:-$(date +%s)}"
+STALE_S="${AX_WD_STALE_S:-1200}"
+WAIT_S="${AX_WD_WAIT_S:-1800}"
+LOCK_MAX_S="${AX_WD_LOCK_MAX_S:-1500}"            # ax-autodeploy.service 의 TimeoutStartSec
+INPROGRESS_GRACE_S="${AX_WD_INPROGRESS_GRACE_S:-120}"
+REPEAT_S="${AX_WD_REPEAT_S:-3600}"
+HEARTBEAT_S="${AX_WD_HEARTBEAT_S:-86400}"
+SYSTEMCTL="${AX_WD_SYSTEMCTL:-systemctl}"
+TIMER_UNIT="${AX_WD_TIMER_UNIT:-ax-autodeploy.timer}"
+SERVICE_UNIT="${AX_WD_SERVICE_UNIT:-ax-autodeploy.service}"
+SLACK_HOOK_FILE="${AX_WD_SLACK_HOOK:-/etc/ax-autodeploy/slack-webhook}"
+CURL="${AX_WD_CURL:-curl}"
+NOTIFIED_FILE="${AX_WD_NOTIFIED_FILE:-${STATE_DIR}/watchdog-notified}"
+HOST_NAME="${AX_WD_HOST:-$(hostname 2>/dev/null || echo server)}"
+
+for v in NOW STALE_S WAIT_S LOCK_MAX_S INPROGRESS_GRACE_S REPEAT_S HEARTBEAT_S; do
+  [[ "${!v}" =~ ^[0-9]{1,12}$ ]] || { printf '[watchdog] 설정 오류: %s 는 숫자여야 한다\n' "${v}" >&2; exit 64; }
+done
+
+MODE_NOTIFY=0; MODE_HEARTBEAT=0; JSON=0
+usage() { printf '사용법: %s [--check] [--notify] [--heartbeat] [--json]\n  (--recover 는 아직 구현 안 됨, 알림 전용)\n' "${0##*/}" >&2; }
+for a in "$@"; do
+  case "${a}" in
+    --check) ;;
+    --notify) MODE_NOTIFY=1 ;;
+    --heartbeat) MODE_NOTIFY=1; MODE_HEARTBEAT=1 ;;
+    --json) JSON=1 ;;
+    --recover) printf '[watchdog] --recover: 아직 구현 안 됨, 알림 전용\n' >&2; exit 64 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; exit 64 ;;
+  esac
+done
+
+# ---- 작은 도구 ---------------------------------------------------------------------------------
+mtime_of() { stat -c %Y "$1" 2>/dev/null || true; }   # 없으면 빈 값
+human_age() { # 초 -> "N분"/"N시간 M분"
+  local s=$1
+  if (( s < 120 )); then printf '%s초' "${s}"
+  elif (( s < 7200 )); then printf '%s분' $(( s / 60 ))
+  else printf '%s시간 %s분' $(( s / 3600 )) $(( s % 3600 / 60 )); fi
+}
+json_str() { local s="${1//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\n'/ }"; s="${s//$'\t'/ }"; printf '"%s"' "${s}"; }
+
+FIND_T=(); FIND_S=(); FIND_D=()
+add() { FIND_T+=("$1"); FIND_S+=("$2"); FIND_D+=("$3"); }   # 종류, 심각도(1 경고/2 심각), 설명
+
+# ---- 설정(읽기만, 내용을 실행하지 않는다): AX_PAUSE_FILE 한 키만 ------------------------------------
+PAUSE_FILE="${AX_PAUSE_FILE:-}"
+if [[ -z "${PAUSE_FILE}" && -f "${ENV_FILE}" && ! -L "${ENV_FILE}" && -r "${ENV_FILE}" ]]; then
+  while IFS='=' read -r k v || [[ -n "${k}" ]]; do
+    v="${v%$'\r'}"
+    if [[ "${k}" == AX_PAUSE_FILE ]]; then v="${v%\"}"; v="${v#\"}"; PAUSE_FILE="${v}"; fi
+  done < "${ENV_FILE}"
+fi
+
+# ---- 1) 타이머·서비스 -------------------------------------------------------------------------
+TIMER_STATE="${AX_WD_TIMER_STATE:-}"
+if [[ -z "${TIMER_STATE}" ]]; then
+  TIMER_STATE="$("${SYSTEMCTL}" is-active "${TIMER_UNIT}" 2>/dev/null || true)"
+  [[ -n "${TIMER_STATE}" ]] || TIMER_STATE="unknown"
+fi
+case "${TIMER_STATE}" in
+  active|unknown) ;;
+  *) add timer-inactive 2 "타이머 ${TIMER_UNIT} 가 ${TIMER_STATE} (자동 배포가 돌지 않는다)" ;;
+esac
+
+SVC_STATE="${AX_WD_SERVICE_STATE:-}"; SVC_RESULT="${AX_WD_SERVICE_RESULT:-}"
+if [[ -z "${SVC_STATE}" ]]; then
+  while IFS='=' read -r k v; do
+    case "${k}" in ActiveState) SVC_STATE="${v}" ;; Result) SVC_RESULT="${v}" ;; esac
+  done < <("${SYSTEMCTL}" show -p ActiveState -p Result "${SERVICE_UNIT}" 2>/dev/null || true)
+fi
+if [[ "${SVC_RESULT}" == start-limit-hit ]]; then
+  add service-start-limit 2 "서비스 ${SERVICE_UNIT} 가 start-limit-hit (너무 자주 실패해 시스템이 막았다)"
+elif [[ "${SVC_STATE}" == failed ]]; then
+  add service-failed 1 "서비스 ${SERVICE_UNIT} 가 failed${SVC_RESULT:+ (Result=${SVC_RESULT})}"
+fi
+
+# ---- 2) flock 점유 -----------------------------------------------------------------------------
+LOCK_FILE="${STATE_DIR}/lock"
+LOCK_HELD=0
+if [[ -n "${AX_WD_LOCK_HELD:-}" ]]; then
+  LOCK_HELD="${AX_WD_LOCK_HELD}"
+elif [[ -e "${LOCK_FILE}" && -r "${LOCK_FILE}" ]] && command -v flock >/dev/null 2>&1; then
+  # 읽기 전용으로 열어 잠깐 잡아 본다(바로 놓는다). 점유 중이면 잡히지 않는다.
+  if exec 8< "${LOCK_FILE}" 2>/dev/null; then
+    if flock -n 8; then LOCK_HELD=0; else LOCK_HELD=1; fi
+    exec 8<&-
+  fi
+fi
+LOCK_MT="$(mtime_of "${LOCK_FILE}")"
+if [[ "${LOCK_HELD}" == 1 ]]; then
+  # lock 파일은 매 실행 시작에 열려(mtime 갱신) 점유 시작 시각의 근사다
+  if [[ -n "${LOCK_MT}" ]] && (( NOW - LOCK_MT > LOCK_MAX_S )); then
+    add lock-held-long 2 "실행 잠금(flock)을 $(human_age $(( NOW - LOCK_MT ))) 째 잡고 있다 (제한 ${LOCK_MAX_S}초 초과)"
+  fi
+fi
+
+# ---- 3) last-run 최신성(mtime 우선) ---------------------------------------------------------------
+# last-run 내용은 "YYYY-MM-DD HH:MM:SS+ZZZZ <판정> <sha 8자리>" 한 줄. 시각을 믿지 않고 파일 mtime 을 쓴다. mtime 을 못 읽으면 내용의 시각으로 대신한다.
+LASTRUN_FILE="${STATE_DIR}/last-run"
+LR_MT="$(mtime_of "${LASTRUN_FILE}")"
+if [[ -z "${LR_MT}" && -r "${LASTRUN_FILE}" ]]; then
+  read -r d t _ < "${LASTRUN_FILE}" 2>/dev/null || true
+  LR_MT="$(date -d "${d:-} ${t:-}" +%s 2>/dev/null || true)"
+fi
+LR_VERDICT=""
+[[ -r "${LASTRUN_FILE}" ]] && read -r _ _ LR_VERDICT _ < "${LASTRUN_FILE}" 2>/dev/null || true
+LR_AGE=""
+if [[ -z "${LR_MT}" ]]; then
+  add last-run-stale 1 "last-run 파일이 없거나 읽을 수 없다 (${LASTRUN_FILE})"
+else
+  LR_AGE=$(( NOW - LR_MT )); (( LR_AGE >= 0 )) || LR_AGE=0
+  if (( LR_AGE >= STALE_S )); then
+    sev=1; (( LR_AGE >= 3 * STALE_S )) && sev=2
+    add last-run-stale "${sev}" "last-run 이 $(human_age "${LR_AGE}") 전이다 (기준 ${STALE_S}초; 마지막 판정 ${LR_VERDICT:-?})"
+  fi
+fi
+
+# ---- 4) 정지 표시(pause) ------------------------------------------------------------------------
+PAUSED=0
+if [[ -n "${PAUSE_FILE}" && ( -e "${PAUSE_FILE}" || -L "${PAUSE_FILE}" ) ]]; then
+  p_epoch=""
+  if [[ -f "${PAUSE_FILE}" && ! -L "${PAUSE_FILE}" && -r "${PAUSE_FILE}" ]]; then
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      line="${line%$'\r'}"
+      case "${line}" in until_epoch=*) p_epoch="${line#until_epoch=}" ;; esac
+    done < "${PAUSE_FILE}"
+  fi
+  if [[ ! "${p_epoch}" =~ ^[0-9]{1,12}$ ]]; then
+    add pause-invalid 1 "정지 표시 파일을 해석할 수 없다 (until_epoch 없음·읽기 실패). 자동 배포는 멈춘 것으로 본다"
+  elif (( NOW < p_epoch )); then
+    PAUSED=1; PAUSE_LEFT=$(( p_epoch - NOW ))
+  else
+    add pause-invalid 1 "정지 표시가 만료됐는데 파일이 남아 있다 ($(human_age $(( NOW - p_epoch ))) 전 만료)"
+  fi
+fi
+
+# ---- 5) 백엔드 배포 흔적(사람 호출 전용) ------------------------------------------------------------
+INPROG_FILE="${STATE_DIR}/backend-in-progress"
+if [[ -e "${INPROG_FILE}" ]]; then
+  ip_mt="$(mtime_of "${INPROG_FILE}")"; ip_age=$(( NOW - ${ip_mt:-$NOW} )); (( ip_age >= 0 )) || ip_age=0
+  ip_kind=""; [[ -r "${INPROG_FILE}" ]] && read -r ip_kind _ < "${INPROG_FILE}" 2>/dev/null || true
+  ip_kind="${ip_kind//[^a-z-]/}"
+  # 실제 배포 중이면 flock 이 잡혀 있다. 잠금이 풀렸는데(또는 제한 시간을 넘기고도) 남아 있으면 죽은 흔적이다
+  if (( ip_age >= INPROGRESS_GRACE_S )) && { [[ "${LOCK_HELD}" != 1 ]] || (( ip_age > LOCK_MAX_S )); }; then
+    add backend-in-progress-stuck 2 "backend-in-progress(${ip_kind:-?})가 $(human_age "${ip_age}") 째 남아 있다. 사람이 확인해야 한다 (자동 처리 안 함)"
+  fi
+fi
+
+# ---- 6) 오래 이어지는 대기(ci-pending / ci-hold) ----------------------------------------------------
+# backend-verdict 는 매 주기 다시 써서 mtime 이 늘 새롭다. 대신 판정이 바뀔 때만 남는 로그 줄("backend: <판정> <운영8>..<대상8> ...")로 시작 시각을 본다.
+VERDICT_FILE="${STATE_DIR}/backend-verdict"
+WAIT_KEY=""; WAIT_AGE=""
+if [[ "${PAUSED}" != 1 && -r "${VERDICT_FILE}" ]]; then
+  read -r v_sha v_key _ < "${VERDICT_FILE}" 2>/dev/null || true
+  v_key="${v_key:-}"; v_key="${v_key%$'\r'}"; v_sha="${v_sha:-}"
+  if [[ ( "${v_key}" == ci-pending || "${v_key}" == ci-hold ) && "${v_sha}" =~ ^[0-9a-f]{40}$ && -r "${LOG_FILE}" ]]; then
+    t8="${v_sha:0:8}"
+    # 이 판정으로 바뀐 마지막 줄과, 그 뒤에 배포가 끝났는지(운영 HEAD 가 바뀐 흔적)를 같이 본다
+    start_line="$(grep -aE "] backend: ${v_key} [0-9a-f]{8}\.\.${t8} " "${LOG_FILE}" 2>/dev/null | tail -n 1 || true)"
+    if [[ -n "${start_line}" ]]; then
+      ts="${start_line%% \[*}"
+      start_epoch="$(date -d "${ts}" +%s 2>/dev/null || true)"
+      after_deploy=0
+      if grep -aqE "] (done: 백엔드 배포 완료|backend: deployed )" "${LOG_FILE}" 2>/dev/null; then
+        last_done="$(grep -aE "] (done: 백엔드 배포 완료|backend: deployed )" "${LOG_FILE}" | tail -n 1)"
+        done_epoch="$(date -d "${last_done%% \[*}" +%s 2>/dev/null || true)"
+        [[ "${done_epoch}" =~ ^[0-9]+$ && "${start_epoch}" =~ ^[0-9]+$ ]] && (( done_epoch >= start_epoch )) && after_deploy=1
+      fi
+      if [[ "${start_epoch}" =~ ^[0-9]+$ && ${after_deploy} == 0 ]]; then
+        WAIT_KEY="${v_key}"; WAIT_AGE=$(( NOW - start_epoch )); (( WAIT_AGE >= 0 )) || WAIT_AGE=0
+        if (( WAIT_AGE >= WAIT_S )); then
+          add long-wait 1 "${v_key} 대기가 $(human_age "${WAIT_AGE}") 째다 (기준 ${WAIT_S}초, 대상 ${t8}, 운영 HEAD 그대로)"
+        fi
+      fi
+    fi
+  fi
+fi
+
+# ---- 판정 모으기 ---------------------------------------------------------------------------------
+# 심각도 큰 것 먼저, 같으면 추가한 순서
+ORDER=()
+for sev in 2 1; do for i in "${!FIND_T[@]}"; do [[ "${FIND_S[$i]}" == "${sev}" ]] && ORDER+=("$i"); done; done
+
+CODE=0; PRIMARY="ok"; DETAIL="자동 배포 정상${LR_AGE:+ (last-run ${LR_AGE}초 전${LR_VERDICT:+, ${LR_VERDICT}})}"
+if (( ${#ORDER[@]} > 0 )); then
+  i0="${ORDER[0]}"; PRIMARY="${FIND_T[$i0]}"; CODE="${FIND_S[$i0]}"; DETAIL="${FIND_D[$i0]}"
+elif [[ "${PAUSED}" == 1 ]]; then
+  PRIMARY="paused-approved"; DETAIL="승인된 정지 중 (재개까지 $(human_age "${PAUSE_LEFT}")). 복구 대상 아님${LR_AGE:+ (last-run ${LR_AGE}초 전)}"
+fi
+STATUS=ok; (( CODE == 1 )) && STATUS=warn; (( CODE == 2 )) && STATUS=critical
+STATE_KEY="${PRIMARY}"
+if (( ${#ORDER[@]} > 0 )); then
+  STATE_KEY=""; for i in "${ORDER[@]}"; do STATE_KEY+="${STATE_KEY:+,}${FIND_T[$i]}"; done
+fi
+(( ${#ORDER[@]} > 0 )) && [[ "${PAUSED}" == 1 ]] && STATE_KEY+=",paused-approved"
+
+# ---- 출력 ----------------------------------------------------------------------------------------
+LABEL="정상"; [[ "${STATUS}" == warn ]] && LABEL="경고"; [[ "${STATUS}" == critical ]] && LABEL="심각"
+LINE="[watchdog] ${LABEL}: ${PRIMARY} — ${DETAIL}"
+(( ${#ORDER[@]} > 1 )) && LINE+=" (그 밖에 $(( ${#ORDER[@]} - 1 ))건: ${STATE_KEY#*,})"
+
+if [[ "${JSON}" == 1 ]]; then
+  printf '{"status":%s,"code":%s,"primary":%s,"detail":%s,"now":%s,"paused":%s,"checks":{"timer":%s,"service":%s,"lock_held":%s,"last_run_age_s":%s,"wait_key":%s,"wait_age_s":%s},"findings":[' \
+    "$(json_str "${STATUS}")" "${CODE}" "$(json_str "${PRIMARY}")" "$(json_str "${DETAIL}")" "${NOW}" \
+    "$([[ "${PAUSED}" == 1 ]] && echo true || echo false)" \
+    "$(json_str "${TIMER_STATE}")" "$(json_str "${SVC_STATE:-unknown}${SVC_RESULT:+/${SVC_RESULT}}")" \
+    "$([[ "${LOCK_HELD}" == 1 ]] && echo true || echo false)" "${LR_AGE:-null}" "$(json_str "${WAIT_KEY}")" "${WAIT_AGE:-null}"
+  first=1
+  for i in "${ORDER[@]}"; do
+    (( first )) || printf ','
+    first=0
+    printf '{"type":%s,"severity":%s,"detail":%s}' "$(json_str "${FIND_T[$i]}")" "${FIND_S[$i]}" "$(json_str "${FIND_D[$i]}")"
+  done
+  printf ']}\n'
+else
+  printf '%s\n' "${LINE}"
+fi
+
+[[ "${MODE_NOTIFY}" == 1 ]] || exit "${CODE}"
+
+# ---- 슬랙 알림 -----------------------------------------------------------------------------------
+# 규칙: 상태가 바뀌면 바로 1회. 같은 이상 상태는 REPEAT_S(1시간)에 1회만 다시. 이상 -> 정상은 복구 알림 1회.
+#       정상이면 --heartbeat 일 때 하루(HEARTBEAT_S)에 1회 하트비트. 알림에 성공했을 때만 기록을 갱신한다(실패하면 다음 주기에 다시).
+# 기록 파일(watchdog-notified): state=<상태 키> / sent=<마지막 알림 epoch> / heartbeat=<마지막 하트비트 epoch>
+s_state=""; s_sent=0; s_hb=0
+if [[ -r "${NOTIFIED_FILE}" ]]; then
+  while IFS='=' read -r k v || [[ -n "${k}" ]]; do
+    case "${k}" in
+      state) [[ "${v}" =~ ^[a-z,-]{1,200}$ ]] && s_state="${v}" ;;
+      sent) [[ "${v}" =~ ^[0-9]{1,12}$ ]] && s_sent="${v}" ;;
+      heartbeat) [[ "${v}" =~ ^[0-9]{1,12}$ ]] && s_hb="${v}" ;;
+    esac
+  done < "${NOTIFIED_FILE}"
+fi
+
+is_good() { [[ "$1" == ok || "$1" == paused-approved ]]; }
+KIND=""   # alert | recovery | heartbeat | (빈 값 = 보내지 않음)
+if is_good "${STATE_KEY}"; then
+  if [[ -n "${s_state}" ]] && ! is_good "${s_state}"; then KIND=recovery
+  elif [[ "${MODE_HEARTBEAT}" == 1 && "${STATE_KEY}" == ok ]] && (( NOW - s_hb >= HEARTBEAT_S )); then KIND=heartbeat
+  fi
+else
+  if [[ "${STATE_KEY}" != "${s_state}" ]]; then KIND=alert
+  elif (( NOW - s_sent >= REPEAT_S )); then KIND=alert
+  fi
+fi
+
+save_state() { # $1=보낸 epoch(없으면 기존 유지) $2=하트비트 epoch
+  local tmp="${NOTIFIED_FILE}.tmp.$$"
+  printf 'state=%s\nsent=%s\nheartbeat=%s\n' "${STATE_KEY}" "$1" "$2" > "${tmp}" 2>/dev/null && mv -f "${tmp}" "${NOTIFIED_FILE}" 2>/dev/null \
+    || { rm -f "${tmp}" 2>/dev/null || true; printf '[watchdog] 알림 기록을 쓰지 못했다 (%s)\n' "${NOTIFIED_FILE}" >&2; }
+}
+
+if [[ -z "${KIND}" ]]; then
+  # 보낼 것은 없지만 상태 키가 바뀌었으면(정상 <-> 일시 정지 등) 기록만 맞춘다
+  [[ "${STATE_KEY}" == "${s_state}" ]] || save_state "${s_sent}" "${s_hb}"
+  exit "${CODE}"
+fi
+
+case "${KIND}" in
+  alert)
+    MSG="[watchdog] 자동 배포 정지 의심(${LABEL}) — ${PRIMARY}"$'\n'"${DETAIL}"
+    (( ${#ORDER[@]} > 1 )) && MSG+=$'\n'"그 밖에: ${STATE_KEY#*,}"
+    MSG+=$'\n'"서버: ${HOST_NAME}. 이 알림은 알림 전용이며 자동 복구는 하지 않습니다. 서버 책임자가 확인해 주세요."
+    [[ "${PRIMARY}" == backend-in-progress-stuck ]] && MSG+=$'\n'"백엔드 배포 흔적은 사람이 직접 확인해야 합니다(자동 처리 안 함)." ;;
+  recovery) MSG="[watchdog] 자동 배포 복구됨 — ${DETAIL} (서버: ${HOST_NAME})" ;;
+  heartbeat) MSG="[watchdog] 하루 1회 점검: 자동 배포 정상 — ${DETAIL} (서버: ${HOST_NAME})" ;;
+esac
+
+if [[ ! -r "${SLACK_HOOK_FILE}" ]]; then
+  printf '[watchdog] 슬랙 웹훅 파일을 읽을 수 없어 알림을 못 보냈다 (%s)\n' "${SLACK_HOOK_FILE}" >&2
+  exit "${CODE}"
+fi
+HOOK_URL=""
+IFS= read -r HOOK_URL < "${SLACK_HOOK_FILE}" || true
+HOOK_URL="${HOOK_URL//$'\r'/}"
+if [[ ! "${HOOK_URL}" =~ ^https:// ]]; then
+  printf '[watchdog] 슬랙 웹훅 파일 형식이 맞지 않아 알림을 못 보냈다\n' >&2
+  exit "${CODE}"
+fi
+
+PAYLOAD_FILE="$(mktemp)"; trap 'rm -f "${PAYLOAD_FILE}"' EXIT
+printf '{"text":%s}' "$(json_str "${MSG}")" > "${PAYLOAD_FILE}"
+# 웹훅 주소가 명령줄(ps)에 보이지 않게 curl 설정을 표준 입력으로 넘긴다. curl 의 출력·오류는 버린다(주소가 섞일 수 있다).
+if printf 'url = "%s"\n' "${HOOK_URL}" | "${CURL}" -sS -m 15 -o /dev/null -f -K - \
+     -H 'Content-Type: application/json' --data-binary "@${PAYLOAD_FILE}" >/dev/null 2>&1; then
+  hb="${s_hb}"; [[ "${KIND}" == heartbeat ]] && hb="${NOW}"
+  save_state "${NOW}" "${hb}"
+  printf '[watchdog] 슬랙 알림 보냄(%s)\n' "${KIND}"
+else
+  printf '[watchdog] 슬랙 전송 실패 — 다음 주기에 다시 시도한다\n' >&2
+fi
+exit "${CODE}"
