@@ -43,9 +43,9 @@ export const DIRECT_ROUTES: readonly DirectRoute[] = [
   // 총괄·안전 관문: 이 읽기는 서버가 토큰을 보지 않는다
   { service: "orch", auth: "none", path: /^\/api\/incidents$/ },
   { service: "safety", auth: "none", path: /^\/api\/safety\/executions$/ },
-  // 기획·개발 state (사이드바 숫자, 30초마다)
-  { service: "planning", auth: "none", path: /^\/api\/planning\/state$/ },
-  { service: "dev", auth: "none", path: /^\/api\/planning\/state$/ },
+  // 기획·개발 state (사이드바 숫자, 30초마다). 세션 회사 상태를 받으려고 세션 토큰을 싣는다 (11/25 회사 분리)
+  { service: "planning", auth: "session", path: /^\/api\/planning\/state$/ },
+  { service: "dev", auth: "session", path: /^\/api\/planning\/state$/ },
 ];
 
 export interface DirectConfig { base: string; services: ReadonlySet<DirectService> }
