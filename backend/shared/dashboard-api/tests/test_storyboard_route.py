@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -296,3 +298,27 @@ def test_youtube_campaign_link_and_campaign_list_go_to_marketing(
         "list_marketing_campaigns",
         {"limit": 20},
     )
+
+
+def test_background_answers_at_once_and_still_asks_marketing(
+    client: TestClient, fake: Fake
+) -> None:
+    """11/25 대본대로 다시 만들기는 60초를 넘겨 끊겼다. 바로 답하고 뒤에서 기록에 붙인다."""
+    body = {"story": "들판", "shots": 6, "record_id": "CR-0123456789ab", "background": True}
+    res = client.post(URL, json=body)
+    assert res.status_code == 200
+    assert res.json()["data"] == {"record_id": "CR-0123456789ab", "started": True}
+    # TestClient의 이벤트 루프에서 뒤 작업이 돌아 마케팅에 같은 요청이 간다
+    client.post(URL, json={"story": "들판"})
+    skills = [(c[1].skill, c[1].untrusted.get("record_id")) for c in fake.calls]
+    assert ("storyboard_prompt", "CR-0123456789ab") in skills
+    request = next(c[1] for c in fake.calls if c[1].untrusted.get("record_id"))
+    left = request.meta.deadline - datetime.now(UTC)
+    assert left.total_seconds() > marketing_client.STORYBOARD_DEADLINE_SECONDS
+
+
+def test_background_needs_a_record(client: TestClient, fake: Fake) -> None:
+    res = client.post(URL, json={"story": "들판", "background": True})
+    assert res.status_code == 422
+    assert fake.calls == []
+    assert client.post(URL, json={"story": "들판", "background": "yes"}).status_code in (400, 422)

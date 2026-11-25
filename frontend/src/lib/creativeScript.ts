@@ -116,3 +116,9 @@ export function boardBehindScript(rec: {
   const boardAt = rec.storyboard_at ? Date.parse(rec.storyboard_at) : NaN;
   return Number.isFinite(scriptAt) && Number.isFinite(boardAt) && scriptAt > boardAt;
 }
+
+/** 11/25 뒤에서 만든 스토리보드가 기록에 붙었나: 시작한 뒤의 storyboard_at이고 대본을 따른다 */
+export function boardArrived(rec: { storyboard?: { script_used?: boolean } | null; storyboard_at?: string | null }, startedAt: number): boolean {
+  const at = rec.storyboard_at ? Date.parse(rec.storyboard_at) : NaN;
+  return Number.isFinite(at) && at >= startedAt && rec.storyboard?.script_used === true;
+}

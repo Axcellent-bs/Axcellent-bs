@@ -48,6 +48,18 @@ export const MAX_STORY = 1000;
 
 const PATH = "/api/dashboard/marketing/storyboard";
 
+/** 11/25 기록에 붙일 스토리보드를 뒤에서 만들게 한다(바로 답함). 끝나면 기록의 storyboard_at이 바뀐다 */
+export async function startStoryboard(body: { story: string; character_en?: string; shots: ShotCount; record_id: string }): Promise<void> {
+  const res = await fetch(`${DASHBOARD_API_URL}${PATH}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...dashboardAuth() },
+    body: JSON.stringify({ ...body, story: body.story.trim(), character_en: body.character_en?.trim() || undefined, background: true }),
+    cache: "no-store",
+  });
+  const parsed: unknown = await res.json().catch(() => undefined);
+  if (!res.ok) throw storyboardFailure(parsed, res.status);
+}
+
 export async function makeStoryboard(body: { story: string; character_en?: string; shots: ShotCount; record_id?: string | null }): Promise<StoryboardResult> {
   const res = await fetch(`${DASHBOARD_API_URL}${PATH}`, {
     method: "POST",

@@ -759,8 +759,9 @@ async def character_sheet_call(
         ),
         skill="character_sheet_prompt",
         # 기본(real_photo)은 지금처럼 빈 input. 다른 종류만 사람이 고른 값을 싣는다
-        input={} if kind == "real_photo" else {"kind": kind,
-                                               "virtual_confirmed": virtual_confirmed},  # fmt: skip
+        input={}
+        if kind == "real_photo"
+        else {"kind": kind, "virtual_confirmed": virtual_confirmed},  # fmt: skip
         untrusted=untrusted,
     )
     result = await SEND(TARGET, request)
@@ -783,6 +784,8 @@ STORYBOARD_REFUSALS = {
     "llm_failed": (502, "LLM_FAILED"),
 }
 STORYBOARD_DEADLINE_SECONDS = 120  # 칸 12개를 쓰는 LLM 호출이라 대화보다 길게 둔다
+# 11/25 뒤에서 만들 때(기록에 붙는다). nginx 60초에 끊기지 않으니 더 길게 둔다
+STORYBOARD_BACKGROUND_DEADLINE_SECONDS = 300
 
 
 async def storyboard_call(
@@ -791,6 +794,7 @@ async def storyboard_call(
     style_en: str | None,
     shots: int,
     record_id: str | None = None,
+    deadline_s: int = STORYBOARD_DEADLINE_SECONDS,
 ) -> dict[str, Any]:
     """스토리보드 프롬프트 skill.
 
@@ -808,7 +812,7 @@ async def storyboard_call(
         meta=RequestMeta(
             context_id=f"ctx_storyboard_{uuid.uuid4().hex[:12]}",
             token=config.agent_token(AGENT_NAME),
-            deadline=datetime.now(UTC) + timedelta(seconds=STORYBOARD_DEADLINE_SECONDS),
+            deadline=datetime.now(UTC) + timedelta(seconds=deadline_s),
             idempotency_key=f"ui:storyboard:{uuid.uuid4().hex}",
             **tenant_meta(),
         ),

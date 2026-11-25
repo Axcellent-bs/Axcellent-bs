@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 영상 대본 칸의 순수 계산 (11/23).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boardBehindScript, nearestCount, saveBody, scriptProblem, sourceLabel, spanLabel, stageChips, updateScene, type CreativeScript } from "./creativeScript.ts";
+import { boardArrived, boardBehindScript, nearestCount, saveBody, scriptProblem, sourceLabel, spanLabel, stageChips, updateScene, type CreativeScript } from "./creativeScript.ts";
 
 const SCRIPT: CreativeScript = {
   title_ko: "들판의 하루",
@@ -73,4 +73,12 @@ test("boardBehindScript: 대본이나 스토리보드가 없거나 시각을 모
   assert.equal(boardBehindScript({ script: null, storyboard: { script_used: false } }), false);
   assert.equal(boardBehindScript({ script: { at: "2026-11-25T03:00:00Z" }, storyboard: null }), false);
   assert.equal(boardBehindScript({ script: { at: null }, storyboard: { script_used: true }, storyboard_at: "2026-11-25T03:00:00Z" }), false);
+});
+
+test("boardArrived: 시작한 뒤에 붙고 대본을 따르는 스토리보드만 도착으로 본다", () => {
+  const start = Date.parse("2026-11-25T04:00:00Z");
+  assert.equal(boardArrived({ storyboard: { script_used: true }, storyboard_at: "2026-11-25T04:01:00Z" }, start), true);
+  assert.equal(boardArrived({ storyboard: { script_used: true }, storyboard_at: "2026-11-25T03:00:00Z" }, start), false);
+  assert.equal(boardArrived({ storyboard: { script_used: false }, storyboard_at: "2026-11-25T04:01:00Z" }, start), false);
+  assert.equal(boardArrived({ storyboard: null, storyboard_at: null }, start), false);
 });
