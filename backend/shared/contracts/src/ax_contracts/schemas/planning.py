@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from ax_contracts.schemas.common import AxModel, UtcDatetime
 from ax_contracts.schemas.finance import ContentFormat
@@ -731,6 +731,84 @@ class VideoMediaHints(AxModel):
     category: str | None = Field(default=None, max_length=30)  # 책 분류 짧은 단어
 
 
+def _clamp(value: Any, low: float, high: float) -> Any:
+    """숫자면 [low, high]로 자른다. 숫자가 아니면 그대로(검증이 거른다)."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return value
+    return min(max(value, low), high)
+
+
+class KeyPoseHead(AxModel):
+    """마네킹 머리 방향(도). yaw: 몸 기준 좌우(몸 yaw에 더함), pitch: 위아래(+ = 아래)."""
+
+    yaw: float = 0.0
+    pitch: float = 0.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _clamp(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = {**data}
+            data["yaw"] = _clamp(data.get("yaw", 0.0), -80, 80)
+            data["pitch"] = _clamp(data.get("pitch", 0.0), -40, 40)
+        return data
+
+
+class KeyPoseArm(AxModel):
+    """마네킹 팔 한쪽(도). raise: 어깨에서 앞으로 든 각도(0 = 내림), bend: 팔꿈치 굽힘.
+    `raise`는 파이썬 예약어라 별칭으로 받고 JSON에도 `raise`로 쓴다."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
+
+    raise_: float = Field(default=0.0, alias="raise")
+    bend: float = 0.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _clamp(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = {**data}
+            if "raise_" in data and "raise" not in data:
+                data["raise"] = data.pop("raise_")
+            data["raise"] = _clamp(data.get("raise", 0.0), -30, 170)
+            data["bend"] = _clamp(data.get("bend", 0.0), 0, 150)
+        return data
+
+
+class KeyPose(AxModel):
+    """3D 마네킹 콘티 한 칸의 포즈 (11/25). 기획 LLM은 이 숫자만 내고 그림은 기획 코드가 그린다
+    (`pose_render`, 원근 투영·바닥 격자·그림자). 범위 밖 숫자는 잘라서(clamp) 받는다.
+
+    shot: 카메라 샷 크기, x: 좌우 위치(m, + = 화면 오른쪽), z: 카메라에서 먼 쪽(m),
+    yaw: 몸 방향(0 = 카메라를 봄, 90 = 화면 왼쪽을 봄), step: 걸음 폭(0 = 섬), prop: 소품,
+    label_ko: 칸 위 한 줄."""
+
+    shot: Literal["close", "medium", "full"] = "medium"
+    x: float = 0.0
+    z: float = 0.0
+    yaw: float = 0.0
+    head: KeyPoseHead = Field(default_factory=KeyPoseHead)
+    arm_l: KeyPoseArm = Field(default_factory=KeyPoseArm)
+    arm_r: KeyPoseArm = Field(default_factory=KeyPoseArm)
+    step: float = 0.0
+    prop: Literal["book", "desk", "phone", "shelf", "cup"] | None = None
+    label_ko: str = Field(default="", max_length=30)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _clamp(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = {**data}
+            for key, low, high in (("x", -1.5, 1.5), ("z", 0, 3), ("yaw", -180, 180),
+                                   ("step", 0, 0.6)):  # fmt: skip
+                if key in data:
+                    data[key] = _clamp(data[key], low, high)
+            label = data.get("label_ko")
+            if isinstance(label, str):
+                data["label_ko"] = " ".join(label.split())[:30]
+        return data
+
+
 class VideoScene(AxModel):
     """영상 제작안의 장면 하나 (11/19 홍보영상 솔루션 ③ 장면별 스토리보드).
 
@@ -755,9 +833,14 @@ class VideoScene(AxModel):
     # 아래는 예전 제작안은 없다 (빈 문자열). 기획이 그린 SVG 콘티(11/25): 장면 첫·끝 화면의 구도를
     # 단순 도형으로 그린 SVG 원문(viewBox 0 0 90 160, 9:16). 기획이 허용 요소·속성만 남겨 정리한
     # 값이다. 화면은 <img src="data:image/svg+xml;base64,…">로만 보여 준다. 마케팅은 스토리보드
-    # 칸의 SVG로 그대로 쓸 수 있다
-    start_svg: str = Field(default="", max_length=8192)
-    end_svg: str = Field(default="", max_length=8192)
+    # 칸의 SVG로 그대로 쓸 수 있다. 11/25 3D 마네킹 콘티(그라데이션 구 음영·바닥 격자)를 넣으려고
+    # 상한을 8KB → 16KB로 늘렸다(허용 범위 확대)
+    start_svg: str = Field(default="", max_length=16384)
+    end_svg: str = Field(default="", max_length=16384)
+    # 아래는 예전 제작안은 없다 (None). 3D 마네킹 콘티의 첫·끝 포즈(11/25). 기획 LLM이 숫자만 내고
+    # 기획 코드가 SVG로 그려 start_svg·end_svg에 넣는다
+    start_pose: KeyPose | None = None
+    end_pose: KeyPose | None = None
 
     @model_validator(mode="after")
     def _ends_after_start(self) -> VideoScene:

@@ -179,6 +179,26 @@ def test_planning_svg_becomes_the_panel_svg() -> None:
     assert all(not s["svg"] for s in board["shots"][1:])
 
 
+def test_planning_mannequin_svg_keeps_gradients_in_the_panel() -> None:
+    """11/25 기획 3D 마네킹 콘티(그라데이션 구 음영·url(#id), 8KB 넘음)도 칸 SVG로 그대로 쓴다."""
+    defs = ('<defs><radialGradient id="sk" cx="35%" cy="30%" r="75%"><stop offset="0%" '
+            'stop-color="#ffe6c7"/><stop offset="100%" stop-color="#d9a77a"/>'
+            "</radialGradient></defs>")  # fmt: skip
+    grid = "".join(f'<line x1="{i}.5" y1="200" x2="{i}.5" y2="320"/>' for i in range(220))
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 320">{defs}'
+           f'<g stroke="#e6dccd" stroke-width="0.6">{grid}</g>'
+           '<circle cx="90" cy="120" r="12" fill="url(#sk)"/>'
+           '<text x="8" y="16" font-size="9" fill="#6b6256">0초 · 놀라 돌아봄</text>'
+           "</svg>")  # fmt: skip
+    assert 8192 < len(svg.encode()) <= 16384
+    scenes = [s.model_copy(update={"start_svg": svg}) if s.n == 1 else s for s in Q.PLAN.scenes]
+    plan = Q.PLAN.model_copy(update={"scenes": scenes})
+    board = request_creative.plan_storyboard(plan, Q.SHEET_FULL)
+    assert board is not None and board["board_source"] == "svg"
+    first = board["shots"][0]["svg"]
+    assert "<radialGradient" in first and 'fill="url(#sk)"' in first and "놀라 돌아봄" in first
+
+
 # ---------------------------------------------------------------- 다시 그리기 전용 스킬
 
 
