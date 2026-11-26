@@ -117,7 +117,36 @@ export function BankSection({ tick }: { tick: number }) {
       {!humanTokenSet && <p className="mb-2 text-sm text-amber-800">로그인이 필요해요. 로그인하면 올리기 버튼이 켜져요.</p>}
       {message && <p role="status" className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-sm text-ink-700">{message}</p>}
       <ResourceBody res={res}>
-        {(b) => !b.uploaded ? <Empty>아직 올린 은행 거래내역이 없습니다. 올리면 그 기간의 PG 정산금 입금을 맞춰 봅니다.</Empty> : (
+        {(b) => !b.uploaded ? (
+          <div className="space-y-3">
+            <Empty>아직 올린 은행 거래내역이 없습니다. 올리면 그 기간의 PG 정산금 입금을 맞춰 봅니다.</Empty>
+            {b.example && b.example.days.length > 0 && (
+              <div className="space-y-2" aria-label="은행 입금 대조 임시 예시">
+                <p className="flex flex-wrap items-center gap-2 text-sm text-ink-500">
+                  <Chip label="임시 예시 · 실제 입금 아님" tone={TONE.warn} />
+                  {b.example.from} ~ {b.example.to} · {b.example.note}
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-sm text-ink-500">
+                    <thead className="text-left text-sm">
+                      <tr><th className="pb-1 font-medium">날짜</th><th className="pb-1 text-right font-medium">PG 정산 예정</th><th className="pb-1 text-right font-medium">입금 (예시)</th><th className="pb-1 font-medium">상태</th></tr>
+                    </thead>
+                    <tbody>
+                      {b.example.days.map((d) => (
+                        <tr key={d.date} className="border-t border-ink-100">
+                          <td className="py-1.5 tabular-nums">{d.date}</td>
+                          <td className="py-1.5 text-right tabular-nums">{d.expected == null ? "–" : krw(d.expected)}</td>
+                          <td className="py-1.5 text-right tabular-nums">{d.deposited == null ? "–" : krw(d.deposited)}</td>
+                          <td className="py-1.5"><Chip label={d.status_label} tone={TONE.muted} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
           <div className="space-y-3">
             {(() => {
               const off = (b.counts.short ?? 0) + (b.counts.over ?? 0) + (b.counts.missing ?? 0) + (b.counts.unexpected ?? 0);

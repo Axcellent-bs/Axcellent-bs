@@ -312,3 +312,22 @@ class DeploymentHistory:
         self.deployments.append(deployment)
         self._learn_components(deployment)
         return deployment
+
+
+def latest_running(history: DeploymentHistory) -> list[Deployment]:
+    """서비스별 지금 돌고 있는 배포(되돌리지 않은 가장 최근 성공 배포), 서비스 이름순. 읽기만 한다.
+
+    배포 도구에서 받은 실행(`source`가 있는 것)만 본다. 시연 이력·시연 준비 기록은 뺀다(지어내지
+    않는다). 한 번만 읽은 사본으로 고른다(`live()`는 보관함을 읽고, `deploy_poll`이 이력을 통째로
+    바꿔도 같은 사본을 본다).
+    """
+    live = list(history.live())
+    rolled_back = set(history.rolled_back)
+    latest: dict[str, Deployment] = {}
+    for d in live:
+        if d.source is None or d.deploy_id in rolled_back:
+            continue
+        current = latest.get(d.service)
+        if current is None or d.deployed_at > current.deployed_at:
+            latest[d.service] = d
+    return [d for _, d in sorted(latest.items())]

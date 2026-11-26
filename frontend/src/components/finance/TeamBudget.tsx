@@ -7,6 +7,7 @@ import { Chip, Empty, Panel, ResourceBody, TONE, useResource } from "./bits";
 // 팀 예산 = 그달 1일 팀 인원(인사 AI) × 인당 월 단가(회사 설정). 발령은 다음 달 1일부터, 파견은 세지 않는다.
 // 재무 AI는 계산과 지난달 대비 증감만 보여 주고, 확정은 인사 AI(사람)가 한다(11/13).
 // 인사가 확정하면 재무 A2A `record_team_budget`으로 기록이 들어오고, 여기서는 그 기록만 보여 준다.
+// 11/26 팀별 실제 지출 자료가 없어 임시 예시 지출(example_spend, 예산의 70~105%)을 "임시 예시" 표시와 함께 보여 준다.
 
 const STATUS_KO: Record<TeamBudget["status"], { label: string; tone: string }> = {
   pending: { label: "인사 확정 대기", tone: TONE.warn },
@@ -73,7 +74,8 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
                       <th className="py-2 pr-3 text-right font-medium">{b.prev_month} 인원</th>
                       <th className="py-2 pr-3 text-right font-medium">{b.month} 인원</th>
                       <th className="py-2 pr-3 text-right font-medium">예산</th>
-                      <th className="py-2 text-right font-medium">지난달 대비</th>
+                      <th className="py-2 pr-3 text-right font-medium">지난달 대비</th>
+                      {b.example_spend && <th className="py-2 text-right font-medium">지출 <span className="font-normal">(임시 예시)</span></th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
@@ -83,14 +85,24 @@ export function TeamBudgetSection({ tick }: { tick: number }) {
                         <td className="py-2 pr-3 text-right tabular-nums text-ink-500">{people(r.prev_headcount)}</td>
                         <td className="py-2 pr-3 text-right tabular-nums text-ink-900">{people(r.headcount)}</td>
                         <td className="py-2 pr-3 text-right tabular-nums text-ink-900">{krw(r.budget)}</td>
-                        <td className={`py-2 text-right tabular-nums ${r.change ? (r.change > 0 ? "text-emerald-700" : "text-red-700") : "text-ink-500"}`}>
+                        <td className={`py-2 pr-3 text-right tabular-nums ${r.change ? (r.change > 0 ? "text-emerald-700" : "text-red-700") : "text-ink-500"}`}>
                           {r.change == null ? "확인할 수 없음" : r.change === 0 ? "변동 없음" : delta(r.change)}
                         </td>
+                        {b.example_spend && (() => {
+                          const x = b.example_spend.rows.find((e) => e.team === r.team);
+                          return <td className="py-2 text-right tabular-nums text-ink-500">{x ? `${krw(x.spend)} · ${x.rate_pct}%` : "–"}</td>;
+                        })()}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              {b.example_spend && (
+                <p className="flex flex-wrap items-center gap-2 text-sm text-ink-500">
+                  <Chip label="임시 예시 · 실제 지출 아님" tone={TONE.warn} />
+                  지출 합계 {krw(b.example_spend.total)} · {b.example_spend.note}
+                </p>
+              )}
               {b.prev_total == null && <p className="text-sm text-ink-500">{b.prev_month} 인원을 받지 못해 지난달 대비는 보여 주지 않습니다.</p>}
 
               {b.approved && (

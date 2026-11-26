@@ -50,6 +50,7 @@ from infra_agent.diagnosis import (
 from infra_agent.pr_suspects import enabled as pr_suspects_enabled
 from infra_agent.pr_suspects import is_pr_service
 from infra_agent.runtime import get_runtime
+from infra_agent.status_reads import HANDLERS as STATUS_HANDLERS
 
 ACTION = "rollback_deployment"
 
@@ -130,7 +131,7 @@ async def diagnose_incident(request: AgentRequest) -> AgentResult:
         except Exception:  # noqa: BLE001 - 못 읽으면 이상이 확인되지 않은 것으로 본다
             state = None
         diag = confirm_with_server(diag, server_state(state))
-    rt.diagnoses[request.meta.context_id] = diag
+    rt.save_diagnosis(request.meta.context_id, diag)
     return AgentResult(
         meta=request.meta,
         status=TaskStatus.COMPLETED,
@@ -246,7 +247,7 @@ async def _rollback_once(
                 },
             )
 
-    diag = rt.diagnoses.get(context_id)
+    diag = rt.diagnosis_of(context_id)
     if diag is None:  # 같은 사건의 진단 기록이 없으면 대상 배포 기준으로 다시 진단한다
         component = target.components[0] if target.components else None
         diag = diagnose(
@@ -805,6 +806,7 @@ async def verify_recovery(request: AgentRequest) -> AgentResult:
 
 HANDLERS = {
     **DEPLOY_HANDLERS,
+    **STATUS_HANDLERS,
     "diagnose_incident": diagnose_incident,
     "rollback_deployment": rollback_deployment,
     "verify_recovery": verify_recovery,

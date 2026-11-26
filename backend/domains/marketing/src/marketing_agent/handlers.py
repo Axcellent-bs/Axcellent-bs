@@ -2334,28 +2334,65 @@ def _promo_done(request: AgentRequest, item: dict[str, Any]) -> AgentResult:
     )
 
 
+_PLATFORM_DONE_STATUS = {
+    # "이미 올림" 판정에 쓰는 상태(요청 중·완료). draft·실패·거절은 빼서 다시 고를 수 있게 둔다
+    "youtube": set(_youtube.PENDING) | {"done"},
+    "instagram": set(_instagram.PENDING) | {"done"},
+}
+
+
+def _narrow(
+    items: list[dict[str, Any]], exclude_platform: str | None, wanted: int
+) -> list[dict[str, Any]]:
+    """상태를 붙인 뒤, `exclude_platform`에 이미 올렸거나 요청 중인 건을 빼고 `wanted`만 남긴다."""
+    if not exclude_platform:
+        return items
+    done = _PLATFORM_DONE_STATUS.get(exclude_platform, set())
+    kept = [i for i in items if (i.get(exclude_platform) or {}).get("status") not in done]
+    return kept[:wanted]
+
+
 async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
-    """의뢰 영상 목록. 유튜브 승인 대기는 관문을 다시 묻고, 항목마다 유튜브 상태를 붙인다."""
+    """의뢰 영상 목록. 유튜브 승인 대기는 관문을 다시 묻고, 항목마다 유튜브 상태를 붙인다.
+
+    `exclude_platform`("youtube"·"instagram")을 주면 그 플랫폼에 이미 올렸거나 요청(승인 대기)
+    중인 영상은 뺀다(11/26: 총괄 대화방이 "최근 1건"으로 골라 같은 영상을 또 올리기 요청하는 걸
+    막는다). 후보가 모자라지 않게 내부적으로는 더 넓게 가져온 뒤 거른다.
+
+    썸네일 후보를 아직 못 만든 영상의 ffmpeg 보충(`_request_cover.backfill`)은 거르고 남긴
+    건(실제로 돌려줄 건)에만 돌린다 — 넓게 가져온 전체(최대 20건)에 다 돌리면, 안 쓸 옛 영상까지
+    무겁게 만든다(11/26 후속, 이태윤 님 리뷰).
+    """
     await _request_youtube.refresh(request.meta, STATE.sns)
     await _instagram.refresh_requests(request.meta)
-    result = await request_video.list_request_videos(request, STATE.sns)
+    exclude_platform = (request.input or {}).get("exclude_platform")
+    wanted = int((request.input or {}).get("limit") or 20)
+    fetch_request = request
+    if exclude_platform:
+        wider_input = {**(request.input or {}), "limit": max(wanted * 5, 20)}
+        fetch_request = request.model_copy(update={"input": wider_input})
+    result = await request_video.list_request_videos(fetch_request, STATE.sns)
     if result.status != TaskStatus.COMPLETED or not result.output:
         return result
-    # 썸네일 기능 전에 만든 영상: 후보가 없으면 한 번 만든다(ffmpeg 프레임, 크레딧 0)
+
+    def _with_states(out: dict[str, Any]) -> list[dict[str, Any]]:
+        items = _request_youtube.attach_states(list(out.get("items") or []))
+        return _instagram.attach_states(items)
+
+    items = _narrow(_with_states(result.output), exclude_platform, wanted)
+    # 썸네일 기능 전에 만든 영상: 후보가 없으면 한 번 만든다(ffmpeg 프레임, 크레딧 0). 거르고
+    # 남긴 건만 대상으로 한다
     lacking = [
-        str(i.get("post_draft_id"))
-        for i in result.output.get("items") or []
-        if i.get("labeled") and not i.get("covers")
+        str(i.get("post_draft_id")) for i in items if i.get("labeled") and not i.get("covers")
     ]
     cover_errors: dict[str, str] = {}
     if lacking:
         made, cover_errors = await asyncio.to_thread(_request_cover.backfill, STATE.sns, lacking)
         if made:
-            again = await request_video.list_request_videos(request, STATE.sns)
+            again = await request_video.list_request_videos(fetch_request, STATE.sns)
             if again.status == TaskStatus.COMPLETED and again.output:
                 result = again
-    items = _request_youtube.attach_states(list((result.output or {}).get("items") or []))
-    items = _instagram.attach_states(items)
+                items = _narrow(_with_states(result.output), exclude_platform, wanted)
     for item in items:  # 썸네일을 바꾸면 다시 승인받아야 하는 요청이 있나(화면 확인 상자)
         item["approval_waiting"] = _request_cover.approval_waiting(
             str(item.get("post_draft_id")), item.get("youtube")

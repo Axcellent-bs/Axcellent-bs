@@ -117,6 +117,14 @@ export function boardBehindScript(rec: {
   return Number.isFinite(scriptAt) && Number.isFinite(boardAt) && scriptAt > boardAt;
 }
 
+/** 대본은 있는데 스토리보드가 아직 없다 (11/26, 이미지 시트 → 대본까지만 만든 기록). 처음 만들기 버튼을 띄운다 */
+export function boardMissing(rec: {
+  script?: unknown;
+  storyboard?: unknown;
+}): boolean {
+  return !!rec.script && !rec.storyboard;
+}
+
 /** 11/25 뒤에서 만든 스토리보드가 기록에 붙었나: 시작한 뒤의 storyboard_at이고 대본을 따른다 */
 export function boardArrived(rec: { storyboard?: { script_used?: boolean } | null; storyboard_at?: string | null }, startedAt: number): boolean {
   const at = rec.storyboard_at ? Date.parse(rec.storyboard_at) : NaN;

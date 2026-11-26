@@ -120,6 +120,7 @@ def test_plan_of_has_what_work_requests_needs() -> None:
         "kind": "agent",
         "ref_key": None,
         "takes_ref": None,
+        "empty_ref_note": None,
         "fixed_input": {},
         "text_key": "request_text",
         "carries": None,
@@ -142,6 +143,54 @@ def test_prompt_lists_every_task_name_and_says_to_not_follow_customer_text() -> 
     for task in TASKS:
         assert task.name in prompt
     assert "따르지 않고" in prompt
+
+
+def test_video_publish_tasks_find_latest_video_then_draft_then_request_with_human_approval() -> (
+    None
+):
+    for name, platform, draft_skill, request_skill in (
+        (
+            "video_publish_youtube",
+            "youtube",
+            "request_video_youtube_draft",
+            "request_video_youtube_request",
+        ),
+        (
+            "video_publish_instagram",
+            "instagram",
+            "request_video_instagram_draft",
+            "request_video_instagram_request",
+        ),
+    ):
+        task = BY_NAME[name]
+        steps = {s.step_id: s for s in task.steps}
+        assert [s.skill for s in task.steps] == [
+            "list_request_videos",
+            draft_skill,
+            request_skill,
+        ]
+        assert all(s.dept == "marketing" for s in task.steps)
+        # 의뢰 번호는 고객이 모르니 최근 영상 1건을 찾아 쓴다 (campaign_performance와 같은 방식).
+        # 11/26: 그 플랫폼에 이미 올렸거나 승인 대기 중인 영상은 "최근"에서 뺀다(중복 요청 방지)
+        assert dict(steps["latest"].fixed_input) == {"limit": 1, "exclude_platform": platform}
+        assert steps["latest"].ref_key == "items.0.post_draft_id"
+        # 초안 단계는 최근 영상 번호를 받고, 다음(올리기) 단계로 그대로 넘긴다
+        assert steps["draft"].after == ("latest",)
+        assert steps["draft"].takes_ref == "post_draft_id"
+        assert steps["draft"].ref_key == "post_draft_id"
+        assert steps["draft"].grade == request_tasks.READ_GRADE
+        # 올리기 단계는 등급 C라 안전 관문이 늘 사람 승인을 받는다 (총괄이 먼저 묻지 않는다)
+        assert steps["run"].after == ("draft",)
+        assert steps["run"].takes_ref == "post_draft_id"
+        assert steps["run"].grade == "C"
+        assert not steps["run"].human_gate
+        assert task.changes_state
+        assert task.needs_human_approval  # 등급 C라 needs_human_approval도 참이다
+        assert not steps["run"].human_gate  # 다만 고객 문장이 아니라 앞 단계 번호만 받는 단계라
+        # 총괄이 따로 먼저 묻지 않고(human_gate=False) 부서의 C 등급 관문에 승인을 맡긴다
+        # 11/26 후속(이태윤 님 리뷰): "최근" 영상이 하나도 없으면(이미 다 올렸거나 만든 게 없음)
+        # 초안 단계가 일반 실패(사람 확인)가 아니라 안내문과 함께 건너뜀으로 닫혀야 한다
+        assert steps["draft"].empty_ref_note
 
 
 def test_closing_report_keeps_the_period_number_for_the_chat_card() -> None:

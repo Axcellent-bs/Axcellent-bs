@@ -9,6 +9,8 @@
 - 인원을 못 받으면 0원으로 지어내지 않고 `unavailable`로 둔다
 - 인사가 가상 명부(예시) 인원을 주면(`example`) 계산·증감은 보여 주되 확정하지 않는다
 - 예산 대비 실제 지출은 팀별 지출 자료가 없어 아직 계산하지 않는다(`actual_spend: None`)
+  11/26 임시로 `example_spend`(팀 예산의 70~105% 예시, `example_data.py`)를 따로 붙인다.
+  실제 지출 아님
 
 숫자는 이 파일의 코드만 계산한다. LLM은 쓰지 않는다.
 """
@@ -21,6 +23,7 @@ import re
 from datetime import date
 from typing import Any
 
+from finance_agent import example_data
 from finance_agent.rules import applied_many
 
 MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
@@ -78,6 +81,7 @@ def report(
         "example": example,  # 가상 명부(예시) 인원이면 True: 확정하지 않는다
         "approved": approved,
         "actual_spend": None,  # 팀별 지출 자료가 아직 없다 (화면은 "준비 중")
+        "example_spend": None,  # 11/26 임시 예시 지출 (실제 아님, 인원을 받은 달만)
     }
     if heads is None:
         return base | {
@@ -124,6 +128,9 @@ def report(
         "headcount_total": sum(heads.values()),
         "signature": sig,
         "applied_rules": applied_many("BUD-001"),
+        "example_spend": example_data.team_spend_example(month, rows)
+        if example_data.enabled()
+        else None,
     }
 
 

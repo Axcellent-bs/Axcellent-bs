@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 대화방 의뢰 진행 카드: 번호 찾기(총괄 문장만) · 단계 칩·버튼 · 같은 의뢰 알림 줄 숨김 · 보고서·제안 잇기 · 토큰 없으면 카드 없음.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { attachRequestCards, closingOfRequest, directItemId, madeVideo, noticeIdOf, perfStep, placeRequestCards, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, requestIdOf, resultStep, showRequestCard, stepRows } from "./requestCards.ts";
+import { attachRequestCards, closingOfRequest, directItemId, infraOfRequest, madeVideo, noticeIdOf, perfStep, placeRequestCards, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, requestIdOf, resultStep, showRequestCard, stepRows } from "./requestCards.ts";
 import { progressKeepPolling } from "./chatCards.ts";
 import type { StepStatus, WorkRequestRow } from "./workRequests.ts";
 
@@ -254,4 +254,31 @@ test("재무 손익 정리 단계: 끝났고 번호 모양이 맞을 때만 기�
   assert.equal(closingOfRequest(row("completed", null)), null);
   assert.equal(closingOfRequest(row("completed", "year:2026-01-01")), null);
   assert.equal(closingOfRequest({ plan: [], steps: {} }), null);
+});
+
+test("인프라 의뢰 단계: 끝났고 번호 모양이 맞을 때만 결과를 돌려준다 (11/26)", () => {
+  const mk = (skill: string) => [{ step_id: "run", dept: "infra", skill, label: "인프라", after: [] as string[] }];
+  const row = (skill: string, status: StepStatus, result_ref: string | null) => ({ plan: mk(skill), steps: { run: { status, result_ref } as never } });
+  assert.deepEqual(infraOfRequest(row("current_incidents", "completed", "incidents:2")), { kind: "incidents", count: 2 });
+  assert.deepEqual(infraOfRequest(row("current_incidents", "completed", "incidents:0")), { kind: "incidents", count: 0 });
+  // 연결 전: 장애 없음으로 읽지 않는다
+  assert.deepEqual(infraOfRequest(row("current_incidents", "completed", "incidents:unknown")), { kind: "incidents", count: null });
+  assert.deepEqual(infraOfRequest(row("latest_deployments", "completed", "deploys:3")), { kind: "deploys", count: 3 });
+  assert.deepEqual(infraOfRequest(row("diagnose_incident", "completed", "suspected")), { kind: "diagnosis", status: "suspected" });
+  assert.equal(infraOfRequest(row("current_incidents", "running", "incidents:2")), null);
+  assert.equal(infraOfRequest(row("current_incidents", "completed", "incidents:x")), null);
+  assert.equal(infraOfRequest(row("diagnose_incident", "completed", "rollback")), null);
+  assert.equal(infraOfRequest({ plan: [], steps: {} }), null);
+});
+
+test("롤백 상태 단계(11/26, 읽기 전용): 총괄이 센 열린 사건 수 번호만 읽는다", () => {
+  const plan = [{ step_id: "run", dept: "orchestrator", skill: "incident_rollback_status", label: "사건 롤백 상태", after: [] as string[], kind: "self" }];
+  const row = (status: StepStatus, result_ref: string | null) => ({ plan, steps: { run: { status, result_ref } as never } });
+  assert.deepEqual(infraOfRequest(row("completed", "open:0")), { kind: "rollback", open: 0 });
+  assert.deepEqual(infraOfRequest(row("completed", "open:2")), { kind: "rollback", open: 2 });
+  assert.equal(infraOfRequest(row("running", "open:2")), null);
+  assert.equal(infraOfRequest(row("completed", "open:x")), null);
+  assert.equal(infraOfRequest(row("completed", "rollback")), null);
+  // 다른 부서가 같은 skill 이름을 쓴다고 읽지 않는다
+  assert.equal(infraOfRequest({ plan: [{ ...plan[0], dept: "data" }], steps: { run: { status: "completed", result_ref: "open:1" } as never } }), null);
 });
