@@ -59,6 +59,7 @@ GATE_SUDO="${AX_GATE_SUDO-sudo -n -u axautodeploy}" # 게이트 호출 앞머리
 GATE_EXEC="${AX_GATE_EXEC:-/usr/local/sbin/ax-gate}"
 GATE_TIMEOUT="${AX_GATE_TIMEOUT:-420}"             # 게이트 동작 하나의 제한 시간(초)
 BE_MAX_COMMITS="${AX_BACKEND_MAX_COMMITS:-50}"     # 범위 안 커밋이 더 많으면 판정 불가로 보류
+BE_GREEN_SCAN="${AX_BACKEND_GREEN_SCAN:-15}"      # green 커밋 탐색: tip 부터 이 개수까지만 check-runs 를 조회(API 호출 상한)
 MEMO_LABEL="${AX_MEMO_LABEL:-manual-deploy}"
 MEMO_REQUIRED_SINCE="${AX_MEMO_REQUIRED_SINCE:-}"  # 비어 있으면 '섹션 없음'을 메모 없음으로 본다(템플릿 도입 전). 값은 YYYY-MM-DD(UTC 머지일 이후는 섹션 필수)
 PYTHON="${AX_PYTHON:-python3}"
@@ -74,6 +75,8 @@ BE_LAST_RESTART_FILE="${STATE_DIR}/backend-last-restart" # 마지막 백엔드 �
 BE_INPROGRESS_FILE="${STATE_DIR}/backend-in-progress"    # 있으면 이전 배포가 중간에 죽은 것: 아무것도 안 하고 사람을 부른다
 BE_SKIPPED_FILE="${STATE_DIR}/backend-skipped-ref"       # 백엔드 배포가 1회 실패한 커밋: 새 커밋이 올 때까지 다시 시도하지 않는다
 BE_DEFER_FILE="${STATE_DIR}/backend-defer-since"         # "<운영 HEAD> <처음 미룬 epoch>": 미루기 상한 계산
+BE_GREEN_FILE="${STATE_DIR}/backend-green-select"         # "<tip> <선택한 green>" 마지막 green-select(바뀔 때만 로그)
+BE_DEPLOYED=""                                            # 백엔드 배포를 시도한 TARGET(green 선택이면 tip 과 다를 수 있다)
 
 DRY=0
 case "${1:-}" in
@@ -340,64 +343,8 @@ be_deploy() { # $1=포함 PR 목록 $2=backend 파일 수 $3=uv sync 필요(0|1)
   return 12
 }
 
-backend_stage() {
-  case "${BACKEND_STAGE}" in
-    dry-run) MODE=dry-run; BE_TAG=backend-dry-run ;;
-    on) if [[ ${DRY} == 1 ]]; then MODE=dry-run; BE_TAG=backend-dry-run; else MODE=on; BE_TAG=backend; fi ;;
-    *) return 0 ;;
-  esac
-  local PROD_HEAD n f hour gap age last c uv_need=0 uv_note="" BUSY_WHY="" h_from h_to hold_tag=""
-  BE_NOW="${AX_BACKEND_NOW:-$(date +%s)}"
-  # 1) 중간에 죽은 배포 흔적·배포 금지 잠금·정지 표시(헬퍼가 멈춤으로 판정한 경우는 위에서 이미 건너뛰었다)
-  PROD_HEAD="$(git -C "${PROD_REPO}" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || true)"
-  if [[ ! "${PROD_HEAD}" =~ ^[0-9a-f]{40}$ ]]; then
-    log "${BE_TAG}: skip-cycle 운영 트리 ${PROD_REPO} 의 HEAD 를 못 읽음(이번 주기 건너뜀)"; return 0
-  fi
-  if [[ -e "${BE_INPROGRESS_FILE}" ]]; then
-    be_note wait in-progress-file "backend-in-progress 가 남아 있음(이전 배포가 중간에 죽었거나 되돌림 실패): 아무것도 하지 않고 사람 확인이 필요하다"; return 0
-  fi
-  if [[ ${MODE} == on ]]; then
-    if [[ -z "${PAUSE_FILE}" ]]; then
-      be_note wait pause-not-connected "AX_PAUSE_FILE 미설정: 정지 표시를 볼 수 없어 on 에서는 배포하지 않는다"; return 0
-    fi
-    if [[ -e "${PAUSE_FILE}" && ! -x "${GATE_BIN}" ]]; then
-      be_note wait paused-no-helper "정지 표시 파일이 있고 판정 헬퍼(${GATE_BIN})가 없어 멈춘 것으로 본다"; return 0
-    fi
-  fi
-  if [[ -e "${DEPLOY_LOCK_FILE}" ]]; then
-    be_note wait deploy-lock "배포 금지 잠금(${DEPLOY_LOCK_FILE}) 걸려 있음"; return 0
-  fi
-
-  # 2) 운영 트리 HEAD..dev 최신에 backend/ 변경이 있는가
-  [[ "${PROD_HEAD}" == "${TARGET}" ]] && return 0
-  if ! git_src cat-file -e "${PROD_HEAD}^{commit}" 2>/dev/null || ! git_src merge-base --is-ancestor "${PROD_HEAD}" "${TARGET}" 2>/dev/null; then
-    be_note wait prod-head-not-in-dev "운영 트리 HEAD 가 origin/${BRANCH} 의 조상이 아님(앞서 있거나 갈라짐): 사람 확인 필요"; return 0
-  fi
-  local -a BE_FILES=()
-  mapfile -t BE_FILES < <(git_src diff --name-only "${PROD_HEAD}" "${TARGET}" -- backend/ 2>/dev/null)
-  n="${#BE_FILES[@]}"
-  if (( n == 0 )); then
-    [[ ${DRY} == 1 ]] && say "백엔드 단계: 운영 트리 ${PROD_HEAD:0:8}..${TARGET:0:8} 에 backend/ 변경 없음"
-    return 0
-  fi
-  for f in "${BE_FILES[@]}"; do
-    case "${f}" in backend/uv.lock|backend/*pyproject.toml) uv_need=1; uv_note=" [uv sync 단계 포함]" ;; esac
-  done
-  if [[ -f "${BE_SKIPPED_FILE}" && "$(tr -d ' \r\n' < "${BE_SKIPPED_FILE}")" == "${TARGET}" ]]; then
-    be_note wait skipped-ref "이전 자동 배포가 이 커밋에서 실패해 건너뜀(새 커밋을 기다림)"; return 0
-  fi
-
-  # 3) 조건 1: check-runs 중 ci·backend 는 completed+success. data-eval 은 진행 중·실패면 보류, 취소·없음이면 대기
-  if [[ ! -r "${CI_TOKEN_FILE}" ]]; then
-    be_note wait ci-off "읽기 전용 토큰 파일 없음: 백엔드는 확인 없이 배포하지 않는다"; return 0
-  fi
-  BE_TOK="$(tr -d ' \r\n' < "${CI_TOKEN_FILE}")"
-  if [[ -z "${BE_TOK}" ]]; then be_note wait ci-off "토큰 파일이 비어 있음"; return 0; fi
-  local body verdict
-  if ! body="$(be_gh_get "commits/${TARGET}/check-runs?per_page=100")"; then
-    BE_TOK=""; log "${BE_TAG}: skip-cycle check-runs API 실패(${TARGET:0:8}; 이번 주기 건너뜀)"; return 0
-  fi
-  verdict="$(printf '%s' "${body}" | "${PYTHON}" -I -c '
+# check-runs JSON(stdin) -> ok | fail:<목록> | hold:<목록> | pending:<목록>. 이름별 가장 큰 id 의 check-run 만 본다.
+BE_VERDICT_PY='
 import json,sys
 runs=json.load(sys.stdin).get("check_runs",[])
 fail=[];hold=[];pend=[]
@@ -420,14 +367,106 @@ else: pend.append("data-eval("+str(r.get("conclusion"))+")")
 if fail: print("fail:"+",".join(fail))
 elif hold: print("hold:"+",".join(hold))
 elif pend: print("pending:"+",".join(pend))
-else: print("ok")' 2>/dev/null || echo "parse-error")"
-  case "${verdict}" in
-    ok) ;;
-    fail:*) BE_TOK=""; be_note wait ci-fail "CI 실패 ${verdict#fail:} (${TARGET:0:8})"; return 0 ;;
-    hold:*) BE_TOK=""; be_note wait ci-hold "CI 보류 ${verdict#hold:} (${TARGET:0:8})"; return 0 ;;
-    pending:*) BE_TOK=""; be_note wait ci-pending "CI 대기 ${verdict#pending:} (${TARGET:0:8})"; return 0 ;;
-    *) BE_TOK=""; log "${BE_TAG}: skip-cycle check-runs 해석 실패(이번 주기 건너뜀)"; return 0 ;;
+else: print("ok")'
+
+backend_stage() {
+  case "${BACKEND_STAGE}" in
+    dry-run) MODE=dry-run; BE_TAG=backend-dry-run ;;
+    on) if [[ ${DRY} == 1 ]]; then MODE=dry-run; BE_TAG=backend-dry-run; else MODE=on; BE_TAG=backend; fi ;;
+    *) return 0 ;;
   esac
+  local TARGET="${TARGET}" PROD_HEAD n f hour gap age last c uv_need=0 uv_note="" BUSY_WHY="" h_from h_to hold_tag=""   # TARGET: 이 함수 안에서만 green 커밋으로 바꾼다(dynamic scope: be_note·be_deploy 가 이 값을 본다). 프론트 단계는 tip 그대로
+  BE_NOW="${AX_BACKEND_NOW:-$(date +%s)}"
+  # 1) 중간에 죽은 배포 흔적·배포 금지 잠금·정지 표시(헬퍼가 멈춤으로 판정한 경우는 위에서 이미 건너뛰었다)
+  PROD_HEAD="$(git -C "${PROD_REPO}" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || true)"
+  if [[ ! "${PROD_HEAD}" =~ ^[0-9a-f]{40}$ ]]; then
+    log "${BE_TAG}: skip-cycle 운영 트리 ${PROD_REPO} 의 HEAD 를 못 읽음(이번 주기 건너뜀)"; return 0
+  fi
+  if [[ -e "${BE_INPROGRESS_FILE}" ]]; then
+    be_note wait in-progress-file "backend-in-progress 가 남아 있음(이전 배포가 중간에 죽었거나 되돌림 실패): 아무것도 하지 않고 사람 확인이 필요하다"; return 0
+  fi
+  if [[ ${MODE} == on ]]; then
+    if [[ -z "${PAUSE_FILE}" ]]; then
+      be_note wait pause-not-connected "AX_PAUSE_FILE 미설정: 정지 표시를 볼 수 없어 on 에서는 배포하지 않는다"; return 0
+    fi
+    if [[ -e "${PAUSE_FILE}" && ! -x "${GATE_BIN}" ]]; then
+      be_note wait paused-no-helper "정지 표시 파일이 있고 판정 헬퍼(${GATE_BIN})가 없어 멈춘 것으로 본다"; return 0
+    fi
+  fi
+  if [[ -e "${DEPLOY_LOCK_FILE}" ]]; then
+    be_note wait deploy-lock "배포 금지 잠금(${DEPLOY_LOCK_FILE}) 걸려 있음"; return 0
+  fi
+
+  # 2) 운영 트리 HEAD..dev 최신에 backend/ 변경이 있는가(API 호출 전 값싼 확인. 최신 tip 기준)
+  [[ "${PROD_HEAD}" == "${TARGET}" ]] && return 0
+  if ! git_src cat-file -e "${PROD_HEAD}^{commit}" 2>/dev/null || ! git_src merge-base --is-ancestor "${PROD_HEAD}" "${TARGET}" 2>/dev/null; then
+    be_note wait prod-head-not-in-dev "운영 트리 HEAD 가 origin/${BRANCH} 의 조상이 아님(앞서 있거나 갈라짐): 사람 확인 필요"; return 0
+  fi
+  local -a BE_FILES=()
+  mapfile -t BE_FILES < <(git_src diff --name-only "${PROD_HEAD}" "${TARGET}" -- backend/ 2>/dev/null)
+  n="${#BE_FILES[@]}"
+  if (( n == 0 )); then
+    [[ ${DRY} == 1 ]] && say "백엔드 단계: 운영 트리 ${PROD_HEAD:0:8}..${TARGET:0:8} 에 backend/ 변경 없음"
+    return 0
+  fi
+
+  # 3) 조건 1: check-runs 중 ci·backend 는 completed+success. data-eval 은 success·skipped 면 통과, 진행 중·실패면 보류, 취소·없음이면 대기.
+  #    green 선택: tip 의 CI 가 끝나지 않았어도(푸시가 잦아 cancel-in-progress 로 취소되는 경우) PROD_HEAD..tip 의 first-parent 커밋을
+  #    새것부터 최대 BE_GREEN_SCAN 개 훑어 ci 판정이 ok 인 가장 최신 커밋을 TARGET 으로 쓴다. tip 이 fail 이면 훑지 않고 ci-fail.
+  if [[ ! -r "${CI_TOKEN_FILE}" ]]; then
+    be_note wait ci-off "읽기 전용 토큰 파일 없음: 백엔드는 확인 없이 배포하지 않는다"; return 0
+  fi
+  BE_TOK="$(tr -d ' \r\n' < "${CI_TOKEN_FILE}")"
+  if [[ -z "${BE_TOK}" ]]; then be_note wait ci-off "토큰 파일이 비어 있음"; return 0; fi
+  local body verdict tip_verdict="" sel="" TIP="${TARGET}" prev_sel=""
+  local -a CAND=()
+  mapfile -t CAND < <(git_src rev-list --first-parent --max-count="${BE_GREEN_SCAN}" "${PROD_HEAD}..${TIP}")
+  for c in "${CAND[@]}"; do
+    if ! body="$(be_gh_get "commits/${c}/check-runs?per_page=100")"; then
+      BE_TOK=""; log "${BE_TAG}: skip-cycle check-runs API 실패(${c:0:8}; 이번 주기 건너뜀)"; return 0
+    fi
+    verdict="$(printf '%s' "${body}" | "${PYTHON}" -I -c "${BE_VERDICT_PY}" 2>/dev/null || echo "parse-error")"
+    [[ -n "${tip_verdict}" ]] || tip_verdict="${verdict}"
+    case "${verdict}" in
+      ok)
+        # 선택 후보는 운영 HEAD 의 후손이어야 한다(옛 커밋으로 되돌리는 배포 방지). LAST 는 보지 않는다:
+        # 프론트 단계가 web 변경 없는 tip 으로 LAST 를 계속 올리므로, LAST 조건을 걸면 green 선택이 막힌다.
+        if git_src merge-base --is-ancestor "${PROD_HEAD}" "${c}" 2>/dev/null; then
+          sel="${c}"; break
+        fi ;;
+      parse-error) BE_TOK=""; log "${BE_TAG}: skip-cycle check-runs 해석 실패(${c:0:8}; 이번 주기 건너뜀)"; return 0 ;;
+      fail:*) [[ "${c}" == "${TIP}" ]] && break ;;   # 가장 최신 후보가 실패면 더 옛 커밋으로 내려가지 않는다
+    esac
+  done
+  if [[ -z "${sel}" ]]; then
+    case "${tip_verdict}" in
+      fail:*) be_note wait ci-fail "CI 실패 ${tip_verdict#fail:} (${TARGET:0:8})"; return 0 ;;
+      hold:*) be_note wait ci-hold "CI 보류 ${tip_verdict#hold:} (${TARGET:0:8})"; return 0 ;;
+      pending:*) be_note wait ci-pending "CI 대기 ${tip_verdict#pending:} (${TARGET:0:8}; 최근 ${#CAND[@]}개 커밋 중 green 없음)"; return 0 ;;
+      *) log "${BE_TAG}: skip-cycle check-runs 해석 실패(이번 주기 건너뜀)"; return 0 ;;
+    esac
+  fi
+  if [[ "${sel}" != "${TIP}" ]]; then
+    TARGET="${sel}"
+    [[ -r "${BE_GREEN_FILE}" ]] && prev_sel="$(cat "${BE_GREEN_FILE}" 2>/dev/null || true)"
+    if [[ ${DRY} == 1 || "${prev_sel}" != "${TIP} ${TARGET}" ]]; then
+      log "${BE_TAG}: green-select: tip=${TIP:0:8} → target=${TARGET:0:8}"
+    fi
+    [[ ${DRY} == 1 ]] || printf '%s %s\n' "${TIP}" "${TARGET}" > "${BE_GREEN_FILE}" 2>/dev/null || true
+    # 선택된 TARGET 기준으로 backend 변경을 다시 센다(tip 에만 backend 변경이 있었다면 이번엔 할 일 없음)
+    mapfile -t BE_FILES < <(git_src diff --name-only "${PROD_HEAD}" "${TARGET}" -- backend/ 2>/dev/null)
+    n="${#BE_FILES[@]}"
+    if (( n == 0 )); then
+      [[ ${DRY} == 1 ]] && say "백엔드 단계: green ${TARGET:0:8} 까지는 backend/ 변경 없음(tip ${TIP:0:8} 의 CI 를 기다림)"
+      return 0
+    fi
+  fi
+  for f in "${BE_FILES[@]}"; do
+    case "${f}" in backend/uv.lock|backend/*pyproject.toml) uv_need=1; uv_note=" [uv sync 단계 포함]" ;; esac
+  done
+  if [[ -f "${BE_SKIPPED_FILE}" && "$(tr -d ' \r\n' < "${BE_SKIPPED_FILE}")" == "${TARGET}" ]]; then
+    be_note wait skipped-ref "이전 자동 배포가 이 커밋에서 실패해 건너뜀(새 커밋을 기다림)"; return 0
+  fi
 
   # 4) 조건 4: 범위 안 커밋마다 PR 을 찾아 라벨·'## 배포 메모' 를 본다(PR 을 못 찾거나 API 실패면 보류)
   local -a COMMITS=()
@@ -524,6 +563,7 @@ print("memo|"+"; ".join(memo) if memo else ("nopr|"+",".join(nopr) if nopr else 
 
   if [[ ${MODE} == on ]]; then
     local rc=0
+    BE_DEPLOYED="${TARGET}"
     be_deploy "${pr_res#ok|}" "${n}" "${uv_need}" || rc=$?
     return "${rc}"
   fi
@@ -533,14 +573,66 @@ print("memo|"+"; ".join(memo) if memo else ("nopr|"+",".join(nopr) if nopr else 
 재시작하면 메모리에만 있는 상태(승인 대기·진행 중 작업)가 지워집니다."
   return 0
 }
+# 홍보 사이트 배포 대상: 이미 PROMO_ROOT 에 있는 파일 + assets/·instagram/assets/ 아래 새 파일. 내부 문서·소스는 배포하지 않는다.
+promo_allowed() { # $1=docs/promo 아래 상대 경로
+  local rel="$1"
+  case "${rel}" in *.mjs|*.md|*.sh|*.py|*.json|*.test.*|INTAKE*|README*|content.*|build.*) return 1 ;; esac
+  [[ -f "${PROMO_ROOT}/${rel}" ]] && return 0
+  [[ "${rel}" == assets/* || "${rel}" == instagram/assets/* ]] && return 0
+  return 1
+}
+
+# 백엔드를 배포한 주기에는 프론트 단계를 건너뛰고 기준 ref 만 올린다(프론트는 deploy-bundle 이 같이 빌드). 그러면 같은 묶음의
+# docs/promo 변경은 영영 홍보 사이트에 안 올라간다(11/26 #1907). 그래서 기준을 올리기 전에 기준..배포한 커밋 사이의 홍보 파일을 먼저 올린다.
+# 새 파일 먼저, index.html 마지막. 하나라도 실패하면 이전 파일로 되돌리고 1 을 돌려준다(그러면 기준 ref 를 올리지 않아 다음 주기가 다시 시도한다).
+promo_catchup() { # $1=기준 ref $2=배포한 커밋
+  local from="$1" to="$2" f rel dst tmp ok=1 code
+  local -a changed=() files=() later=()
+  mapfile -t changed < <(git_src diff --name-only "${from}" "${to}" -- docs/promo)
+  for f in "${changed[@]}"; do
+    rel="${f#docs/promo/}"
+    if git_src cat-file -e "${to}:${f}" 2>/dev/null && promo_allowed "${rel}"; then
+      if [[ "${rel}" == index.html ]]; then later+=("${rel}"); else files+=("${rel}"); fi
+    fi
+  done
+  files+=("${later[@]}")
+  (( ${#files[@]} > 0 )) || return 0
+  if [[ ${DRY} == 1 ]]; then say "백엔드 배포 뒤 홍보 파일 ${#files[@]}개를 같이 올린다: ${files[*]}"; return 0; fi
+  tmp="$(mktemp -d)"
+  local pbk="${STATE_DIR}/prev-promo"; ${SUDO} rm -rf "${pbk}" "${pbk}.added"; mkdir -p "${pbk}"; : > "${pbk}.added"
+  for rel in "${files[@]}"; do
+    mkdir -p "${tmp}/$(dirname "${rel}")"
+    git_src show "${to}:docs/promo/${rel}" > "${tmp}/${rel}" || { ok=0; break; }
+    dst="${PROMO_ROOT}/${rel}"
+    if [[ -f "${dst}" ]]; then mkdir -p "${pbk}/$(dirname "${rel}")"; ${SUDO} cp -a "${dst}" "${pbk}/${rel}"; else echo "${rel}" >> "${pbk}.added"; fi
+    if ! ${SUDO} install -D -o root -g root -m 644 "${tmp}/${rel}" "${dst}" || ! cmp -s "${tmp}/${rel}" "${dst}"; then ok=0; break; fi
+  done
+  if (( ok )) && [[ "${URL_PROMO}" != "off" ]]; then
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${URL_PROMO}" || true)"
+    [[ "${code}" == "200" ]] || { log "verify: 홍보 사이트 HTTP ${code:-000}"; ok=0; }
+  fi
+  if (( ! ok )); then
+    for rel in "${files[@]}"; do [[ -f "${pbk}/${rel}" ]] && ${SUDO} cp -a "${pbk}/${rel}" "${PROMO_ROOT}/${rel}"; done
+    while read -r rel; do [[ -n "${rel}" ]] && ${SUDO} rm -f "${PROMO_ROOT}/${rel}"; done < "${pbk}.added"
+    log "restore: 백엔드 배포 뒤 홍보 파일 올리기 실패, 이전 상태로 복원(기준 ref 는 그대로 ${from:0:8})"
+    rm -rf "${tmp}"; return 1
+  fi
+  log "promo: 백엔드 배포 ${to:0:8} 와 같은 묶음의 홍보 파일 ${#files[@]}개 갱신 완료(${PROMO_ROOT})"
+  rm -rf "${tmp}"; return 0
+}
+
 be_rc=0
 backend_stage || be_rc=$?
 case "${be_rc}" in
   0) ;;
-  10) # 배포 완료: deploy-bundle 이 프론트도 다시 빌드했으므로 이번 주기의 프론트 단계는 건너뛰고 기준만 갱신한다
-    advance_ref "${TARGET}"; heartbeat "backend-deployed ${TARGET:0:8}"; log "done: 백엔드 배포 완료, 기준 ref -> ${TARGET:0:8}"; exit 0 ;;
-  11) heartbeat "backend-rolled-back ${TARGET:0:8}"; exit 0 ;;   # 되돌림 완료. 프론트는 다음 주기부터 평소대로
-  12) heartbeat "backend-rollback-failed ${TARGET:0:8}"; exit 1 ;;
+  10) # 배포 완료: deploy-bundle 이 프론트도 다시 빌드했으므로 이번 주기의 프론트 단계는 건너뛰고 기준만 갱신한다(기준은 실제 배포한 green TARGET).
+      # 단 홍보 파일은 번들에 없으니 기준을 올리기 전에 같은 묶음의 홍보 변경을 먼저 올린다. 실패하면 기준을 올리지 않아 다음 주기에 다시 한다.
+    if ! promo_catchup "${LAST}" "${BE_DEPLOYED:-${TARGET}}"; then
+      heartbeat "backend-deployed-promo-failed ${BE_DEPLOYED:0:8}"; log "FAIL: 백엔드는 배포됐지만 홍보 파일 올리기 실패(기준 ref 그대로 ${LAST:0:8}, 다음 주기에 다시 시도)"; exit 1
+    fi
+    advance_ref "${BE_DEPLOYED:-${TARGET}}"; heartbeat "backend-deployed ${BE_DEPLOYED:0:8}"; log "done: 백엔드 배포 완료, 기준 ref -> ${BE_DEPLOYED:0:8}"; exit 0 ;;
+  11) heartbeat "backend-rolled-back ${BE_DEPLOYED:0:8}"; exit 0 ;;   # 되돌림 완료. 프론트는 다음 주기부터 평소대로
+  12) heartbeat "backend-rollback-failed ${BE_DEPLOYED:0:8}"; exit 1 ;;
   *) log "${BE_TAG}: skip-cycle 내부 오류(rc=${be_rc}; 이번 주기 건너뜀)" ;;
 esac
 
@@ -565,14 +657,6 @@ if (( NALL > MAX_FILES )); then
 fi
 
 FE_FILES=(); PROMO_FILES=(); BACKEND_N=0
-# 홍보 사이트 배포 대상: 이미 PROMO_ROOT 에 있는 파일 + assets/ 아래 새 파일. 내부 문서·소스는 배포하지 않는다.
-promo_allowed() { # $1=docs/promo 아래 상대 경로
-  local rel="$1"
-  case "${rel}" in *.mjs|*.md|*.sh|*.py|*.json|*.test.*|INTAKE*|README*|content.*|build.*) return 1 ;; esac
-  [[ -f "${PROMO_ROOT}/${rel}" ]] && return 0
-  [[ "${rel}" == assets/* ]] && return 0
-  return 1
-}
 for f in "${ALL_FILES[@]}"; do
   case "${f}" in
     frontend/*.md|frontend/*.test.ts|frontend/*.test.tsx) ;;           # 문서·시험만 바뀐 것은 화면과 무관
@@ -589,7 +673,11 @@ done
 mapfile -t FE_COMMITS < <(git_src log --format='%h %s' --no-merges "${LAST}..${TARGET}" -- frontend docs/promo | cut -c1-150)
 
 if (( BACKEND_N > 0 )); then
-  log "backend-changed: manual deploy needed (backend/ 변경 ${BACKEND_N}개 ${LAST:0:8}..${TARGET:0:8}; 자동 배포는 프론트만 한다)"
+  if [[ "${BACKEND_STAGE}" == off ]]; then
+    log "backend-changed: manual deploy needed (backend/ 변경 ${BACKEND_N}개 ${LAST:0:8}..${TARGET:0:8}; 자동 배포는 프론트만 한다)"
+  else
+    log "backend-changed: backend/ 변경 ${BACKEND_N}개 ${LAST:0:8}..${TARGET:0:8}; 백엔드 자동 배포(${BACKEND_STAGE})는 이 단계가 아니라 위 backend 판정에서 한다(이번 주기 보류 사유는 위 ${BE_TAG:-backend}: 로그 참조). 이 단계는 프론트·홍보만 배포"
+  fi
 fi
 
 DO_FE=0; DO_PROMO=0
@@ -642,7 +730,10 @@ if [[ ${DRY} == 1 ]]; then
   if (( ${#FE_COMMITS[@]} > 0 )); then printf '  %s\n' "${FE_COMMITS[@]}"; fi
   if (( DO_FE )); then say "할 일: 프론트 ${WEB_ROOT_90} 과 ${WEB_ROOT_91} 를 ${TARGET:0:8} 로 재빌드·교체(deploy.sh 2회), 이후 토큰 검사"; fi
   if (( DO_PROMO )); then say "할 일: 홍보 파일 ${#PROMO_FILES[@]}개 갱신/추가(${PROMO_ROOT}):"; printf '  %s\n' "${PROMO_FILES[@]}"; fi
-  if (( BACKEND_N > 0 )); then say "주의: backend 변경 ${BACKEND_N}개는 배포하지 않는다(backend-changed: manual deploy needed)"; fi
+  if (( BACKEND_N > 0 )); then
+    if [[ "${BACKEND_STAGE}" == off ]]; then say "주의: backend 변경 ${BACKEND_N}개는 배포하지 않는다(backend-changed: manual deploy needed)"
+    else say "참고: backend 변경 ${BACKEND_N}개는 이 단계가 아니라 백엔드 자동 단계(${BACKEND_STAGE})가 판정한다"; fi
+  fi
   exit 0
 fi
 
