@@ -110,7 +110,12 @@ def test_character_not_read_leaves_a_reason_code_and_a_warning(
     assert out.video_plan.character_source_reason == why
     rows = [r for r in caplog.records if "회사 캐릭터 못 읽음" in r.getMessage()]
     assert len(rows) == 1 and rows[0].levelno == logging.WARNING
-    assert why in rows[0].getMessage() and "not_found" not in rows[0].getMessage()  # 코드만
+    # 11/26 H 바뀐 기대값: 코드 + 이유 글(마케팅 호출 결과, 120자)을 같이 남긴다 — 운영 PROP-42에서
+    # read_failed만 남아 원인(FORBIDDEN_SKILL)을 몰랐다. 예전: 코드만("not_found" 없음)
+    msg = rows[0].getMessage()
+    detail = type(answer).__name__ if isinstance(answer, Exception) else str(answer)
+    assert why in msg and f"({detail})" in msg
+    assert C.RECORD not in msg  # 기록 번호는 남기지 않는다
 
 
 def test_character_read_or_not_chosen_has_no_failure_reason() -> None:
