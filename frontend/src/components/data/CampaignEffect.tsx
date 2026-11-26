@@ -1,10 +1,11 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useState, type FormEvent } from "react";
 import { Chip, Empty, Panel, TONE, Waiting } from "@/components/finance/bits";
 import type { LoopProbe } from "@/lib/contentLoop";
 import {
   CAMPAIGN_DIRECTION_KO, DATA_SERVER, UNKNOWN, dataAi, kpiLive, percent,
-  type CampaignChange, type CampaignCoupons, type CampaignEffectOutput,
+  type CampaignChange, type CampaignCoupons, type CampaignEffectOutput, type VideoPerformanceVideo,
 } from "@/lib/data";
+import { effectCell, measurePrefill, videoCell, type CampaignRow, type MeasureForm } from "@/lib/resultCampaigns";
 
 // 캠페인 효과 (트렌드 탭 아래쪽): 데이터 AI(8106) campaign_effect 출력을 그대로 보여 준다.
 // - 주문 방향·증분·기준선, 쿠폰 누적 사용률·설명 문장, "확인할 수 없음" 이유는 모두 서버 값이다. 화면은 자릿수만 정한다.
@@ -12,6 +13,8 @@ import {
 // - 처음 열 때는 부르지 않는다. 사람이 기간을 넣고 "측정"을 눌러야 부른다 (30초 새로고침도 따르지 않는다).
 // - 기준선 정의(baseline_rule)와 뺀 구간(baseline_note)은 서버 문장을 그대로 보여 준다. 화면에 기준선 정의를 따로 적지 않는다.
 // - 응답 결과(측정 대기·정상·실패)는 콘텐츠 루프 4단계 칩으로 올린다(onProbe). 칩을 위해 따로 부르지 않는다.
+// - 11/26: 맨 위 "마케팅에 넘어간 캠페인 N" 표(기획 기록 handoff) + 줄마다 [측정] → 그 줄 아래 폼(campaign_id·시작·끝 채움).
+//   지금 단독 폼은 접힌 "다른 기간·캠페인 직접 넣기"로 둔다 (lib/resultCampaigns.ts)
 
 const fixed = (v: number | null | undefined, digits = 2) =>
   typeof v === "number" && Number.isFinite(v) ? v.toLocaleString("ko-KR", { maximumFractionDigits: digits }) : null;
@@ -65,7 +68,7 @@ function ChangeCard({ title, c, unit, isOrders }: { title: string; c: CampaignCh
               <p className="text-3xl font-bold leading-none text-ink-900">
                 {c.excess != null ? `${signed(c.excess)}${unit}` : UNKNOWN}
               </p>
-              <p className="mt-1 text-[11px] text-ink-500">증분 = 캠페인 기간 − 기준선</p>
+              <p className="mt-1 text-[12.5px] text-ink-500">증분 = 캠페인 기간 − 기준선</p>
             </div>
             <div><Chip label={line.text} tone={line.tone} /></div>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1 bg-ink-50 px-3 py-2 text-xs text-ink-700">
@@ -120,8 +123,11 @@ function Result({ out }: { out: CampaignEffectOutput }) {
 
 // ------------------------------------------------------------------- 본문
 
-export function CampaignEffect({ onProbe }: { onProbe: (p: LoopProbe) => void }) {
-  const [form, setForm] = useState({ from: "", to: "", campaignId: "" });
+/** 측정 폼 하나 (11/26: 캠페인 줄 아래 · 접힌 "다른 기간·캠페인 직접 넣기"가 같이 쓴다). 누르면 지금 측정 호출 그대로 */
+function MeasureFormBox({ initial, onProbe, onResult, label }: {
+  initial: MeasureForm; onProbe: (p: LoopProbe) => void; onResult?: (out: CampaignEffectOutput) => void; label: string;
+}) {
+  const [form, setForm] = useState(initial);
   // 사람이 "측정"을 누르기 전에는 null → 부르지 않는다
   const [query, setQuery] = useState<Query | null>(null);
   const [run, setRun] = useState(0);
@@ -135,7 +141,7 @@ export function CampaignEffect({ onProbe }: { onProbe: (p: LoopProbe) => void })
     let live = true;
     setState({ kind: "loading" });
     dataAi.campaignEffect(query.from, query.to, query.campaignId)
-      .then((r) => live && setState({ kind: "ok", out: r.output }))
+      .then((r) => { if (live) { setState({ kind: "ok", out: r.output }); onResult?.(r.output); } })
       .catch((e: Error) => live && setState({ kind: "failed", reason: e.message }));
     return () => { live = false; };
   }, [query, run]);
@@ -156,23 +162,22 @@ export function CampaignEffect({ onProbe }: { onProbe: (p: LoopProbe) => void })
   };
 
   return (
-    <Panel id="data-campaign" title="캠페인 효과"
-      hint="캠페인 기간 주문을 서버가 정한 기준선과 비교하고, 캠페인 쿠폰 누적 사용률을 봅니다. 어떤 기준선을 썼는지는 결과에 함께 나옵니다. 숫자·이유·문장은 모두 데이터 AI 서버 값입니다.">
-      <form onSubmit={submit} className="mb-4 flex flex-wrap items-end gap-2" aria-label="캠페인 효과 측정">
-        <label className="min-w-0 flex-1 text-xs text-ink-500 sm:max-w-48">
+    <div>
+      <form onSubmit={submit} className="mb-4 flex flex-wrap items-end gap-2" aria-label={label}>
+        <label className="min-w-0 flex-1 text-[13.5px] text-ink-500 sm:max-w-48">
           campaign_id (선택)
           <input className="field mt-1" value={form.campaignId} onChange={(e) => setForm((f) => ({ ...f, campaignId: e.target.value }))} placeholder="비우면 쿠폰은 보지 않음" />
         </label>
-        <label className="min-w-0 text-xs text-ink-500">
+        <label className="min-w-0 text-[13.5px] text-ink-500">
           시작
           <input type="datetime-local" className="field mt-1" value={form.from} onChange={(e) => setForm((f) => ({ ...f, from: e.target.value }))} required />
         </label>
-        <label className="min-w-0 text-xs text-ink-500">
+        <label className="min-w-0 text-[13.5px] text-ink-500">
           끝
           <input type="datetime-local" className="field mt-1" value={form.to} onChange={(e) => setForm((f) => ({ ...f, to: e.target.value }))} required />
         </label>
         <button type="submit" className="btn-primary" disabled={!kpiLive || state.kind === "loading"}>측정</button>
-        <p className={`w-full text-[11px] ${inputError ? "text-red-700" : "text-ink-500"}`}>
+        <p className={`w-full text-[13.5px] ${inputError ? "text-red-700" : "text-ink-500"}`}>
           {inputError ?? "시각은 이 컴퓨터 시간 기준입니다. 기간을 넣고 \"측정\"을 누르면 데이터 AI를 부릅니다."}
         </p>
       </form>
@@ -188,6 +193,89 @@ export function CampaignEffect({ onProbe }: { onProbe: (p: LoopProbe) => void })
         </Empty>
       )}
       {state.kind === "ok" && <Result out={state.out} />}
+    </div>
+  );
+}
+
+/**
+ * 성과 탭 맨 위 (11/26): "마케팅에 넘어간 캠페인 N" 표 — 캠페인 · 기획 제목 · 영상 성과 · 캠페인 효과 · [측정].
+ * [측정]은 그 줄 아래에 지금 측정 폼을 펼치고 campaign_id·시작(handoff 시각)·끝(지금)을 채운다. 누를 때만 부른다(자동 측정 없음).
+ * 지금 단독 폼은 접힌 "다른 기간·캠페인 직접 넣기"로 둔다. 숫자·문장은 데이터 AI 서버 값만
+ */
+export function CampaignEffect({ onProbe, campaigns = [], videos = null, effects = {}, onEffect }: {
+  onProbe: (p: LoopProbe) => void;
+  /** 기획 기록에서 handoff가 있는 제안 (lib/resultCampaigns campaignRows) */
+  campaigns?: CampaignRow[];
+  /** 영상 성과(video_performance)가 받은 영상. 아직 못 받았으면 null */
+  videos?: VideoPerformanceVideo[] | null;
+  /** 이 화면에서 잰 캠페인 효과 (캠페인 id → 결과) */
+  effects?: Readonly<Record<string, CampaignEffectOutput>>;
+  onEffect?: (campaignId: string, out: CampaignEffectOutput) => void;
+}) {
+  const [open, setOpen] = useState<{ id: string; form: MeasureForm } | null>(null);
+  const toggle = (row: CampaignRow) =>
+    setOpen((o) => (o?.id === row.campaignId ? null : { id: row.campaignId, form: measurePrefill(row, Date.now()) }));
+  return (
+    <Panel id="data-campaign" title={`마케팅에 넘어간 캠페인 ${campaigns.length.toLocaleString("ko-KR")}`}
+      hint="기획 기록에서 마케팅에 넘긴 제안이에요. [측정]을 누르면 그 캠페인 기간 주문을 서버가 정한 기준선과 비교하고, 쿠폰 누적 사용률을 봅니다. 숫자·이유·문장은 모두 데이터 AI 서버 값입니다.">
+      {campaigns.length === 0 ? (
+        <Empty>아직 마케팅에 넘어간 캠페인이 없어요. 기획에서 마케팅에 넘기면 여기에 줄이 생겨요.</Empty>
+      ) : (
+        <div className="mb-4">
+          <table className="w-full table-fixed text-[14.5px]">
+            <caption className="sr-only">마케팅에 넘어간 캠페인</caption>
+            <colgroup><col className="w-[24%]" /><col /><col className="hidden w-[24%] sm:table-column" /><col className="hidden w-[24%] sm:table-column" /><col className="w-[4.75rem]" /></colgroup>
+            <thead>
+              <tr className="text-left text-[12.5px] text-ink-500">
+                <th scope="col" className="pb-1 font-medium">캠페인</th><th scope="col" className="pb-1 font-medium">기획 제목</th>
+                <th scope="col" className="hidden pb-1 font-medium sm:table-cell">영상 성과</th><th scope="col" className="hidden pb-1 font-medium sm:table-cell">캠페인 효과</th>
+                <th scope="col" className="pb-1"><span className="sr-only">측정</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {campaigns.map((row) => {
+                const on = open?.id === row.campaignId;
+                const video = videoCell(videos, row.campaignId);
+                const effect = effectCell(effects[row.campaignId]);
+                return (
+                  <Fragment key={row.campaignId}>
+                    <tr className="border-t border-ink-100 align-top">
+                      <td className="break-words py-2 pr-2 font-semibold tabular-nums text-ink-900">{row.campaignId}</td>
+                      <td className="break-words py-2 pr-2 text-ink-700">
+                        {row.title} <span className="text-[13.5px] text-ink-500">({row.proposalId})</span>
+                        {/* 좁은 화면: 영상 성과·캠페인 효과를 제목 아래에 */}
+                        <span className="mt-1 block text-[13.5px] text-ink-500 sm:hidden">영상 {video} · 효과 {effect}</span>
+                      </td>
+                      <td className="hidden break-words py-2 pr-2 text-[13.5px] text-ink-700 sm:table-cell">{video}</td>
+                      <td className="hidden py-2 pr-2 text-[13.5px] text-ink-700 sm:table-cell"><span className="line-clamp-2 break-words">{effect}</span></td>
+                      <td className="py-2 text-right">
+                        <button type="button" className="btn-ghost px-2.5 py-1 text-[14px]" aria-expanded={on} aria-controls={`measure-${row.campaignId}`} onClick={() => toggle(row)}>측정</button>
+                      </td>
+                    </tr>
+                    {on && open && (
+                      <tr id={`measure-${row.campaignId}`}>
+                        <td colSpan={5} className="pb-3">
+                          <div className="rounded-xl bg-ink-50 p-3">
+                            <MeasureFormBox key={row.campaignId} initial={open.form} onProbe={onProbe} label={`캠페인 ${row.campaignId} 효과 측정`}
+                              onResult={(out) => onEffect?.(row.campaignId, out)} />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <details className="rounded-xl ring-1 ring-ink-100">
+        <summary className="cursor-pointer select-none px-3 py-2.5 text-[14.5px] font-semibold text-ink-900">다른 기간·캠페인 직접 넣기</summary>
+        <div className="px-3 pb-3">
+          <MeasureFormBox initial={{ campaignId: "", from: "", to: "" }} onProbe={onProbe} label="캠페인 효과 측정"
+            onResult={(out) => { if (out.campaign_id) onEffect?.(out.campaign_id, out); }} />
+        </div>
+      </details>
     </Panel>
   );
 }
