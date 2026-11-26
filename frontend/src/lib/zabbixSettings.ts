@@ -37,3 +37,14 @@ export function zabbixSummary(z: ZabbixSettings): string {
   const from = z.source === "file" ? "화면에서 정함" : "서버 설치 설정";
   return [from, z.url ?? "주소 없음", z.token_set ? "토큰 있음" : "토큰 없음"].join(" · ");
 }
+
+/**
+ * 토큰이 보호되지 않는 연결이면 경고 한 줄 (DejaFix 리뷰 11/26). 없으면 null.
+ * http:// 는 토큰이 평문으로 가고, 인증서 확인을 끄면 중간에서 가로챌 수 있다.
+ */
+export function zabbixInsecure(url: string, verifyTls: boolean): string | null {
+  const plain = /^\s*http:\/\//i.test(url);
+  if (plain) return "http:// 주소라 토큰이 암호화되지 않고 그대로 가요. 가능하면 https:// 주소를 쓰세요.";
+  if (!verifyTls && /^\s*https:\/\//i.test(url)) return "인증서 확인을 끄면 중간에서 토큰을 가로챌 수 있어요. 사내 자체 인증서일 때만 끄세요.";
+  return null;
+}
