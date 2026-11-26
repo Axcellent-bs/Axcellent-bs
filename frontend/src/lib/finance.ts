@@ -326,6 +326,8 @@ export interface BankMatch {
   counts: Partial<Record<BankStatus, number>>;
   days: BankDay[];
   pg_memo: string;
+  /** 11/26 임시 예시(실제 입금 아님): 거래내역을 올리기 전에만 온다. 끄면(FINANCE_EXAMPLE_DATA=0) 없음 */
+  example?: { note: string; from: string; to: string; counts: Partial<Record<BankStatus, number>>; days: BankDay[] } | null;
 }
 export type TransferStatus = "paid" | "waiting" | "not_found" | "not_covered";
 export interface BankTransfer {
@@ -386,6 +388,8 @@ export interface TeamBudget {
   approved: TeamBudgetApproval | null;
   /** 팀별 실제 지출 자료가 아직 없어 늘 null (화면은 "준비 중") */
   actual_spend: null;
+  /** 11/26 임시 예시 지출(팀 예산의 70~105%, 실제 아님). 인원을 못 받았거나 끄면 null (옛 응답은 없음) */
+  example_spend?: { note: string; total: number; rows: { team: string; budget: number; spend: number; rate_pct: number }[] } | null;
 }
 
 // ---------------------------------------------------------------- ⑤ 세무 지원
