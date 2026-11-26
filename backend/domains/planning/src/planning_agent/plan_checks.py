@@ -136,9 +136,38 @@ def real_quotes(
     return kept, len(rules) - len(kept)
 
 
+# 광고 금칙어(성과 과장·인력 대체). 마케팅 sns.FORBIDDEN_CLAIM_PATTERNS와 같은 값이고, 마케팅
+# video_draft가 제작안 concept+script 전체를 has_forbidden_claim으로 본다(quote 예외 없음).
+# 도메인끼리 import하지 않아 옮겨 둔다(video_plan.CLAIM_PATTERNS도 이 값). 공백을 뺀 글에서 찾는다
+CLAIM_PATTERNS = (
+    r"인건비(를|가|은|는)?절감",
+    r"직원(을|이|은|는)?(모두|전부)?대체",
+    r"에이전트(가|는|들이)?(더|훨씬)?빨라",
+    r"최고",
+    r"무조건",
+    r"획기적",
+    r"압도적",
+    r"혁신적",
+)
+BLOCKED_WHERE = "광고 금칙어라 넣지 않아요"  # 금칙어 든 의뢰 대사 (화면 ✕ 줄, 11/26 S)
+
+
+def has_claim(text: str) -> bool:
+    """광고 금칙어가 있나 (마케팅 has_forbidden_claim과 같은 기준)."""
+    squeezed = re.sub(r"\s+", "", text or "")
+    return any(re.search(pat, squeezed) for pat in CLAIM_PATTERNS)
+
+
+def blocked_quote(rule: dict[str, Any]) -> bool:
+    """광고 금칙어가 든 의뢰 대사 (넣지 않고, 금칙어 검사에서도 빼지 않는다)."""
+    return rule.get("kind") == "quote" and has_claim(str(rule.get("text_ko") or ""))
+
+
 def check_rule(rule: dict[str, str], scenes: list[Scene], script: str) -> tuple[bool, str]:
-    """(지켰나, 어디서)."""
+    """(지켰나, 어디서). 금칙어 든 대사는 늘 (False, BLOCKED_WHERE)."""
     kind, text = rule["kind"], rule["text_ko"]
+    if blocked_quote(rule):
+        return False, BLOCKED_WHERE
     if kind == "quote":
         want = bare(text)
         for s in scenes:
@@ -182,6 +211,9 @@ KIND_KO = {"quote": "대사", "ending": "마지막 장면", "setting": "배경",
 def rule_fix(rule: dict[str, Any]) -> str:
     """다시 쓰기 "고칠 점" 한 줄 (못 지킨 의뢰 지시)."""
     kind = rule["kind"]
+    if blocked_quote(rule):
+        return (f"의뢰 대사 '{rule['text_ko']}'에는 광고 금칙어가 있어 넣지 않는다: 장면 caption·"
+                "script·concept에서 그 문장을 뺀다")  # fmt: skip
     tail = {
         "quote": "어떤 장면 caption에 글자 그대로 쓴다",
         "ending": "마지막 장면을 엔드카드만으로 두지 말고 이 지시 장면으로 쓴다",
@@ -190,14 +222,17 @@ def rule_fix(rule: dict[str, Any]) -> str:
 
 
 def quotes(rules: list[dict[str, Any]]) -> set[str]:
-    """비우지 않을 자막(의뢰 quote 문장, bare)."""
-    return {bare(r["text_ko"]) for r in rules if r.get("kind") == "quote"} - {""}
+    """비우지 않을 자막(의뢰 quote 문장, bare). 금칙어 든 대사는 넣지 않으니 뺀다."""
+    return {bare(r["text_ko"]) for r in rules
+            if r.get("kind") == "quote" and not blocked_quote(r)} - {""}  # fmt: skip
 
 
 def strip_quotes(text: str, rules: list[dict[str, Any]]) -> str:
-    """의뢰 quote 문장을 뺀 글 (그 문장은 마케팅 금칙 검사에서 통과시킨다)."""
+    """의뢰 quote 문장을 뺀 글 (그 문장은 마케팅 금칙 검사에서 통과시킨다).
+
+    11/26 S: 광고 금칙어가 든 대사는 빼지 않는다 (마케팅 video_draft가 quote 예외 없이 거절)."""
     for r in rules:
-        if r.get("kind") == "quote" and r.get("text_ko"):
+        if r.get("kind") == "quote" and r.get("text_ko") and not blocked_quote(r):
             text = text.replace(r["text_ko"], " ")
     return text
 
@@ -302,7 +337,8 @@ def problem_fix(p: dict[str, Any]) -> str:
 
 def rule_problem(r: dict[str, Any]) -> dict[str, Any]:
     """못 지킨 의뢰 지시 → 검사 기록 문제 한 줄."""
-    detail = f"의뢰 지시({KIND_KO[r['kind']]}) '{r['text_ko'][:80]}' 못 지킴"
+    tail = "광고 금칙어라 넣지 않음" if blocked_quote(r) else "못 지킴"
+    detail = f"의뢰 지시({KIND_KO[r['kind']]}) '{r['text_ko'][:80]}' {tail}"
     return {"kind": "request_rule", "scene": None, "detail_ko": detail}
 
 

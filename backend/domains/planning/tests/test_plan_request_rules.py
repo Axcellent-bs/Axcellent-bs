@@ -206,6 +206,37 @@ def test_real_quotes_compares_without_spaces_and_punctuation() -> None:
     assert pc.real_quotes(rules, "")[1] == 2  # 의뢰문이 비면 quote는 모두 버린다
 
 
+CLAIM = "캣북스가 업계 최고 서점"  # 광고 금칙어(최고)가 든 의뢰 대사
+
+
+def test_quote_with_a_forbidden_claim_is_not_kept_and_rewritten_out() -> None:
+    """11/26 S (태윤 님 제안·예진 님 동의): 마케팅 video_draft는 concept+script를
+    has_forbidden_claim으로 보고 quote 예외 없이 거절한다 → 기획도 그 대사는 넣지 않는다."""
+    rules = [*RULES, {"kind": "quote", "text_ko": CLAIM}]
+    first = _answer(True, rules=rules).model_copy(update={"script": f"노래한다. {CLAIM}"})
+    plan, sent = _write(first, _answer(True, rules=rules), request=f"{REQUEST} · 끝 대사 '{CLAIM}'")
+    assert len(sent) == 2  # 금칙어 대사를 빼라고 한 번 다시 쓴다 (LLM 호출 최대 2회 그대로)
+    assert f"의뢰 대사 '{CLAIM}'에는 광고 금칙어가 있어 넣지 않는다" in sent[1]
+    assert plan.written_by == "llm"
+    blocked = next(r for r in plan.request_rules if r.text_ko == CLAIM)
+    assert blocked.kept is False
+    assert blocked.where == pc.BLOCKED_WHERE == "광고 금칙어라 넣지 않아요"
+    assert not pc.has_claim(f"{plan.concept}\n{plan.script}")  # 마케팅 has_forbidden_claim 통과
+    assert all(CLAIM not in s.caption for s in plan.scenes)
+    others = [r for r in plan.request_rules if r.text_ko != CLAIM]
+    assert all(r.kept for r in others)  # 금칙어 없는 대사·지시는 지금처럼 지킨다
+    assert plan.scenes[-1].caption == QUOTE  # 마지막 장면 자막(의뢰 대사)은 지금처럼 남긴다
+
+
+def test_forbidden_claim_quote_is_not_stripped_from_the_marketing_check() -> None:
+    blocked = [{"kind": "quote", "text_ko": CLAIM}]
+    assert vp.text_problems(pc.strip_quotes(f"대본 {CLAIM}", blocked)) == ["claim_word"]
+    assert pc.quotes(blocked) == set()  # 비우지 않을 자막에도 넣지 않는다
+    said = [pc.Scene(1, caption=CLAIM)]
+    assert pc.check_rule(blocked[0], said, CLAIM) == (False, pc.BLOCKED_WHERE)
+    assert vp.CLAIM_PATTERNS is pc.CLAIM_PATTERNS  # 기획 금칙어 검사와 같은 목록 하나
+
+
 def test_marketing_words_in_the_quote_do_not_reject_the_plan() -> None:
     said = "지금 공유하고 만나요"
     rules = [{"kind": "quote", "text_ko": said}]

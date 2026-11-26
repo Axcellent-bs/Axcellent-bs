@@ -123,9 +123,13 @@ export function requestRulesChip(v: Pick<VideoPlanView, 'requestRules'>): string
   const rules = v.requestRules ?? []
   return rules.length ? `의뢰 지시 ${rules.filter((r) => r.kept).length}/${rules.length} 지킴` : ''
 }
-/** 지시 한 줄 "보라 무대 → 장면 1~3" / "… → 못 지킴" */
+/** 금칙어 든 의뢰 대사 (기획 plan_checks.BLOCKED_WHERE와 같은 글, 11/26) */
+export const RULE_BLOCKED_WHERE = '광고 금칙어라 넣지 않아요'
+const ruleResult = (r: RequestRuleView) =>
+  r.kept ? r.where || '지킴' : r.where === RULE_BLOCKED_WHERE ? '이 문장은 광고 금칙어라 못 넣어요' : '못 지킴'
+/** 지시 한 줄 "보라 무대 → 장면 1~3" / "… → 못 지킴" / 대사 "… → 이 문장은 광고 금칙어라 못 넣어요" */
 export const requestRuleLine = (r: RequestRuleView) =>
-  `${RULE_KIND[r.kind]} · ${r.kind === 'quote' ? `"${r.textKo}"` : r.textKo} → ${r.kept ? r.where || '지킴' : '못 지킴'}`
+  `${RULE_KIND[r.kind]} · ${r.kind === 'quote' ? `"${r.textKo}"` : r.textKo} → ${ruleResult(r)}`
 const RULE_KINDS = new Set<string>(Object.keys(RULE_KIND))
 function toRules(raw: unknown): RequestRuleView[] {
   if (!Array.isArray(raw)) return []
