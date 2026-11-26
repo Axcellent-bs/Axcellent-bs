@@ -366,6 +366,25 @@ def _sales_key(row: dict[str, Any]) -> tuple[datetime, str]:
     return _at(row["updated_at"], upstream_value=True) or _EPOCH, row["order_id"]
 
 
+async def _product_names() -> dict[str, tuple[str | None, str | None]]:
+    """상품 id → (상품 이름, 분류 값). 사이트 주문 줄에는 상품 번호만 있어(스터디온 강좌 코드,
+    누비투어 상품 코드) 판매 기록 줄의 이름·분류를 상품 목록에서 채운다(11/26).
+
+    상품 짝이 없거나 상품 목록을 읽지 못하면 빈 표(줄은 예전처럼 비운 채, 주문은 그대로 준다).
+    고객사 읽기 캐시(`upstream`, 회사 주소마다)를 그대로 쓴다.
+    """
+    if "products" not in _mapping().resources:
+        return {}
+    try:
+        rows = await _rows("products")
+    except ApiError as exc:
+        if exc.code not in _warned:
+            _warned.add(exc.code)
+            logger.warning("판매 기록 줄 이름을 채우지 못함 (상품 목록 %s): %s", exc.code, exc)
+        return {}
+    return resources.product_names(rows)
+
+
 @router.get("/api/shop/sales-export")
 async def sales_export(limit: int | None = None, cursor: str | None = None) -> dict[str, Any]:
     """`ShopSalesExportResult` 모양. `(updated_at, order_id)` 순, 커서 뒤의 줄만.
@@ -376,8 +395,12 @@ async def sales_export(limit: int | None = None, cursor: str | None = None) -> d
     """
     after = _sales_cursor(cursor)
     since = (after[0] - SINCE_LEAD).isoformat().replace("+00:00", "Z") if after else None
+    names = await _product_names()
     keyed = sorted(
-        ((_sales_key(r), r) for r in await _rows("orders", since, resources.sales_row)),
+        (
+            (_sales_key(r), resources.with_product_names(r, names))
+            for r in await _rows("orders", since, resources.sales_row)
+        ),
         key=lambda kr: kr[0],
     )
     if after:

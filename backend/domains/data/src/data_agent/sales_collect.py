@@ -664,6 +664,30 @@ def rebuild_summary(env: Mapping[str, str]) -> int:
         store.close()
 
 
+def recollect(env: Mapping[str, str], company: str) -> int:
+    """캣북스가 아닌 회사 하나의 판매 기록 커서만 비운다 (잠금은 부르는 쪽이 잡는다, 11/26).
+
+    지우는 기록은 없다. 다음 수집 회차가 그 회사 주문을 처음부터 다시 받아 같은 주문 번호 줄을
+    덮어쓰고(예: 변환기가 새로 채운 상품 이름·분류), 다음 하루 집계가 다시 받은 날을 다시 센다.
+    """
+    from ax_agent_template import company_scope
+
+    cid = company_scope.scope_id(company.strip())
+    if not cid or cid == company_scope.CATBOOKS:
+        print("[sales] --recollect는 캣북스가 아닌 회사 id만 (캣북스는 --reset)", flush=True)
+        return 2
+    store = SalesStore(db_path(env))
+    try:
+        with company_scope.using(cid):
+            name = source_name(env)
+        store.save_cursor(cid, name, None)
+        print(f"[sales {cid}] 판매 기록 커서를 비움 ({name}): 다음 회차에 처음부터 다시 받음",
+              flush=True)  # fmt: skip
+        return 0
+    finally:
+        store.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):  # Windows 콘솔에서도 한글이 깨지지 않게
         reconfigure = getattr(stream, "reconfigure", None)
@@ -686,7 +710,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="구매자 요약 표를 기존 주문으로 처음부터 다시 채운다 (한 번만, 주문은 받지 않음)",
     )
+    parser.add_argument(
+        "--recollect",
+        metavar="COMPANY_ID",
+        default=None,
+        help="캣북스가 아닌 회사 하나의 판매 기록을 다음 회차에 처음부터 다시 받게 (커서만 비움)",
+    )
     args = parser.parse_args(argv)
+    if args.recollect and (args.reset or args.rebuild_summary or args.every is not None):
+        print("[sales] --recollect는 혼자 한 번만 실행", flush=True)
+        return 2
     if args.rebuild_summary and (args.reset or args.every is not None):
         print("[sales] --rebuild-summary는 혼자 한 번만 실행", flush=True)
         return 2
@@ -713,6 +746,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[sales] 이미 다른 수집기가 돌고 있음 (잠금 {path}): 끝냄", flush=True)
         return 0
     try:
+        if args.recollect:
+            return recollect(env, args.recollect)
         if args.rebuild_summary:
             return rebuild_summary(env)
         if args.reset:

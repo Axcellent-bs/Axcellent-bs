@@ -3,6 +3,7 @@
 - 누비투어 로그인으로 불러도 캣북스 보관함·환경변수 DejaFix를 쓰지 않는다(연결 없으면 503)
 - 누비투어가 저장한 연결은 누비투어만 쓰고, 로그인 토큰도 회사마다 따로 받는다
 - 에이전트 토큰은 `X-AX-Company` 머리글의 회사, 없으면 캣북스(예전 그대로)
+- 같이 설치된 DejaFix는 회사별을 알 때(`X-DejaFix-Company`)만 캣북스 아닌 회사에 넘긴다(11/26)
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import pytest
 
 from ax_agent_template import company_scope, human_auth
 from ax_agent_template import tool_connections as tc
+from ax_dejafix_proxy import main
 from ax_dejafix_proxy.main import create_app
 
 pytestmark = pytest.mark.asyncio
@@ -94,21 +96,93 @@ async def test_other_company_does_not_use_catbooks_vault() -> None:
     assert rec.logins == [] and rec.reads == 0  # 캣북스 DejaFix에 로그인조차 하지 않는다
 
 
-async def test_any_company_uses_the_builtin_dejafix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """같이 설치된 DejaFix는 이 설치의 것: 자기 보관함에 DejaFix가 없는 회사도 쓴다 (11/26 결정).
+class Echo(Recorder):
+    """회사별을 아는 DejaFix 흉내: 받은 `X-AX-Company`로 걸렀다고 `X-DejaFix-Company`로 돌려준다."""
 
-    그래서 그 회사 관리자도 화면에서 Zabbix를 넣을 수 있다. 다른 회사 보관함은 여전히 안 쓴다
-    (`test_other_company_does_not_use_catbooks_vault`).
-    """
+    def __init__(self) -> None:
+        super().__init__()
+        self.companies: list[str | None] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        res = super().__call__(request)
+        if request.url.path == "/api/auth/login":
+            return res
+        company = request.headers.get("X-AX-Company")
+        self.companies.append(company)
+        return httpx.Response(res.status_code, json=json.loads(res.content),
+                              headers={"X-DejaFix-Company": company or ""})  # fmt: skip
+
+
+def _builtin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DEJAFIX_USERNAME", "builtin")
     monkeypatch.setenv("DEJAFIX_PASSWORD", "pw-builtin")
+
+
+async def test_old_builtin_dejafix_is_catbooks_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """회사별을 모르는 같이 설치된 DejaFix(옛 버전)의 장애는 캣북스 것: 다른 회사에는 안 넘긴다.
+
+    11/26 실서버: 누비투어 인프라 화면에 캣북스 Zabbix 장애가 보였다(#1880 뒤).
+    """
+    _builtin(monkeypatch)
     rec = Recorder()
     async with _client(rec, _session(NUBI)) as c:
         res = await c.get("/api/incidents")
+        summary = await c.get("/api/dashboard/summary")
         status = (await c.get("/status")).json()
-    assert res.status_code == 200
-    assert status["source"] == "builtin"
-    assert rec.logins == ["builtin"]
+    assert res.status_code == 503 and res.json()["error"]["code"] == "DEJAFIX_NOT_CONNECTED"
+    assert summary.status_code == 503
+    assert "Zabbix" in res.json()["error"]["message"]
+    assert status == {"source": "builtin", "reachable": None, "detail": main.NOT_SCOPED}
+    async with _client(rec, _session("catbooks")) as c:  # 캣북스는 그대로
+        assert (await c.get("/api/incidents")).status_code == 200
+        assert (await c.get("/status")).json()["reachable"] is True
+
+
+async def test_company_scoped_builtin_dejafix_serves_each_company(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """회사별을 아는 DejaFix: 하나가 회사마다 그 회사 것만 돌려준다(예진 님 방향, 11/26)."""
+    _builtin(monkeypatch)
+    rec = Echo()
+    async with _client(rec, _session(NUBI)) as c:
+        assert (await c.get("/api/incidents")).status_code == 200
+        assert (await c.get("/status")).json()["reachable"] is True
+    async with _client(rec, _session("catbooks")) as c:
+        assert (await c.get("/api/incidents")).status_code == 200
+    assert rec.companies == [NUBI, NUBI, "catbooks"]  # 요청마다 부르는 회사를 싣는다
+    assert rec.logins == ["builtin", "builtin"]  # 로그인 토큰도 회사마다
+
+
+async def test_company_header_cannot_override_session_company(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """로그인 세션이면 회사는 세션의 cid뿐: `X-AX-Company`를 캣북스로 바꿔 붙여도 누비투어다."""
+    _builtin(monkeypatch)
+    rec = Echo()
+    async with _client(rec, _session(NUBI), {"X-AX-Company": "catbooks"}) as c:
+        assert (await c.get("/api/incidents")).status_code == 200
+    assert rec.companies == [NUBI]
+    rec = Recorder()  # 옛 DejaFix + 위조 머리: 그래도 캣북스 장애는 안 넘긴다
+    async with _client(rec, _session(NUBI), {"X-AX-Company": "catbooks"}) as c:
+        assert (await c.get("/api/incidents")).status_code == 503
+
+
+async def test_echo_for_another_company_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DejaFix가 다른 회사로 걸렀다고 하면 넘기지 않는다."""
+    _builtin(monkeypatch)
+
+    def wrong(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"data": {"token": "t"}})
+        return httpx.Response(200, json={"data": []}, headers={"X-DejaFix-Company": "catbooks"})
+
+    upstream = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(wrong))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(upstream)),
+        base_url="http://proxy",
+        headers={"Authorization": f"Bearer {_session(NUBI)}"},
+    ) as c:
+        assert (await c.get("/api/incidents")).status_code == 503
 
 
 async def test_each_company_uses_its_own_vault_and_login() -> None:

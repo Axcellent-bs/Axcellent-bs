@@ -38,8 +38,14 @@ def _at(value: str) -> datetime:
 class FakeSite:
     """누비투어 예약 API 흉내 (테스트 전용): `updated_since` 이상만, `updated_at` 순, 쪽 나눔."""
 
-    def __init__(self, bookings: list[dict[str, Any]], page_size: int = 2) -> None:
+    def __init__(
+        self,
+        bookings: list[dict[str, Any]],
+        page_size: int = 2,
+        tours: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.bookings = {b["code"]: dict(b) for b in bookings}
+        self.tours = tours  # None이면 상품 목록 주소도 404 (상품을 못 읽는 사이트)
         self.page_size = page_size
         self.requests: list[dict[str, str]] = []
 
@@ -47,6 +53,8 @@ class FakeSite:
         self.bookings[code].update(updated_at=updated_at, **changes)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/tours" and self.tours is not None:
+            return httpx.Response(200, json={"data": self.tours, "next_cursor": None})
         if request.url.path != "/api/v1/bookings":
             return httpx.Response(404, json={})
         params = dict(request.url.params)
@@ -67,11 +75,17 @@ def bookings(nubi: Any) -> list[dict[str, Any]]:
 
 
 @pytest.fixture
+def nubi_tours(nubi: Any) -> list[dict[str, Any]]:
+    return nubi("nubi_tours.json")["data"]
+
+
+@pytest.fixture
 def site(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     adapter_dir: Path,
     bookings: list[dict[str, Any]],
+    nubi_tours: list[dict[str, Any]],
 ) -> FakeSite:
     path = tmp_path / "company_connection.json"
     path.write_text(
@@ -81,7 +95,7 @@ def site(
     monkeypatch.setenv(cc.CONNECTION_FILE_ENV, str(path))
     monkeypatch.setattr(cc, "_cache", None)
     monkeypatch.setenv(up.CACHE_SECONDS_ENV, "0")  # 고객사 값이 바뀌는 것을 시험한다
-    fake = FakeSite(bookings)
+    fake = FakeSite(bookings, tours=nubi_tours)
     monkeypatch.setattr(up, "TRANSPORT", httpx.MockTransport(fake.handle))
     return fake
 
@@ -302,3 +316,56 @@ def test_payment_failed_only_when_status_table_says_so() -> None:
     assert _row({}, table, status="pay_error", paid=0).payment_status == "failed"
     assert _row({}, table, status="waiting", paid=0).payment_status is None
     assert _row({}, table).payment_status == "succeeded"
+
+
+# ------------------------------------------------------------------ 줄 이름·분류 (11/26)
+
+
+def test_lines_get_product_name_and_category_from_products(
+    client: TestClient, nubi_tours: list[dict[str, Any]]
+) -> None:
+    """사이트 주문 줄에는 상품 번호만 있다 → 상품 목록의 이름·분류 값으로 채운다
+    (스터디온 '이름 없는 분류 100%·이름 없는 상품')."""
+    tours = {t["code"]: t for t in nubi_tours}
+    page = _export(client, limit=500)
+    lines = [line for o in page.orders for line in o.lines]
+    assert lines
+    for line in lines:
+        tour = tours[line.product_id]
+        assert line.title == tour["name"]
+        assert line.category_code == tour["region"]
+
+
+def test_unknown_product_keeps_empty_name(client: TestClient, site: FakeSite) -> None:
+    """상품 목록에 없는 상품(지워진 상품)은 지어내지 않고 비운다."""
+    site.tours = [t for t in (site.tours or []) if t["code"] != "JP-OSA-4D"]
+    page = _export(client, limit=500)
+    gone = [line for o in page.orders for line in o.lines if line.product_id == "JP-OSA-4D"]
+    assert gone
+    assert all(line.title is None and line.category_code is None for line in gone)
+
+
+def test_products_unreadable_still_exports_orders(client: TestClient, site: FakeSite) -> None:
+    """상품 목록을 못 읽어도 판매 기록은 예전처럼 준다(줄 이름만 빈 채)."""
+    site.tours = None
+    page = _export(client, limit=500)
+    assert [o.order_id for o in page.orders] == [
+        "NB-20261110-0001", "NB-20261111-0002", "NB-20261115-0003",
+    ]  # fmt: skip
+    assert all(line.title is None for o in page.orders for line in o.lines)
+
+
+def test_with_product_names_keeps_given_values_and_other_company_table() -> None:
+    """줄에 이미 이름·분류가 있으면 그대로, 표는 부르는 쪽 회사 것만 쓴다(섞이지 않음)."""
+    row = {"order_id": "o1", "lines": [
+        {"product_id": "A", "qty": 1, "unit_price": 1, "title": "원래 이름", "category_code": "X"},
+        {"product_id": "B", "qty": 1, "unit_price": 1},
+    ]}  # fmt: skip
+    mine = resources.product_names([
+        {"product_id": "A", "name": "다른 이름", "category_code": "Y"},
+        {"product_id": "B", "name": "강좌 B", "category_code": "DEV"},
+    ])  # fmt: skip
+    out = resources.with_product_names(row, mine)
+    assert out["lines"][0]["title"] == "원래 이름" and out["lines"][0]["category_code"] == "X"
+    assert out["lines"][1]["title"] == "강좌 B" and out["lines"][1]["category_code"] == "DEV"
+    assert resources.with_product_names(row, {}) is row

@@ -2,6 +2,7 @@
 
 - 로그인 세션의 운영자·관리자만. 에이전트 토큰·공용 사람 토큰·일반회원은 거부
 - 같이 설치된 DejaFix(캣북스 환경 변수 연결)만. 회사 보관함 연결은 409, 연결 없으면 503
+- 캣북스 아닌 회사는 DejaFix가 회사별을 알 때(`X-DejaFix-Company`)만. 옛 DejaFix면 409(11/26)
 - DejaFix에는 관리자 계정(`DEJAFIX_ADMIN_*`)으로 로그인한 세션으로 넘긴다(viewer 세션과 따로)
 - Zabbix 토큰은 본문 그대로 DejaFix로만 가고, 응답에는 실리지 않는다
 """
@@ -188,13 +189,45 @@ async def test_company_without_dejafix_is_503(monkeypatch: pytest.MonkeyPatch) -
     assert res.json()["error"]["code"] == "DEJAFIX_NOT_CONNECTED"
 
 
-async def test_any_company_admin_sets_zabbix_on_the_builtin_dejafix() -> None:
-    """캣북스가 아닌 회사 관리자도 같이 설치된 DejaFix에 자기 Zabbix를 넣는다 (11/26 결정)."""
+async def test_old_builtin_dejafix_refuses_other_company_zabbix() -> None:
+    """회사별을 모르는 DejaFix에 누비투어 Zabbix를 넣으면 캣북스 것을 덮는다: 막는다(11/26)."""
     dfx = DejaFix()
     async with _client(dfx, _session(company="nubi-tour")) as c:
+        got = await c.get("/settings/zabbix")
+        saved = await c.put("/settings/zabbix", json=BODY)
+    for res in (got, saved):
+        assert res.status_code == 409
+        assert res.json()["error"]["code"] == "DEJAFIX_NO_COMPANY"
+        assert STATE["url"] not in res.text  # 캣북스 Zabbix 주소도 안 보인다
+    assert [c for c in dfx.calls if c[0] == "PUT"] == []
+
+
+async def test_company_scoped_dejafix_saves_each_company_zabbix() -> None:
+    """회사별을 아는 DejaFix: 그 회사 관리자가 자기 Zabbix를 넣는다. 요청에 회사가 실린다."""
+    seen: list[tuple[str, str | None]] = []
+    dfx = DejaFix()
+
+    def scoped(request: httpx.Request) -> httpx.Response:
+        res = dfx(request)
+        if request.url.path == "/api/auth/login":
+            return res
+        company = request.headers.get("X-AX-Company")
+        seen.append((request.method, company))
+        return httpx.Response(res.status_code, content=res.content,
+                              headers={"X-DejaFix-Company": company or ""})  # fmt: skip
+
+    upstream = httpx.AsyncClient(
+        base_url="http://dejafix.test", transport=httpx.MockTransport(scoped)
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(upstream)),
+        base_url="http://proxy",
+        headers={"Authorization": f"Bearer {_session(company='nubi-tour')}"},
+    ) as c:
         saved = await c.put("/settings/zabbix", json=BODY)
     assert saved.status_code == 200
-    assert dfx.logins == ["dfx-admin"]
+    assert ("PUT", "nubi-tour") in seen
+    assert all(company == "nubi-tour" for _, company in seen)
     assert ZBX_TOKEN not in saved.text
 
 
