@@ -5,6 +5,7 @@ import { orchestrator } from "@/lib/orchestrator";
 import { VIDEO_WAIT_LABEL, unansweredNotice, videoApproval } from "@/lib/requestCharacter";
 import { BrandCharacterAsk } from "@/components/office/BrandCharacterAsk";
 import { RequestCreative } from "@/components/office/RequestCreative";
+import { RequestPublish } from "@/components/office/RequestPublish";
 import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestTitle } from "@/lib/requestHandoffs";
@@ -34,6 +35,7 @@ import type { VideoPlanView } from "@/lib/videoPlan";
 // - 사람 확인 단계: "<다음 단계> 진행"·"여기서 멈추기" → decideRequestStep. 누른 뒤 끄고 결과는 다음 읽기에 반영.
 //   실패하면 버튼 아래 한 줄(403 서버 차단·409 이미 처리·404·상태 코드, requestActionError)을 보이고 버튼을 다시 켠다
 // - 열린 채 6시간(STALE_HOURS) 넘게 그대로면 "오래 멈춤 · N시간" 회색 칩 (AI 오피스 자리 상태에는 쓰지 않는다)
+// - 영상 제작이 끝나면 [영상 열기]·썸네일 고르기 아래 "어디에 올릴까요?" [유튜브][인스타그램] (RequestPublish, 11/26)
 // - 실패·건너뜀: 회색 + 의뢰 note(코드 문장). 고객 글·부서 문장은 옮기지 않는다. 계산은 lib/requestCards.ts
 
 const DOT: Record<StepDot, string> = {
@@ -292,6 +294,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                   <>
                     <button type="button" className="btn-primary btn-card mt-1" onClick={() => navigate(videoLink)}>영상 열기</button>
                     <RequestCoverCell requestId={row.request_id} />
+                    <RequestPublish requestId={row.request_id} />
                   </>
                 )}
                 {report && <ReportCell reportId={report} />}
