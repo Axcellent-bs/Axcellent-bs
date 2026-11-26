@@ -7,7 +7,7 @@ import { isSvgBoard } from "@/lib/storyboardSvg";
 import { usesOriginalReference } from "@/lib/videoAsk";
 import { listRequestVideos } from "@/lib/requestVideos";
 import { VIDEO_NOT_FOUND_KO, canUploadToYoutube, durationKo, type RequestVideo } from "@/lib/requestVideoView";
-import { RECORDS_PATH, defaultStep, hasPublishState, linkedRecordId, renderStatuses, workStatus, workTitle, type StepNo } from "@/lib/recordWorks";
+import { RECORDS_PATH, defaultSteps, hasPublishState, linkedRecordId, renderStatuses, workStatus, workTitle, type StepNo } from "@/lib/recordWorks";
 import { DetailHeader, Fold, Step } from "./RecordSteps";
 import { BoardPicture, FinalVideoArea, Keyframes, MotionArea, RecordPublish, RecordThumbnails, SheetPicture, VideoArea, useRecordRender, type RecordRender } from "./RenderPanel";
 import { RequestVideoCard, RequestVideoPublish } from "./RequestVideoParts";
@@ -25,12 +25,13 @@ import { isHolding, promoChip, promoItem, usePromoSite } from "@/lib/promoSite";
 const WEB_NOTE = "Higgsfield 화면(웹 구독)에서 2단계의 스토리보드 그림을 시작 이미지로 올리고 프롬프트를 붙여 넣어 만드세요. 만든 영상은 위 영상 칸에 끌어 놓거나 [파일 올리기]로 붙이면 완성 영상이 돼요.";
 const PENDING_VIDEO = new Set(["awaiting_approval", "running", "uploading"]);
 
-/** 처음에는 지금 볼 단계 하나만 펼친다. 그 뒤는 사람이 여닫은 대로 */
-function useSteps(first: StepNo | null) {
+/** 처음에는 지금 볼 단계(영상 전이면 1·2)만 펼친다. 그 뒤는 사람이 여닫은 대로 */
+function useSteps(first: StepNo[] | null) {
   const [open, setOpen] = useState<ReadonlySet<StepNo> | null>(null);
+  const key = first?.join(",") ?? null;
   useEffect(() => {
-    if (first !== null) setOpen((prev) => prev ?? new Set([first]));
-  }, [first]);
+    if (key !== null) setOpen((prev) => prev ?? new Set(key.split(",").map(Number) as StepNo[]));
+  }, [key]);
   const toggle = (no: StepNo) => setOpen((prev) => {
     const next = new Set(prev);
     if (!next.delete(no)) next.add(no);
@@ -150,7 +151,7 @@ export function RecordDetail({ recordId }: { recordId: string }) {
   const site = promo.status;
   const videos = mine.videos;
   const facts = rec ? { render: renderStatuses(rec.render), shot_count: rec.storyboard?.shots.length ?? 0, script_scenes: rec.script?.scenes.length ?? 0 } : null;
-  const steps = useSteps(facts && videos ? defaultStep(facts, videos) : null);
+  const steps = useSteps(facts && videos ? defaultSteps(facts, videos) : null);
 
   if (!rec) {
     if (!error) return <p className="text-sm text-ink-500">불러오는 중…</p>;
@@ -216,7 +217,7 @@ export function RecordDetail({ recordId }: { recordId: string }) {
 
 /** 기록 없이 의뢰로만 만든 영상: 1·2단계는 비어 있고 3·4단계만 쓴다 */
 function VideoOnly({ videos, onChanged }: { videos: RequestVideo[]; onChanged: () => void }) {
-  const steps = useSteps(defaultStep(null, videos));
+  const steps = useSteps(defaultSteps(null, videos));
   const promo = usePromoSite();
   const site = promo.status;
   const labeled = videos.filter(canUploadToYoutube);
