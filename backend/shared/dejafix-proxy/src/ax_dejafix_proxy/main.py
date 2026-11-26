@@ -378,7 +378,8 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
                 upstream = await session.send(method, "/api/settings/zabbix", "", body)
         except httpx.HTTPError:
             return _error(502, "DEJAFIX_UNREACHABLE", "DejaFix 백엔드에 연결할 수 없습니다")
-        if upstream.status_code == 404:
+        # 옛 DejaFix는 이 경로가 없어 404, GET 전용 경로에 걸려 405가 온다. 둘 다 501로 안내한다
+        if upstream.status_code in (404, 405):
             return _error(
                 501, "DEJAFIX_TOO_OLD", "이 DejaFix는 아직 화면에서 Zabbix를 바꾸지 못해요"
             )
