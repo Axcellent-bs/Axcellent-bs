@@ -1,0 +1,9 @@
+# AXcellent(자사) 검색어 급상승(data trend_scan) 키워드 그룹. 재현 님이 채운다.
+# 비어 있으면 도메인 프로필의 씨앗 키워드를 쓴다 (캣북스 trends.toml과 같은 형식)
+[scan]
+max_seed_groups = 5      # 프로필 씨앗으로 만드는 기본 그룹 수 상한
+
+# (덮어쓰기용) 사람이 정한 기본 키워드 그룹. 예:
+# [[override.groups]]
+# name = "그룹 이름"
+# keywords = ["키워드"]
