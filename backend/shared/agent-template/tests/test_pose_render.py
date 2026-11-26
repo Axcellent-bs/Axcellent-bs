@@ -39,13 +39,17 @@ SAMPLES = [
 # 새 소품 0개).
 # 예전 값(옮기기 전 기획 렌더러 dev 5ce647db): (6875, bfe291de…) (6973, f335290d…) (7033, 22ae5b54…)
 # (6917, 3d94cb9d…), 16:9 (6921, bebfa489…)
+# 11/26 바뀐 기대값 2 (3D 그레이박스, fix/pose-svg-scene): 마네킹을 한 색 입체(캡슐 팔다리·둥근
+# 상자 몸통·코 점)로, 라벨 뒤 흰 판, 카메라 기울기 두 배 오류 고침 → 다시 찍었다. 장면이 없으면
+# 배경은 예전 격자 그대로. 직전 값: (6861, 7db32ac6…) (7026, beb6a477…) (7011, 4a41a76f…)
+# (6944, ac6dbc2d…), 16:9 (6784, e17b1926…)
 OLD_PLANNING = [
-    (6861, "7db32ac6ae599acc92db48e9ff6fcad302b22aeb917a01ff1b694b9c6a775a51"),
-    (7026, "beb6a47794c9219d9c6965f767480184f11087a5fe0a4992eef6bc6a3e0f1608"),
-    (7011, "4a41a76f86d5d1dd7462af02dc1947f4e46396ea1d4b7581adca6f9e3a78726b"),
-    (6944, "ac6dbc2d2f3bdbb96c0dd46c3c4019d156e68167320a26d657e78f86061f5473"),
+    (7915, "31ee13dfa9cba6a531e44b6463953103f564018f2af9c97978d0930b8d3c6477"),
+    (7957, "c7b4acd97fb8130e0f16ef8fd8bb426c15466325258ac9418a453dc4dcb09a35"),
+    (8089, "d52797d3d5af6d9fa04299ba1e6a9d2f393602dd766b7ec6a31d12ab20bea7bf"),
+    (7911, "2788026bda19d21ab30a3e8b79ea5640dc7af1093b66650750606a96fad29590"),
 ]
-OLD_PLANNING_16_9 = (6784, "e17b19265f217f19ce0d5a4078433b2b82ce832b90429c81989b8c1a89f0047e")
+OLD_PLANNING_16_9 = (7703, "ca92294c374ae6b0d85ce92310a5c2aca47c5870c48e9d7bbcb6ab66921b9b5b")
 PROP_COLORS = {"book": "#e2552f", "desk": "#c9a27a", "phone": "#2b2f36", "shelf": "#b98d63",
                "cup": "#f4f1ea"}  # fmt: skip
 EYE = 'fill="#333"'

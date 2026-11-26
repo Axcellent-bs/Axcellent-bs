@@ -31,7 +31,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from ax_agent_template import pose_ladder, pose_render
 from ax_agent_template.company_ai import settings_for
 from ax_agent_template.llm import LLMClient, LLMFormatError
-from ax_contracts.schemas.planning import KeyPose, VideoPlan
+from ax_contracts.schemas.planning import KeyPose, VideoPlan, VideoScene
+from planning_agent import plan_checks
 
 log = logging.getLogger(__name__)
 
@@ -259,12 +260,40 @@ def _data(plan: VideoPlan, note: str, only: int | None) -> dict[str, Any]:
     return data
 
 
-def drawn(pose: KeyPose, aspect: str) -> str:
-    """포즈 → 정리까지 마친 SVG (렌더 결과도 정리 규칙을 한 번 통과시킨다)."""
-    return sanitize_svg(pose_render.render(pose, aspect))
+def drawn(pose: KeyPose, aspect: str, scene: pose_render.Scene | None = None) -> str:
+    """포즈 → 정리까지 마친 SVG (렌더 결과도 정리 규칙을 한 번 통과시킨다).
+    11/26 scene: 장소·장면 글·camera_en (3D 그레이박스 방·가구·앵글). 없으면 예전 격자."""
+    return sanitize_svg(pose_render.render(pose, aspect, scene))
 
 
-def apply(plan: VideoPlan, got: _PoseOut, only: int | None = None) -> tuple[VideoPlan, int]:
+def scene_of(s: VideoScene) -> pose_render.Scene:
+    """장면 → 렌더러 장면 (장소 place_ko, 장소 낱말을 찾을 글, 앵글을 읽을 camera_en)."""
+    return pose_render.Scene(place=s.place_ko, camera=s.camera_en,
+                             text=" ".join((s.visual, s.start_frame, s.end_frame)))  # fmt: skip
+
+
+def company_name() -> str:
+    """지금 회사 이름 (엔드카드 판정용). video_plan이 이 모듈을 import해서 여기서 늦게 부른다."""
+    from planning_agent import video_plan  # noqa: PLC0415 - 순환 import를 피한다
+
+    return video_plan.company_name()
+
+
+def is_end_card(s: VideoScene, company: str) -> bool:
+    """11/26 엔드카드 장면 (채널 이름·로고뿐, 사람 낱말 없음): 콘티를 사람 없이 그린다."""
+    return plan_checks.end_card_scene(s.visual, company)
+
+
+def scene_svg(pose: KeyPose, s: VideoScene, aspect: str, company: str) -> str:
+    """장면 한 칸 SVG: 엔드카드면 어두운 판 + "엔드카드"만, 아니면 방·가구·마네킹."""
+    if is_end_card(s, company):
+        return sanitize_svg(pose_render.end_card(aspect))
+    return drawn(pose, aspect, scene_of(s))
+
+
+def apply(
+    plan: VideoPlan, got: _PoseOut, only: int | None = None, company: str = ""
+) -> tuple[VideoPlan, int]:
     """LLM 포즈를 코드로 그려 장면에 넣는다. (새 제작안, 바뀐 장면 수). 포즈가 없는 칸은 그대로."""
     by_n = {f.n: f for f in got.scenes}
     changed = 0
@@ -274,13 +303,14 @@ def apply(plan: VideoPlan, got: _PoseOut, only: int | None = None) -> tuple[Vide
         if f is None or (only is not None and s.n != only):
             scenes.append(s)
             continue
-        # 11/26 라벨 시각은 장면 시각으로 코드가 붙이고, 장면 글의 마이크 같은 낱말은 소품으로
+        # 11/26 라벨 시각은 장면 시각(첫 칸 start_s, 끝 칸 end_s)으로 코드가 붙이고, 장면 글의
+        # 마이크 같은 낱말은 소품·"소파"는 앉은 자세로
         head = f"{s.visual} {s.prompt}"
         start = key_pose(f.start, "", s.start_s, f"{head} {s.start_frame}") if f.start else None
         end = key_pose(f.end, "", s.end_s, f"{head} {s.end_frame}") if f.end else None
         update: dict[str, Any] = {}
         for key, pose in (("start", start), ("end", end)):
-            svg = drawn(pose, plan.aspect) if pose else ""
+            svg = scene_svg(pose, s, plan.aspect, company) if pose else ""
             if pose and svg:
                 update[f"{key}_pose"], update[f"{key}_svg"] = pose, svg
         if update:
@@ -325,8 +355,9 @@ def _drawn_ns(plan: VideoPlan) -> set[int]:
 
 
 async def draw(
-    llm: Any, plan: VideoPlan, context_id: str, note: str = "", only: int | None = None
-) -> tuple[VideoPlan, int]:
+    llm: Any, plan: VideoPlan, context_id: str, note: str = "", only: int | None = None,
+    company: str | None = None,
+) -> tuple[VideoPlan, int]:  # fmt: skip
     """장면별 첫·끝 포즈를 받아 3D 마네킹 콘티로 그린다. (제작안, 바뀐 장면 수).
 
     11/26 실패 사다리(공용 `pose_ladder`): 1단 전 장면 한 번(성공하면 호출 1번 그대로) → 실패하면
@@ -353,11 +384,12 @@ async def draw(
     res = await pose_ladder.ladder(ids, whole, one, client, timeout=TIMEOUT_SECONDS,
                                    where="마네킹 콘티",
                                    base_llm=lambda: base_pose_llm(client))  # fmt: skip
-    out, changed = apply(plan, _PoseOut(scenes=list(res.got.values())), only)
+    name = company_name() if company is None else company
+    out, changed = apply(plan, _PoseOut(scenes=list(res.got.values())), only, name)
     missing = [n for n in ids if n not in _drawn_ns(out)]
     rule_changed = 0
     if missing:
-        out, rule_changed = apply(out, _PoseOut(scenes=_rule_frames(out, missing)), only)
+        out, rule_changed = apply(out, _PoseOut(scenes=_rule_frames(out, missing)), only, name)
     elapsed = time.monotonic() - started
     total = changed + rule_changed
     if not total:

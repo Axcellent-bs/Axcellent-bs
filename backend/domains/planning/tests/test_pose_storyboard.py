@@ -142,7 +142,13 @@ def test_llm_poses_fill_svg_and_pose_with_one_call() -> None:
 
         assert s.start_pose == timed(SAMPLES[i % 4], s.start_s)
         assert s.end_pose == timed(SAMPLES[(i + 1) % 4], s.end_s)
-        assert s.start_svg == sb.sanitize_svg(pr.render(s.start_pose, plan.aspect))
+        # 11/26 바뀐 기대값: 장면(장소·글·camera_en)을 같이 넘겨 그리고, 엔드카드 장면은 사람 없이
+        scene = sb.scene_of(s)
+        if sb.is_end_card(s, sb.company_name()):
+            assert s.start_svg == sb.sanitize_svg(pr.end_card(plan.aspect))
+            assert "<radialGradient" not in s.start_svg and pr.END_CARD_TEXT in s.start_svg
+            continue
+        assert s.start_svg == sb.sanitize_svg(pr.render(s.start_pose, plan.aspect, scene))
         assert "<radialGradient" in s.start_svg and s.end_svg
     # 장면 글은 그대로
     words = [(s.visual, s.prompt) for s in plan.scenes]
