@@ -948,6 +948,9 @@ REQUEST_RULE = (
     "ending(마지막 장면)·setting(배경)·prop(소품)·action(동작)·look(외형) 중 하나, "
     "text_ko는 그 지시 (한국어, "
     "120자 이내)\n"
+    "  - text_ko에는 의뢰문의 지시만 쓰고 코드 설명·괄호를 붙이지 않는다. look은 의뢰문에 외형 "
+    "묘사(머리·옷·안경·색 등)가 있을 때만 만든다(\"회사 캐릭터가 …\"처럼 가리키기만 하면 만들지 "
+    "않는다)\n"
     "  - 의뢰 지시가 위 기본 틀과 부딪히면 의뢰가 이긴다: ending 지시가 있으면 마지막 장면을 "
     "엔드카드만으로 두지 않고 그 장면을 쓴다(회사 이름 엔드카드는 코드가 마지막 2초에 얹는다). "
     "quote는 그 문장을 어떤 장면 caption에 글자 그대로 쓴다(마지막 대사면 마지막 장면 caption)\n"
@@ -970,6 +973,10 @@ def _rules(p: Proposal, got: _PlanOut, note: bool = False) -> list[dict[str, str
     )
     if dropped and note:
         log.info("영상 제작안 의뢰 지시 버림: %s %d건", plan_checks.QUOTE_NOT_IN_REQUEST, dropped)
+    # 11/26 I: 의뢰문에 외형 묘사가 없는 look은 버린다 (회사 캐릭터를 골랐으면 "회사 캐릭터" 한 줄)
+    rules, looks = plan_checks.real_looks(rules, p.request_text, bool(cast_fields(p)))
+    if looks and note:
+        log.info("영상 제작안 의뢰 지시 버림: %s %d건", plan_checks.LOOK_NOT_IN_REQUEST, looks)
     return rules
 
 

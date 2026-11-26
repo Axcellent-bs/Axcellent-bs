@@ -106,8 +106,19 @@ def scene_span(ns: list[int]) -> str:
     return "장면 " + ", ".join(str(n) for n in ns)
 
 
+# 11/26 I: 지시 글 끝에 붙은 코드 설명 "(코드가 마지막 2초에 엔드카드로 얹음)"·"[…]"은 연출이 아니다
+_PAREN = re.compile(r"\([^()]*\)|\[[^\[\]]*\]|（[^（）]*）")
+
+
+def drop_parens(text: str) -> str:
+    """괄호 안 설명((…)·[…])을 뺀 글 (공백 정리)."""
+    return " ".join(_PAREN.sub(" ", text or "").split())
+
+
 def clean_rules(raw: Sequence[Any] | None) -> list[dict[str, str]]:
-    """LLM이 뽑은 지시 → {kind, text_ko} (모르는 종류·빈 글 버림, 같은 글 하나, 최대 6)."""
+    """LLM이 뽑은 지시 → {kind, text_ko} (모르는 종류·빈 글 버림, 같은 글 하나, 최대 6).
+
+    대사(quote)가 아닌 지시는 괄호 안 설명을 뺀다(11/26 I). 대사는 글자 그대로 둔다."""
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for r in raw or []:
@@ -115,7 +126,8 @@ def clean_rules(raw: Sequence[Any] | None) -> list[dict[str, str]]:
         text = getattr(r, "text_ko", None)
         if text is None and isinstance(r, dict):
             text = r.get("text_ko")
-        text = " ".join(str(text or "").split())[:RULE_TEXT_MAX]
+        text = " ".join(str(text or "").split())
+        text = (text if kind == "quote" else drop_parens(text) or text)[:RULE_TEXT_MAX]
         key = bare(text)
         if kind not in RULE_KINDS or not key or key in seen:
             continue
@@ -137,6 +149,54 @@ def real_quotes(
     request = bare(request_text)
     kept = [r for r in rules if r["kind"] != "quote" or (request and bare(r["text_ko"]) in request)]
     return kept, len(rules) - len(kept)
+
+
+# 11/26 I (운영 PROP-42): 의뢰문은 "회사 캐릭터가 …"뿐인데 LLM이 기본 캐릭터 이름으로
+# "원본 일러스트 회사 캐릭터 등장"(look)을 만들어 ✕가 됐다. 외형 지시는 의뢰문에 실제 묘사 낱말이
+# 있고 지시 글도 그 낱말을 쓸 때만 받는다 (R과 같은 방식: 의뢰문 근거가 없으면 버림).
+# "눈"(눈 오는)·"귀"(귀여운)처럼 외형이 아닌 뜻이 흔한 낱말은 넣지 않는다
+LOOK_WORDS = (
+    "머리", "앞머리", "생머리", "단발", "곱슬", "포니테일", "안경", "선글라스", "모자",
+    "비니", "옷", "니트", "셔츠", "티셔츠", "원피스", "치마", "스커트", "바지", "청바지",
+    "코트", "패딩", "재킷", "자켓", "후드", "목도리", "스카프", "장갑", "신발", "운동화",
+    "부츠", "얼굴", "수염", "피부", "머리띠", "리본", "앞치마", "교복", "정장", "가방",
+    "빨간", "빨강", "파란", "파랑", "노란", "노랑", "초록", "검은", "검정", "하얀", "흰",
+    "분홍", "핑크", "보라", "주황", "갈색", "회색",
+    "hair", "glasses", "hat", "beanie", "shirt", "dress", "skirt", "jeans", "coat", "jacket",
+    "hoodie", "scarf", "gloves", "boots", "beard", "red", "blue", "yellow", "green", "black",
+    "white", "pink", "purple", "orange", "brown",
+)  # fmt: skip
+LOOK_NOT_IN_REQUEST = "look_not_in_request"  # 버린 look 로그 이유 코드
+# 회사 캐릭터를 골랐을 때 캐릭터를 가리키기만 하는 외형 지시 (고르기 단계가 지킨다)
+COMPANY_LOOK_KO = "회사 캐릭터"
+COMPANY_LOOK_WHERE = "고른 회사 캐릭터(코드)"
+
+
+def look_words(text: str) -> set[str]:
+    """외형 묘사 낱말. 영어는 낱말 경계로 본다 (hat ≠ what)."""
+    low = (text or "").lower()
+    english = set(_WORD.findall(low))
+    return {w for w in LOOK_WORDS if (w in english if w.isascii() else w in low)}
+
+
+def real_looks(
+    rules: list[dict[str, str]], request_text: str, company_character: bool = False
+) -> tuple[list[dict[str, str]], int]:
+    """의뢰문에 외형 묘사가 있는 look만 남긴다. 돌려주는 값: (남긴 지시, 버린 look 수).
+
+    company_character: 회사 캐릭터를 골랐으면 근거 없는 look은 버리지 않고 "회사 캐릭터" 한 줄로
+    (고른 회사 캐릭터가 지킨다, `check_rule`이 kept). 그런 줄은 하나만."""
+    asked = look_words(request_text)
+    out: list[dict[str, str]] = []
+    dropped = 0
+    for r in rules:
+        if r["kind"] != "look" or look_words(r["text_ko"]) & asked:
+            out.append(r)
+        elif company_character and not any(x["text_ko"] == COMPANY_LOOK_KO for x in out):
+            out.append({"kind": "look", "text_ko": COMPANY_LOOK_KO})
+        else:
+            dropped += 1
+    return out, dropped
 
 
 # 광고 금칙어(성과 과장·인력 대체). 마케팅 sns.FORBIDDEN_CLAIM_PATTERNS와 같은 값이고, 마케팅
@@ -180,9 +240,11 @@ END_CARD_FILLER = (
 
 
 def end_card_only(text: str, company: str = "") -> bool:
-    """회사·채널 이름·로고·엔드카드를 끝에 넣으라는 말뿐인가 (남는 연출 낱말이 없음)."""
+    """회사·채널 이름·로고·엔드카드를 끝에 넣으라는 말뿐인가 (남는 연출 낱말이 없음).
+
+    괄호 안 설명은 빼고 본다(11/26 I: "(코드가 마지막 2초에 엔드카드로 얹음)")."""
     names = [w for w in keywords(company) if w]
-    words = keywords(text)
+    words = keywords(drop_parens(text))
     marks = [w for w in words if w in names or any(w.startswith(m) for m in END_CARD_MARKS)]
     rest = [w for w in words if w not in marks
             and not any(w.startswith(f) for f in END_CARD_FILLER)]  # fmt: skip
@@ -217,6 +279,8 @@ def check_rule(
         return False, BLOCKED_WHERE
     if kind == "ending" and end_card_only(text, company):
         return True, END_CARD_WHERE
+    if kind == "look" and text == COMPANY_LOOK_KO:  # real_looks가 회사 캐릭터를 골랐을 때만 만든다
+        return True, COMPANY_LOOK_WHERE
     if kind == "quote":
         want = bare(text)
         for s in scenes:
