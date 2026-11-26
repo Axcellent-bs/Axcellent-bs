@@ -311,6 +311,7 @@ def _pick(value: str, table: dict[str, tuple[str, str]], fallback: str) -> str:
 def build_output(
     read: StoryRead, character: str | None, style: str, count: int, end_card_hint: bool = False,
     aspect: str | None = None, starts: dict[int, float] | None = None, rule_poses: bool = False,
+    detailed: bool = False,
 ) -> StoryboardPromptOutput:
     """LLM 장면으로 칸·구도·프롬프트를 조립한다. 샷 이름과 영어 구도 문장은 코드 표에서만 나온다.
 
@@ -322,7 +323,11 @@ def build_output(
     (칸 글에 "엔드 카드"·"채널 이름", 또는 `end_card_hint` = 대본 끝 장면이 엔드카드)면 배경만.
 
     그림체는 입력값 → 줄거리에서 읽은 값 → 기본값 순서로 고른다.
+
+    11/26 `detailed`(의뢰 흐름, 기획 장면 칸을 다 씀): 시트 프롬프트 칸 줄을 덜 자른다
+    (동작·장소·첫 화면·소품이 잘려 빠지지 않게. 전체 상한 12000자는 그대로).
     """
+    subject_n, setting_n = (600, 260) if detailed else (200, 120)
     style = style or _cut(read.style_en, MAX_STYLE_EN) or DEFAULT_STYLE
     loose = [s for s in read.shots if _cut(s.scene_ko, 200)]
     if len(loose) < count:
@@ -367,7 +372,7 @@ def build_output(
         )
         # 11/26: 장면 말에서 샷 크기·비율 말을 지우고 단어 경계로 자른다 (칸 샷 크기는 size_en 하나)
         what = ", ".join(
-            x for x in (scene_words(s.subject_en, 200), scene_words(s.setting_en, 120),
+            x for x in (scene_words(s.subject_en, subject_n), scene_words(s.setting_en, setting_n),
                         scene_words(s.light_en, 80)) if x
         )  # fmt: skip
         lines.append(f"Panel {no}: {size_en}, {angle_en} — {what or scene}.")
