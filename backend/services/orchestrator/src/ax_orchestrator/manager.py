@@ -20,6 +20,7 @@ from ax_contracts.schemas import (
     TaskCompletedData,
     TaskProgressData,
 )
+from ax_orchestrator import request_tasks
 from ax_orchestrator.agent_diagnoses import AgentDiagnoses
 from ax_orchestrator.engine import Engine, ReviewOutcome, incident_metrics
 from ax_orchestrator.finance_opinions import FinanceOpinions
@@ -30,6 +31,7 @@ from ax_orchestrator.request_inbox import RequestEscalation
 from ax_orchestrator.request_intake import RequestIntake
 from ax_orchestrator.request_runner import RequestRunner
 from ax_orchestrator.resolved_log import log_resolved
+from ax_orchestrator.rollback_status import read_rollback_status
 from ax_orchestrator.store import IncidentStore
 from ax_orchestrator.work_requests import WorkRequests
 
@@ -166,7 +168,16 @@ class IncidentManager:
         self.work_requests = WorkRequests(store)
         self.request_intake = RequestIntake(self.work_requests)  # 대화로 온 의뢰를 분류·접수
         # 접수된 의뢰를 첫 부서부터 시키는 실행기. 엔진은 부서를 바꿔 끼울 수 있어 그때그때 읽는다
-        self.request_runner = RequestRunner(self.work_requests, lambda: self.engine)
+        self.request_runner = RequestRunner(
+            self.work_requests,
+            lambda: self.engine,
+            # 11/26 롤백 상태 읽기: 이 회사 매니저의 사건 기록만 읽는다(읽기 전용, 부서 호출 없음)
+            self_reads={
+                request_tasks.ROLLBACK_STATUS_SKILL: lambda _row: read_rollback_status(
+                    self.incidents.values()
+                )
+            },
+        )
         self.request_intake.on_task = self.request_runner.start
         # 사람에게 넘길 의뢰는 사람 받은 요청에 올린다(올리는 함수는 서버가 켜질 때 붙인다)
         self.request_escalation = RequestEscalation(self.work_requests)

@@ -119,6 +119,8 @@ RESET_STEP: dict[str, Any] = {
 Notifier = Callable[[str, str], None]
 Escalator = Callable[[str, str, str | None], None]
 ScopeCheck = Callable[[dict[str, Any], dict[str, Any]], bool]
+# 총괄이 자기 기록을 읽기만 하는 단계(`kind="self"`)의 읽기 함수: skill 이름 → (의뢰 줄) → 결과
+SelfRead = Callable[[dict[str, Any]], dict[str, Any]]
 OUT_OF_SCOPE = "out_of_scope"
 
 
@@ -168,7 +170,11 @@ class RequestRunner:
         escalate: Escalator | None = None,
         scope_check: ScopeCheck = in_catalog,
         clock: Callable[[], datetime] = now,
+        self_reads: dict[str, SelfRead] | None = None,
     ) -> None:
+        # 부서를 부르지 않고 총괄이 읽는 읽기 전용 단계(11/26 롤백 상태).
+        # 여기 없는 skill이면 실패로 닫는다
+        self._self_reads = self_reads or {}
         self._clock = clock
         self._requests = requests
         self._get_engine = get_engine
@@ -315,6 +321,9 @@ class RequestRunner:
                 finished_at=stamp(),
             )
             return
+        if spec.get("kind") == request_tasks.SELF_KIND:
+            self._run_self(rid, step_id, spec, row)
+            return
         engine = self._get_engine()
         entry = engine.registry.find(spec["skill"]) if engine else None
         if engine is not None and entry is not None and entry.dept != spec.get("dept"):
@@ -416,6 +425,45 @@ class RequestRunner:
         self._update(rid, step_id, status="running", grade=grade, started_at=stamp())
         result = await self._call(engine, row, spec, entry.dept, step_id, payload, grade)
         self._apply(rid, step_id, result, spec)
+
+    def _run_self(self, rid: str, step_id: str, spec: dict[str, Any], row: dict[str, Any]) -> None:
+        """총괄이 자기 기록을 읽는 읽기 전용 단계. 부서·`execute()`를 부르지 않고 번호만 남긴다."""
+        stamp = now().isoformat
+        read = self._self_reads.get(spec.get("skill") or "")
+        task = request_tasks.get(row.get("task"))
+        listed = next(  # 일 목록의 단계가 읽기 등급일 때만(계획 기록에는 등급이 없다)
+            (
+                st
+                for st in (task.steps if task else ())
+                if st.kind == request_tasks.SELF_KIND and st.skill == spec.get("skill")
+            ),
+            None,
+        )
+        if read is None or listed is None or listed.grade != request_tasks.READ_GRADE:
+            self._update(
+                rid,
+                step_id,
+                status="failed",
+                reason_code=NO_AGENT,
+                note="총괄이 읽을 수 있는 읽기 단계가 아니라 시키지 않았다",
+                started_at=stamp(),
+                finished_at=stamp(),
+            )
+            return
+        self._update(rid, step_id, status="running", started_at=stamp())
+        try:
+            out = read(row)
+        except Exception:  # noqa: BLE001 - 읽기 실패는 이 단계만 실패로 닫는다
+            log.exception("총괄 읽기 단계 실패: %s/%s", rid, step_id)
+            self._update(
+                rid,
+                step_id,
+                status="failed",
+                note="사건 기록을 읽지 못했다",
+                finished_at=stamp(),
+            )
+            return
+        self._complete(rid, step_id, spec, out, "사건 기록 읽기")
 
     # ---- 부서 호출 ----------------------------------------------------------------
     @staticmethod
