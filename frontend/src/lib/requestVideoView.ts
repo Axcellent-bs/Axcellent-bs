@@ -1,7 +1,7 @@
 // 의뢰로 만든 영상(홍보 영상 의뢰 wr_… → SNS 초안 reel)의 순수 계산. node --test (requestVideoView.test.ts).
 // 환경 값(env)에 기대지 않는 것만 둔다. 읽기·주소는 lib/requestVideos.ts.
 // 화면은 제작 기록(/marketing/records)의 작업 목록과 상세에 둔다(11/26, 탭을 없앴다. ?request=wr_…는 그 작업 상세).
-// 영상마다 회사 유튜브 올리기(사람 승인 C)를 할 수 있다. Instagram 게시 승인은 기획안 카드의 승인 패널 그대로다.
+// 영상마다 회사 유튜브·인스타 릴스 올리기(사람 승인 C)를 할 수 있다. 대화방 의뢰 카드에서도 같은 칸을 연다(11/26).
 import type { WorkRequestRow } from "./workRequests.ts";
 import type { InstagramPostState } from "./instagramPost.ts";
 import type { YoutubeState } from "./youtube.ts";
@@ -148,3 +148,17 @@ export function focusDraftId(items: Pick<RequestVideo, "post_draft_id" | "reques
 
 /** 유튜브 칸을 보여 줄 수 있나: AI 표시를 입힌 영상(재생되는 영상)만 올릴 수 있다 */
 export const canUploadToYoutube = (v: Pick<RequestVideo, "labeled" | "preview_path" | "status">): boolean => videoPane(v).kind === "play";
+
+/** 대화방 의뢰 카드의 "어디에 올릴까요?" 버튼 (11/26). 채널마다 지금 상태 한 마디(아직 안 했으면 null) */
+export type PublishChannel = "youtube" | "instagram";
+const CHANNEL_STATUS_KO: Record<string, string> = {
+  draft: "초안", awaiting_approval: "사람 승인 대기", uploading: "올리는 중", posting: "올리는 중",
+  done: "올림", failed: "실패", rejected: "거절됨", blocked: "막힘",
+};
+export const PUBLISH_CHANNELS: { key: PublishChannel; label: string }[] = [
+  { key: "youtube", label: "유튜브" }, { key: "instagram", label: "인스타그램 (릴스)" },
+];
+export function publishStatusKo(v: Pick<RequestVideo, "youtube" | "instagram">, channel: PublishChannel): string | null {
+  const status = (channel === "youtube" ? v.youtube : v.instagram)?.status;
+  return status ? CHANNEL_STATUS_KO[status] ?? status : null;
+}
