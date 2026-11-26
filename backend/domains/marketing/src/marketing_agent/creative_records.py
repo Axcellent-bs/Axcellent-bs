@@ -399,6 +399,22 @@ class CreativeRecords:
             ).fetchall()
         return sorted(rows, key=lambda r: str(json.loads(r["brand"]).get("marked_at") or ""))
 
+    def _preview_part(
+        self, record_id: str, sheet: dict[str, Any], render: dict[str, Any]
+    ) -> str | None:
+        """미리보기 칸 (11/26 A): 만든 캐릭터 시트 → "sheet_image", 원본만 있으면 "original_image"
+        (화면 "원본 사진 (시트 아직 없음)" + [캐릭터 시트 만들기]), 없으면 None.
+
+        예전 기록(원본이 시트 그림 자리)은 원본 칸으로 복사해 둔다(파일은 지우지 않는다)."""
+        from marketing_agent import creative_render as _render
+
+        rec = {"sheet": sheet, "render": render}
+        if _render.legacy_original(rec) and _render.move_legacy_original(record_id, rec):
+            rec["render"] = self.get_render(record_id)
+        if _render.sheet_ready(rec):
+            return "sheet_image"
+        return "original_image" if _render.original_part(rec) == _render.ORIGINAL_PART else None
+
     def brand_characters(self) -> list[dict[str, Any]]:
         """이 회사의 대표 캐릭터. 마지막에 표시한 것(기본)부터."""
         rows = list(reversed(self._brand_rows()))
@@ -407,14 +423,14 @@ class CreativeRecords:
             brand = json.loads(r["brand"])
             sheet = json.loads(r["sheet"])
             render = json.loads(r["render"]) if r["render"] else {}
-            done = (render.get("sheet_image") or {}).get("status") == "done"
+            preview = self._preview_part(r["record_id"], sheet, render)
             name = str(sheet.get("summary_ko") or r["note"] or r["record_id"])
             out.append(
                 {
                     "record_id": r["record_id"],
                     "name": " ".join(name.split())[:MAX_BRAND_NAME],
                     "thumbnail_base64": r["thumbnail"],
-                    "preview_part": "sheet_image" if done else None,
+                    "preview_part": preview,
                     "kind": upload_kind(sheet),
                     "references": references_of(sheet),
                     "saved_at": brand.get("marked_at") or "",

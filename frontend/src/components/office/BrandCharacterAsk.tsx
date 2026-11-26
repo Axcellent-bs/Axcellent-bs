@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { ACCEPT, makeCharacterSheet, shrinkExtra, shrinkImage, shrinkReference, type ExtraLabel } from "@/lib/characterSheet";
 import { MULTI_HINT, buildExtras, referenceChip, slotsFor } from "@/lib/characterRefs";
 import { listBrandCharacters, markBrandCharacter, type BrandCharacter } from "@/lib/brandCharacters";
-import { thumbSrc } from "@/lib/creativeRecords";
+import { redrawBoardImage, thumbSrc } from "@/lib/creativeRecords";
+import { brandSheetState } from "@/lib/sheetState";
 import { orchestrator } from "@/lib/orchestrator";
 import {
   CHARACTER_NOTE, CHARACTER_QUESTION, KIND_OPTIONS, PLAN_OUTDATED_LINE, RIGHTS_HINT, RIGHTS_LABEL, SPACE_NOTE,
@@ -133,17 +134,34 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
       .finally(() => setBusy(false));
   };
 
+  // 11/26 A: 가상 인물·일러스트 카드에 시트 상태와 [캐릭터 시트 만들기 · 약 1.5 크레딧](기존 다시 그리기 경로)
+  const [sheetBusy, setSheetBusy] = useState<string | null>(null);
+  const makeSheet = (recordId: string) => {
+    setSheetBusy(recordId);
+    redrawBoardImage(recordId)
+      .then(() => loadSaved(true).then(setSaved, () => undefined))
+      .catch((e: unknown) => setError(errText(e)))
+      .finally(() => setSheetBusy(null));
+  };
+
   const savedCard = (c: BrandCharacter) => {
     const src = thumbSrc(c.thumbnail_base64);
+    const sheet = brandSheetState(c.preview_part, c.kind);
     return (
-      <div className="flex items-center gap-2.5 rounded-xl border border-ink-100 bg-surface p-2">
+      <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-ink-100 bg-surface p-2">
         {src ? <img src={src} alt="" className="h-11 w-11 shrink-0 rounded-lg object-contain" /> : <span className="h-11 w-11 shrink-0 rounded-lg bg-ink-100" aria-hidden="true" />}
         <span className="min-w-0 flex-1">
           <b className="block truncate text-[13px] text-ink-900">{c.name}</b>
           {c.kind === "virtual_human" && <span className="chip text-[11px]">{VIRTUAL_HUMAN_LABEL}</span>}
           {referenceChip(c) && <span className="chip ml-1 text-[11px]">{referenceChip(c)}</span>}
           <small className="block truncate text-xs tabular-nums text-ink-500">{savedLine(c)}</small>
+          {sheet.button && <small className={`block text-xs ${sheet.hasSheet ? "text-ink-500" : "text-amber-800"}`}>{sheet.title}</small>}
         </span>
+        {sheet.button && (
+          <button type="button" className="btn-ghost shrink-0 text-xs" disabled={sheetBusy === c.record_id} onClick={() => makeSheet(c.record_id)}>
+            {sheetBusy === c.record_id ? "요청하는 중…" : sheet.button}
+          </button>
+        )}
       </div>
     );
   };

@@ -68,35 +68,63 @@ def _cut(text: Any, n: int) -> str:
 
 
 # ---------------------------------------------------------------- 영상 준비: 기록 복사 + 스토리보드
-def _copy_sheet_image(brand_id: str, record_id: str) -> None:
-    """대표 캐릭터의 시트 그림이 있으면 의뢰 기록으로 파일째 복사한다(다시 만들지 않는다)."""
-    store = _creative.store()
-    if (store.get_render(record_id).get("sheet_image") or {}).get("status") == "done":
-        return
-    item = store.get_render(brand_id).get("sheet_image") or {}
-    asset = item.get("asset")
-    if item.get("status") != "done" or asset not in _render.UPLOAD_FILES["sheet_image"]:
-        return
-    source = _render._dir(brand_id) / str(asset)  # noqa: SLF001 - 같은 모듈 묶음의 파일 자리
-    target = _render._dir(record_id) / str(asset)  # noqa: SLF001
+def _copy_file(brand_id: str, record_id: str, name: str, target_name: str) -> bool:
+    source = _render._dir(brand_id) / name  # noqa: SLF001 - 같은 모듈 묶음의 파일 자리
+    target = _render._dir(record_id) / target_name  # noqa: SLF001
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
     except OSError:
-        logger.warning("대표 캐릭터 시트 그림 복사 실패: %s → %s", brand_id, record_id)
+        logger.warning("대표 캐릭터 그림 복사 실패: %s → %s (%s)", brand_id, record_id, name)
+        return False
+    return True
+
+
+SHEET_MISSING = "sheet_missing"  # 의뢰 기록 render.sheet_image 표시: 회사 캐릭터에 시트가 아직 없음
+
+
+def _copy_sheet_image(brand_id: str, record_id: str) -> None:
+    """대표 캐릭터의 시트 그림·원본을 의뢰 기록으로 파일째 복사한다(다시 만들지 않는다).
+
+    11/26 A: 만든 캐릭터 시트가 있으면 그것을 시트 칸에, 올린 원본(가상 인물·일러스트)은 원본 칸에
+    (영상 참조는 지금처럼 원본). 시트가 없으면 원본을 시트 칸에도 두고(예전과 같은 흐름) 기록에
+    `sheet_missing`을 남긴다(화면 "회사 캐릭터에 시트를 먼저 만들면 스토리보드가 정확해져요")."""
+    store = _creative.store()
+    if (store.get_render(record_id).get("sheet_image") or {}).get("status") == "done":
         return
-    _render._set(  # noqa: SLF001
-        record_id,
-        "sheet_image",
-        status="done",
-        error=None,
-        asset=asset,
-        sha256=item.get("sha256"),
-        source="brand_copy",
-        copied_from=brand_id,
-        # 올린 원본(가상 인물·일러스트)을 복사한 것이면 영상 참조로 쓸 수 있다(video_reference)
-        original=item.get("source") == _render.ORIGINAL_SOURCE,
-    )
+    brand = store.get(brand_id) or {}
+    render = brand.get("render") or {}
+    opart = _render.original_part(brand)
+    original = render.get(opart) or {} if opart else {}
+    oname = str(original.get("asset") or "")
+    otarget = oname.replace("sheet", "original")
+    if opart and _copy_file(brand_id, record_id, oname, otarget):
+        _render._set(  # noqa: SLF001
+            record_id, _render.ORIGINAL_PART, status="done", error=None, asset=otarget,
+            sha256=original.get("sha256"), source="brand_copy", copied_from=brand_id,
+        )  # fmt: skip
+    if _render.sheet_ready(brand):
+        item = render.get("sheet_image") or {}
+        asset = str(item.get("asset") or "")
+        if asset in _render.UPLOAD_FILES["sheet_image"] and _copy_file(brand_id, record_id,
+                                                                         asset, asset):  # fmt: skip
+            _render._set(  # noqa: SLF001
+                record_id, "sheet_image", status="done", error=None, asset=asset,
+                sha256=item.get("sha256"), source="brand_copy", copied_from=brand_id,
+                original=False,
+            )  # fmt: skip
+        return
+    if not opart:
+        return
+    # 시트가 아직 없음: 원본을 시트 칸에도 (스토리보드 그림 참조, 예전과 같은 흐름)
+    sname = oname.replace("original", "sheet")
+    if sname in _render.UPLOAD_FILES["sheet_image"] and _copy_file(brand_id, record_id, oname,
+                                                                     sname):  # fmt: skip
+        _render._set(  # noqa: SLF001
+            record_id, "sheet_image", status="done", error=None, asset=sname,
+            sha256=original.get("sha256"), source="brand_copy", copied_from=brand_id,
+            original=True, **{SHEET_MISSING: True},
+        )  # fmt: skip
 
 
 EXTRA_REF_INDEXES = (1, 2, 3)  # 추가 참조 번호 (creative_render.save_extra와 같은 범위)
@@ -263,7 +291,10 @@ async def _ensure_images(
     meta = request.meta
     cid = _render.request_company(meta)
     sheet = await _wait_part(record_id, "sheet_image")
-    if sheet.get("status") != "done":
+    # 11/26 A: 가상 인물·일러스트 원본이 있으면 여기서 시트 그림을 새로 그리지 않는다(사람이 누르는
+    # [캐릭터 시트 만들기]에서만 그린다). 스토리보드·영상 참조는 지금처럼 원본
+    has_original = _render.original_part(_creative.store().get(record_id) or rec) is not None
+    if sheet.get("status") != "done" and not has_original:
         via = _render.route(cid)
         _render._log_route(via, cid, "sheet_image", record_id)  # noqa: SLF001
         why = _render.configured("image", via, cid)
