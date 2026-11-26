@@ -120,13 +120,21 @@ DEPLOYMENT_FIELDS = (
 
 
 async def latest_deployments() -> list[dict[str, Any]]:
-    """서비스별 지금 돌고 있는 배포 (인프라가 받아 둔 이력). 이력이 없는 서비스는 목록에 없다."""
+    """서비스별 지금 돌고 있는 배포 (인프라가 받아 둔 이력). 이력이 없는 서비스는 목록에 없다.
+
+    로그인 세션의 회사를 `X-AX-Company`로 실어 인프라가 그 회사 배포 이력만 주게 한다
+    (11/26 회사 분리).
+    세션이 없으면 싣지 않는다(인프라가 설치 회사 이력을 준다, 예전 그대로)."""
+    from ax_agent_template import company_scope
+    from ax_agent_template.company_connection import CALLER_COMPANY_HEADER
+    from ax_dashboard_api.envelope import session_company
+
     token = config.agent_token(AGENT_NAME)
-    data = await _get(
-        "incident",
-        "/api/infra/deployments/latest",
-        headers={"Authorization": f"Bearer {token}"},
-    )
+    headers = {"Authorization": f"Bearer {token}"}
+    company = session_company()
+    if company:
+        headers[CALLER_COMPANY_HEADER] = company_scope.scope_id(company)
+    data = await _get("incident", "/api/infra/deployments/latest", headers=headers)
     if not isinstance(data, list):
         raise ApiError(502, "UPSTREAM_ERROR", "incident 응답 형식이 다르다")
     return [{k: row.get(k) for k in DEPLOYMENT_FIELDS} for row in data if isinstance(row, dict)]

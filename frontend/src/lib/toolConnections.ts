@@ -1,5 +1,6 @@
 import { ApiError } from "./apiError";
 import { DASHBOARD_API_URL, dashboardAuth } from "./env";
+import { SESSION_HEADER, sessionReadAuth } from "./humanToken";
 
 // 시스템 관리 > 도구 연결: GitHub 앱·배포 도구(GitHub Actions·Jenkins)·DejaFix 연결. dashboard-api `tool_connections.py`.
 // 연결은 공용 보관함 한 곳에 두고 인프라 AI·개발 AI·DejaFix 프록시가 재시작 없이 읽는다. 읽기·쓰기 모두 사람 토큰이 필요하다(dashboardAuth).
@@ -72,10 +73,16 @@ export class ToolCheckError extends ApiError {
 
 const PATH = "/api/dashboard/tool-connections";
 
+/** 로그인 세션을 회사 고르기용 머리(`X-AX-Session`)로 같이 싣는다(11/26 회사 분리). 권한은 Authorization 그대로 */
+function sessionCompanyHeader(): Record<string, string> {
+  const session = sessionReadAuth()[SESSION_HEADER];
+  return session ? { [SESSION_HEADER]: session } : {};
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${DASHBOARD_API_URL}${path}`, {
     method,
-    headers: { "Content-Type": "application/json", ...dashboardAuth() },
+    headers: { "Content-Type": "application/json", ...dashboardAuth(), ...sessionCompanyHeader() },
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
   });

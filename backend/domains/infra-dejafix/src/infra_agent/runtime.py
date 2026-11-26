@@ -1,5 +1,8 @@
 """프로세스 안의 상태 하나: 배포 이력, 사건별 진단·롤백 기록, 바깥 호출 클라이언트.
 
+배포 이력은 회사마다 따로다(11/26 회사 분리): 캣북스는 `history`(예전 그대로), 다른 회사는
+`history_for(회사)`가 그 회사 칸을 준다(처음엔 비어 있고, 그 회사 보관함의 배포 도구에서만 채운다).
+
 v0은 DB 없이 프로세스 메모리에만 둔다(재시작하면 배포 이력 파일 상태로 돌아간다).
 테스트는 `set_runtime`으로 시계·대기·클라이언트를 바꾼다.
 """
@@ -13,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ax_agent_template import company_scope
 from infra_agent.clients import (
     DataClient,
     ShopClient,
@@ -20,7 +24,7 @@ from infra_agent.clients import (
     default_shop,
     orchestrator_opened_at,
 )
-from infra_agent.deployments import DeploymentHistory
+from infra_agent.deployments import DeploymentHistory, connected_services
 from infra_agent.diagnosis import Diagnosis
 from infra_agent.pr_suspects import A2ADev, DevClient, NoDev, PrSuspect
 
@@ -56,9 +60,25 @@ class KeyLocks:
         return not self._locks
 
 
+def company_history(company: str) -> DeploymentHistory:
+    """캣북스가 아닌 회사의 빈 배포 이력.
+
+    패키지 시연 이력·캣북스 파일은 쓰지 않는다(지어내지 않는다).
+
+    "연결된 서비스"는 그 회사 보관함으로 본다(부르는 쪽 요청 회사와 상관없이)."""
+
+    def connected() -> set[str]:
+        with company_scope.using(company):
+            return connected_services()
+
+    return DeploymentHistory([], connected=connected)
+
+
 @dataclass
 class Runtime:
+    # 캣북스(설치 회사) 배포 이력. 다른 회사는 `company_histories`
     history: DeploymentHistory = field(default_factory=DeploymentHistory.load)
+    company_histories: dict[str, DeploymentHistory] = field(default_factory=dict)
     shop: ShopClient = field(default_factory=default_shop)
     data: DataClient = field(default_factory=default_data)
     clock: Callable[[], datetime] = _now
@@ -78,6 +98,20 @@ class Runtime:
     releases: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )  # 과거 처리 방식 다시 하기 결과
+
+    def history_for(self, company: str | None = None) -> DeploymentHistory:
+        """그 회사의 배포 이력: 준 값 → 지금 요청의 회사.
+
+        캣북스·회사 없음(스스로 도는 캣북스 작업)은 `history`. 다른 회사는 그 회사 칸
+        (없으면 빈 칸을 만든다). 다른 회사 이력은 섞지 않는다."""
+        cid = company if company is not None else company_scope.active()
+        if cid is None or company_scope.scope_id(cid) == company_scope.CATBOOKS:
+            return self.history
+        key = company_scope.scope_id(cid)
+        found = self.company_histories.get(key)
+        if found is None:
+            found = self.company_histories[key] = company_history(key)
+        return found
 
     def executed_rollbacks(self, context_id: str) -> int:
         return sum(

@@ -20,6 +20,8 @@ from typing import Any, Literal
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import AwareDatetime, BaseModel, Field
 
+from ax_agent_template.companies import canonical_company_id
+from ax_agent_template.company_connection import CALLER_COMPANY_HEADER
 from ax_agent_template.config import is_mock
 from ax_agent_template.server import create_agent_app, verify_token
 from ax_contracts.schemas import AgentCard
@@ -109,9 +111,7 @@ async def _lifespan(a: FastAPI) -> AsyncIterator[None]:
         watch = dejafix_watch.start()
         # 목 모드(테스트)에서는 보관함·배포 도구를 부르지 않는다
         poll = (
-            None
-            if is_mock("infra")
-            else asyncio.create_task(deploy_poll.run_forever(get_runtime().history))
+            None if is_mock("infra") else asyncio.create_task(deploy_poll.run_forever(get_runtime))
         )
         try:
             yield
@@ -140,11 +140,11 @@ def demo_deploy(body: DemoDeployInput | None = None) -> dict:
         raise HTTPException(422, "previous_version과 previous_at은 같이 준다")
     baseline = None
     if body.previous_version is not None and body.previous_at is not None:
-        before = rt.history.running(body.service)
+        before = rt.history_for().running(body.service)
         if before is None or before.version != body.previous_version:
             # 직전에 돌던 버전 기록이 없다: 기준으로 남긴다. 바꾼 구성요소가 없어 원인 후보가
             # 아니고, 되돌릴 때 돌아갈 버전이 된다
-            baseline = rt.history.record(
+            baseline = rt.history_for().record(
                 service=body.service,
                 version=body.previous_version,
                 components=(),
@@ -152,9 +152,9 @@ def demo_deploy(body: DemoDeployInput | None = None) -> dict:
                 at=body.previous_at,
                 applies_to=body.applies_to,
             )
-    deployment = rt.history.record(
+    deployment = rt.history_for().record(
         service=body.service,
-        version=body.version or rt.history.next_version(body.service),
+        version=body.version or rt.history_for().next_version(body.service),
         components=tuple(body.components),
         change_summary=body.change_summary,
         at=rt.clock(),
@@ -175,24 +175,35 @@ def demo_deploy_reset(body: DemoResetInput) -> dict:
     """
     rt = get_runtime()
     marked: list[dict[str, Any]] = []
-    while (top := rt.history.running(body.service)) is not None and (
+    while (top := rt.history_for().running(body.service)) is not None and (
         top.version != body.running_version
     ):
-        rt.history.mark_rolled_back(top)
+        rt.history_for().mark_rolled_back(top)
         marked.append(_deployment_view(top))
     return {"data": {"service": body.service, "rolled_back": marked}}
 
 
 @app.get("/api/infra/deployments/latest", dependencies=[Depends(require_reader)])
-def latest_deployments() -> dict:
+def latest_deployments(
+    x_ax_company: str | None = Header(default=None, alias=CALLER_COMPANY_HEADER),
+) -> dict:
     """서비스별 지금 돌고 있는 배포(되돌리지 않은 가장 최근 성공 배포). 읽기만 한다.
 
     배포 도구에서 받은 실행(`deploy_poll`이 120초마다 받는 성공 실행)만 내보낸다. 패키지 시연
     이력(`deployments.json`)·시연 준비 기록(`source` 없음)은 화면에 보내지 않는다(지어내지 않는다).
     도구 이력이 없는 서비스는 목록에 없다. `source`는 도구 이름(`github_actions`·`jenkins`).
     이력은 연결 보관함 파일을 읽어 거르므로 동기 함수로 두어 이벤트 루프 밖(스레드 풀)에서 돈다.
+
+    회사(11/26 회사 분리): 검증된 dashboard-api·운영자 토큰이 실은 `X-AX-Company`(화면 세션의 회사)
+    → 로그인 세션의 회사 → 없으면 캣북스(예전 그대로). 다른 회사 배포 이력은 섞지 않는다.
+    형식이 틀린 회사 값은 캣북스로 떨어뜨리지 않고 빈 목록을 준다.
     """
-    history = get_runtime().history
+    company: str | None = None
+    if x_ax_company is not None:
+        company = canonical_company_id(x_ax_company.strip())
+        if not company:
+            return {"data": []}
+    history = get_runtime().history_for(company)
     # 한 번만 읽은 사본으로 고른다. live()는 보관함을 읽으므로 서비스마다 부르지 않고(요청당 한 번),
     # deploy_poll이 이벤트 루프에서 이력 목록을 통째로 바꿔도 이 스레드는 같은 사본을 본다
     live = list(history.live())

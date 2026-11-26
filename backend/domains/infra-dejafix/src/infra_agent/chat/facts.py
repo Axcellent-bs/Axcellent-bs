@@ -35,7 +35,7 @@ def _iso(value: Any) -> str | None:
 
 
 def _deployments() -> list[dict[str, Any]]:
-    history = get_runtime().history
+    history = get_runtime().history_for()
     rows = sorted(history.deployments, key=lambda d: d.deployed_at, reverse=True)[:RECENT]
     return [
         {

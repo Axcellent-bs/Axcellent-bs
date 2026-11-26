@@ -112,8 +112,8 @@ async def diagnose_incident(request: AgentRequest) -> AgentResult:
     mock = is_mock("infra")
     now = rt.clock()
     # 보관함 파일 읽기(연결된 배포 도구)가 이벤트 루프를 막지 않게 한다
-    connected = await asyncio.to_thread(rt.history.connected)
-    diag = diagnose(rt.history, inp.component, now, mock=mock, connected=connected)
+    connected = await asyncio.to_thread(rt.history_for().connected)
+    diag = diagnose(rt.history_for(), inp.component, now, mock=mock, connected=connected)
     if not mock and diag.output.status == "undetermined" and pr_suspects_enabled():
         # 배포 기록에 원인이 없으면 연결된 실제 레포에서 구간 안에 머지된 PR을 후보로 본다
         # (INFRA_PR_SUSPECTS=off면 묻지 않는다)
@@ -207,13 +207,13 @@ async def _rollback_once(
         return await _rollback_pr(request, rt, inp, key)
 
     # 보관함 파일 읽기(연결된 배포 도구)가 이벤트 루프를 막지 않게 한 번만 미리 읽는다
-    connected = await asyncio.to_thread(rt.history.connected)
-    target = rt.history.find(inp.service, inp.from_version, connected=connected)
+    connected = await asyncio.to_thread(rt.history_for().connected)
+    target = rt.history_for().find(inp.service, inp.from_version, connected=connected)
     if target is None:
         return _failed(
             request, "invalid_input", f"배포 이력에 {inp.service} {inp.from_version}이 없다"
         )
-    previous = rt.history.previous_good(target, connected=connected)
+    previous = rt.history_for().previous_good(target, connected=connected)
     if previous is None:
         return _failed(request, "invalid_input", "되돌아갈 직전 정상 배포가 없다")
     if inp.to_version is not None and inp.to_version != previous.version:
@@ -250,7 +250,7 @@ async def _rollback_once(
     if diag is None:  # 같은 사건의 진단 기록이 없으면 대상 배포 기준으로 다시 진단한다
         component = target.components[0] if target.components else None
         diag = diagnose(
-            rt.history, component, rt.clock(), mock=is_mock("infra"), connected=connected
+            rt.history_for(), component, rt.clock(), mock=is_mock("infra"), connected=connected
         )
     ints = path_params(diag, target, rt.executed_rollbacks(context_id))
     params: dict[str, Any] = RollbackDeploymentParams(
@@ -399,7 +399,7 @@ async def _apply(
             output["fault_released"] = switched_off(None, state)
             output["fault_state"] = state
             output["post_check_ok"] = output["fault_released"]
-        rt.history.mark_rolled_back(target)
+        rt.history_for().mark_rolled_back(target)
         return AgentResult(
             meta=request.meta,
             status=TaskStatus.COMPLETED,
@@ -526,8 +526,8 @@ async def _redeploy(
         )
     output["redeploy"] = {"tool": ref.tool, "run_id": ref.run_id, "url": ref.url}
     output["fault_released"] = False  # 장애 주입은 건드리지 않는다 (복구는 verify_recovery가 본다)
-    rt.history.mark_rolled_back(target)
-    rt.history.record_redeploy(target.service, to_version, at=rt.clock(), run_id=ref.run_id)
+    rt.history_for().mark_rolled_back(target)
+    rt.history_for().record_redeploy(target.service, to_version, at=rt.clock(), run_id=ref.run_id)
     return AgentResult(
         meta=request.meta,
         status=TaskStatus.COMPLETED,

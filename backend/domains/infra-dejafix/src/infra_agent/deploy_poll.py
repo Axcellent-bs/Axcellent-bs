@@ -7,6 +7,9 @@
 - 받기 실패(도구 오류, 보관함이 깨지거나 사라짐)는 로그만 남기고 이전 이력을 그대로 둔다.
   그래서 연결을 끊어도 받아 둔 도구 이력은 재시작 전까지 남는다.
 - 목 모드에서는 켜지 않는다 (`main` lifespan). 주기 실행이라 LLM을 부르지 않는다.
+- 회사마다 돈다(11/26 회사 분리): 캣북스(예전 그대로) + 회사 연결이 켜진 다른 회사.
+  회사마다 그 회사 보관함의 배포 도구만 읽어 그 회사 배포 이력에 넣는다(`company_jobs`).
+  한 회사가 실패해도 다음 회사는 돈다.
 """
 
 from __future__ import annotations
@@ -14,12 +17,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
 
+from ax_agent_template import company_jobs
 from ax_agent_template.tool_connections import ToolConnectionError
 from infra_agent import deploy_tools
 from infra_agent.deploy_tools import DeployTool
 from infra_agent.deployments import DeploymentHistory
+
+if TYPE_CHECKING:
+    from infra_agent.runtime import Runtime
 
 logger = logging.getLogger("ax.infra.deploy_poll")
 
@@ -62,13 +70,28 @@ async def poll_once(history: DeploymentHistory, tools: list[DeployTool]) -> None
         history.replace_service(tool.service, runs, tool=tool.tool, components=tool.components)
 
 
-async def run_forever(history: DeploymentHistory) -> None:
-    """켤 때 바로, 그 뒤 주기마다 `poll_once`. 보관함은 회차마다 다시 읽는다(재시작 없이 반영)."""
+async def poll_company(runtime: Runtime, company: str) -> None:
+    """한 회사 한 회차: 그 회사 보관함의 배포 도구로 그 회사 이력을 바꾼다.
+
+    `company_jobs.for_each_company` 안에서 부른다
+    (캣북스는 요청 회사 없이, 다른 회사는 그 회사로)."""
+    # 보관함 파일 읽기가 이벤트 루프를 막지 않게 한다 (to_thread는 지금 회사를 이어 받는다)
+    tools = await asyncio.to_thread(deploy_tools.all_tools)
+    await poll_once(runtime.history_for(company), tools)
+
+
+async def poll_all(runtime: Runtime) -> None:
+    """한 회차: 회사마다 `poll_company`. 한 회사 실패가 다른 회사를 막지 않는다."""
+    await company_jobs.for_each_company(
+        lambda cid: poll_company(runtime, cid), label="배포 이력 받기"
+    )
+
+
+async def run_forever(runtime: Callable[[], Runtime]) -> None:
+    """켤 때 바로, 그 뒤 주기마다 `poll_all`. 보관함은 회차마다 다시 읽는다(재시작 없이 반영)."""
     while True:
         try:
-            # 보관함 파일 읽기가 이벤트 루프를 막지 않게 한다
-            tools = await asyncio.to_thread(deploy_tools.all_tools)
-            await poll_once(history, tools)
+            await poll_all(runtime())
         except Exception as exc:  # noqa: BLE001 - 받기가 멈추면 이력이 낡는다: 다음 회차에 다시
             logger.warning("배포 이력 받기 회차 실패: %s", type(exc).__name__)
         await asyncio.sleep(interval_seconds())
