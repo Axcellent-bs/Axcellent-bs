@@ -128,15 +128,27 @@ class Scene:
     camera: str = ""
 
 
-PLACES: Final = ("airport", "cafe", "office", "living", "snow", "street")
-# 장소 묶음 낱말 (place_ko를 먼저, 없으면 장면 글. 표 순서대로 먼저 걸린 것)
+PLACES: Final = ("storefront", "storefront_snow", "entrance", "hallway", "bookstore", "airport",
+                  "cafe", "office", "bedroom", "living", "snow", "street")  # fmt: skip
+# 장소 묶음 낱말 (place_ko를 먼저, 없으면 장면 글. 표 순서대로 먼저 걸린 것).
+# 11/26 J(PROP-42 장면 3 "현관"이 바깥 거리로 그려졌다): 실내 묶음(현관·복도·서점 안·방)을 바깥
+# 낱말보다 앞에 둔다. "현관 … 문틈 너머 눈"이어도 place_ko가 현관이면 실내.
+# 서점 앞·가게 앞은 바깥(유리문 가게 + 길), 눈 낱말이 같이 있으면 눈 바닥(storefront_snow)
 PLACE_WORDS: Final = (
+    ("storefront", ("서점 앞", "가게 앞", "매장 앞", "상점 앞", "책방 앞", "카페 앞", "storefront",
+                    "shop front", "in front of the bookstore", "in front of the shop",
+                    "outside the bookstore", "outside the shop")),
+    ("entrance", ("현관", "신발장", "entryway", "front door", "entrance hall")),
+    ("hallway", ("복도", "hallway", "corridor")),
+    ("bookstore", ("서점", "책방", "bookstore", "bookshop", "book store")),
     ("airport", ("공항", "대합실", "터미널", "기차역", "지하철역", "플랫폼", "탑승", "airport",
                  "terminal", "station", "platform", "gate")),
     ("cafe", ("카페", "커피숍", "찻집", "cafe", "café", "coffee shop")),
     ("office", ("사무실", "회의실", "오피스", "office", "meeting room")),
-    ("living", ("거실", "소파", "침실", "안방", "자취방", "집 안", "집안", "집에", "우리 집",
-                "living room", "sofa", "couch", "bedroom", " home")),
+    ("bedroom", ("침실", "안방", "자취방", "내 방", "작은 방", "방 안", "침대", "bedroom",
+                 " bed ")),
+    ("living", ("거실", "소파", "집 안", "집안", "집에", "우리 집", "living room", "sofa",
+                "couch", " home")),
     ("snow", ("눈 덮", "눈이 내", "눈 내리", "눈 오는", "눈밭", "설원", "설경", "겨울 거리",
               "겨울 바깥", "겨울 길", "snow")),
     ("street", ("거리", "골목", "바깥", "야외", "도로", "공원", "광장", "길 위", "street",
@@ -154,8 +166,28 @@ def place_of(scene: Scene | None) -> str:
             continue
         for kind, words in PLACE_WORDS:
             if any(w in low for w in words):
+                if kind == "storefront" and _snowy(scene):
+                    return "storefront_snow"
                 return kind
     return ""
+
+
+SNOW_WORDS: Final = next(words for kind, words in PLACE_WORDS if kind == "snow")
+# 탁자 낱말 (11/26 J: PROP-42 장면 2 "거실 낮은 탁자"가 소파만 그려졌다)
+TABLE_WORDS: Final = ("탁자", "책상", "테이블", "식탁", "table", "desk")
+
+
+def _snowy(scene: Scene) -> bool:
+    low = f"{scene.place} {scene.text}".lower()
+    return any(w in low for w in (*SNOW_WORDS, "눈이 와", "눈 와", "눈발"))
+
+
+def has_table(scene: Scene | None) -> bool:
+    """장소·장면 글에 탁자·책상·테이블이 있나 (그 장면은 탁자 상자를 인물 앞에)."""
+    if scene is None:
+        return False
+    low = f"{scene.place} {scene.text}".lower()
+    return any(w in low for w in TABLE_WORDS)
 
 
 def angle_of(camera: str) -> str:
@@ -460,15 +492,26 @@ ROOM_COLORS: Final = {
     "cafe": ("#ece6dc", "#ddd3c4", "#cfc4b3", "#b8a58c"),
     "airport": ("#eceef0", "#dfe2e6", "#d0d4da", "#c4c7cb"),
     "office": ("#eceae6", "#dedbd5", "#d0ccc5", "#c2bdb4"),
+    "entrance": ("#ebe6dc", "#e2dccf", "#d3ccbe", "#bdb3a2"),
+    "hallway": ("#ecebe7", "#dddad3", "#cfcbc3", "#c0b9ad"),
+    "bedroom": ("#ece8e2", "#e0dad2", "#d2cbc1", "#c4b8a6"),
+    "bookstore": ("#ebe5da", "#ddd2c1", "#cfc3b0", "#b6a284"),
 }
+# 11/26 J: 방 반폭·뒷벽 거리 (없으면 ROOM_W·ROOM_BACK). 복도는 좁고 길다, 현관은 좁다
+ROOM_DIMS: Final = {"hallway": (1.3, 6.0), "entrance": (1.9, 3.6)}
 # 바깥: (하늘 위, 하늘 아래, 땅, 길, 건물, 지붕)
 OUTDOOR_COLORS: Final = {
     "street": ("#c9d3df", "#eef1f4", "#cfcbc3", "#b7b3ab", "#a9b0b9", "#c3c9d0"),
     "snow": ("#aab4c0", "#dfe4ea", "#f4f6f9", "#e3e8ee", "#a3acb8", "#fbfcfd"),
+    "storefront": ("#c9d3df", "#eef1f4", "#cfcbc3", "#b7b3ab", "#a9b0b9", "#c3c9d0"),
+    "storefront_snow": ("#aab4c0", "#dfe4ea", "#f4f6f9", "#e3e8ee", "#a3acb8", "#fbfcfd"),
 }
 SOFA, TABLE, LAMP_POLE, LAMP_SHADE = "#a39c90", "#b59b7c", "#8a8680", "#f1d999"
 WINDOW, CHAIR, SUITCASE, DESK, MONITOR, SEAT = (
     "#cfdbe6", "#9ea3aa", "#7d8696", "#b9a586", "#4a4d55", "#aaa49a",
+)  # fmt: skip
+DOOR, GLASS, SHOE_RACK, UMBRELLA, BED, PILLOW, SHELF, FACADE = (
+    "#7a6650", "#cfe0f2", "#a08a6c", "#3d5a80", "#c8bfb2", "#f3efe8", "#9c7b58", "#b8a48c",
 )  # fmt: skip
 TOP_K, FRONT_K, SIDE_K = 1.12, 1.0, 0.8  # 상자 면 밝기 (위·앞·옆)
 # 직육면체: (x0, x1, y0, y1, z0, z1) m
@@ -479,18 +522,60 @@ def _seat(px: float, pz: float, half: float) -> list[tuple[Box, str]]:
     return [((px - half, px + half, 0, 0.42, pz - 0.08, pz + 0.5), SEAT)]
 
 
-def furniture(kind: str, px: float, pz: float, posture: str) -> list[tuple[Box, str]]:
-    """장소 묶음의 가구 상자 (인물 위치 px·pz 기준). 앉으면 소파·의자가 엉덩이 밑에 온다."""
+def _front_table(kind: str, px: float, pz: float, sit: bool) -> list[tuple[Box, str]]:
+    """11/26 J 탁자 장면: 탁자 상자를 인물 앞(카메라 쪽)에. 앉으면 탁자 앞 의자(낮은 앉을 상자)."""
+    top = 0.42 if kind == "living" else 0.74  # 거실은 낮은 탁자
+    boxes = [((px - 0.6, px + 0.6, 0, top, pz - 0.95, pz - 0.45), TABLE)]
+    if sit:
+        boxes += _seat(px, pz, 0.3)
+    return boxes
+
+
+def furniture(kind: str, px: float, pz: float, posture: str,
+              table: bool = False) -> list[tuple[Box, str]]:  # fmt: skip
+    """장소 묶음의 가구 상자 (인물 위치 px·pz 기준). 앉으면 소파·의자가 엉덩이 밑에 온다.
+
+    table(11/26 J): 장면에 탁자가 있으면 탁자를 인물 앞에 두고, 앉으면 소파가 아니라 탁자 앞 의자에
+    (소파는 뒤로). 카페·사무실은 원래 탁자·책상이 있어 그대로."""
     sit = posture == "sit"
     boxes: list[tuple[Box, str]] = []
+    if table and kind not in ("cafe", "office"):
+        boxes += _front_table(kind, px, pz, sit)
+        sit = False  # 아래 장소 묶음은 앉을 상자 없이 (탁자 앞 의자에 앉았다)
     if kind == "living":
         sofa_z = pz if sit else 2.9
         sofa_x = px if sit else 0.0
         boxes += [((sofa_x - 0.75, sofa_x + 0.75, 0, 0.42, sofa_z - 0.08, sofa_z + 0.5), SOFA),
-                  ((sofa_x - 0.75, sofa_x + 0.75, 0, 0.88, sofa_z + 0.42, sofa_z + 0.64), SOFA),
-                  ((px + 0.95, px + 1.55, 0, 0.4, pz - 0.45, pz + 0.15), TABLE),
-                  ((1.74, 1.8, 0, 1.5, 3.2, 3.26), LAMP_POLE),
+                  ((sofa_x - 0.75, sofa_x + 0.75, 0, 0.88, sofa_z + 0.42, sofa_z + 0.64), SOFA)]
+        if not table:
+            boxes += [((px + 0.95, px + 1.55, 0, 0.4, pz - 0.45, pz + 0.15), TABLE)]
+        boxes += [((1.74, 1.8, 0, 1.5, 3.2, 3.26), LAMP_POLE),
                   ((1.57, 1.97, 1.5, 1.78, 3.03, 3.43), LAMP_SHADE)]  # fmt: skip
+    elif kind == "entrance":  # 왼쪽 신발장 + 우산 (문은 뒷벽, room())
+        boxes += [((-1.85, -1.15, 0, 0.95, 2.3, 3.5), SHOE_RACK),
+                  ((-1.05, -0.99, 0, 0.9, 3.25, 3.31), UMBRELLA),
+                  ((-1.12, -0.92, 0.55, 0.9, 3.2, 3.36), UMBRELLA)]  # fmt: skip
+        if sit:
+            boxes += _seat(px, pz, 0.3)
+    elif kind == "bedroom":  # 왼쪽 침대 + 베개 (창은 뒷벽, room())
+        boxes += [((-2.3, -0.7, 0, 0.5, 1.6, 3.7), BED),
+                  ((-2.1, -0.9, 0.5, 0.64, 3.2, 3.6), PILLOW)]  # fmt: skip
+        if sit:
+            boxes += [((px - 0.5, px + 0.5, 0, 0.42, pz - 0.08, pz + 0.5), BED)]
+    elif kind == "bookstore":  # 뒷벽 책장 줄 + 오른쪽 책장
+        boxes += [((-2.3 + i * 1.18, -1.22 + i * 1.18, 0, 2.0, 3.3, 3.7), SHELF)
+                  for i in range(4)]  # fmt: skip
+        boxes += [((1.8, 2.3, 0, 2.0, 0.8 + i * 1.1, 1.8 + i * 1.1), SHELF) for i in range(2)]
+        if sit:
+            boxes += _seat(px, pz, 0.3)
+    elif kind in ("storefront", "storefront_snow"):  # 인물 뒤 유리문 가게 (앞면 + 유리문·진열창)
+        boxes += [((-2.6, 2.6, 0, 3.2, 3.6, 4.4), FACADE),
+                  ((-0.6, 0.6, 0, 2.2, 3.56, 3.6), GLASS),
+                  ((-2.2, -1.0, 0.7, 2.2, 3.56, 3.6), GLASS),
+                  ((1.0, 2.2, 0.7, 2.2, 3.56, 3.6), GLASS),
+                  ((-2.7, 2.7, 3.2, 3.5, 3.4, 4.4), DOOR)]  # fmt: skip
+        if sit:
+            boxes += _seat(px, pz, 0.7)
     elif kind == "cafe":
         boxes += [((px + 0.55, px + 1.15, 0, 0.74, pz - 0.3, pz + 0.3), TABLE),
                   ((px + 0.78, px + 0.88, 0.74, 0.84, pz - 0.05, pz + 0.05), "#f4f1ea")]
@@ -530,6 +615,7 @@ class _Frame:
         self.pose, self.grid = pose, grid
         self.w, self.h = SIZES.get(aspect, SIZES["9:16"])
         self.place = place_of(scene)
+        self.table = has_table(scene)
         self.with_furniture = with_furniture
         self.c = _Camera(pose.shot, self.w, self.h, angle_of(scene.camera) if scene else "eye")
         self.j = skeleton(pose)
@@ -552,7 +638,7 @@ class _Frame:
         else:
             self.background()
         self.shadow()
-        if self.place or self.pose.posture == "sit":
+        if self.place or self.table or self.pose.posture == "sit":
             self.boxes()
         self.props_behind()
         self.extras_behind()
@@ -612,7 +698,8 @@ class _Frame:
     def room(self) -> None:
         """실내: 천장 색 판 + 바닥면 + 뒷벽 + 옆벽 둘 (원근)."""
         ceiling, back, side, floor = ROOM_COLORS[self.place]
-        wd, ht, zb = ROOM_W, ROOM_H, ROOM_BACK
+        wd, zb = ROOM_DIMS.get(self.place, (ROOM_W, ROOM_BACK))
+        ht = ROOM_H
         zn = self.c.pos[2] + 0.3  # 카메라 바로 앞부터
         add = self.parts.append
         add(_tag("rect", {"x": 0, "y": 0, "width": self.w, "height": self.h, "fill": ceiling}))
@@ -628,6 +715,21 @@ class _Frame:
             add(self.poly([(-2.2, 0.6, zb - 0.01), (2.2, 0.6, zb - 0.01), (2.2, 2.4, zb - 0.01),
                            (-2.2, 2.4, zb - 0.01)], WINDOW))  # fmt: skip
             self.window_bars([(x, 0.6, 2.4) for x in (-1.1, 0.0, 1.1)], None, -2.2, 2.2, zb - 0.02)
+        if self.place == "entrance":  # 11/26 J 뒷벽 현관문 (문틀 + 위쪽 유리)
+            add(self.poly([(0.2, 0, zb - 0.01), (1.3, 0, zb - 0.01), (1.3, 2.15, zb - 0.01),
+                           (0.2, 2.15, zb - 0.01)], DOOR))  # fmt: skip
+            add(self.poly([(0.35, 1.3, zb - 0.02), (1.15, 1.3, zb - 0.02), (1.15, 2.0, zb - 0.02),
+                           (0.35, 2.0, zb - 0.02)], GLASS))  # fmt: skip
+        if self.place == "hallway":  # 양옆 벽 문 (왼쪽·오른쪽 하나씩) + 끝 문
+            for x, z0 in ((-wd + 0.01, 1.6), (wd - 0.01, 3.4)):
+                add(self.poly([(x, 0, z0), (x, 0, z0 + 0.9), (x, 2.1, z0 + 0.9), (x, 2.1, z0)],
+                              DOOR))  # fmt: skip
+            add(self.poly([(-0.45, 0, zb - 0.01), (0.45, 0, zb - 0.01), (0.45, 2.1, zb - 0.01),
+                           (-0.45, 2.1, zb - 0.01)], DOOR))  # fmt: skip
+        if self.place == "bedroom":  # 뒷벽 창 (창틀 십자)
+            add(self.poly([(0.0, 1.1, zb - 0.01), (1.8, 1.1, zb - 0.01), (1.8, 2.2, zb - 0.01),
+                           (0.0, 2.2, zb - 0.01)], WINDOW))  # fmt: skip
+            self.window_bars([(0.9, 1.1, 2.2)], 1.65, 0.0, 1.8, zb - 0.02)
 
     def window_bars(self, bars: list[Vec], mid: float | None, x0: float, x1: float,
                     z: float) -> None:  # fmt: skip
@@ -671,7 +773,8 @@ class _Frame:
             return
         pelvis = self.j["pelvis"]
         for box, color in furniture(self.place, pelvis[0], pelvis[2] - (
-                0.12 if self.pose.posture == "sit" else 0.0), self.pose.posture):  # fmt: skip
+                0.12 if self.pose.posture == "sit" else 0.0), self.pose.posture,
+                self.table):  # fmt: skip
             if not self.with_furniture and color not in (SEAT, SOFA, CHAIR):
                 continue
             self.cuboid(box, color)
