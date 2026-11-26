@@ -121,8 +121,11 @@ def _one(
     blocked_by: str | None = None,
     fill: str | None = None,
     human_gate: bool = False,
+    ref_key: str | None = None,
 ) -> TaskDef:
-    step = TaskStep("run", dept, skill, label, grade, fill=fill, human_gate=human_gate)
+    step = TaskStep(
+        "run", dept, skill, label, grade, fill=fill, human_gate=human_gate, ref_key=ref_key
+    )
     return TaskDef(name, label, description, examples, (step,), blocked_by)
 
 
@@ -319,6 +322,7 @@ TASKS: tuple[TaskDef, ...] = (
         "finance",
         "closing_report",
         fill="closing_period",
+        ref_key="ref",  # 11/26 "<기간>:<날짜>". 대화방 카드가 이 번호로 손익 숫자를 다시 읽는다
     ),
     _one(
         "notice_draft",

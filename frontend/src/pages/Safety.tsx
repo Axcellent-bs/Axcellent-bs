@@ -7,6 +7,8 @@ import { ACTION_KO as FINANCE_ACTION_KO, type ExecStatus, type ExecutionRecord, 
 import { ago, shortDateTime, won } from "@/lib/format";
 import { SAFETY_ACTION_KO, SAFETY_RULE_KO, safety, type RegisteredAction, type SafetyThresholds } from "@/lib/safety";
 import { hr } from "@/lib/hr";
+import { orchestrator } from "@/lib/orchestrator";
+import { chatWaits, type ChatWait } from "@/lib/safetyChatWaits";
 
 // 관문 밖에서 사람 확인을 기다리는 일 한 줄 (A2A로 각 AI에서 받은 목록)
 type OtherWait = { key: string; who: string; what: string; why: string; since: string; href: string };
@@ -18,6 +20,8 @@ type OtherWait = { key: string; who: string; what: string; why: string; since: s
 //   관문 밖: 아카이브 AI가 확신하지 못해 미룬 기록(후보 카드), 사람이 정할 중복 결정 묶음, 인사 발령 초안.
 //   이 셋은 상태 변경이 A로 실행돼도 "사람 확인 전" 상태가 각 AI 안에 남아 C 보류에 안 잡힌다(11/18 [기획 확정] 사례).
 //   dashboard-api가 A2A로 아카이브·인사 AI에서 받은 목록을 그대로 보여 주고, 결정은 그 화면에서 한다.
+//   11/26: 대화방 의뢰의 사람 확인(기획 확인·회사 캐릭터 답·승인 필요)도 총괄 안에만 남아 C 보류에 안 잡혀서
+//   총괄 의뢰 목록(GET /api/requests)에서 모은다(lib/safetyChatWaits.ts). 결정은 대화방 의뢰 카드에서 한다.
 // 모두 안전 처리 로그 서버(8001)의 기록을 그대로 읽는다. 결정은 그 일을 맡은 화면에서 사람이 한다 (여기서는 링크만).
 
 const POLL_MS = 15_000;
@@ -93,6 +97,7 @@ export default function Safety() {
   const [thresholds, setThresholds] = useState<SafetyThresholds | null>(null);
   const [registry, setRegistry] = useState<RegisteredAction[] | null>(null);
   const [others, setOthers] = useState<OtherWait[] | null>(null);
+  const [chats, setChats] = useState<ChatWait[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [at, setAt] = useState<string | null>(null);
 
@@ -106,6 +111,9 @@ export default function Safety() {
     // 관문 밖 사람 확인 대기: 하나가 실패해도 나머지는 보여 준다(실패한 곳은 문제 줄에 같이 적는다)
     const side = await Promise.allSettled([hr.candidateCards(), hr.duplicateGroups(), hr.orgChanges()]);
     const [cc, dg, oc] = side;
+    // 대화방 의뢰 사람 확인: 읽지 못하면 빈칸(–)으로 두고 문제 줄에 같이 적는다
+    const req = await Promise.allSettled([orchestrator.workRequests()]);
+    setChats(req[0].status === "fulfilled" ? chatWaits(req[0].value.data, req[0].value.meta.tasks ?? []) : null);
     const list: OtherWait[] = [];
     if (cc.status === "fulfilled") for (const c of cc.value) list.push({
       key: `card:${c.card_id}`, who: "아카이브 AI · 업무 기록", what: c.title,
@@ -121,7 +129,7 @@ export default function Safety() {
       why: "확정 전에는 팀 인원에 세지 않음", since: c.created_at, href: "/org",
     });
     setOthers(list.sort((a, b) => a.since.localeCompare(b.since)));
-    const failed = [...got, ...side].find((x) => x.status === "rejected");
+    const failed = [...got, ...side, ...req].find((x) => x.status === "rejected");
     setProblem(failed && failed.status === "rejected" ? errText(failed.reason) : null);
     setAt(new Date().toISOString());
   }, []);
@@ -142,6 +150,7 @@ export default function Safety() {
   }, [sorted]);
   const recent = useMemo(() => (day ? sorted.filter((x) => dayOf(x.created_at) === day) : sorted.slice(0, RECENT)), [sorted, day]);
   const pending = useMemo(() => (reviews ?? []).filter((r) => r.status === "pending").sort((a, b) => a.created_at.localeCompare(b.created_at)), [reviews]);
+  const waitTotal = pending.length + (chats?.length ?? 0) + (others?.length ?? 0);
   const counts = useMemo(() => {
     const c = { total: execs?.length ?? 0, executed: 0, held: 0, rejected: 0 };
     for (const x of execs ?? []) {
@@ -179,7 +188,7 @@ export default function Safety() {
           {[
             { k: "판단한 요청", v: counts.total, sub: "서버가 켜진 뒤" },
             { k: "실행됨", v: counts.executed, sub: "A·B 등급, 승인 뒤 실행 포함" },
-            { k: "사람 결정 대기", v: pending.length + (others?.length ?? 0), sub: `C 등급 보류 ${pending.length} · 기록·발령 확인 ${others?.length ?? 0}`, warn: pending.length + (others?.length ?? 0) > 0 },
+            { k: "사람 결정 대기", v: waitTotal, sub: `C 등급 보류 ${pending.length} · 대화방 의뢰 ${chats?.length ?? 0} · 기록·발령 ${others?.length ?? 0}`, warn: waitTotal > 0 },
             { k: "거절·오류", v: counts.rejected, sub: "검증 거절·기한 지남 포함" },
           ].map((s) => (
             <div key={s.k} className="rounded-xl border border-ink-100 px-4 py-3">
@@ -191,7 +200,7 @@ export default function Safety() {
         </dl>
       </header>
 
-      <Section title="① 사람 결정 대기" desc="사람이 정해야 넘어가는 일을 모든 AI에서 모았습니다. C 등급 보류는 기한 안에 아무도 정하지 않으면 자동으로 취소돼요. 기록·발령 확인은 기한이 없고 사람이 정할 때까지 남아요. 결정은 그 일을 맡은 화면에서 합니다.">
+      <Section title="① 사람 결정 대기" desc="사람이 정해야 넘어가는 일을 모든 AI에서 모았습니다. C 등급 보류는 기한 안에 아무도 정하지 않으면 자동으로 취소돼요. 대화방 의뢰 사람 확인과 기록·발령 확인은 기한이 없고 사람이 정할 때까지 남아요. 결정은 그 일을 맡은 화면에서 합니다.">
         <h3 className="text-sm font-semibold text-ink-700">C 등급 보류 · {reviews ? pending.length : "–"}건</h3>
         {!reviews ? <Empty>불러오는 중…</Empty> : pending.length === 0 ? <Empty>지금 C 등급으로 보류된 일이 없어요.</Empty> : (
           <ul className="divide-y divide-ink-100">
@@ -204,6 +213,20 @@ export default function Safety() {
                 {holdFolded(r.action)
                   ? <span className="chip" title="담당 화면(인수인계)이 접혀 있어 결정할 곳이 없어요. 기한이 지나면 자동으로 취소돼요.">담당 화면 없음(접힘)</span>
                   : <Link href={holdPage(r.action, execs?.find((e) => e.execution_id === r.execution_id)?.request.params?.target)} className="btn-ghost text-sm">결정하러 가기</Link>}
+              </li>
+            ))}
+          </ul>
+        )}
+        <h3 className="mt-5 text-sm font-semibold text-ink-700">대화방 의뢰 · 사람 확인 · {chats ? chats.length : "–"}건 <span className="font-normal text-ink-500">(총괄 AI 의뢰에서 받음)</span></h3>
+        {!chats ? <Empty>불러오는 중…</Empty> : chats.length === 0 ? <Empty>지금 대화방 의뢰에서 사람 확인을 기다리는 일이 없어요.</Empty> : (
+          <ul className="divide-y divide-ink-100">
+            {chats.map((c) => (
+              <li key={c.key} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">총괄 AI · {c.what} <span className="font-normal tabular-nums text-ink-500">{c.requestId}</span></p>
+                  <p className="mt-0.5 text-sm text-ink-500">{c.why} · {ago(c.since)}부터</p>
+                </div>
+                <Link href={c.href} className="btn-ghost text-sm">대화방에서 결정하기</Link>
               </li>
             ))}
           </ul>

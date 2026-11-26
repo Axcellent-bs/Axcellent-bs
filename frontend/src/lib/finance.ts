@@ -70,7 +70,7 @@ export interface FinanceKpis {
 export interface FinanceOverview { date: string; kpis: FinanceKpis; todo: FinanceTodo[] }
 
 // ---------------------------------------------------------------- ① 결산·리포트
-export type ClosingPeriod = "day" | "month";
+export type ClosingPeriod = "day" | "week" | "month";
 export interface ClosingLine { code: string; label: string; amount: number | null }
 export interface JournalEntry { account: string; debit: number; credit: number; memo: string }
 /** 판단에 쓴 규칙과 근거 (finance_rules.toml) */

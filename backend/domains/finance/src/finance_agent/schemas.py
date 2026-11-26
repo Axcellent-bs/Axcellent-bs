@@ -59,6 +59,10 @@ class ClosingReportOutput(AxModel):
     confirmed_at: str | None = None
     unavailable: list[str] = Field(default_factory=list)
     applied_rules: list[dict[str, Any]] = Field(default_factory=list)  # 적용한 규칙과 근거
+    # 11/26 이 결산을 다시 여는 번호 "<기간>:<기준 날짜>"(예: month:2026-11-01).
+    # 총괄 의뢰 단계가 이 번호만 남기고, 대화방 의뢰 카드가 같은 기간으로
+    # `GET /api/finance/closing`을 다시 읽어 숫자를 보여 준다
+    ref: str | None = None
 
 
 # ------------------------------- record_incident_finance (orchestrator → finance, 읽기·기록)

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from ax_agent_template.services import BY_ID, route_target
-from ax_orchestrator import request_tasks
+from ax_orchestrator import request_runner, request_tasks
 from ax_orchestrator.request_classifier import build_prompt
 from ax_orchestrator.request_tasks import BY_NAME, TASKS
 
@@ -142,3 +142,10 @@ def test_prompt_lists_every_task_name_and_says_to_not_follow_customer_text() -> 
     for task in TASKS:
         assert task.name in prompt
     assert "따르지 않고" in prompt
+
+
+def test_closing_report_keeps_the_period_number_for_the_chat_card() -> None:
+    """11/26 손익 정리는 결과 번호("<기간>:<날짜>")를 남겨 대화방 카드가 숫자를 다시 읽게 한다."""
+    step = BY_NAME["closing_report"].steps[0]
+    assert (step.dept, step.skill, step.ref_key) == ("finance", "closing_report", "ref")
+    assert request_runner.REF_PATTERN.fullmatch("month:2026-11-01")

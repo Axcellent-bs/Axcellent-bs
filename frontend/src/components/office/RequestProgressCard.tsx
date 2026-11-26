@@ -12,8 +12,9 @@ import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestTitle } from "@/lib/requestHandoffs";
 import type { WorkRequestRow } from "@/lib/workRequests";
-import { hiddenRequestLine, madeVideo, needPlanRefetch, perfStep, PLAN_LOOKUP_MIN_MS, PLAN_RETRY_MAX, PLAN_RETRY_MS, planCard, planFound, planLookupDue, proposalOfRequest, requestActionError, requestEditError, reportIdOfRequest, resultStep, showRequestCard, stepRows, type PerfStepView, type PlanCardView, type PlanLookup } from "@/lib/requestCards";
+import { closingOfRequest, hiddenRequestLine, madeVideo, needPlanRefetch, perfStep, PLAN_LOOKUP_MIN_MS, PLAN_RETRY_MAX, PLAN_RETRY_MS, planCard, planFound, planLookupDue, proposalOfRequest, requestActionError, requestEditError, reportIdOfRequest, resultStep, showRequestCard, stepRows, type PerfStepView, type PlanCardView, type PlanLookup } from "@/lib/requestCards";
 import { dataAi, type RequestVideoPerformance } from "@/lib/data";
+import { finance, krw, type ClosingPeriod, type ClosingReport } from "@/lib/finance";
 import { planDocPath } from "@/lib/planDoc";
 import { planId } from "@/lib/format";
 import { STALE_HOURS, staleHours } from "@/lib/officeRequests";
@@ -41,6 +42,7 @@ import type { VideoPlanView } from "@/lib/videoPlan";
 //   실패하면 버튼 아래 한 줄(403 서버 차단·409 이미 처리·404·상태 코드, requestActionError)을 보이고 버튼을 다시 켠다
 // - 열린 채 6시간(STALE_HOURS) 넘게 그대로면 "오래 멈춤 · N시간" 회색 칩 (AI 오피스 자리 상태에는 쓰지 않는다)
 // - 영상 제작이 끝나면 [영상 열기]·썸네일 고르기 아래 "어디에 올릴까요?" [유튜브][인스타그램] (RequestPublish, 11/26)
+// - 재무 손익 정리가 끝나면 그 기간 손익 줄과 설명(ClosingCell, 11/26)
 // - 실패·건너뜀: 회색 + 의뢰 note(코드 문장). 고객 글·부서 문장은 옮기지 않는다. 계산은 lib/requestCards.ts
 
 /** 의뢰 하나 읽기: 목록에 있으면 그것, 없으면 한 번 따로 */
@@ -68,6 +70,34 @@ function ReportCell({ reportId }: { reportId: string }) {
     report_path: `/data/trend${reportHash(r.report_id)}`,
   });
   return <ProgressCard card={{ kind: "trend_report_progress", report_id: reportId }} onDone={finish} />;
+}
+
+// 재무 손익 정리 결과 (11/26). 총괄 단계는 번호("<기간>:<날짜>")만 남기고, 숫자는 재무 화면과 같은
+// GET /api/finance/closing으로 다시 읽는다(코드 계산 값 그대로, 새로 계산하지 않는다)
+const CLOSING_LINES = 6;
+const PERIOD_KO: Record<ClosingPeriod, string> = { day: "하루", week: "한 주", month: "한 달" };
+function ClosingCell({ period, date }: { period: ClosingPeriod; date: string }) {
+  const [report, setReport] = useState<ClosingReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    finance.closing(period, date).then((r) => live && setReport(r.data), (e: unknown) => live && setError(e instanceof Error ? e.message : "손익을 읽지 못했어요"));
+    return () => { live = false; };
+  }, [period, date]);
+  if (error) return <p className="mt-1 text-[13.5px] text-red-700">{error}</p>;
+  if (!report) return <p className="mt-1 animate-pulse text-[13.5px] text-ink-500">손익을 불러오는 중…</p>;
+  return (
+    <div className="mt-1 space-y-1 rounded-lg border border-ink-100 bg-ink-50 px-2.5 py-2 text-[13.5px]" aria-label="손익 정리 결과">
+      <p className="text-ink-700">{report.from} ~ {report.to} ({PERIOD_KO[period]}) · {report.status === "confirmed" ? "확정" : "확정 전"}</p>
+      <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5">
+        {report.lines.slice(0, CLOSING_LINES).map((ln) => (
+          <div key={ln.code} className="contents"><dt className="truncate text-ink-700">{ln.label}</dt><dd className="text-right tabular-nums text-ink-900">{krw(ln.amount)}</dd></div>
+        ))}
+      </dl>
+      {report.commentary && <p className="break-words text-ink-700">{report.commentary}</p>}
+      <a className="btn-ghost btn-card inline-flex items-center" href="/finance#closing">재무 화면에서 전체 보기</a>
+    </div>
+  );
 }
 
 // 기획 기록 읽기 (카드 여러 개가 같이 쓴다). 1분에 한 번 넘게 다시 읽지 않는다 (lib/requestCards.ts planLookupDue)
@@ -349,6 +379,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
           <ol className="divide-y divide-ink-100 border-t border-ink-100">
             {rows.map((s, i) => {
               const report = s.skill === "trend_report_create" ? reportIdOfRequest(row, s.stepId) : null;
+          const closing = s.skill === "closing_report" ? closingOfRequest(row, s.stepId) : null;
               const isInsight = s.skill === "receive_insight";
               const isCur = i === cur;
               const state = stepState(s, isCur);
@@ -387,6 +418,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                       </>
                     )}
                     {report && <ReportCell reportId={report} />}
+                {closing && <ClosingCell period={closing.period} date={closing.date} />}
                     {isInsight && plan && <PlanCell card={plan} plan={found?.fullPlan} />}
                     {/* 끝난 제작안: 주인공 · 의뢰 지시 N/N · 제작 검사 (사람 확인 중이면 그 단계 버튼 위에만) */}
                     {isInsight && found?.fullPlan && !humanDeciding && (
