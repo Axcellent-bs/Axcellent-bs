@@ -299,6 +299,33 @@ async def test_sentence_is_not_accepted_as_a_result_number_and_next_step_is_not_
     assert row["status"] == "needs_human"
 
 
+# 11/26 후속(이태윤 님 리뷰): 결과 번호가 없을 때 `empty_ref_note`가 있으면 "고를 게 없을
+# 뿐"으로 보고, 사람 확인(needs_human)이 아니라 안내문과 함께 "다 마쳤다"로 닫는다
+NO_CANDIDATE_NOTE = "아직 올릴 수 있는 의뢰 영상이 없어요."
+EMPTY_NOTE_CHAIN = [
+    {**PLAN[0], "ref_key": "report_id"},
+    {**PLAN[1], "takes_ref": "report_id", "empty_ref_note": NO_CANDIDATE_NOTE},
+]
+
+
+@pytest.mark.asyncio
+async def test_empty_ref_note_closes_request_as_done_instead_of_needs_human() -> None:
+    reqs, rid = make(plan=EMPTY_NOTE_CHAIN)
+    reqs.link_thread(rid, "orchchat-1")
+    told: list[str] = []
+    fake = Fake(
+        {"s_a": entry("data", "s_a"), "s_b": entry("planning", "s_b")},
+        {"s_a": [result(TaskStatus.COMPLETED, output={})]},  # 후보 없음: report_id가 없다
+    )
+    await runner(reqs, fake, notify=lambda _thread, text: told.append(text)).run(rid)
+    row = reqs.get(rid)
+    assert row["steps"]["b"]["status"] == "skipped" and row["steps"]["b"]["reason_code"] == "no_ref"
+    assert row["steps"]["b"]["note"] == NO_CANDIDATE_NOTE
+    assert len(fake.calls) == 1  # b는 끝내 시키지 않았다 (부서를 부르지 않는다)
+    assert row["status"] == "done"  # needs_human이 아니다: 담당자가 볼 문제가 아니다
+    assert any(NO_CANDIDATE_NOTE in t for t in told)
+
+
 # ---- 9번: 사람 확인과 알림 ------------------------------------------------------------
 HUMAN_FLOW = [
     PLAN[0],

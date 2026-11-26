@@ -15,7 +15,7 @@
    - `docs/promo/` 변경 -> 이미 `/var/www/promo` 에 있는 파일 갱신 + `assets/` 아래 새 파일 추가. `*.mjs *.md *.sh *.py *.json INTAKE* README* content.* build.*` 는 배포 안 함
    - 웹 변경이 없으면 기준 ref 만 갱신하고 끝(빌드 안 함)
    - 변경 파일 500개 초과면 중단(`abort`)
-5. CI: `/etc/ax-autodeploy/gh-readonly-token` 이 있으면 GitHub check-runs 가 모두 끝났고 success(skipped·neutral 허용)일 때만 배포. 진행 중이면 다음 주기에 다시, 실패면 배포 안 함. 파일이 없으면 CI 확인 없이 진행하고 로그에 `ci-check=off`. 토큰은 이 스크립트가 만들지 않는다(읽기 전용 토큰을 사람이 둔다)
+5. CI: `/etc/ax-autodeploy/gh-readonly-token` 이 있으면 GitHub check-runs 가 모두 끝났고 success(skipped·neutral 허용)일 때만 배포. 진행 중이면 다음 주기에 다시, 실패면 배포 안 함. 파일이 없거나 비어 있으면 화면 배포도 하지 않고 이번 주기를 건너뛴다(로그 `wait: ci-check=off(no token file)` / `ci-check=off(empty token file)`, 사유 문구 포함. fail-closed, 백엔드 단계와 같음). 토큰은 이 스크립트가 만들지 않는다(읽기 전용 토큰을 사람이 둔다)
 6. `/opt/axcellent/deploy.sh` 재사용(`AXCELLENT_REPO=빌드 전용 트리`, 두 웹 루트에 한 번씩). 열람 전용 토큰은 운영 `backend/.env` 의 `SHOP_VIEWER_TOKEN` 만 읽어 `VITE_SHOP_VIEWER_TOKEN` 으로 넘긴다(값 출력 없음), 사람 토큰은 자리표시자 `human-via-nginx`
 7. 검증: index.html 이 가리키는 파일 존재 + HTTP 200 + **토큰 검사**(nginx 사람 토큰 맵·`.env` 의 HUMAN/WORK/ADMIN 토큰 실제 값이 번들에 없고 자리표시자만 있는지)
 8. 실패(빌드 실패·시간 초과(1200초)·200 아님·토큰 검사 실패·예상 못 한 종료)면 배포 직전 백업(`/var/lib/ax-autodeploy/prev/`)으로 즉시 복원하고 기준 ref 는 갱신하지 않는다. 같은 커밋으로 3회 연속 실패하면 그 커밋은 `skipped-ref` 에 적고 다음 새 커밋을 기다린다
@@ -42,7 +42,7 @@ echo <배포된 커밋 40자> > /var/lib/ax-autodeploy/last-deployed-ref
 sudo systemctl enable --now ax-autodeploy.timer
 ```
 
-CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-autodeploy/gh-readonly-token`(600)에 둔다. 없으면 `ci-check=off`.
+CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-autodeploy/gh-readonly-token`(600)에 둔다. 없거나 비어 있으면 화면·백엔드 모두 배포하지 않는다(`ci-check=off`, 백엔드는 `ci-off`).
 
 ## 정지
 
@@ -119,10 +119,13 @@ CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-aut
 | `pause-invalid` | 1 경고 | 정지 표시가 만료됐는데 남아 있거나 `until_epoch` 를 해석 못 함 | 재개 또는 파일 정리(게이트로) |
 | `backend-in-progress-stuck` | 2 심각 | `backend-in-progress` 가 남아 있는데 잠금이 풀렸거나 1500초 넘음(유예 120초). **사람 호출 전용, 자동 처리 안 함** | 사람이 되돌림 상태 확인 |
 | `long-wait` | 1 경고 | 같은 판정 `ci-pending`/`ci-hold` 가 `AX_WD_WAIT_S`(1800초) 이상 이어지고 대상 SHA·운영 HEAD 가 그대로. `backend-verdict` 는 매 주기 다시 써서 mtime 이 늘 새롭기 때문에, 판정이 바뀔 때만 남는 로그 줄의 시각으로 잰다 | CI 확인 |
+| `ci-off-stuck` | 1 경고(3배면 2) | `backend-verdict` 의 판정이 `ci-off` 로 `AX_WD_CIOFF_S`(600초) 이상 이어짐(`<sha> ci-off`, 로그 `backend: ci-off ...`). 백엔드 단계가 CI 확인용 토큰 파일(`/etc/ax-autodeploy/gh-readonly-token`)이 없거나 비어 있어 멈춘 상태. 정지 중에는 보지 않음. 자동 복구 없음 | 사람이 토큰 파일 존재·내용 확인(값은 출력·공유 금지) |
 | `lock-held-long` | 2 심각 | flock 이 잡혀 있고 `lock` mtime 이 `TimeoutStartSec`(1500초) 보다 오래됨 | 멈춘 실행 확인 |
 | `ok` | 0 | 위에 해당 없음 | 없음 |
 
 여러 개가 겹치면 심각도 큰 것을 대표로 하고 나머지는 같이 적는다.
+
+**토큰 파일이 없거나 비어 있으면 백엔드와 화면 모두 멈춘다(fail-closed).** 백엔드 단계는 `ci-off` 판정으로, 화면 단계(`ci_check`)는 `CI_STATE="ci-check=off(...)"` 와 반환 2(`ci_rc != 0`)로 이번 주기 배포를 건너뛰고 기준 ref 도 올리지 않는다(`last-run` 은 `ci-wait`). 화면 단계가 막혀도(백엔드 단계가 켜져 있으면) `watchdog` 은 백엔드 `ci-off` 판정으로 `ci-off-stuck` 을 알린다(#1925). 백엔드가 `ci-off` 로 멈추면 `promo_catchup`(백엔드 배포 뒤 홍보 파일 올리기)은 실행되지 않으므로 영향이 없다. 토큰이 있을 때 동작(CI 통과면 배포, 진행 중·실패·API 오류면 보류)은 그대로다. 이 감시 스크립트는 배포 동작을 바꾸지 않는다.
 
 ### 사용법
 
@@ -137,7 +140,7 @@ ax-autodeploy-watchdog --notify --heartbeat   # 위 + 정상일 때 하루 1회 
 
 알림 규칙: 상태가 바뀌면 바로 1회, 같은 이상 상태는 1시간(`AX_WD_REPEAT_S`)에 1회만 반복, 정상 복귀 때 복구 알림 1회, `--heartbeat` 는 정상이 이어질 때 하루 1회. 전송에 실패하면 기록을 갱신하지 않아 다음 주기에 다시 보낸다. 문구는 한국어, `[watchdog]` 접두. 웹훅 주소는 파일(`AX_WD_SLACK_HOOK`, 기본 `/etc/ax-autodeploy/slack-webhook`)에서만 읽고 어디에도 출력하지 않으며 curl 명령줄에도 싣지 않는다(표준 입력으로 전달).
 
-시험용 환경 변수: `AX_STATE_DIR AX_ENV_FILE AX_PAUSE_FILE AX_WD_NOW AX_WD_STALE_S AX_WD_WAIT_S AX_WD_SKIP_S AX_WD_LOG_FILE AX_WD_TIMER_STATE AX_WD_SERVICE_STATE AX_WD_SERVICE_RESULT AX_WD_LOCK_HELD AX_WD_SLACK_HOOK AX_WD_CURL AX_WD_NOTIFIED_FILE` 등(스크립트 머리 주석 참고). 단위 시험: `python -m unittest discover -s docs/ops/autodeploy/tests -p test_watchdog.py -v`.
+시험용 환경 변수: `AX_STATE_DIR AX_ENV_FILE AX_PAUSE_FILE AX_WD_NOW AX_WD_STALE_S AX_WD_WAIT_S AX_WD_CIOFF_S AX_WD_SKIP_S AX_WD_LOG_FILE AX_WD_TIMER_STATE AX_WD_SERVICE_STATE AX_WD_SERVICE_RESULT AX_WD_LOCK_HELD AX_WD_SLACK_HOOK AX_WD_CURL AX_WD_NOTIFIED_FILE` 등(스크립트 머리 주석 참고). 단위 시험: `python -m unittest discover -s docs/ops/autodeploy/tests -p test_watchdog.py -v`.
 
 ### 설치 (서버 책임자, sudo 필요)
 

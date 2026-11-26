@@ -25,10 +25,15 @@ DEPT_LABEL = {
     "finance": "재무",
     "dev": "개발",
     "infra": "인프라",
+    "orchestrator": "총괄",
     "hr": "인사",
     "archive": "아카이브",
 }
 READ_GRADE = "read"
+# 11/26 총괄이 자기 사건 기록을 읽기만 하는 단계(부서를 부르지 않는다).
+# 어떤 skill인지는 아래 목록이 정한다
+SELF_KIND = "self"
+ROLLBACK_STATUS_SKILL = "incident_rollback_status"
 HUMAN_GRADE = "C"  # 총괄이 사람 승인을 먼저 받는 등급(`human_gate`가 있는 단계도 같다)
 BRAND_CHARACTER_KEY = "brand_character_record_id"  # 홍보 영상에 쓸 회사 대표 캐릭터 (11/23)
 # 11/24: 홍보 영상은 회사 캐릭터 답을 먼저 받는다. 이 사람 단계는 사람 확인(승인·거절)이 아니라
@@ -45,11 +50,16 @@ class TaskStep:
     label: str
     grade: str | None  # read · A · B · C (사람 확인 단계는 None)
     after: tuple[str, ...] = ()
-    kind: str = "agent"  # agent | human
+    kind: str = "agent"  # agent | human | self(총괄이 자기 사건 기록을 읽는 읽기 전용 단계)
     # 결과 번호: 이 단계 결과에서 부서가 정한 번호를 읽을 칸 이름(예: "report_id"),
     # 그리고 이 단계가 앞 단계 번호를 받을 입력 칸 이름. 큰 결과는 부서 저장소에 두고 번호만 넘긴다
     ref_key: str | None = None
     takes_ref: str | None = None
+    # 11/26: `takes_ref`로 받을 앞 단계 번호가 없을 때(예: "최근 영상"이 하나도 없음) 보여 줄
+    # 안내문. 있으면 이 단계를 실패(사람 확인으로 넘김)가 아니라 건너뜀으로 닫고 의뢰를
+    # "모두 마쳤다"로 끝낸다(사람이 볼 문제가 아니라 고를 게 없을 뿐이라서). 없으면 기존처럼
+    # 일반 실패(NO_REF)로 처리한다
+    empty_ref_note: str | None = None
     # 부서가 요구하는 고정 입력(예: 긴 작업으로 받기 `caller`), 고객 문장을 넣을 입력 칸 이름
     fixed_input: tuple[tuple[str, Any], ...] = ()
     text_key: str | None = None
@@ -253,6 +263,91 @@ TASKS: tuple[TaskDef, ...] = (
         ),
         note="가장 최근 캠페인 기준",
     ),
+    # 올릴 영상 번호를 고객이 모르므로 마케팅 의뢰 영상 목록에서 가장 최근 것을 찾아 쓴다.
+    # 초안(제목·설명 또는 캡션·해시태그)은 없으면 AI가 만들고, 올리기는 등급 C라 늘 사람 승인이다
+    TaskDef(
+        "video_publish_youtube",
+        "의뢰 영상 유튜브에 올리기",
+        "가장 최근에 만든 의뢰 영상(AI 라벨 입힌 파일)을 유튜브에 올려 달라는 의뢰. "
+        "초안을 쓰고 사람 승인을 거쳐 올린다.",
+        ("이 영상 유튜브에 올려 주세요", "최근 만든 영상 유튜브에 올려 줘"),
+        (
+            TaskStep(
+                "latest",
+                "marketing",
+                "list_request_videos",
+                "최근 의뢰 영상 찾기",
+                READ_GRADE,
+                # 11/26: 유튜브에 이미 올렸거나 승인 대기 중인 영상은 "최근"에서 뺀다
+                # (같은 영상을 또 올리기 요청하는 걸 막는다)
+                fixed_input=(("limit", 1), ("exclude_platform", "youtube")),
+                ref_key="items.0.post_draft_id",
+            ),
+            TaskStep(
+                "draft",
+                "marketing",
+                "request_video_youtube_draft",
+                "유튜브 제목·설명 초안",
+                READ_GRADE,
+                after=("latest",),
+                takes_ref="post_draft_id",
+                ref_key="post_draft_id",
+                empty_ref_note="아직 유튜브에 새로 올릴 의뢰 영상이 없어요. 이미 다 올렸거나, "
+                "만든 의뢰 영상이 아직 없어요.",
+            ),
+            TaskStep(
+                "run",
+                "marketing",
+                "request_video_youtube_request",
+                "유튜브 올리기 요청",
+                HUMAN_GRADE,
+                after=("draft",),
+                takes_ref="post_draft_id",
+            ),
+        ),
+        note="가장 최근 의뢰 영상 기준",
+    ),
+    TaskDef(
+        "video_publish_instagram",
+        "의뢰 영상 인스타그램(릴스)에 올리기",
+        "가장 최근에 만든 의뢰 영상(AI 라벨 입힌 파일)을 인스타그램 릴스로 올려 달라는 의뢰. "
+        "초안을 쓰고 사람 승인을 거쳐 올린다.",
+        ("이 영상 인스타에 올려 주세요", "최근 만든 영상 릴스로 올려 줘"),
+        (
+            TaskStep(
+                "latest",
+                "marketing",
+                "list_request_videos",
+                "최근 의뢰 영상 찾기",
+                READ_GRADE,
+                # 11/26: 인스타에 이미 올렸거나 승인 대기 중인 영상은 "최근"에서 뺀다
+                fixed_input=(("limit", 1), ("exclude_platform", "instagram")),
+                ref_key="items.0.post_draft_id",
+            ),
+            TaskStep(
+                "draft",
+                "marketing",
+                "request_video_instagram_draft",
+                "인스타 캡션·해시태그 초안",
+                READ_GRADE,
+                after=("latest",),
+                takes_ref="post_draft_id",
+                ref_key="post_draft_id",
+                empty_ref_note="아직 인스타에 새로 올릴 의뢰 영상이 없어요. 이미 다 올렸거나, "
+                "만든 의뢰 영상이 아직 없어요.",
+            ),
+            TaskStep(
+                "run",
+                "marketing",
+                "request_video_instagram_request",
+                "인스타 릴스 올리기 요청",
+                HUMAN_GRADE,
+                after=("draft",),
+                takes_ref="post_draft_id",
+            ),
+        ),
+        note="가장 최근 의뢰 영상 기준",
+    ),
     _one(
         "sales_analysis",
         "매출 분석",
@@ -373,6 +468,29 @@ TASKS: tuple[TaskDef, ...] = (
         fill="incident_component",
         ref_key="status",
     ),
+    # 11/26 롤백 요청 2단계(읽기 전용): 열린 사건의 롤백 승인 대기를 카드에 보여 준다.
+    # 새 실행 경로가 아니다: 총괄이 자기 사건 기록만 읽고(부서·`execute()` 호출 없음),
+    # 롤백은 기존 사건 흐름의 안전 관문(B)에서만 일어난다.
+    # "롤백해 줘" 같은 글도 여기로 와서 지금 상태와 이유를 안내받는다
+    TaskDef(
+        "incident_rollback_status",
+        "사건 롤백 상태 확인",
+        "열린 장애 사건에서 롤백(배포를 이전 버전으로 되돌리기)이 제안됐는지, 승인을 기다리는지, "
+        "어떻게 됐는지 알려 달라는 의뢰. 상태만 보여 주고 이 의뢰로 되돌리지는 않는다"
+        "(롤백은 장애 대응 사건의 안전 관문에서만 한다).",
+        ("롤백 상태 알려 주세요", "결제 장애 롤백 어떻게 돼가요", "배포 되돌려 줘"),
+        (
+            TaskStep(
+                "run",
+                "orchestrator",
+                ROLLBACK_STATUS_SKILL,
+                "사건 롤백 상태",
+                READ_GRADE,
+                kind=SELF_KIND,
+                ref_key="ref",
+            ),
+        ),
+    ),
     _one(
         "dev_status",
         "개발 진행 현황",
@@ -447,6 +565,7 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "kind": s.kind,
             "ref_key": s.ref_key,
             "takes_ref": s.takes_ref,
+            "empty_ref_note": s.empty_ref_note,
             "fixed_input": dict(s.fixed_input),
             "text_key": s.text_key,
             "carries": s.carries,

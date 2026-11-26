@@ -8,12 +8,14 @@ import { thumbSrc } from "@/lib/creativeRecords";
 import { characterLine } from "@/lib/videoPlan";
 import { RequestCreative } from "@/components/office/RequestCreative";
 import { RequestPublish } from "@/components/office/RequestPublish";
+import { ChatReviewDecision } from "@/components/office/ChatReviewDecision";
 import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestTitle } from "@/lib/requestHandoffs";
 import type { WorkRequestRow } from "@/lib/workRequests";
 import { closingOfRequest, hiddenRequestLine, infraOfRequest, type InfraResult, madeVideo, needPlanRefetch, perfStep, PLAN_LOOKUP_MIN_MS, PLAN_RETRY_MAX, PLAN_RETRY_MS, planCard, planFound, planLookupDue, proposalOfRequest, requestActionError, requestEditError, reportIdOfRequest, resultStep, showRequestCard, stepRows, type PerfStepView, type PlanCardView, type PlanLookup } from "@/lib/requestCards";
 import { dataAi, type RequestVideoPerformance } from "@/lib/data";
+import { rollbackCardResult, rollbackDecisionOf, type RollbackCardResult } from "@/lib/rollbackStatus";
 import { listLatestDeploys, type LatestDeploy } from "@/lib/toolConnections";
 import { finance, krw, type ClosingPeriod, type ClosingReport } from "@/lib/finance";
 import { planDocPath } from "@/lib/planDoc";
@@ -94,7 +96,54 @@ function DeploysCell() {
     </dl>
   );
 }
+// 사건 롤백 상태 (11/26 롤백 요청 2단계, 읽기 전용). 총괄 사건 목록(GET /api/incidents, 로그인 회사 범위)에서
+// 열린 사건의 롤백 단계를 읽어 보여 준다. 승인 대기(held)이고 review_id가 있을 때만 결정 영역(ChatReviewDecision, 기존 안전 관문 결정 경로 한 곳)을 붙인다 (3-a)
+const KO_TIME = (iso: string | null) => (iso ? new Date(iso).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : "확인 안 됨");
+const CONF_KO = { low: "낮음", mid: "보통", high: "높음" } as const;
+function RollbackCell() {
+  const [res, setRes] = useState<RollbackCardResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0); // 승인·거절 뒤 바로 다시 읽기
+  useEffect(() => {
+    let live = true;
+    const load = () => orchestrator.incidents().then((r) => live && (setRes(rollbackCardResult(r.data)), setError(null)), (e: unknown) => live && setError(e instanceof Error ? e.message : "사건 목록을 읽지 못했어요"));
+    load();
+    const t = setInterval(load, 5000);
+    return () => { live = false; clearInterval(t); };
+  }, [tick]);
+  if (error) return <p className="mt-1 text-[13.5px] text-red-700">{error}</p>;
+  if (!res) return <p className="mt-1 animate-pulse text-[13.5px] text-ink-500">사건 롤백 상태를 불러오는 중…</p>;
+  if (res.kind === "none") return <p className="mt-1 rounded-lg border border-ink-100 bg-ink-50 px-2.5 py-2 text-[13.5px] text-ink-700" aria-label="사건 롤백 상태">{res.text}</p>;
+  const s = res.status;
+  const decision = rollbackDecisionOf(s);
+  const rows: [string, string][] = [];
+  if (s.service) rows.push(["서비스", s.service]);
+  if (s.fromVersion || s.toVersion) rows.push(["버전", `${s.fromVersion ?? "확인 안 됨"} → ${s.toVersion ?? "확인 안 됨"}`]);
+  if (s.toVersion) rows.push(["되돌릴 버전 직전 health", s.toVersionHealthy === null ? "확인 안 됨" : s.toVersionHealthy ? "정상" : "정상 아님"]);
+  if (s.confidence) rows.push(["원인 확신도", CONF_KO[s.confidence]]);
+  if (s.irreversibleCount !== null) rows.push(["되돌릴 수 없는 변경", `${s.irreversibleCount}건`]);
+  if (s.priorRollbacks !== null) rows.push(["이 사건의 이전 롤백", `${s.priorRollbacks}회`]);
+  rows.push(["사건 시작", KO_TIME(s.openedAt)]);
+  if (s.state === "waiting") rows.push(["승인 대기 기한", KO_TIME(s.expiresAt)]);
+  return (
+    <div className="mt-1 rounded-lg border border-ink-100 bg-ink-50 px-2.5 py-2 text-[13.5px]" aria-label="사건 롤백 상태">
+      <p className="font-medium text-ink-900">{s.headline}{res.openCount > 1 ? ` (열린 사건 ${res.openCount}건 중 가장 최근)` : ""}</p>
+      <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents"><dt className="truncate text-ink-700">{k}</dt><dd className="text-right tabular-nums text-ink-900">{v}</dd></div>
+        ))}
+      </dl>
+      {s.onReject && <p className="mt-1 text-ink-700">{s.onReject}.{decision ? "" : " 승인·거절은 장애 대응 사건에서 해요."}</p>}
+      {decision && (
+        <div className="mt-1.5">
+          <ChatReviewDecision key={decision.reviewId} reviewId={decision.reviewId} what="사건 롤백" confirmName={decision.service} confirmText={decision.confirmText} doneText="승인했어요. 롤백은 사건 흐름이 이어서 진행해요." onDone={() => setTick((n) => n + 1)} />
+        </div>
+      )}
+    </div>
+  );
+}
 function InfraCell({ result }: { result: InfraResult }) {
+  if (result.kind === "rollback") return <RollbackCell />;
   if (result.kind === "deploys") return <DeploysCell />;
   const text =
     result.kind === "incidents"
@@ -411,7 +460,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
             {rows.map((s, i) => {
               const report = s.skill === "trend_report_create" ? reportIdOfRequest(row, s.stepId) : null;
           const closing = s.skill === "closing_report" ? closingOfRequest(row, s.stepId) : null;
-          const infraResult = s.dept === "infra" ? infraOfRequest(row, s.stepId) : null;
+          const infraResult = s.dept === "infra" || s.dept === "orchestrator" ? infraOfRequest(row, s.stepId) : null;
               const isInsight = s.skill === "receive_insight";
               const isCur = i === cur;
               const state = stepState(s, isCur);

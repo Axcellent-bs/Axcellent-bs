@@ -76,6 +76,17 @@ class SelfApprovalError(Exception):
     pass
 
 
+class ConfirmError(Exception):
+    """승인 때 받은 서비스 이름 확인(`confirm`)이 맞지 않다. `code`는 응답 오류 코드.
+
+    `CONFIRM_MISMATCH`(보류의 서비스 이름과 다르다)·`CONFIRM_NOT_APPLICABLE`(비교할 서비스가 없다).
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class AmountError(ValueError):
     pass
 
@@ -554,11 +565,17 @@ class Gate:
         by: str,
         note: str | None,
         decided_as: str | None = None,
+        confirm: str | None = None,
     ) -> Review:
         """사람의 승인·거절. 이미 결정·만료된 건은 바꾸지 않고 ValueError.
 
         `decided_as`는 공용 토큰(`SHARED_HUMAN`)일 때만 받는 승인자 이름(자기 신고)이다.
         개인 토큰이면 토큰이 곧 사람이라 버린다.
+
+        `confirm`(선택)은 승인할 때만 보류 요청 params의 `service`와 견준다(앞뒤 공백만 뺀다,
+        대소문자 구분). 안 보내면 예전과 같다. 거절에는 쓰지 않는다. 틀리면 `ConfirmError`이고
+        아무것도 쓰기 전이라 보류는 pending 그대로, 감사 로그도 그대로다. 이미 처리된 건의
+        409·자기 승인 403이 먼저 나가야 해서 두 검사 뒤, 기록 전에 둔다.
         """
         await self.expire_reviews()
         review = self.store.get_review(review_id)
@@ -582,9 +599,20 @@ class Gate:
             and _same_person(asked_by, approver)
         ):
             raise SelfApprovalError(f"{approver}가 요청한 건은 다른 사람이 승인해야 한다")
+        if confirm is not None and decision == "approved":
+            self._check_confirm(record, confirm)
         review = self._close_review(review, decision, by, note, decided_as)
         await self._emit_review(review)
         return review
+
+    @staticmethod
+    def _check_confirm(record: Any, confirm: str) -> None:
+        service = record.request.params.get("service") if record else None
+        if not isinstance(service, str) or not service.strip():
+            raise ConfirmError("CONFIRM_NOT_APPLICABLE", "이 보류 건에는 확인할 서비스 이름이 없다")
+        typed = confirm.strip()
+        if not typed or typed != service.strip():
+            raise ConfirmError("CONFIRM_MISMATCH", "서비스 이름이 보류 건과 다르다")
 
     async def expire_reviews(self) -> list[Review]:
         """마감이 지난 보류 건을 자동 거절한다(`review_timeout`)."""

@@ -373,3 +373,19 @@ async def test_human_approval_resume_is_not_counted_as_retry(harness) -> None:
     await task
     assert inc.steps["rollback"].attempts == 1
     assert inc.metrics["retries"] == 0
+
+
+@pytest.mark.asyncio
+async def test_held_step_keeps_only_whitelisted_facts_for_the_chat_card(harness) -> None:
+    """11/26 승인 대기 단계 기록에 화면이 읽을 값(코드·버전·정수)만 남는다. 보류 결정은 그대로."""
+    harness.fakes.script("infra", "rollback_deployment", "hold")
+    harness.hold_timeout = 5
+    engine = await harness.start()
+    inc = new_incident()
+    task = asyncio.create_task(engine.run(inc, scenario_a()))
+    await wait_hold(inc, "rollback")
+    assert inc.steps["rollback"].output == {"hold_reason": "over_threshold"}
+    assert "rollback" not in inc.outputs  # 완료 결과가 아니라서 다음 단계가 읽는 결과에 넣지 않는다
+    assert engine.decide_hold(inc, "rollback", False)
+    await task
+    assert inc.steps["rollback"].status == "rejected_by_human"

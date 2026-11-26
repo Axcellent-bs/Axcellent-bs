@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router";
 import { shortDateTime } from "@/lib/format";
 import { redrawBoardImage, thumbSrc, type CreativeRecord } from "@/lib/creativeRecords";
-import { boardBehindScript, nearestCount } from "@/lib/creativeScript";
+import { boardBehindScript, boardMissing, nearestCount } from "@/lib/creativeScript";
 import { isSvgBoard } from "@/lib/storyboardSvg";
 import { usesOriginalReference } from "@/lib/videoAsk";
 import { listRequestVideos } from "@/lib/requestVideos";
@@ -78,6 +78,9 @@ function BoardStep({ ctx, rec }: { ctx: RecordRender; rec: CreativeRecord }) {
   // 실제 그림이나 영상이 생기면 회색 구도 그림 콘티는 접는다(AI가 그린 SVG 콘티는 펼쳐 둔다)
   const drawn = keyframed || [render.board_image, render.video, render.final_video].some((p) => p?.status === "done");
   const board = rec.storyboard;
+  // 대본만 있고 스토리보드가 없으면(11/26) 처음 만들기 버튼만 두고 옛 안내·빈 그림 칸은 숨긴다. 이미 그림을 올렸으면 그림 칸은 그대로
+  const missing = boardMissing(rec);
+  const hidePicture = missing && !render.board_image?.status;
   const view = board && <StoryboardView r={board} onRedraw={async () => { await redrawBoardImage(rec.record_id); await load(); }} />;
   return (
     <>
@@ -96,12 +99,16 @@ function BoardStep({ ctx, rec }: { ctx: RecordRender; rec: CreativeRecord }) {
       </div>
       <div className="space-y-3 border-t border-ink-100 pt-4">
         <h3 className="text-sm font-semibold text-ink-900">스토리보드</h3>
-        {needsPicture && <div className="max-w-2xl"><BoardPicture ctx={ctx} /></div>}
+        {rec.script && missing && (
+          <RecordBoardFromScript first recordId={rec.record_id} story={rec.story ?? rec.script.title_ko} characterEn={rec.sheet.consistency_en}
+            scenes={rec.script.scenes.length} onRecord={setRec} />
+        )}
+        {needsPicture && !hidePicture && <div className="max-w-2xl"><BoardPicture ctx={ctx} /></div>}
         <Keyframes ctx={ctx} />
-        {!board ? <p className="text-sm text-ink-500">이 기록에는 스토리보드가 없어요. SNS·미디어에서 줄거리를 넣고 다시 만들면 붙어요.</p>
+        {missing ? null : !board ? <p className="text-sm text-ink-500">이 기록에는 스토리보드가 없어요. SNS·미디어에서 줄거리를 넣고 다시 만들면 붙어요.</p>
           : drawn && !isSvgBoard(board) ? <Fold title={`칸 설명과 프롬프트 (${board.shots.length}칸)`}>{view}</Fold>
             : view}
-        {!needsPicture && <Fold title="스토리보드 그림 직접 올리기 (선택)"><div className="max-w-2xl"><BoardPicture ctx={ctx} /></div></Fold>}
+        {!needsPicture && !hidePicture && <Fold title="스토리보드 그림 직접 올리기 (선택)"><div className="max-w-2xl"><BoardPicture ctx={ctx} /></div></Fold>}
       </div>
     </>
   );

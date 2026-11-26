@@ -318,6 +318,7 @@ SERVICES: tuple[Service, ...] = (
             "campaign_effect",
             "video_performance",
             "ad_performance",
+            "video_insights",
             "campaign_result",
             "receive_idea_report",
             "list_idea_reports",

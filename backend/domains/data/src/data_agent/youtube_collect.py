@@ -57,6 +57,7 @@ from ax_agent_template.tenant import setting as tenant_setting
 from data_agent import collector_lock, keyword_pool, meme_shorts, shorts_backfill, youtube_quota
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat, YouTubeConnector
+from data_agent.connectors.youtube_analytics import YouTubeAnalytics
 from data_agent.stage_timing import install_sqlite_timer
 from data_agent.trend_precompute import precompute
 from data_agent.youtube_store import (
@@ -487,6 +488,7 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
             print(result.line(), flush=True)
             await measure_videos(connector, env)  # 게시한 영상 성과: 지금 잴 시점만 (실패해도 계속)
             await measure_instagram_videos(env)  # 인스타 게시 영상: 계정마다 한 번 (실패해도 계속)
+            await collect_insights(env)  # 영상 깊은 지표: 영상마다 하루 1번 (실패해도 계속)
             await collect_ads(env)  # 광고 성과: 회사·플랫폼마다 하루 1번 (실패해도 계속)
             await track_fresh(env)  # 새 숏츠 추적: 같은 형식 비교 기준 표본 (실패해도 계속)
             # 숏츠 표본의 빠진 게시 시각 채우기 (하루 상한, 미리 계산 바로 앞. 실패해도 계속)
@@ -592,6 +594,32 @@ async def collect_ads(env: Mapping[str, str], now: datetime | None = None) -> in
         print(f"[ads] 광고 성과 수집 실패 ({type(error).__name__})", flush=True)
         return 0
     finally:
+        store.close()
+    if result.saved or result.problems:
+        print(result.line(), flush=True)
+    return result.saved
+
+
+async def collect_insights(
+    env: Mapping[str, str], now: datetime | None = None, conn: YouTubeAnalytics | None = None
+) -> int:
+    """video_performance 추적 목록의 영상 깊은 지표 (유튜브 Analytics·Reporting, 영상마다
+    `DATA_YT_ANALYTICS_EVERY_HOURS`에 한 번). 저장한 영상 수. 실패해도 수집은 계속한다.
+    토큰·주소는 찍지 않는다 (오류 코드만)."""
+    from data_agent.skills import video_insights as vi
+    from data_agent.skills import video_performance as vp
+
+    path = env.get(vp.DB_ENV) or vp.DEFAULT_DB
+    if str(path) != ":memory:" and not Path(path).is_file():
+        return 0  # 등록된 영상이 없다
+    videos, store = vp.VideoStore(path), vi.InsightStore(path)
+    try:
+        result = await vi.collect_due(videos, store, conn or YouTubeAnalytics(env), env, now)
+    except Exception as error:  # 깊은 지표가 실패해도 수집은 계속
+        print(f"[insights] 깊은 지표 수집 실패 ({type(error).__name__})", flush=True)
+        return 0
+    finally:
+        videos.close()
         store.close()
     if result.saved or result.problems:
         print(result.line(), flush=True)

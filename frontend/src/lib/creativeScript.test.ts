@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 영상 대본 칸의 순수 계산 (11/23).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boardArrived, boardBehindScript, nearestCount, saveBody, scriptProblem, sourceLabel, spanLabel, stageChips, updateScene, type CreativeScript } from "./creativeScript.ts";
+import { boardArrived, boardBehindScript, boardMissing, nearestCount, saveBody, scriptProblem, sourceLabel, spanLabel, stageChips, updateScene, type CreativeScript } from "./creativeScript.ts";
 
 const SCRIPT: CreativeScript = {
   title_ko: "들판의 하루",
@@ -81,4 +81,25 @@ test("boardArrived: 시작한 뒤에 붙고 대본을 따르는 스토리보드�
   assert.equal(boardArrived({ storyboard: { script_used: true }, storyboard_at: "2026-11-25T03:00:00Z" }, start), false);
   assert.equal(boardArrived({ storyboard: { script_used: false }, storyboard_at: "2026-11-25T04:01:00Z" }, start), false);
   assert.equal(boardArrived({ storyboard: null, storyboard_at: null }, start), false);
+});
+
+test("boardMissing: 대본 있음 && 스토리보드 없음일 때만 처음 만들기 (11/26)", () => {
+  const script = { at: "2026-11-26T01:00:00Z" };
+  const board = { script_used: true };
+  assert.equal(boardMissing({ script, storyboard: null }), true);
+  assert.equal(boardMissing({ script, storyboard: undefined }), true);
+  assert.equal(boardMissing({ script }), true);
+  assert.equal(boardMissing({ script, storyboard: board }), false);
+  assert.equal(boardMissing({ script: null, storyboard: null }), false);
+  assert.equal(boardMissing({ script: null, storyboard: board }), false);
+  assert.equal(boardMissing({}), false);
+});
+
+test("boardMissing·boardBehindScript는 겹치지 않는다: 대본보다 오래된 스토리보드는 다시 만들기", () => {
+  const rec = { script: { at: "2026-11-25T03:30:00Z" }, storyboard: { script_used: true }, storyboard_at: "2026-11-25T03:00:00Z" };
+  assert.equal(boardMissing(rec), false);
+  assert.equal(boardBehindScript(rec), true);
+  const onlyScript = { script: { at: "2026-11-26T01:00:00Z" }, storyboard: null };
+  assert.equal(boardMissing(onlyScript), true);
+  assert.equal(boardBehindScript(onlyScript), false);
 });

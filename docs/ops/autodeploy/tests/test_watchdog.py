@@ -167,6 +167,50 @@ class WatchdogTest(unittest.TestCase):
             f.write(f"{ts(NOW - 100)} [2] done: 백엔드 배포 완료, 기준 ref -> 3d419637\n")
         self.assertEqual(self.js()[1]["primary"], "ok")
 
+    def test_ci_off_stuck(self):
+        self._wait_setup("ci-off", 700)  # 기준(600초) 이상: 경고
+        code, j = self.js()
+        self.assertEqual((code, j["primary"]), (1, "ci-off-stuck"))
+        self.assertIn("토큰 파일", j["detail"])
+        self.assertIn("/etc/ax-autodeploy/gh-readonly-token", j["detail"])
+
+    def test_ci_off_short_is_ok(self):
+        self._wait_setup("ci-off", 300)
+        self.assertEqual(self.js()[1]["primary"], "ok")
+
+    def test_ci_off_three_times_is_critical(self):
+        self._wait_setup("ci-off", 1900)
+        code, j = self.js()
+        self.assertEqual((code, j["primary"]), (2, "ci-off-stuck"))
+        self._wait_setup("ci-off", 1700)  # 3배(1800초) 미만은 경고
+        self.assertEqual(self.js()[0], 1)
+
+    def test_ci_off_threshold_env_and_not_long_wait(self):
+        self._wait_setup("ci-off", 700)
+        self.assertEqual(self.js(AX_WD_CIOFF_S=1000)[1]["primary"], "ok")
+        # ci-off 는 long-wait(1800초 기준)가 아니라 자기 기준으로만 본다
+        self._wait_setup("ci-pending", 700)
+        self.assertEqual(self.js()[1]["primary"], "ok")
+
+    def test_ci_off_not_reported_while_paused(self):
+        self._wait_setup("ci-off", 2000)
+        self.touch("pause", f"until_epoch={NOW + 3600}\n")
+        self.assertEqual(self.js(AX_PAUSE_FILE=str(self.state / "pause"))[1]["primary"], "paused-approved")
+
+    def test_ci_off_other_verdicts_do_not_trigger(self):
+        for key in ("ci-fail", "outside-hours", "no-pr"):
+            self._wait_setup(key, 5000)
+            self.assertEqual(self.js()[1]["primary"], "ok", key)
+
+    def test_ci_off_notify_dedupes(self):
+        self._wait_setup("ci-off", 700)
+        self.run_wd("--notify")
+        self.assertEqual(len(self.sent()), 1)
+        self.assertIn("ci-off-stuck", self.sent()[0])
+        self.assertNotIn("hooks.fake.invalid", self.sent()[0])
+        self.run_wd("--notify", AX_WD_NOW=NOW + 300)
+        self.assertEqual(len(self.sent()), 1)
+
     # ---- 같은 사유로 주기를 계속 건너뜀 · fetch 실패 ---------------------------------------------
     def _streak(self, text, minutes, last_ago=30, step=65):
         """minutes 분 길이로 step 초마다 이어지는 로그 줄을 쓴다(마지막 줄은 last_ago 초 전)"""

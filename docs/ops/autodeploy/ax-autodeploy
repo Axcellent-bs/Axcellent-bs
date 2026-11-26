@@ -693,13 +693,13 @@ if (( DO_FE == 0 && DO_PROMO == 0 )); then
 fi
 
 # ---- CI 확인 --------------------------------------------------------------------------------------
-# 반환: 0 통과(또는 확인 꺼짐), 1 실패, 2 아직 진행 중/확인 불가(다음 주기에 다시)
+# 반환: 0 통과, 1 실패, 2 아직 진행 중/확인 불가/토큰 파일 없음·빔(다음 주기에 다시. 백엔드 단계와 같이 확인 없이는 배포하지 않는다)
 CI_STATE=""
 ci_check() {
-  if [[ ! -r "${CI_TOKEN_FILE}" ]]; then CI_STATE="ci-check=off"; return 0; fi
+  if [[ ! -r "${CI_TOKEN_FILE}" ]]; then CI_STATE="ci-check=off(no token file)"; return 2; fi
   local tok body verdict
   tok="$(tr -d ' \r\n' < "${CI_TOKEN_FILE}")"
-  [[ -n "${tok}" ]] || { CI_STATE="ci-check=off(empty token file)"; return 0; }
+  [[ -n "${tok}" ]] || { CI_STATE="ci-check=off(empty token file)"; return 2; }
   body="$(curl -fsS --max-time 30 -H "Authorization: Bearer ${tok}" -H 'Accept: application/vnd.github+json' \
            "https://api.github.com/repos/${GITHUB_REPO}/commits/${TARGET}/check-runs?per_page=100" 2>/dev/null)" \
     || { CI_STATE="ci-check=api-error(${TARGET:0:8})"; return 2; }
@@ -717,6 +717,8 @@ print("fail" if bad else "ok")' 2>/dev/null || echo "parse-error")"
   esac
 }
 ci_rc=0; ci_check || ci_rc=$?
+CI_OFF_WHY=""
+[[ "${CI_STATE}" == ci-check=off* ]] && CI_OFF_WHY="CI 확인용 토큰 파일이 없거나 비어 있어 화면 배포를 보류(${CI_TOKEN_FILE}; 값은 출력하지 않음)"
 
 # ---- dry-run 보고 ---------------------------------------------------------------------------------
 if [[ ${DRY} == 1 ]]; then
@@ -726,6 +728,7 @@ if [[ ${DRY} == 1 ]]; then
   say "변경 파일 ${NALL}개: frontend(화면 관련) ${#FE_FILES[@]}개, 홍보 웹 ${#PROMO_FILES[@]}개, backend ${BACKEND_N}개"
   say "게이트 정지 연결: ${GATE_STATE}"
   say "CI: ${CI_STATE} (rc=${ci_rc}; 0이 아니면 이번 주기엔 배포하지 않는다)"
+  [[ -z "${CI_OFF_WHY}" ]] || say "주의: ${CI_OFF_WHY}"
   say "frontend/·docs/promo 를 건드린 커밋:"
   if (( ${#FE_COMMITS[@]} > 0 )); then printf '  %s\n' "${FE_COMMITS[@]}"; fi
   if (( DO_FE )); then say "할 일: 프론트 ${WEB_ROOT_90} 과 ${WEB_ROOT_91} 를 ${TARGET:0:8} 로 재빌드·교체(deploy.sh 2회), 이후 토큰 검사"; fi
@@ -738,7 +741,7 @@ if [[ ${DRY} == 1 ]]; then
 fi
 
 if (( ci_rc != 0 )); then
-  log "wait: ${CI_STATE} -> 이번 주기엔 배포하지 않음"
+  log "wait: ${CI_STATE} -> 이번 주기엔 배포하지 않음${CI_OFF_WHY:+ (${CI_OFF_WHY})}"
   heartbeat "ci-wait ${TARGET:0:8}"
   exit 0
 fi
