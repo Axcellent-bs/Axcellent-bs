@@ -65,7 +65,9 @@ def test_fake_llm_is_used_as_is(monkeypatch: pytest.MonkeyPatch) -> None:
         (TimeoutError(), "TimeoutError"),
     ],
 )
-def test_svg_detail_says_why_the_call_failed(exc: BaseException, detail: str) -> None:
+def test_svg_detail_says_why_the_call_failed(
+    exc: BaseException, detail: str, caplog: pytest.LogCaptureFixture
+) -> None:
     assert sb.failure_detail(exc) == detail
 
     class Broken(MockLLMClient):
@@ -73,5 +75,9 @@ def test_svg_detail_says_why_the_call_failed(exc: BaseException, detail: str) ->
             raise exc
 
     plan = vp.rule_plan(V._prop())  # noqa: SLF001
-    out, n = asyncio.run(sb.draw(Broken(responses={}), plan, "ctx"))
-    assert n == 0 and out.svg_detail == detail
+    with caplog.at_level("WARNING"):
+        out, n = asyncio.run(sb.draw(Broken(responses={}), plan, "ctx"))
+    # 11/26 실패 사다리: 규칙 포즈로 다 그리고 실패 코드는 로그 줄에
+    # (예전 기대값: svg_detail = 실패 코드)
+    assert n == len(plan.scenes) and out.svg_detail == f"rule_pose_{n}"
+    assert detail in caplog.text

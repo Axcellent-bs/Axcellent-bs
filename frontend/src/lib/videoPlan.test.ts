@@ -223,6 +223,12 @@ test("규칙 초안 진짜 이유 (계약 fallback_detail·svg_detail·character
   assert.equal(svgOf("LLMResponseError_400_length"), "콘티 호출이 실패했어요 · AI 입력·출력이 너무 길어요");
   assert.equal(svgOf("LLMResponseError_400_model"), "콘티 호출이 실패했어요 · AI 모델 설정이 맞지 않아요");
   assert.equal(svgOf("LLMResponseError_400"), "콘티 호출이 실패했어요 (LLMResponseError_400)");
+  // 11/26 콘티 실패 사다리 4단: svg_reason은 비고 svg_detail "rule_pose_N" → 규칙 포즈 줄
+  const ruled = (detail: string) => videoSvgLine(toVideoPlan({ ...RAW, svg_reason: "", svg_detail: detail })!);
+  assert.equal(ruled("rule_pose_3"), "3장면은 AI 대신 규칙 포즈로 그렸어요");
+  assert.equal(ruled("rule_pose_0"), "");
+  assert.equal(ruled("LLMResponseError_400"), ""); // 이유 없이 온 다른 코드는 그리지 않는다 (지금 그대로)
+  assert.equal(videoSvgLine(toVideoPlan(RAW)!), "");
   assert.equal(svgOf("LLMResponseError_503"), "콘티 호출이 실패했어요 (LLMResponseError_503)");
   assert.equal(svgOf("toString"), "콘티 호출이 실패했어요 (toString)");
   const brand = (why: string) => characterLine(toVideoPlan({ ...RAW, character_source: "brand", character_source_reason: why })!);

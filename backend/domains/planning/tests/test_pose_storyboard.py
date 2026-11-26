@@ -163,16 +163,19 @@ def test_unknown_shot_and_prop_from_llm_become_defaults_and_label_falls_back() -
     assert s.end_pose is None and s.end_svg == ""  # 끝 포즈가 없으면 그 칸은 그대로
 
 
-def test_llm_failure_keeps_plan_without_pose_or_svg() -> None:
+def test_llm_failure_draws_rule_poses_for_every_scene() -> None:
+    """11/26 실패 사다리 4단: LLM이 없거나 실패해도 콘티는 규칙 포즈로 다 그린다.
+
+    (예전 기대값: 장면 그대로·svg_reason 있음·svg_detail "KeyError". 이유는 이제 로그에 남는다)"""
     plan = _plan()
     for llm in (None, MockLLMClient(responses={})):
         drawn, changed = asyncio.run(sb.draw(llm, plan, "ctx"))
-        assert changed == 0 and drawn.svg_reason  # 11/25 5-1: 이유를 남긴다 (장면은 그대로)
-        assert drawn.scenes == plan.scenes
-        # 11/26 U: 호출 실패면 예외 종류 이름(svg_detail)도 남는다 (LLM 없음은 "")
-        assert drawn.svg_detail == ("" if llm is None else "KeyError")
-        assert drawn.model_copy(update={"svg_reason": "", "svg_detail": ""}) == plan
-    assert all(s.start_pose is None and not s.start_svg for s in plan.scenes)
+        n = len(plan.scenes)
+        assert changed == n and drawn.svg_reason == "" and drawn.svg_detail == f"rule_pose_{n}"
+        assert all(s.start_pose and s.start_svg and s.end_pose and s.end_svg for s in drawn.scenes)
+        assert [(s.visual, s.prompt) for s in drawn.scenes] == [(s.visual, s.prompt)
+                                                                  for s in plan.scenes]  # fmt: skip
+    assert all(s.start_pose is None and not s.start_svg for s in plan.scenes)  # 원본은 그대로
 
 
 class _Slow:
@@ -190,23 +193,33 @@ class _Raises:
         raise self.exc
 
 
-def _reason(llm: Any) -> str:
-    drawn, changed = asyncio.run(sb.draw(llm, _plan(), "ctx"))
-    assert changed == 0 and all(not s.start_svg and not s.end_svg for s in drawn.scenes)
-    return drawn.svg_reason
+def _reason(llm: Any, caplog: pytest.LogCaptureFixture) -> str:
+    """그 실패에서도 4칸 모두 규칙 포즈로 그리고, 실패 이유는 로그 줄로 돌려준다."""
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        drawn, changed = asyncio.run(sb.draw(llm, _plan(), "ctx"))
+    n = len(drawn.scenes)
+    assert changed == n and drawn.svg_reason == "" and drawn.svg_detail == f"rule_pose_{n}"
+    assert all(s.start_svg and s.end_svg for s in drawn.scenes)
+    return " ".join(r.getMessage() for r in caplog.records)
 
 
-def test_svg_reason_for_each_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_each_failure_falls_back_to_rule_poses_and_logs_why(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """(예전 기대값: svg_reason no_llm·timeout·bad_format·error·rejected. 이제 4칸은 늘 그려지고
+    이유는 로그 줄에 남는다)"""
     monkeypatch.delenv(sb.MODEL_ENV, raising=False)
-    assert _reason(None) == "no_llm"
+    assert "LLM 없음" in _reason(None, caplog)
     monkeypatch.setattr(sb, "TIMEOUT_SECONDS", 0.05)
-    assert _reason(_Slow()) == "timeout"
-    assert _reason(_Raises(sb.LLMFormatError("형식"))) == "bad_format"
-    assert _reason(_Raises(RuntimeError("끊김"))) == "error"
+    assert "TimeoutError" in _reason(_Slow(), caplog)
+    assert "LLMFormatError" in _reason(_Raises(sb.LLMFormatError("형식")), caplog)
+    assert "RuntimeError" in _reason(_Raises(RuntimeError("끊김")), caplog)
     empty = MockLLMClient(responses={sb._PoseOut: sb._PoseOut.model_validate({"scenes": []})})
-    assert _reason(empty) == "bad_format"  # 답은 왔지만 장면이 없다
+    _reason(empty, caplog)  # 답은 왔지만 장면이 없다 → 1단 성공이라 2단 없이 규칙 포즈
+    assert len(empty.calls) == 1
     wrong_n = sb._PoseOut.model_validate({"scenes": [{"n": 99, "start": SAMPLES[0]}]})
-    assert _reason(MockLLMClient(responses={sb._PoseOut: wrong_n})) == "rejected"
+    _reason(MockLLMClient(responses={sb._PoseOut: wrong_n}), caplog)
 
 
 def test_timeout_is_150s_for_the_background_flow() -> None:
@@ -217,17 +230,19 @@ def test_partial_poses_draw_only_those_scenes_and_success_has_no_reason() -> Non
     plan = _plan()
     got = sb._PoseOut.model_validate({"scenes": [{"n": 2, "start": SAMPLES[0], "end": SAMPLES[1]}]})
     drawn, changed = asyncio.run(sb.draw(MockLLMClient(responses={sb._PoseOut: got}), plan, "c"))
-    assert changed == 1 and drawn.svg_reason == ""
-    for s in drawn.scenes:
-        assert bool(s.start_svg) == bool(s.end_svg) == (s.n == 2)
+    # (예전 기대값: 1장면만 그리고 나머지는 빈 칸. 이제 나머지 3장면은 규칙 포즈)
+    assert changed == len(plan.scenes) and drawn.svg_reason == ""
+    assert drawn.svg_detail == f"rule_pose_{len(plan.scenes) - 1}"
+    llm_drawn = next(s for s in drawn.scenes if s.n == 2)
+    assert llm_drawn.start_pose and llm_drawn.start_pose.yaw == KeyPose.model_validate(
+        SAMPLES[0]).yaw  # 2장면은 LLM 포즈 그대로  # fmt: skip
+    assert all(s.start_svg and s.end_svg for s in drawn.scenes)
     full, n = asyncio.run(sb.draw(MockLLMClient(responses={sb._PoseOut: _out(plan)}), plan, "c"))
-    assert n == len(plan.scenes) and full.svg_reason == ""
+    assert n == len(plan.scenes) and full.svg_reason == "" and full.svg_detail == ""
 
 
 def test_failure_log_has_kind_seconds_and_count_only(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level("WARNING"):
-        _reason(_Raises(RuntimeError("비밀 프롬프트 내용")))
-    line = " ".join(r.getMessage() for r in caplog.records)
+    line = _reason(_Raises(RuntimeError("비밀 프롬프트 내용")), caplog)
     assert "RuntimeError" in line and "s 0/" in line and "비밀" not in line
 
 

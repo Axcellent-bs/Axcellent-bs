@@ -185,7 +185,11 @@ export const VIDEO_SVG_DETAIL: Record<string, string> = {
 /** 콘티를 못 그린 이유가 있을 때만 그 한 줄, 아니면 '' (지금 화면 그대로).
  *  예외 종류 이름(계약 svg_detail, 예: LLMResponseError)이 있으면 괄호로 붙인다 (11/26 U).
  *  아는 코드(ReadTimeout·429)면 괄호 대신 짧은 한국어를 붙인다 (11/26 C) */
+/** 11/26 콘티 실패 사다리 4단: 규칙 포즈로 그린 장면 수 (기획 svg_detail "rule_pose_N", svg_reason은 "") */
+export const RULE_POSE = /^rule_pose_([1-9][0-9]?)$/
 export function videoSvgLine(v: Pick<VideoPlanView, 'svgReason' | 'svgDetail'>): string {
+  const rule = !v.svgReason && v.svgDetail ? RULE_POSE.exec(v.svgDetail) : null
+  if (rule) return `${rule[1]}장면은 AI 대신 규칙 포즈로 그렸어요`
   if (!v.svgReason) return ''
   const base = VIDEO_SVG_LINE[v.svgReason]
   if (!v.svgDetail) return base
@@ -321,7 +325,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     ...(FALLBACKS.has(svgWhy) ? { svgReason: svgWhy as VideoFallbackReason } : {}),
     // 11/26 U: 코드만 받는다 (모양이 다르면 버린다)
     ...(FALLBACKS.has(fallback) && fallbackDetail in FALLBACK_DETAIL ? { fallbackDetail } : {}),
-    ...(FALLBACKS.has(svgWhy) && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(svgDetail) ? { svgDetail } : {}),
+    ...((FALLBACKS.has(svgWhy) && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(svgDetail)) || RULE_POSE.test(svgDetail) ? { svgDetail } : {}),
     ...(source === 'brand' && CHARACTER_REASONS.has(sourceWhy) ? { characterSourceReason: sourceWhy as CharacterSourceReason } : {}),
     ...(source === 'company_character' || source === 'brand' ? { characterSource: source } : {}),
     ...(source === 'company_character' && characterKo ? { characterKo } : {}),

@@ -487,7 +487,10 @@ def test_planning_timeout_falls_back_to_rule_plan_and_still_makes_a_video(
 ) -> None:
     _, rid = _timeout(world)
     board = world["store"].get(rid)["storyboard"]
-    assert board["board_source"] == "layout"  # 기획 SVG 없음
+    # 11/26 콘티 실패 사다리 4단: 규칙 제작안이어도 콘티는 규칙 포즈로 그린다
+    # (예전 기대값: "layout", 기획 SVG 없음)
+    assert board["board_source"] == "svg"
+    assert any(s.get("svg") for s in board["shots"])
     after = _approve(world, rid)
     assert after["render"]["video"]["status"] == "done"
 

@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import re
@@ -29,9 +28,9 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ax_agent_template import pose_render
+from ax_agent_template import pose_ladder, pose_render
 from ax_agent_template.company_ai import settings_for
-from ax_agent_template.llm import LLMClient, LLMFormatError, LLMResponseError
+from ax_agent_template.llm import LLMClient, LLMFormatError
 from ax_contracts.schemas.planning import KeyPose, VideoPlan
 
 log = logging.getLogger(__name__)
@@ -165,6 +164,15 @@ class _PoseOut(BaseModel):
     scenes: list[_PoseFrame] = Field(default_factory=list)
 
 
+class _ScenePoseOut(BaseModel):
+    """2단(장면별) LLM 답: 그 장면 하나의 첫·끝 포즈 (칸이 작은 스키마, null 없음)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    start: _PoseLLM = Field(default_factory=_PoseLLM)
+    end: _PoseLLM = Field(default_factory=_PoseLLM)
+
+
 POSE_RULES = (
     """- 장면마다 start(첫 화면)와 end(끝 화면)에 마네킹 포즈 숫자만 JSON으로 쓴다.
   글 문단·SVG·그림 원문은 쓰지 않는다(그림은 코드가 포즈로 그린다).
@@ -214,45 +222,20 @@ def pose_llm(llm: Any) -> Any:
     return llm
 
 
-_CALL_FAILED = re.compile(r"호출 실패: ([A-Za-z][A-Za-z0-9_]*)")
+def base_pose_llm(llm: Any) -> Any:
+    """3단: 모델 env(`PLANNING_SVG_LLM_MODEL`)를 썼을 때만, env 없을 때와 같은 기획 기본 클라이언트.
+    env가 없으면 None (1·2단이 이미 기본 모델)."""
+    if llm is None or not os.getenv(MODEL_ENV, "").strip():
+        return None
+    return LLMClient("planning", settings=settings_for("planning"), timeout=TIMEOUT_SECONDS)
 
 
-def failure_detail(exc: BaseException) -> str:
-    """계약 svg_detail: 예외 종류 이름. LLMResponseError면 HTTP 코드("LLMResponseError_429")나
-    httpx 예외 이름("LLMResponseError_ReadTimeout")을 붙인다 ([A-Za-z0-9_], 40자)."""
-    name = type(exc).__name__
-    if isinstance(exc, LLMResponseError):
-        status = getattr(exc, "status_code", None)
-        m = _CALL_FAILED.search(str(exc))
-        if isinstance(status, int):
-            name = f"{name}_{status}"
-            kind = bad_request_kind(provider_message(exc)) if status == 400 else ""
-            if kind:
-                name = f"{name}_{kind}"
-        elif m:
-            name = f"{name}_{m.group(1)}"
-    return name[:40]
-
-
-# 11/26 F: 400(잘못된 요청)의 공급자 메시지 갈래 (대소문자 무시, 위에서부터)
-BAD_REQUEST_KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("schema", ("schema", "json_schema", "response_format", "additionalproperties", "required")),
-    ("length", ("max_tokens", "too long", "context", "length")),
-    ("model", ("model",)),
-)
-PROVIDER_LOG_MAX = 120  # 로그에 남기는 공급자 메시지 길이 (마케팅 character_sheet와 같다)
-
-
-def provider_message(exc: BaseException) -> str:
-    """LLMResponseError의 공급자 메시지 (래퍼가 키·토큰 모양을 가린 앞 200자). 없으면 ""."""
-    raw = getattr(exc, "provider_message", None)
-    return " ".join(raw.split()) if isinstance(raw, str) else ""
-
-
-def bad_request_kind(message: str) -> str:
-    """400 공급자 메시지 → schema·length·model, 모르면 ""."""
-    low = (message or "").lower()
-    return next((kind for kind, words in BAD_REQUEST_KINDS if any(w in low for w in words)), "")
+# 실패 이유 (11/26 F) → 공용 `ax_agent_template.pose_ladder` (마케팅 콘티와 같은 값)
+failure_detail = pose_ladder.failure_detail
+provider_message = pose_ladder.provider_message
+bad_request_kind = pose_ladder.bad_request_kind
+BAD_REQUEST_KINDS = pose_ladder.BAD_REQUEST_KINDS
+PROVIDER_LOG_MAX = pose_ladder.PROVIDER_LOG_MAX
 
 
 def _cut(text: Any, n: int) -> str:
@@ -321,38 +304,68 @@ def _failed(plan: VideoPlan, reason: str, detail: str = "") -> tuple[VideoPlan, 
     return plan.model_copy(update={"svg_reason": reason, "svg_detail": code}), 0
 
 
+def _rule_frames(plan: VideoPlan, missing: list[int]) -> list[_PoseFrame]:
+    """4단 규칙 포즈 (LLM 없이). 장면 i의 end = 장면 i+1의 start (같은 순간, 기존 규칙)."""
+    by_n = {s.n: s for s in plan.scenes}
+    frames = []
+    for n in missing:
+        s = by_n[n]
+        head = " ".join((s.visual, s.action_en, s.camera_en))
+        start = pose_ladder.rule_pose(f"{head} {s.start_frame}", s.visual)
+        nxt = by_n.get(n + 1)
+        end = (pose_ladder.rule_pose(f"{nxt.visual} {nxt.camera_en} {nxt.start_frame}", nxt.visual)
+               if nxt is not None and not s.end_frame
+               else pose_ladder.rule_pose(f"{head} {s.end_frame}", s.visual))  # fmt: skip
+        frames.append(_PoseFrame(n=n, start=start, end=end))
+    return frames
+
+
+def _drawn_ns(plan: VideoPlan) -> set[int]:
+    return {s.n for s in plan.scenes if s.start_svg and s.end_svg}
+
+
 async def draw(
     llm: Any, plan: VideoPlan, context_id: str, note: str = "", only: int | None = None
 ) -> tuple[VideoPlan, int]:
     """장면별 첫·끝 포즈를 받아 3D 마네킹 콘티로 그린다. (제작안, 바뀐 장면 수).
 
-    LLM 호출은 한 번. 포즈가 일부 장면만 오면 온 장면만 그리고 나머지는 비운다.
-    하나도 못 그리면 (장면 그대로, 0)이고 `svg_reason`에 이유를 남긴다(그렸으면 "").
-    로그에는 예외 종류·경과 초·그린 장면 수만 남긴다(포즈 값·프롬프트는 남기지 않는다)."""
-    llm = pose_llm(llm)
-    if llm is None:
-        log.warning("마네킹 콘티: LLM 없음 → 그림 없이 제작안 그대로")
-        return _failed(plan, "no_llm")
+    11/26 실패 사다리(공용 `pose_ladder`): 1단 전 장면 한 번(성공하면 호출 1번 그대로) → 실패하면
+    2단 장면별 동시 → 모델 env의 400 `_model`이면 3단 기본 모델 → 그래도 못 그린 장면은 4단 규칙
+    포즈(LLM 없이). 전체 시간 상한은 `TIMEOUT_SECONDS` 하나. 규칙 포즈로 그린 장면이 있으면
+    svg_detail "rule_pose_N"(svg_reason ""). 로그에는 예외 종류·경과 초·장면 수·공급자 메시지 앞
+    120자만 남긴다(포즈 값·프롬프트는 남기지 않는다)."""
+    client = pose_llm(llm)
     started = time.monotonic()
-    try:
-        got = await asyncio.wait_for(
-            llm.structured(PROMPT, _PoseOut, untrusted=_data(plan, note, only),
-                           context_id=context_id),
-            TIMEOUT_SECONDS,
-        )  # fmt: skip
-    except Exception as exc:  # noqa: BLE001 - 포즈·SVG 없이 제작안 그대로
-        # 11/26 F: 공급자 메시지(래퍼가 가린 앞 200자)를 120자로 같이 남긴다 (요청·프롬프트는 없음)
-        said = provider_message(exc)[:PROVIDER_LOG_MAX]
-        log.warning("마네킹 콘티 포즈 실패: %s %.1fs 0/%d장면%s", failure_detail(exc),
-                    time.monotonic() - started, len(plan.scenes),
-                    f" — 공급자 메시지: {said}" if said else "")  # fmt: skip
-        return _failed(plan, svg_reason_of(exc), failure_detail(exc))
-    out, changed = apply(plan, got, only)
+    ids = [s.n for s in plan.scenes if only is None or s.n == only]
+
+    async def whole(c: Any) -> dict[int, _PoseFrame]:
+        got = await c.structured(PROMPT, _PoseOut, untrusted=_data(plan, note, only),
+                                 context_id=context_id)  # fmt: skip
+        return {f.n: f for f in got.scenes if f.n in ids}
+
+    async def one(c: Any, n: int) -> _PoseFrame:
+        got = await c.structured(PROMPT, _ScenePoseOut, untrusted=_data(plan, note, n),
+                                 context_id=context_id)  # fmt: skip
+        return _PoseFrame(n=n, start=got.start, end=got.end)
+
+    if client is None:
+        log.warning("마네킹 콘티: LLM 없음 → 규칙 포즈로")
+    res = await pose_ladder.ladder(ids, whole, one, client, timeout=TIMEOUT_SECONDS,
+                                   where="마네킹 콘티",
+                                   base_llm=lambda: base_pose_llm(client))  # fmt: skip
+    out, changed = apply(plan, _PoseOut(scenes=list(res.got.values())), only)
+    missing = [n for n in ids if n not in _drawn_ns(out)]
+    rule_changed = 0
+    if missing:
+        out, rule_changed = apply(out, _PoseOut(scenes=_rule_frames(out, missing)), only)
     elapsed = time.monotonic() - started
-    if not changed:
-        reason = "rejected" if got.scenes else "bad_format"
-        log.warning("마네킹 콘티 포즈를 하나도 못 씀: %s %.1fs 0/%d장면", reason, elapsed,
-                    len(plan.scenes))  # fmt: skip
-        return _failed(plan, reason)
-    log.info("마네킹 콘티: %.1fs %d/%d장면", elapsed, changed, len(plan.scenes))
-    return out.model_copy(update={"svg_reason": "", "svg_detail": ""}), changed
+    total = changed + rule_changed
+    if not total:
+        reason = svg_reason_of(res.errors[-1]) if res.errors else "no_llm" if client is None \
+            else "bad_format"
+        log.warning("마네킹 콘티를 하나도 못 그림: %s %.1fs 0/%d장면", reason, elapsed, len(ids))
+        return _failed(plan, reason, failure_detail(res.errors[-1]) if res.errors else "")
+    log.info("마네킹 콘티: %.1fs LLM %d · 규칙 %d / %d장면 (호출 %d번, %s)", elapsed, changed,
+             rule_changed, len(ids), res.calls, "→".join(res.steps) or "LLM 없음")  # fmt: skip
+    return out.model_copy(update={"svg_reason": "",
+                                  "svg_detail": pose_ladder.rule_detail(rule_changed)}), total

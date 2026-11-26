@@ -193,22 +193,26 @@ def test_mixed_cells_draw_mannequins_where_a_pose_came_and_mark_the_board_svg() 
     # 11/25: LLM은 SVG 대신 칸마다 포즈 숫자. 포즈가 온 칸만 코드가 3D 마네킹으로 그린다
     out, llm = _make([POSE, None, POSE, {"shot": "full", "x": 99}, None, POSE])
     assert out.board_source == "svg"
-    assert [bool(s.svg) for s in out.shots] == [True, False, True, True, False, True]
+    # 11/26 실패 사다리 4단: 포즈가 없는 칸(2·5)은 규칙 포즈 (예전 기대값: 빈 칸)
+    assert [bool(s.svg) for s in out.shots] == [True] * 6
     assert all(_is_mannequin(s.svg) for s in out.shots if s.svg)
     assert len(llm.calls) == 1  # 호출 수는 그대로 1회
     sent = llm.calls[0]
     assert "SVG·그림 원문은 쓰지 않는다" in sent and "단순 도형" not in sent
 
 
-def test_svg_written_by_the_llm_is_ignored_and_no_pose_is_layout() -> None:
-    # 납작한 SVG 길을 막는다: LLM이 svg 원문을 적어도 쓰지 않는다 (포즈 없음 → 배치판)
+def test_svg_written_by_the_llm_is_ignored_and_no_pose_is_rule_pose() -> None:
+    # 납작한 SVG 길을 막는다: LLM이 svg 원문을 적어도 쓰지 않는다
+    # (11/26 실패 사다리 4단: 포즈 없음 → 규칙 포즈 마네킹. 예전 기대값: 배치판)
     out, _ = _make([None] * 6, svg=GOOD)
-    assert out.board_source == "layout" and all(s.svg is None for s in out.shots)
+    assert out.board_source == "svg" and all(_is_mannequin(s.svg) for s in out.shots)
+    assert all(s.svg != GOOD for s in out.shots)
 
 
-def test_all_empty_cells_fall_back_to_layout() -> None:
+def test_all_empty_cells_fall_back_to_rule_poses() -> None:
+    # 11/26 실패 사다리 4단 (예전 기대값: board_source "layout", 칸 SVG 없음)
     out, _ = _make([None] * 6)
-    assert out.board_source == "layout" and all(s.svg is None for s in out.shots)
+    assert out.board_source == "svg" and all(_is_mannequin(s.svg) for s in out.shots)
 
 
 def test_no_character_cell_gets_no_mannequin() -> None:
@@ -228,11 +232,13 @@ def test_end_card_cell_is_background_only() -> None:
     for gone in ("<text", "<circle", "url(#sk)", "채널"):  # 인물·글자 없음
         assert gone not in end
     assert all(_is_mannequin(s.svg) for s in out.shots[:-1])
-    # 다른 칸을 하나도 못 그리면 엔드카드 배경도 두지 않는다(배치판)
+    # 포즈가 하나도 없어도 11/26 실패 사다리 4단 규칙 포즈로 그리고 엔드카드는 배경만
+    # (예전 기대값: 배치판, 칸 SVG 없음)
     none = [S._shot(i, has_character=True) for i in range(1, 6)] + [shots[-1] | {"pose": None}]  # noqa: SLF001
     llm2 = MockLLMClient(responses={sb.StoryRead: S._read(6, shots=none)})  # noqa: SLF001
     out2 = asyncio.run(sb.make_storyboard({"story": S.STORY, "shots": 6}, lambda: llm2))
-    assert out2.board_source == "layout" and all(s.svg is None for s in out2.shots)
+    assert out2.board_source == "svg" and all(_is_mannequin(s.svg) for s in out2.shots[:-1])
+    assert "<linearGradient" in str(out2.shots[-1].svg)
 
 
 def test_redraw_from_script_draws_mannequins_and_end_card_background() -> None:

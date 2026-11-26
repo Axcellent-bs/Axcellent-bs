@@ -141,11 +141,20 @@ def test_llm_scene_count_spreads_evenly() -> None:
 def test_llm_plan_breaking_rules_falls_back_to_rule(out, detail) -> None:  # noqa: ANN001
     plan = asyncio.run(vp.write(_mock(out), _prop(), "ctx"))
     # 11/25 규칙 제작안 이유가 같이 남는다 (나머지 칸은 규칙 제작안 그대로).
-    # 가짜 LLM에 포즈 답이 없어 콘티 단계는 실패 → svg_reason="error"(5-1)
-    # 11/26 U: 어느 규칙인지(fallback_detail)·콘티 예외 종류(svg_detail, 가짜 LLM은 KeyError)도
-    want = {"fallback_reason": "rejected", "svg_reason": "error",
-            "fallback_detail": detail, "svg_detail": "KeyError"}  # fmt: skip
-    assert plan == vp.rule_plan(_prop()).model_copy(update=want)
+    # 가짜 LLM에 포즈 답이 없어 콘티 LLM 단계는 실패 → 11/26 실패 사다리 4단 규칙 포즈로 다 그린다
+    # (예전 기대값: svg_reason "error"·svg_detail "KeyError", 장면 그림 없음)
+    # 11/26 U: 어느 규칙인지(fallback_detail)도 남는다
+    n = len(plan.scenes)
+    want = {"fallback_reason": "rejected", "svg_reason": "",
+            "fallback_detail": detail, "svg_detail": f"rule_pose_{n}"}  # fmt: skip
+    assert all(s.start_svg and s.end_svg for s in plan.scenes)
+    assert without_drawings(plan) == vp.rule_plan(_prop()).model_copy(update=want)
+
+
+def without_drawings(plan):  # noqa: ANN001, ANN201
+    """콘티 칸(포즈·SVG)을 뺀 제작안 (규칙 포즈로 그린 칸 말고 나머지를 견줄 때)."""
+    clean = {"start_pose": None, "end_pose": None, "start_svg": "", "end_svg": ""}
+    return plan.model_copy(update={"scenes": [s.model_copy(update=clean) for s in plan.scenes]})
 
 
 def test_llm_failure_falls_back_to_rule() -> None:
