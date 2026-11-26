@@ -1,10 +1,11 @@
 // node --test로 돈다 (npm test). 기획 전달 탭 사슬·요약 숫자·출처 칩, 보고서 인사이트 카드의 전달 상태·막힘, 인사이트 필터, 인쇄 머리글.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { TrendReportListItem } from "./data.ts";
 import {
-  HANDOFF_GATED_TEXT, activeCount, chainOf, dataProposals, deliveryOf, handoffChip, handoffGated, handoffSummary, insightFilterFromHash,
-  insightFilterHash, insightReports, proposalFor, reportIdOfInsight, reportInsightId, sourceChip,
+  HANDOFF_GATED_TEXT, STALE_DAYS, activeCount, chainOf, createdAt, dataProposals, deliveryOf, handoffBadge, handoffChip, handoffCounts, handoffGated,
+  handoffGroup, handoffGroups, handoffSummary, insightFilterFromHash, insightFilterHash, insightReports, proposalFor, reportIdOfInsight, reportInsightId, sourceChip,
 } from "./handoffView.ts";
 import type { Proposal } from "./proposals.ts";
 import { printHeaderLine } from "./trendReportView.ts";
@@ -98,4 +99,76 @@ test("인사이트 필터 주소 #recommend?from=report|brief", () => {
 test("인쇄 머리글: TR-xxxx · 회사 · 만든 시각(한국) · 상태", () => {
   assert.equal(printHeaderLine({ report_id: "tr_4913aa", created_at: "2026-11-19T02:11:00Z", status: "done" }, "캣북스"), "TR-4913 · 캣북스 · 2026-11-19 11:11 · 완료");
   assert.equal(printHeaderLine({ report_id: "tr_4913aa", created_at: null, status: "partial" }, null), "TR-4913 · 일부 완료");
+});
+
+// ---- 11/26 무리 나누기 (진행 중 → 오래 기다림 → 끝남 → 폐기)
+
+/** 지금 = 2026-11-26 12:00 KST */
+const NOW = Date.UTC(2026, 10, 26, 3, 0);
+
+test("created(KST MM-DD HH:mm) → 시각, 해 넘김", () => {
+  assert.equal(createdAt("11-26 12:00", NOW), NOW);
+  assert.equal(createdAt("11-23 12:00", NOW), NOW - 3 * 86_400_000);
+  // 지금보다 하루 넘게 뒤면 지난해 (1월에 12월 기록을 볼 때)
+  const jan = Date.UTC(2027, 0, 2, 3, 0);
+  assert.equal(createdAt("12-30 12:00", jan), Date.UTC(2026, 11, 30, 3, 0));
+  assert.equal(createdAt("", NOW), null);
+  assert.equal(createdAt(undefined, NOW), null);
+  assert.equal(createdAt("어제", NOW), null);
+});
+
+test("무리 나누기: 확인 대기로 3일 넘으면 오래 기다림(정확히 3일은 진행 중), 확정·마케팅 전달은 끝남, 폐기는 폐기", () => {
+  assert.equal(STALE_DAYS, 3);
+  const g = (over: Partial<Proposal>) => handoffGroup(prop("PROP-9", over), NOW);
+  assert.equal(g({ status: "확인 대기", created: "11-23 12:00" }), "active"); // 정확히 3일
+  assert.equal(g({ status: "확인 대기", created: "11-23 11:59" }), "stale"); // 3일 1분
+  assert.equal(g({ status: "확인 대기", created: "11-26 09:00" }), "active");
+  assert.equal(g({ status: "확인 대기", created: "" }), "active"); // 시각 모름 → 오래됐다고 하지 않음
+  assert.equal(g({ status: "기획안", created: "11-10 09:00" }), "active"); // 오래 기다림은 확인 대기만
+  assert.equal(g({ status: "마케팅 전달", handoff: { ok: true, campaign: "cmp_PROP-9" } }), "done");
+  assert.equal(g({ status: "성과 확인" }), "done");
+  assert.equal(g({ status: "기획서로" }), "done");
+  assert.equal(g({ status: "진행 중" }), "done");
+  assert.equal(g({ status: "마케팅 전달", handoff: { ok: false, reason: "응답 없음" } }), "active"); // 전달 실패는 아직 진행 중
+  assert.equal(g({ status: "폐기", created: "11-01 09:00" }), "rejected");
+});
+
+test("무리 목록·숫자 3칸·탭 배지 (지금 기록에서 센 그대로, 지우지 않음)", () => {
+  const list = dataProposals([
+    ...SAMPLE,
+    prop("PROP-50", { status: "확인 대기", created: "11-20 08:00" }),
+    prop("PROP-51", { status: "확인 대기", created: "11-26 08:00" }),
+    prop("PROP-52", { status: "폐기", created: "11-21 08:00" }),
+  ]);
+  const groups = handoffGroups(list, NOW);
+  // 진행 중은 최신 위(받은 순서 그대로)
+  assert.deepEqual(groups.active.map((p) => p.id), ["PROP-51", "PROP-31"]); // 확인 대기 오늘 · 기획안
+  assert.deepEqual(groups.stale.map((p) => p.id), ["PROP-50"]); // 확인 대기 6일
+  assert.deepEqual(groups.done.map((p) => p.id), ["PROP-29", "PROP-22"]);
+  assert.deepEqual(groups.rejected.map((p) => p.id), ["PROP-52", "PROP-25"]);
+  // 모든 줄이 한 무리에만 (없어지는 줄 없음)
+  const total = groups.active.length + groups.stale.length + groups.done.length + groups.rejected.length;
+  assert.equal(total, list.length);
+  assert.deepEqual(handoffCounts(list, NOW), { active: 2, stale: 1, marketing: 2 });
+  assert.equal(handoffBadge(list, NOW), "진행 2");
+  assert.equal(handoffBadge([], NOW), null);
+  assert.equal(handoffBadge(dataProposals([prop("PROP-1", { status: "폐기" })]), NOW), null);
+});
+
+test("기획 전달 탭 화면: 진행 중 펼침, 오래 기다림·끝남·폐기는 접힌 details, 지금 칸 주황", () => {
+  const src = readFileSync(new URL("../components/data/PlanningHandoff.tsx", import.meta.url), "utf8");
+  assert.match(src, /<Group title="오래 기다림" list=\{g\.stale\}/);
+  assert.match(src, /<Group title="끝남" list=\{g\.done\}/);
+  assert.match(src, /<Group title="폐기" list=\{g\.rejected\}/);
+  // 접힌 무리: details에 open 없음
+  const group = src.slice(src.indexOf("function Group"), src.indexOf("export function PlanningHandoff"));
+  assert.match(group, /<details className=/);
+  assert.doesNotMatch(group, /<details[^>]*\bopen\b/);
+  assert.match(src, /current: "border-amber-700 bg-amber-50/);
+  assert.match(src, /done: "border-emerald-100 bg-emerald-50/);
+  assert.match(src, /\["진행 중", s\.active\], \["오래 기다림", s\.stale\], \["마케팅 전달", s\.marketing\]/);
+  // 자동으로 상태를 바꾸거나 지우지 않는다 (기획 API는 읽기만)
+  assert.doesNotMatch(src, /planningApi\([^)]*\)\.(?!state\b)\w+\(/);
+  const scan = readFileSync(new URL("../components/data/TrendScan.tsx", import.meta.url), "utf8");
+  assert.match(scan, /handoffBadgeText\(dataProposals\(planningAll\), Date\.now\(\)\)/);
 });
