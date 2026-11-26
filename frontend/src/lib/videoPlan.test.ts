@@ -196,6 +196,14 @@ test("의뢰 지시 ✓/✕ (계약 request_rules): 칩 N/N · 줄 문구 · 모
   assert.equal(requestRulesChip(toVideoPlan({ ...RAW, request_rules: [] })!), "");
 });
 
+test("금칙어 든 의뢰 대사 줄: ✕ 이 문장은 광고 금칙어라 못 넣어요 (기획 BLOCKED_WHERE)", () => {
+  const v = toVideoPlan({ ...RAW, request_rules: [
+    { kind: "quote", text_ko: "업계 최고 서점", kept: false, where: "광고 금칙어라 넣지 않아요" },
+  ] })!;
+  assert.equal(requestRuleLine(v.requestRules![0]), '대사 · "업계 최고 서점" → 이 문장은 광고 금칙어라 못 넣어요');
+  assert.equal(requestRulesChip(v), "의뢰 지시 0/1 지킴");
+});
+
 test("의뢰 지시는 기획 화면·카드 안 기획서·의뢰 카드 사람 확인에 같은 컴포넌트로", () => {
   const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
   assert.match(read("../components/planning/videoPlan.tsx"), /<RequestRules v=\{v\} \/>/);

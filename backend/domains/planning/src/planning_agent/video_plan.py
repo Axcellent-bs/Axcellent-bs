@@ -423,16 +423,7 @@ def _theme(p: Proposal) -> str:
 # 마케팅 sns.FORBIDDEN_PHRASES·FORBIDDEN_CLAIM_PATTERNS와 같은 값 (도메인끼리 import 안 해 옮김).
 # 참여 유도(좋아요·팔로우·공유·댓글하면 혜택)와 성과 과장 표현. 과장은 공백을 뺀 글에서 찾는다
 ENGAGEMENT_WORDS = ("좋아요", "팔로우", "공유", "댓글")
-CLAIM_PATTERNS = (
-    r"인건비(를|가|은|는)?절감",
-    r"직원(을|이|은|는)?(모두|전부)?대체",
-    r"에이전트(가|는|들이)?(더|훨씬)?빨라",
-    r"최고",
-    r"무조건",
-    r"획기적",
-    r"압도적",
-    r"혁신적",
-)
+CLAIM_PATTERNS = plan_checks.CLAIM_PATTERNS  # 11/26 S: 의뢰 대사 금칙어 검사와 같은 목록
 
 
 def text_problems(text: str) -> list[str]:
@@ -440,8 +431,7 @@ def text_problems(text: str) -> list[str]:
     out = []
     if any(w in text for w in ENGAGEMENT_WORDS):
         out.append("engagement_word")
-    squeezed = re.sub(r"\s+", "", text)
-    if any(re.search(pat, squeezed) for pat in CLAIM_PATTERNS):
+    if plan_checks.has_claim(text):
         out.append("claim_word")
     return out
 
@@ -1033,7 +1023,8 @@ def _checked(
     rules = _rules(p, got, note=True)
     # 11/26 보고서 추천 형식 카드: LLM이 비트를 적었고 의뢰 지시를 다 지켰을 때만 (형식보다 먼저)
     card = plan_format.card_for(p)
-    kept = all(r["kept"] for r in plan_checks.check_rules(rules, _check_scenes(got), got.script))
+    kept = all(r["kept"] or plan_checks.blocked_quote(r)  # 금칙어 대사는 일부러 안 넣은 것
+               for r in plan_checks.check_rules(rules, _check_scenes(got), got.script))  # fmt: skip
     use_card = card is not None and kept and all(s.beat_ko.strip() for s in got.scenes)
     if use_card and card is not None and not even:
         fun = style_ == FUN_FIRST or ad
