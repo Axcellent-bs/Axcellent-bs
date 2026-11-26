@@ -165,12 +165,22 @@ def read_error(error: ConnectorUnavailable) -> str:
 def tenant_timezone(env: Mapping[str, str] | None = None) -> tzinfo:
     """회사 시간대: `DATA_TENANT_TIMEZONE` → 회사 폴더 `tenant.toml`의 `timezone` → UTC.
 
+    캣북스가 아닌 회사 요청이면 그 회사 설정만(회사 설정이 없으면 틀 기본값, 11/26).
+
     요일·날짜 경계(같은 요일 기준선, 시작 전 기록 일수)를 이 시간대로 센다.
     코드에 시간대를 두지 않는다.
     """
     env = os.environ if env is None else env
-    name = env.get(TIMEZONE_ENV) or tenant_setting(TIMEZONE_ENV)
-    tenant = (env.get("AX_TENANT") or "").strip()
+    from ax_agent_template.company_connection import company_of
+    from ax_agent_template.company_scope import CATBOOKS
+
+    if company_of() != CATBOOKS:
+        # 다른 회사: 그 회사 설정(없으면 틀 기본값 Asia/Seoul)만. 캣북스 환경변수·폴더를 보지 않는다
+        name = tenant_setting(TIMEZONE_ENV)
+        tenant = ""
+    else:
+        name = env.get(TIMEZONE_ENV) or tenant_setting(TIMEZONE_ENV)
+        tenant = (env.get("AX_TENANT") or "").strip()
     if not name and tenant:  # 회사 연결 전이면 회사 폴더가 없다 → UTC
         path = BACKEND / "config" / "tenants" / tenant / "tenant.toml"
         try:

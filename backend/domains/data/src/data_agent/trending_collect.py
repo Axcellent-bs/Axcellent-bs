@@ -54,7 +54,13 @@ class RunResult:
 def config_path(env: Mapping[str, str]) -> Path:
     """회사 `trends.toml`: 환경변수 → `AX_TENANT` 폴더 → 회사 연결에서 고른 회사.
 
-    연결 전이면 없는 경로(설정 없음)."""
+    연결 전이면 없는 경로(설정 없음). 환경변수·`AX_TENANT`는 설치 하나에 하나(캣북스 것)라
+    캣북스가 아닌 회사 범위에서는 보지 않고 그 회사 설정(없으면 틀 기본값)만 본다(11/26)."""
+    from ax_agent_template.company_connection import company_of
+    from ax_agent_template.company_scope import CATBOOKS
+
+    if company_of() != CATBOOKS:
+        return Path(tenant_setting(TREND_CONFIG_ENV) or NOT_CONNECTED)
     if value := env.get(TREND_CONFIG_ENV):
         return Path(value)
     if tenant := (env.get("AX_TENANT") or "").strip():

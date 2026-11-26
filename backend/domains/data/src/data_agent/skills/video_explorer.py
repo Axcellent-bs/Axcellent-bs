@@ -402,6 +402,8 @@ class _Item:
     ad: caution.Caution | None = None
     subscribers: int | None = None
     subscriber_reason: str | None = None
+    # 회사 키워드 검색으로만 들어온 영상의 검색 회사들 (인기 목록에 든 적 있으면 비움, 11/26)
+    owners: frozenset[str] = frozenset()
 
 
 def snapshot_pool(db: str | Path, since: datetime) -> dict[str, _Item]:
@@ -422,7 +424,15 @@ def snapshot_pool(db: str | Path, since: datetime) -> dict[str, _Item]:
         return {}
     finally:
         conn.close()
+    from data_agent.youtube_store import search_owners
+
     last = {r[0]: r for r in rows}
+    owners: dict[str, set[str]] = {}
+    public: set[str] = set()
+    for r in rows:  # 회사 키워드 검색으로만 본 영상은 그 회사 것 (인기 목록에 든 적 있으면 공용)
+        if r[4] is not None:
+            public.add(r[0])
+        owners.setdefault(r[0], set()).update(search_owners(str(r[9] or "")))
     ids = list(last)
     titles, details = video_titles(db, ids), video_details(db, ids)
     thumbs = video_thumbnails(db, ids)
@@ -438,7 +448,8 @@ def snapshot_pool(db: str | Path, since: datetime) -> dict[str, _Item]:
             channel_title=(d.channel_title if d else None) or "",
             duration_seconds=d.duration_seconds if d else None, thumbnail_url=thumbs.get(vid),
         )  # fmt: skip
-        out[vid] = _Item(stat, source, datetime.fromisoformat(r[10]))
+        mine = frozenset() if vid in public else frozenset(owners.get(vid, ()))
+        out[vid] = _Item(stat, source, datetime.fromisoformat(r[10]), owners=mine)
     return out
 
 
@@ -591,7 +602,8 @@ async def compute(
     await _refresh(env, youtube, store, config, items, now, today, queries, limits)
     for vid, (stat, source, at) in store.videos().items():
         if vid not in items or items[vid].at < at:
-            items[vid] = _Item(stat, source, at)
+            old = items.get(vid)
+            items[vid] = _Item(stat, source, at, owners=old.owners if old else frozenset())
     pool = _korean_recent(items, config, since)
 
     # 2. 분류 (저장 재사용, 새로 묻는 것은 한 번 상한·하루 몫까지. 나머지는 다음으로)
@@ -634,6 +646,8 @@ async def compute(
         "videos": [v.model_dump(mode="json") for v in videos],
         "shortages": shortages,
         "searches": [s.model_dump(mode="json") for s in searches],
+        # 회사 키워드 검색으로만 들어온 영상 → 그 회사들. 화면은 요청 회사 것만 보인다(11/26)
+        "company_only": {i.stat.video_id: sorted(i.owners) for i in kept if i.owners},
         "limits": limits,
         "queries": queries,
     }
@@ -1166,6 +1180,11 @@ def _sort_key(sort: str) -> Callable[[ExplorerVideo], tuple[Any, ...]]:
     return lambda v: (v.views is None, -(v.views or 0))
 
 
+def hidden_for(payload: Mapping[str, Any], company: str) -> set[str]:
+    """이 회사 화면에서 뺄 영상: 다른 회사 키워드 검색으로만 들어온 영상 (11/26 회사별)."""
+    return {vid for vid, who in (payload.get("company_only") or {}).items() if company not in who}
+
+
 def view(
     payload: Mapping[str, Any] | None,
     request: VideoExplorerRequest,
@@ -1196,6 +1215,10 @@ def view(
     out.min_per_cell = int(payload.get("min_per_cell", config.min_per_cell))
     limit = int(payload.get("max_videos", config.max_videos))
     videos = [ExplorerVideo.model_validate(v) for v in payload.get("videos", [])]
+    from ax_agent_template.company_connection import company_of
+
+    hidden = hidden_for(payload, company_of())  # 다른 회사 키워드 검색으로만 들어온 영상은 뺀다
+    videos = [v for v in videos if v.video_id not in hidden]
     shortages = payload.get("shortages", {})
     cats = [request.category] if request.category else out.categories
     for cat in cats:

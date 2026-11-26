@@ -11,6 +11,9 @@ YouTube는 지금 누적값만 주고 기간별 추이를 주지 않는다. 그�
 - `video_titles`: 영상 id마다 제목 한 줄(마지막으로 받은 제목). `snapshots` 표 모양은 바꾸지 않는다
   (돌고 있는 예전 수집기의 INSERT가 깨지지 않게 따로 둔다). 제목이 없는 예전 스냅샷은
   `youtube_collect --titles`로 채운다.
+- 회사 키워드 검색(11/26 회사별): 캣북스 검색은 예전처럼 `search:<키워드>`, 다른 회사 검색은
+  `search@<회사 id>:<키워드>`로 `sources`에 남긴다. 그날 검색을 했는지는 캣북스는 `runs.searched`,
+  다른 회사는 `company_searches`(한국 날짜·회사 id). 인기·추적 값은 회사와 상관없는 공용이다.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS as CATBOOKS  # 예전 `search:` 줄의 회사
 from data_agent.connectors.youtube import VideoStat
 
 DB_ENV = "DATA_YOUTUBE_DB"
@@ -84,6 +88,34 @@ CREATE TABLE IF NOT EXISTS video_titles (
     seen_at       TEXT NOT NULL       -- 그 제목을 받은 시각 (UTC)
 );
 """
+
+
+COMPANY_SEARCH = "search@"  # 다른 회사 키워드 검색 출처 머리말: search@<회사 id>:<키워드>
+
+
+def search_source(company: str, query: str) -> str:
+    """회사 키워드 검색 출처 이름. 캣북스는 예전 모양(`search:<키워드>`) 그대로."""
+    if company == CATBOOKS:
+        return f"search:{query}"
+    return f"{COMPANY_SEARCH}{company}:{query}"
+
+
+def search_owners(sources: str) -> set[str]:
+    """한 줄 `sources`(쉼표)에서 회사 키워드 검색을 한 회사들. 검색 출처가 없으면 빈 집합."""
+    out: set[str] = set()
+    for part in (sources or "").split(","):
+        part = part.strip()
+        if part.startswith("search:"):
+            out.add(CATBOOKS)
+        elif part.startswith(COMPANY_SEARCH) and ":" in part[len(COMPANY_SEARCH) :]:
+            out.add(part[len(COMPANY_SEARCH) :].split(":", 1)[0])
+    return out
+
+
+_COMPANY_SEARCHES = (
+    "CREATE TABLE IF NOT EXISTS company_searches (day TEXT NOT NULL, company TEXT NOT NULL,"
+    " videos INTEGER NOT NULL, PRIMARY KEY (day, company))"
+)
 
 
 @dataclass(frozen=True)
@@ -245,8 +277,16 @@ class SnapshotStore:
                  json.dumps(errors, ensure_ascii=False)),
             )  # fmt: skip
 
-    def searched_on(self, day: date) -> bool:
-        """그 한국 날짜에 회사 키워드 검색을 이미 했는지."""
+    def searched_on(self, day: date, company: str = CATBOOKS) -> bool:
+        """그 한국 날짜에 그 회사 키워드 검색을 이미 했는지 (캣북스는 예전처럼 `runs.searched`)."""
+        if company != CATBOOKS:
+            with self._lock:
+                self._conn.execute(_COMPANY_SEARCHES)
+                row = self._conn.execute(
+                    "SELECT 1 FROM company_searches WHERE day = ? AND company = ?",
+                    (day.isoformat(), company),
+                ).fetchone()
+            return row is not None
         start = datetime(day.year, day.month, day.day, tzinfo=KST)
         end = start + timedelta(days=1)
         with self._lock:
@@ -255,6 +295,15 @@ class SnapshotStore:
                 (iso(start), iso(end)),
             ).fetchone()
         return row is not None
+
+    def mark_searched(self, day: date, company: str, videos: int) -> None:
+        """캣북스가 아닌 회사가 그 한국 날짜에 키워드 검색을 했다고 남긴다."""
+        with self._lock, self._conn:
+            self._conn.execute(_COMPANY_SEARCHES)
+            self._conn.execute(
+                "INSERT OR REPLACE INTO company_searches VALUES (?,?,?)",
+                (day.isoformat(), company, videos),
+            )
 
     def seen_ids(self, since: datetime) -> list[str]:
         """`since` 뒤에 인기 목록이나 회사 키워드 검색에서 본 영상 (추적으로만 본 것은 뺀다).
@@ -266,7 +315,8 @@ class SnapshotStore:
             rows = self._conn.execute(
                 "SELECT video_id, MAX(collected_at) AS last FROM snapshots WHERE collected_at >= ?"
                 " AND (popular_rank IS NOT NULL OR sources LIKE '%popular%'"
-                " OR sources LIKE '%search:%') GROUP BY video_id ORDER BY last DESC",
+                " OR sources LIKE '%search:%' OR sources LIKE '%search@%')"
+                " GROUP BY video_id ORDER BY last DESC",
                 (iso(since),),
             ).fetchall()
         return [r[0] for r in rows]
