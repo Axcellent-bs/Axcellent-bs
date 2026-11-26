@@ -33,6 +33,18 @@ function loadSaved(force = false): Promise<BrandCharacter[]> {
   return cache.list;
 }
 
+/** 11/26 의뢰 진행 카드 사진·외형 한 줄: 고른 대표 캐릭터 (같은 목록·같은 1분 캐시). 못 읽거나 안 골랐으면 null */
+export function useChosenCharacter(recordId: string | null | undefined): BrandCharacter | null {
+  const [saved, setSaved] = useState<BrandCharacter[] | null>(null);
+  useEffect(() => {
+    if (!recordId) return;
+    let live = true;
+    loadSaved().then((x) => live && setSaved(x), () => live && setSaved([]));
+    return () => { live = false; };
+  }, [recordId]);
+  return (recordId && saved?.find((c) => c.record_id === recordId)) || null;
+}
+
 const errText = (e: unknown) => (e instanceof Error && e.message ? e.message : "처리하지 못했어요");
 
 export function BrandCharacterAsk({ row, variant = "handoff" }: { row: CharacterRow & { request_id: string }; variant?: "handoff" | "chat" }) {
