@@ -57,11 +57,19 @@ export interface SiteAiReport {
 }
 
 /** 알아서 연결 결과. 저장했으면 변환기 상태가 같이 온다 */
+/** 알아서 연결이 문의 받은함 짝도 넣었는지 (dashboard-api `setup.auto_inquiries`, 규칙으로만) */
+export interface SiteAutoInquiries {
+  saved: boolean;
+  path?: string;
+  reason?: string;
+  count?: number;
+}
+
 export interface SiteAutoResult extends Partial<SiteAdapterState> {
   saved: boolean;
   reason?: string;
   mapping: SiteMapping;
-  ai: Partial<Record<SiteResource, SiteAiReport>>;
+  ai: Partial<Record<SiteResource, SiteAiReport>> & { inquiries?: SiteAutoInquiries };
 }
 
 const PATH = "/api/dashboard/site-adapter";

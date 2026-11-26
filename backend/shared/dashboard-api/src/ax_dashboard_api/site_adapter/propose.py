@@ -164,3 +164,56 @@ def order_items(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
             }
             return {"path": key, "fields": {k: v for k, v in fields.items() if v}}
     return None
+
+
+# ---------------------------------------------------------------- 문의 받은함 (11/26)
+
+# 문의 받은함 짝(`inquiries.to_inquiry`)이 꼭 읽는 칸과 찾아볼 이름
+INQUIRY_REQUIRED: dict[str, tuple[str, ...]] = {
+    "inquiry_id": ("inquiry_id", "question_id", "ticket_id", "id"),
+    "subject": ("subject", "title"),
+    "message": ("message", "body", "content", "question", "text"),
+}
+INQUIRY_OPTIONAL: dict[str, tuple[str, ...]] = {
+    "status": ("status", "state"),
+    "order_id": ("order_id", "booking_code", "booking_id", "reservation_id", "order_no"),
+    "customer_name": ("customer_name", "name", "author", "writer"),
+    "created_at": ("created_at", "created", "date"),
+}
+# 문의 상태 낱말 → `open`(답 전)·`answered`. 위에서부터 처음 맞는 것
+INQUIRY_STATUS_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("unanswer", "not_answer", "noanswer"), "open"),
+    (("answer", "repl", "done", "close", "resolv", "complete"), "answered"),
+    (("open", "new", "pending", "wait", "receiv", "progress"), "open"),
+)
+
+
+def inquiry_fields(rows: list[dict[str, Any]], order_buyer: str = "") -> dict[str, str]:
+    """문의 받은함 칸 → 고객사 짝 식. 못 찾은 필수 칸은 "".
+
+    문의에 구매자 칸이 없고 주문 칸이 있으면, 주문 짝의 구매자 칸(`order_buyer`)을
+    `order.<칸>`으로 읽는다(그 문의가 가리키는 주문 원본 행).
+    """
+    paths = _paths(rows)
+    out = {name: _first(paths, names) for name, names in INQUIRY_REQUIRED.items()}
+    for name, names in INQUIRY_OPTIONAL.items():
+        hit = _first(paths, names)
+        if hit:
+            out[name] = hit
+    buyer = _first(paths, SYNONYMS["orders"]["buyer_id"])
+    if buyer:
+        out["buyer_id"] = buyer
+    elif out.get("order_id") and order_buyer and ":" not in order_buyer:
+        out["buyer_id"] = f"order.{order_buyer}"
+    return out
+
+
+def inquiry_statuses(values: list[str]) -> dict[str, str]:
+    """문의 상태 값 → `open`·`answered`. 모르면 ""."""
+    out: dict[str, str] = {}
+    for value in values:
+        low = value.lower()
+        out[value] = next(
+            (to for words, to in INQUIRY_STATUS_RULES if any(w in low for w in words)), ""
+        )
+    return out

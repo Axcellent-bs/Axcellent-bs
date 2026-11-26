@@ -260,3 +260,80 @@ def test_shape_keeps_only_kinds() -> None:
         "c.e": "빈 값",
         "f": "목록",
     }
+
+
+# ---------------------------------------------------------------- 문의 받은함 (11/26)
+
+NUBI_WITH_INQUIRIES = {"paths": {**NUBI_OPENAPI["paths"], "/api/v1/inquiries": {"get": {}}}}
+
+
+def _nubi_pages(nubi: Any, inquiries: Any) -> dict[str, Any]:
+    return {
+        "/openapi.json": NUBI_WITH_INQUIRIES,
+        "/api/v1/tours": nubi("nubi_tours.json"),
+        "/api/v1/bookings": nubi("nubi_bookings_p1.json"),
+        "/api/v1/inquiries": inquiries,
+    }
+
+
+def _no_ai(monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_ai() -> LLMClient:
+        raise AssertionError("AI를 부르면 안 된다")
+
+    monkeypatch.setattr(ai_propose, "make_client", no_ai)
+
+
+def test_auto_connect_also_maps_the_inquiry_inbox(tmp_path, monkeypatch, nubi) -> None:
+    """누비투어: 알아서 연결이 문의 받은함 짝도 규칙으로 넣는다(AI 없이)."""
+    _no_ai(monkeypatch)
+    client = _client(tmp_path, monkeypatch, _nubi_pages(nubi, nubi("nubi_inquiries.json")))
+    data = auto(client).json()["data"]
+    assert data["saved"] is True, data.get("reason")
+    report = data["ai"]["inquiries"]
+    assert report["saved"] is True and report["path"] == "/api/v1/inquiries"
+    assert report["fields"] == {
+        "inquiry_id": "id",
+        "subject": "title",
+        "message": "body",
+        "status": "status",
+        "order_id": "booking_code",
+        "customer_name": "name",
+        "created_at": "created_at",
+        # 문의에 회원 id가 없어 예약의 회원 칸을 읽는다
+        "buyer_id": "order.member_id",
+    }
+    saved = client.get(BASE + "/writes").json()["data"]["inboxes"]["inquiries"]
+    assert saved["path"] == "/api/v1/inquiries"
+    assert saved["values"]["status"] == {"open": "open", "answered": "answered"}
+
+
+def test_unknown_inquiry_status_skips_the_inbox_but_still_connects(
+    tmp_path, monkeypatch, nubi
+) -> None:
+    """문의 상태 낱말을 모르면 문의 짝은 넣지 않는다(답한 문의를 다시 읽지 않게).
+
+    주문·상품은 그대로 연결한다.
+    """
+    _no_ai(monkeypatch)
+    rows = nubi("nubi_inquiries.json")
+    rows["data"][0]["status"] = "hold"
+    client = _client(tmp_path, monkeypatch, _nubi_pages(nubi, rows))
+    data = auto(client).json()["data"]
+    assert data["saved"] is True, data.get("reason")
+    assert data["ai"]["inquiries"]["saved"] is False
+    assert "hold" in data["ai"]["inquiries"]["reason"]
+    assert client.get(BASE + "/writes").json()["data"]["inboxes"]["inquiries"] is None
+
+
+def test_inquiry_statuses_rule() -> None:
+    from ax_dashboard_api.site_adapter import propose
+
+    words = ["open", "answered", "unanswered", "new", "closed", "hold"]
+    assert propose.inquiry_statuses(words) == {
+        "open": "open",
+        "answered": "answered",
+        "unanswered": "open",
+        "new": "open",
+        "closed": "answered",
+        "hold": "",
+    }
