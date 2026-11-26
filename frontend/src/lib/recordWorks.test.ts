@@ -3,7 +3,8 @@ import { test } from "node:test";
 import type { CreativeRecordSummary } from "./creativeRecords";
 import type { RequestVideo } from "./requestVideoView.ts";
 import {
-  dayLabel, defaultStep, groupByDay, hasPublishState, linkedRecordId, mergeWorks, renderStatuses, videoSlot, workHref, workStatus, workTitle,
+  PAGE_SIZE, dayLabel, defaultStep, groupByDay, hasPublishState, linkedRecordId, mergeWorks, pageCount, pageHref, pageItems, pageOf,
+  renderStatuses, videoSlot, workHref, workStatus, workTitle,
 } from "./recordWorks.ts";
 
 const record = (id: string, at: string, more: Partial<CreativeRecordSummary> = {}): CreativeRecordSummary => ({
@@ -98,4 +99,21 @@ test("올리기 초안이나 상태가 남아 있나", () => {
   assert.equal(hasPublishState({}), false);
   assert.equal(hasPublishState({ youtube: { title: "제목" } }), true);
   assert.equal(hasPublishState({ instagram: { status: "draft" } }), true);
+});
+
+test("10건씩 나누고, 10건 이하면 한 쪽", () => {
+  assert.equal(PAGE_SIZE, 10);
+  assert.deepEqual([0, 1, 10, 11, 24].map(pageCount), [1, 1, 1, 2, 3]);
+  const items = Array.from({ length: 24 }, (_, i) => i);
+  assert.deepEqual(pageItems(items, 1), items.slice(0, 10));
+  assert.deepEqual(pageItems(items, 3), [20, 21, 22, 23]);
+});
+
+test("?page=는 있는 쪽만 받고, 1쪽 주소에는 붙이지 않는다", () => {
+  assert.equal(pageOf(null, 24), 1);
+  assert.equal(pageOf("2", 24), 2);
+  assert.equal(pageOf("9", 24), 3);
+  for (const bad of ["0", "-1", "1.5", "abc", ""]) assert.equal(pageOf(bad, 24), 1);
+  assert.equal(pageHref(1), "/marketing/records");
+  assert.equal(pageHref(3), "/marketing/records?page=3");
 });

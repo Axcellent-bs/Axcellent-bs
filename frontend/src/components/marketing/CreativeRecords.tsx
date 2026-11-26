@@ -1,22 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useAuthedMedia } from "@/lib/authedMedia";
 import { RECORD_ID, listCreativeRecords, thumbSrc, type CreativeRecordSummary } from "@/lib/creativeRecords";
 import { thumbUrl } from "@/lib/creativeThumbnails";
 import { listRequestVideos, requestVideoCoverUrl } from "@/lib/requestVideos";
 import { durationKo, requestFilterOf, type RequestVideo } from "@/lib/requestVideoView";
-import { groupByDay, mergeWorks, videoSlot, workHref, workStatus, workTitle, type VideoCover, type Work } from "@/lib/recordWorks";
+import { groupByDay, mergeWorks, pageCount, pageHref, pageItems, pageOf, videoSlot, workHref, workStatus, workTitle, type VideoCover, type Work } from "@/lib/recordWorks";
 import { RecordDetail, RequestDetail } from "./RecordDetail";
 import { StatusChip } from "./RecordSteps";
 
 // 마케팅 › 제작 기록 (/marketing/records). 목록 하나(2026-11-26, 탭 세 개를 없앴다):
 // - 작업 한 건이 한 줄이다. 열은 만드는 순서(이미지 시트 → 대본·스토리보드 → 영상)로 고정하고, 없는 단계는 점선 빈칸
 // - 총괄 홍보 영상 의뢰가 만든 영상은 그 캐릭터 기록 줄의 영상 칸에 합친다. 기록 없이 만든 영상은 혼자 한 줄
-// - 날짜별로 묶어 최신순. 줄을 누르면 단계별 상세(RecordDetail)
+// - 날짜별로 묶어 최신순, 10건씩 페이지 번호(?page=2). 줄을 누르면 단계별 상세(RecordDetail), 상세의 [‹ 제작 기록]은 보던 쪽으로
 // - ?id=CR-… 기록 상세, ?request=wr_… 의뢰 영상 상세. 옛 주소의 ?view=는 목록으로 본다
 
-const COLUMNS = "grid grid-cols-[minmax(0,1fr)_2.75rem_3.5rem_2.75rem] items-center gap-2 px-3 sm:grid-cols-[minmax(0,1fr)_4.5rem_7rem_4.5rem] sm:gap-3 sm:px-4";
-const SLOT = "flex h-16 flex-col items-center justify-center gap-1 overflow-hidden rounded-xl text-center text-[10px] sm:h-24 sm:text-[11px]";
+const COLUMNS = "grid grid-cols-[minmax(0,1fr)_2.75rem_3.5rem_2.75rem] items-center gap-2 px-3 sm:grid-cols-[minmax(0,1fr)_6rem_9rem_6rem] sm:gap-4 sm:px-4";
+const SLOT = "flex h-16 flex-col items-center justify-center gap-1 overflow-hidden rounded-xl text-center text-[10px] sm:h-32 sm:text-xs";
 const FILLED = `${SLOT} bg-surface text-ink-700 ring-1 ring-ink-100`;
 
 function Empty({ label }: { label: string }) {
@@ -57,12 +57,12 @@ function VideoSlotCell({ work }: { work: Work }) {
   );
 }
 
-function Row({ work }: { work: Work }) {
+function Row({ work, page }: { work: Work; page: number }) {
   const facts = work.record;
   const when = new Date(work.at);
   return (
     <li>
-      <Link to={workHref(work)} className={`${COLUMNS} py-3 hover:bg-ink-50`}>
+      <Link to={workHref(work)} state={{ page }} className={`${COLUMNS} py-3 hover:bg-ink-50`}>
         <span className="min-w-0 space-y-1">
           <span className="block truncate text-sm font-medium text-ink-900">{workTitle(work)}</span>
           <span className="block truncate text-xs tabular-nums text-ink-500">
@@ -76,6 +76,22 @@ function Row({ work }: { work: Work }) {
         <VideoSlotCell work={work} />
       </Link>
     </li>
+  );
+}
+
+function Pages({ page, count, onPick }: { page: number; count: number; onPick: () => void }) {
+  const move = (to: number, label: string, text: string) => (
+    <Link to={pageHref(to)} onClick={onPick} className="btn-ghost text-xs" aria-label={label}>{text}</Link>
+  );
+  return (
+    <nav className="flex flex-wrap items-center justify-center gap-2" aria-label="제작 기록 페이지">
+      {page > 1 && move(page - 1, "이전 페이지", "‹")}
+      {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
+        <Link key={n} to={pageHref(n)} onClick={onPick} aria-label={`${n}페이지`} aria-current={n === page ? "page" : undefined}
+          className={`min-w-9 text-xs tabular-nums ${n === page ? "btn-primary" : "btn-ghost"}`}>{n}</Link>
+      ))}
+      {page < count && move(page + 1, "다음 페이지", "›")}
+    </nav>
   );
 }
 
@@ -101,8 +117,13 @@ function WorkList() {
   }, []);
 
   const works = records && videos ? mergeWorks(records, videos) : null;
+  const [params] = useSearchParams();
+  const page = pageOf(params.get("page"), works?.length ?? 0);
+  const count = pageCount(works?.length ?? 0);
+  const top = useRef<HTMLDivElement>(null);
+  const toTop = () => top.current?.scrollIntoView?.({ block: "start" });
   return (
-    <div className="space-y-6">
+    <div ref={top} className="space-y-6">
       <header className="flex flex-wrap items-end gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">제작 기록</h1>
@@ -122,17 +143,18 @@ function WorkList() {
                   <span className="text-center"><span className="hidden sm:inline">대본·스토리보드</span><span className="sm:hidden">콘티</span></span>
                   <span className="text-center">영상</span>
                 </div>
-                {groupByDay(works).map((group) => (
+                {groupByDay(pageItems(works, page)).map((group) => (
                   <div key={group.day}>
                     <h2 className="bg-surface px-3 py-2 text-xs font-semibold text-ink-700 sm:px-4">{group.day}</h2>
                     <ul className="divide-y divide-ink-100" aria-label={`${group.day} 작업`}>
-                      {group.works.map((w) => <Row key={w.key} work={w} />)}
+                      {group.works.map((w) => <Row key={w.key} work={w} page={page} />)}
                     </ul>
                   </div>
                 ))}
               </>
             )}
       </section>
+      {count > 1 && <Pages page={page} count={count} onPick={toTop} />}
     </div>
   );
 }

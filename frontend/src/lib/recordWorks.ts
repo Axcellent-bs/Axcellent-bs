@@ -52,6 +52,22 @@ export function dayLabel(at: string): string {
   return Number.isFinite(d.getTime()) ? `${d.getMonth() + 1}월 ${d.getDate()}일` : "날짜 모름";
 }
 
+// ---- 목록 페이지: 10건씩, 주소는 ?page=2 (1쪽은 붙이지 않는다)
+
+export const PAGE_SIZE = 10;
+
+export const pageCount = (total: number): number => Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+/** 주소의 ?page= 값 → 있는 쪽 번호. 모르는 값이면 1, 끝을 넘으면 마지막 쪽 */
+export function pageOf(param: string | null | undefined, total: number): number {
+  const n = Number(param);
+  return Number.isInteger(n) && n > 1 ? Math.min(n, pageCount(total)) : 1;
+}
+
+export const pageItems = <T,>(items: T[], page: number): T[] => items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+export const pageHref = (page: number): string => (page > 1 ? `${RECORDS_PATH}?page=${page}` : RECORDS_PATH);
+
 /** 최신순으로 정렬된 작업을 날짜별로 묶는다 */
 export function groupByDay(works: Work[]): { day: string; works: Work[] }[] {
   const groups: { day: string; works: Work[] }[] = [];

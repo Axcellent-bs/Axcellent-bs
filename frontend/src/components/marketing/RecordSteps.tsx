@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router";
-import { RECORDS_PATH, type StepNo, type Tone } from "@/lib/recordWorks";
+import { Link, useLocation } from "react-router";
+import { pageHref, type StepNo, type Tone } from "@/lib/recordWorks";
 
 // 제작 기록 상세의 틀: 머리글, 만드는 순서 네 단계(접이식), 단계 안의 접는 칸.
 
@@ -16,9 +16,11 @@ export function StatusChip({ text, tone }: { text: string; tone: Tone }) {
 }
 
 export function DetailHeader({ title, status, meta }: { title: string; status: { text: string; tone: Tone }; meta: string }) {
+  // 목록에서 보던 쪽으로 돌아간다(줄 링크가 state.page를 넘긴다). 주소로 바로 들어왔으면 1쪽
+  const from = (useLocation().state as { page?: number } | null)?.page ?? 1;
   return (
     <header className="space-y-2">
-      <Link to={RECORDS_PATH} className="btn-ghost text-xs">‹ 제작 기록</Link>
+      <Link to={pageHref(from)} className="btn-ghost text-xs">‹ 제작 기록</Link>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h1 className="min-w-0 break-words text-xl font-bold tracking-tight">{title}</h1>
         <StatusChip {...status} />
