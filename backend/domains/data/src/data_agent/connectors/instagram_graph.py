@@ -246,6 +246,71 @@ class InstagramGraph:
                 m[OWNER_BIO] = bio.strip()[:300]
         return out
 
+    # ------------------------------------------------------------ 우리 계정 인사이트 (11/26 H)
+    # 공식 문서 (2026-11-26 확인):
+    # - 미디어 인사이트 `GET /{media-id}/insights?metric=…` 릴스 지표 views·reach·saved·shares·
+    #   total_interactions·ig_reels_avg_watch_time(밀리초).
+    #   impressions는 2024-07-02 뒤 미디어엔 없다
+    #   https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/insights
+    # - 계정 시청층 `GET /{ig-user-id}/insights?metric=follower_demographics&period=lifetime&
+    #   metric_type=total_value&timeframe=…&breakdown=age|gender`. 팔로워 100명 미만이면 주지 않는다
+    #   https://developers.facebook.com/docs/instagram-platform/api-reference/instagram-user/insights
+    # 권한: instagram_basic + instagram_manage_insights (+ pages_read_engagement). GET만
+
+    async def own_username(self) -> str:
+        """우리 계정(DATA_IG_USER_ID) 아이디. 호출 1번."""
+        payload = await self._get(self.user_id, {"fields": "username"})
+        name = payload.get("username") if isinstance(payload, dict) else None
+        if not isinstance(name, str) or not name:
+            raise IgError("NO_DATA", "우리 계정 아이디를 주지 않음")
+        return name
+
+    async def own_media(self, limit: int = 50) -> list[dict[str, Any]]:
+        """우리 계정 최근 미디어 id·permalink·timestamp (최대 50개). 호출 1번."""
+        n = max(1, min(50, limit))
+        payload = await self._get(f"{self.user_id}/media",
+                                  {"fields": "id,permalink,timestamp,media_product_type",
+                                   "limit": str(n)})  # fmt: skip
+        data = payload.get("data") if isinstance(payload, dict) else None
+        return [m for m in data or [] if isinstance(m, dict) and m.get("id")]
+
+    async def media_insights(self, media_id: str, metrics: Sequence[str]) -> dict[str, float]:
+        """미디어 인사이트 {지표: 값} (받은 그대로). 값이 없는 지표는 넣지 않는다. 호출 1번."""
+        payload = await self._get(f"{media_id}/insights", {"metric": ",".join(metrics)})
+        out: dict[str, float] = {}
+        for row in (payload.get("data") if isinstance(payload, dict) else None) or []:
+            if not isinstance(row, dict) or not isinstance(row.get("name"), str):
+                continue
+            total = row.get("total_value")
+            values = row.get("values")
+            value = (total.get("value") if isinstance(total, dict) else None)
+            first = values[0] if isinstance(values, list) and values else None
+            if value is None and isinstance(first, dict):
+                value = first.get("value")
+            if isinstance(value, int | float) and not isinstance(value, bool):
+                out[row["name"]] = float(value)
+        return out
+
+    async def account_demographics(
+        self, breakdown: str, metric: str = "follower_demographics", timeframe: str = "this_month"
+    ) -> list[tuple[str, float]]:
+        """계정 시청층 [(값, 수)] (breakdown 하나: age 또는 gender). 비면 [] (100명 미만 등)."""
+        payload = await self._get(f"{self.user_id}/insights", {
+            "metric": metric, "period": "lifetime", "metric_type": "total_value",
+            "timeframe": timeframe, "breakdown": breakdown,
+        })  # fmt: skip
+        out: list[tuple[str, float]] = []
+        for row in (payload.get("data") if isinstance(payload, dict) else None) or []:
+            total = row.get("total_value") if isinstance(row, dict) else None
+            for b in (total.get("breakdowns") if isinstance(total, dict) else None) or []:
+                for r in (b.get("results") if isinstance(b, dict) else None) or []:
+                    dims = r.get("dimension_values") if isinstance(r, dict) else None
+                    value = r.get("value") if isinstance(r, dict) else None
+                    if (isinstance(dims, list) and dims and isinstance(value, int | float)
+                            and not isinstance(value, bool)):  # fmt: skip
+                        out.append((str(dims[0])[:20], float(value)))
+        return out
+
     # ------------------------------------------------------------ 해시태그
 
     async def hashtag_id(self, name: str) -> str:

@@ -38,6 +38,7 @@ from ax_contracts.schemas.data import (
     VideoInsightsRequest,
     VideoInsightsRetentionPoint,
     VideoInsightsSource,
+    VideoInsightsSourceId,
     VideoInsightsTraffic,
     VideoInsightsWatch,
 )
@@ -66,6 +67,20 @@ NEEDS_ANALYTICS = [
     "채널 주인 계정의 OAuth 동의 (yt-analytics.readonly)",
 ]
 NEEDS_REPORTING = ["YouTube Reporting job channel_reach_basic_a1 예약 (채널 주인)"]
+# 인스타 (11/26 H): 데이터 인스타 토큰으로 우리 계정(DATA_IG_USER_ID) 미디어 인사이트·계정 시청층
+IG_EVERY_ENV, DEFAULT_IG_EVERY_HOURS = "DATA_IG_INSIGHTS_EVERY_HOURS", 24
+IG_METRICS = ("views", "reach", "saved", "shares", "total_interactions",
+              "ig_reels_avg_watch_time")  # fmt: skip
+IG_MEDIA_LIMIT = 50
+IG_PERMISSION = "instagram_manage_insights 권한 필요"
+NOT_OUR_ACCOUNT = "우리 계정(DATA_IG_USER_ID)이 아닌 게시 계정이라 공개값만 (video_performance)"
+NO_PUBLISH_ACCOUNT = "회사 설정에 게시 계정 아이디가 없음 ([instagram] publish_username)"
+IG_NOT_FOUND = "우리 계정 최근 50개에서 이 게시물을 찾지 못함"
+IG_SAMPLE_SHORT = "표본 부족 (팔로워 100명 미만이면 플랫폼이 계정 시청층을 주지 않음)"
+NEEDS_IG = [
+    "서버 env DATA_IG_ACCESS_TOKEN", "서버 env DATA_IG_USER_ID",
+    "instagram_manage_insights 권한 (instagram_basic·pages_read_engagement와 같이)",
+]
 
 
 # ---------------------------------------------------------------- 저장
@@ -136,8 +151,8 @@ def store_of(env: Mapping[str, str]) -> InsightStore:
 # ---------------------------------------------------------------- 회사 채널
 
 
-def channel_id_of(tenant_id: str | None) -> str:
-    """회사 설정 `[youtube_channel] channel_id` (없거나 못 읽으면 "")."""
+def tenant_value(tenant_id: str | None, section: str, key: str) -> str:
+    """그 회사 설정 `tenant.toml [section] key` 글 (없거나 못 읽으면 "")."""
     from ax_agent_template import tenant
 
     if not tenant_id or not tenant.is_tenant(tenant_id):
@@ -145,11 +160,16 @@ def channel_id_of(tenant_id: str | None) -> str:
     path = tenant.tenants_dir() / tenant_id / tenant.TENANT_FILE
     try:
         with path.open("rb") as f:
-            section = tomllib.load(f).get("youtube_channel")
+            got = tomllib.load(f).get(section)
     except (OSError, tomllib.TOMLDecodeError):
         return ""
-    value = section.get("channel_id") if isinstance(section, dict) else None
+    value = got.get(key) if isinstance(got, dict) else None
     return value.strip() if isinstance(value, str) else ""
+
+
+def channel_id_of(tenant_id: str | None) -> str:
+    """회사 설정 `[youtube_channel] channel_id` (없거나 못 읽으면 "")."""
+    return tenant_value(tenant_id, "youtube_channel", "channel_id")
 
 
 def channel_problem(want: str, mine: Mapping[str, str]) -> str | None:
@@ -296,8 +316,24 @@ def facts_of(out: VideoInsightsOutput) -> list[DataFact]:
 # ---------------------------------------------------------------- 출처 상태
 
 
-def sources(env: Mapping[str, str], store: InsightStore | None) -> list[VideoInsightsSource]:
-    """유튜브 출처 연결 상태 (env가 없으면 연결 대기 + 필요한 것). 인스타는 H에서 더한다."""
+def _saved_sources(
+    store: InsightStore | None, rows: Sequence[tuple[VideoInsightsSourceId, list[str]]]
+) -> list[VideoInsightsSource]:
+    out = []
+    for source, needs in rows:
+        saved = store.source(source) if store is not None else None
+        status, reason = saved if saved else ("waiting", NOT_COLLECTED)
+        out.append(VideoInsightsSource(
+            source=source, status=status if status in ("connected", "waiting", "check")
+            else "check", reason=reason, needs=[] if status == "connected" else list(needs),
+        ))  # fmt: skip
+    return out
+
+
+def youtube_sources(
+    env: Mapping[str, str], store: InsightStore | None
+) -> list[VideoInsightsSource]:
+    """유튜브 출처 연결 상태 (env가 없으면 연결 대기 + 필요한 것)."""
     lack = yta.missing(env)
     if lack:
         why = f"{WAITING}: {', '.join(lack)} 없음"
@@ -305,15 +341,38 @@ def sources(env: Mapping[str, str], store: InsightStore | None) -> list[VideoIns
                                     needs=list(NEEDS_ANALYTICS)),
                 VideoInsightsSource(source="youtube_reporting", status="waiting", reason=why,
                                     needs=[*NEEDS_ANALYTICS[:3], *NEEDS_REPORTING])]  # fmt: skip
-    out = []
-    for source, needs in (("youtube_analytics", NEEDS_ANALYTICS[3:]),
-                          ("youtube_reporting", NEEDS_REPORTING)):  # fmt: skip
-        saved = store.source(source) if store is not None else None
-        status, reason = saved if saved else ("waiting", NOT_COLLECTED)
-        out.append(VideoInsightsSource(
-            source=source, status=status if status in ("connected", "waiting", "check")
-            else "check", reason=reason, needs=[] if status == "connected" else list(needs),
-        ))  # fmt: skip
+    return _saved_sources(store, (("youtube_analytics", NEEDS_ANALYTICS[3:]),
+                                  ("youtube_reporting", NEEDS_REPORTING)))  # fmt: skip
+
+
+def ig_missing(env: Mapping[str, str]) -> list[str]:
+    from data_agent.connectors.instagram_graph import TOKEN_ENV, USER_ENV
+
+    return [name for name in (TOKEN_ENV, USER_ENV) if not (env.get(name) or "").strip()]
+
+
+def instagram_sources(
+    env: Mapping[str, str], store: InsightStore | None
+) -> list[VideoInsightsSource]:
+    """인스타 출처 연결 상태 (미디어 인사이트·계정 시청층)."""
+    lack = ig_missing(env)
+    if lack:
+        why = f"{WAITING}: {', '.join(lack)} 없음"
+        return [VideoInsightsSource(source=s, status="waiting", reason=why, needs=list(NEEDS_IG))
+                for s in ("instagram_insights", "instagram_audience")]  # fmt: skip
+    return _saved_sources(store, (("instagram_insights", NEEDS_IG[2:]),
+                                  ("instagram_audience", NEEDS_IG[2:])))  # fmt: skip
+
+
+def sources(
+    env: Mapping[str, str], store: InsightStore | None, platform: str | None = None
+) -> list[VideoInsightsSource]:
+    """출처 연결 상태 (platform이 없으면 유튜브·인스타 모두)."""
+    out: list[VideoInsightsSource] = []
+    if platform in (None, "youtube"):
+        out += youtube_sources(env, store)
+    if platform in (None, "instagram"):
+        out += instagram_sources(env, store)
     return out
 
 
@@ -333,7 +392,7 @@ class CollectResult:
 
     def line(self) -> str:
         tail = f", {'; '.join(self.problems)}" if self.problems else ""
-        return f"[insights] 유튜브 깊은 지표 {self.saved}개{tail}"
+        return f"[insights] 깊은 지표 {self.saved}개{tail}"
 
 
 async def _latest_csv(conn: yta.YouTubeAnalytics, job_id: str) -> list[dict[str, str]] | None:
@@ -460,6 +519,138 @@ async def _one(
     return out
 
 
+# ---------------------------------------------------------------- 인스타 (하루 1번, 11/26 H)
+
+
+def _handle(name: str) -> str:
+    return name.strip().lstrip("@").lower()
+
+
+def ig_audience_of(
+    ages: Sequence[tuple[str, float]], genders: Sequence[tuple[str, float]]
+) -> list[VideoInsightsAudience]:
+    """계정 시청층: 연령대 줄(성별 빈칸)과 성별 줄(연령대 빈칸).
+
+    percent = 값 ÷ 합계 × 100 (코드)."""
+    out: list[VideoInsightsAudience] = []
+    for rows, is_age in ((ages, True), (genders, False)):
+        total = sum(n for _, n in rows)
+        for name, n in rows:
+            if total > 0:
+                out.append(VideoInsightsAudience(age=name if is_age else "",
+                                                 gender="" if is_age else name,
+                                                 percent=round(n / total * 100, 2)))  # fmt: skip
+    return out[:60]
+
+
+def ig_watch_of(got: Mapping[str, float]) -> VideoInsightsWatch | None:
+    """미디어 인사이트 → 시청 값. ig_reels_avg_watch_time은 밀리초라 ÷ 1000 (단위 변환만)."""
+    if not got:
+        return None
+
+    def n(key: str) -> int | None:
+        v = got.get(key)
+        return int(v) if v is not None and v >= 0 else None
+
+    ms = got.get("ig_reels_avg_watch_time")
+    return VideoInsightsWatch(
+        views=n("views"), reach=n("reach"), saved=n("saved"), shares=n("shares"),
+        total_interactions=n("total_interactions"),
+        avg_view_seconds=round(ms / 1000, 3) if ms is not None and ms >= 0 else None,
+        source="instagram_insights",
+    )  # fmt: skip
+
+
+async def collect_instagram_due(
+    videos: vp.VideoStore, store: InsightStore, graph: Any, env: Mapping[str, str],
+    now: datetime | None = None,
+) -> CollectResult:  # fmt: skip
+    """등록된 인스타 영상 중 마지막 수집에서 `DATA_IG_INSIGHTS_EVERY_HOURS`가 지난 것만, 우리 계정
+    (DATA_IG_USER_ID) 미디어 인사이트와 계정 시청층을 읽어 저장한다 (Graph 하루 상한 그대로).
+
+    회사 게시 계정(publish_username)이 우리 계정이 아니면 그 회사 영상은 공개값만(이유만 저장)."""
+    from data_agent.connectors.naver_searchad import limit_of
+
+    now = now or datetime.now(UTC)
+    result = CollectResult(problems=[])
+    if graph is None or not getattr(graph, "configured", False):
+        return result
+    gap = timedelta(hours=limit_of(env, IG_EVERY_ENV, DEFAULT_IG_EVERY_HOURS))
+    due = [v for v in videos.videos(all_companies=True) if v.platform == "instagram"
+           and ((at := store.collected_at(v.key)) is None or now - at >= gap)]  # fmt: skip
+    if not due:
+        return result
+
+    def why_of(error: ConnectorUnavailable) -> str:
+        if error.code == "PERMISSION":
+            return IG_PERMISSION
+        return f"인스타 인사이트를 읽지 못함 [{error.code}]"
+
+    try:
+        ours = _handle(await graph.own_username())
+        media = await graph.own_media(IG_MEDIA_LIMIT)
+    except ConnectorUnavailable as error:
+        store.set_source("instagram_insights", "check", why_of(error), now)
+        result.problems = [why_of(error)]
+        return result
+    by_code = {}
+    for m in media:
+        parsed = vp.parse_video(str(m.get("permalink") or ""))
+        if parsed and parsed[0] == "instagram":
+            by_code[parsed[1]] = str(m["id"])
+    audience, audience_why = await _ig_audience(graph, store, now, why_of)
+    ok_any, bad = False, ""
+    for v in due:
+        out = VideoInsightsOutput(platform="instagram", video_key=v.key, video_id=v.video_id,
+                                  video_url=v.video_url, campaign_id=v.campaign_id,
+                                  collected_at=now, as_of=now.date())  # fmt: skip
+        account = _handle(tenant_value(store.tenant_of(v.key), "instagram", "publish_username"))
+        if not account:
+            out.reason = NO_PUBLISH_ACCOUNT
+        elif account != ours:
+            out.reason = NOT_OUR_ACCOUNT
+        elif v.video_id not in by_code:
+            out.reason = IG_NOT_FOUND
+        else:
+            try:
+                out.watch = ig_watch_of(await graph.media_insights(by_code[v.video_id], IG_METRICS))
+            except ConnectorUnavailable as error:
+                out.reason = why_of(error)
+                bad = out.reason
+            out.audience, out.audience_basis = audience, "account"
+            out.audience_reason = audience_why
+            if out.watch is not None:
+                ok_any = True
+            elif out.reason is None:
+                out.reason = "인스타가 이 게시물 인사이트를 아직 주지 않음"
+        out.status = "known" if out.watch is not None else "unknown"
+        out.facts = facts_of(out)
+        w = out.watch
+        out.summary = (f"도달 {w.reach:,}명" if w is not None and w.reach is not None
+                       else out.reason or "")[:300]  # fmt: skip
+        store.save(v.key, out, now)
+        result.saved += 1
+    if ok_any or bad:
+        store.set_source("instagram_insights", "connected" if ok_any and not bad else "check",
+                         None if ok_any and not bad else bad, now)  # fmt: skip
+    return result
+
+
+async def _ig_audience(
+    graph: Any, store: InsightStore, now: datetime, why_of: Any
+) -> tuple[list[VideoInsightsAudience], str | None]:
+    """계정 시청층 (한 번에 연령대·성별 두 번). 비면 표본 부족, 권한 없음이면 그 이유."""
+    try:
+        ages = await graph.account_demographics("age")
+        genders = await graph.account_demographics("gender")
+    except ConnectorUnavailable as error:
+        store.set_source("instagram_audience", "check", why_of(error), now)
+        return [], why_of(error)
+    rows = ig_audience_of(ages, genders)
+    store.set_source("instagram_audience", "connected", None if rows else IG_SAMPLE_SHORT, now)
+    return rows, None if rows else IG_SAMPLE_SHORT
+
+
 # ---------------------------------------------------------------- skill (저장분만)
 
 
@@ -473,11 +664,12 @@ def placeholder(v: vp.Video, env: Mapping[str, str], store: InsightStore) -> Vid
     """저장분이 없는 영상: 이유와 필요한 것 (지어내지 않는다)."""
     out = VideoInsightsOutput(platform=v.platform, video_key=v.key, video_id=v.video_id,
                               video_url=v.video_url, campaign_id=v.campaign_id)  # fmt: skip
-    if v.platform == "youtube":
-        lack = yta.missing(env)
-        out.reason = f"{WAITING}: {', '.join(lack)} 없음" if lack else NOT_COLLECTED
-    else:
+    lack = (yta.missing(env) if v.platform == "youtube"
+            else ig_missing(env) if v.platform == "instagram" else None)  # fmt: skip
+    if lack is None:
         out.reason = f"{WAITING}: {v.platform} 깊은 지표를 읽는 연결이 아직 없음"
+    else:
+        out.reason = f"{WAITING}: {', '.join(lack)} 없음" if lack else NOT_COLLECTED
     out.summary = f"깊은 지표 없음: {out.reason}"
     return out
 
@@ -486,8 +678,8 @@ def describe(v: vp.Video, env: Mapping[str, str], store: InsightStore) -> VideoI
     got = store.get(v.key)
     out = got if got is not None else placeholder(v, env, store)
     out.campaign_id = v.campaign_id or out.campaign_id
-    if v.platform == "youtube":
-        out.needs = [s for s in sources(env, store) if s.status != "connected"]
+    if v.platform in ("youtube", "instagram"):
+        out.needs = [s for s in sources(env, store, v.platform) if s.status != "connected"]
     return out
 
 
