@@ -44,6 +44,9 @@ export interface VideoPlanView {
   ctaKo?: string // 마지막 행동 문구
   fallbackReason?: VideoFallbackReason // 규칙 초안이 된 이유 (11/25, 예전 제작안·LLM 제작안은 없음)
   svgReason?: VideoFallbackReason // 3D 마네킹 콘티를 못 그린 이유 (11/25, 그렸거나 예전 제작안은 없음)
+  fallbackDetail?: string // 11/26 U 금지 규칙 코드 (계약 fallback_detail, FALLBACK_DETAIL 키만)
+  svgDetail?: string // 11/26 U 콘티 호출 예외 종류 이름 (계약 svg_detail)
+  characterSourceReason?: CharacterSourceReason // 11/26 U 회사 브랜드로 쓴 이유 (계약 character_source_reason)
   // 11/26 주인공 (계약 VideoPlan.character_source·character_ko·character_look). 예전 제작안은 없음
   characterSource?: 'company_character' | 'brand'
   characterKo?: string // 회사 캐릭터 외형 요약 (마케팅 시트 summary_ko)
@@ -144,9 +147,12 @@ function toRules(raw: unknown): RequestRuleView[] {
 
 const LOOK_LABEL: Record<'photo' | 'illustration', string> = { photo: '실사 그대로', illustration: '그림체 그대로' }
 /** "주인공" 줄 (기획 video_plan.character_line과 같은 문구). 예전 제작안(칸 없음)은 '' (줄을 그리지 않는다) */
-export function characterLine(v: Pick<VideoPlanView, 'characterSource' | 'characterKo' | 'characterLook'>): string {
+export function characterLine(v: Pick<VideoPlanView, 'characterSource' | 'characterKo' | 'characterLook' | 'characterSourceReason'>): string {
   if (!v.characterSource) return ''
-  if (v.characterSource !== 'company_character') return '회사 브랜드 기본 캐릭터'
+  if (v.characterSource !== 'company_character') {
+    const why = v.characterSourceReason ? CHARACTER_REASON[v.characterSourceReason] : ''
+    return why ? `회사 브랜드 기본 캐릭터 · ${why}` : '회사 브랜드 기본 캐릭터'
+  }
   const head = v.characterKo ? `회사 캐릭터 (${v.characterKo})` : '회사 캐릭터'
   return [head, v.characterLook ? LOOK_LABEL[v.characterLook] : ''].filter(Boolean).join(' · ')
 }
@@ -159,8 +165,10 @@ export const VIDEO_SVG_LINE: Record<VideoFallbackReason, string> = {
   rejected: '포즈 답이 규칙에 걸렸어요',
   error: '콘티 호출이 실패했어요',
 }
-/** 콘티를 못 그린 이유가 있을 때만 그 한 줄, 아니면 '' (지금 화면 그대로) */
-export const videoSvgLine = (v: Pick<VideoPlanView, 'svgReason'>) => (v.svgReason ? VIDEO_SVG_LINE[v.svgReason] : '')
+/** 콘티를 못 그린 이유가 있을 때만 그 한 줄, 아니면 '' (지금 화면 그대로).
+ *  예외 종류 이름(계약 svg_detail, 예: LLMResponseError)이 있으면 괄호로 붙인다 (11/26 U) */
+export const videoSvgLine = (v: Pick<VideoPlanView, 'svgReason' | 'svgDetail'>) =>
+  v.svgReason ? `${VIDEO_SVG_LINE[v.svgReason]}${v.svgDetail ? ` (${v.svgDetail})` : ''}` : ''
 
 export type VideoFallbackReason = 'no_llm' | 'timeout' | 'bad_format' | 'rejected' | 'error'
 /** 규칙 초안 칩 옆 이유 한 줄 (계약 VideoPlan.fallback_reason) */
@@ -172,9 +180,39 @@ export const VIDEO_FALLBACK_LINE: Record<VideoFallbackReason, string> = {
   error: 'AI 호출이 실패해 규칙으로 썼어요',
 }
 const FALLBACKS = new Set<string>(Object.keys(VIDEO_FALLBACK_LINE))
-/** 규칙 초안이고 이유가 있을 때만 그 한 줄, 아니면 '' (지금 화면 그대로) */
-export const videoFallbackLine = (v: Pick<VideoPlanView, 'writtenBy' | 'fallbackReason'>) =>
-  v.writtenBy === 'rule' && v.fallbackReason ? VIDEO_FALLBACK_LINE[v.fallbackReason] : ''
+/** 금지 규칙에 걸린 진짜 이유 (계약 VideoPlan.fallback_detail, 기획 reject_detail 코드, 11/26 U).
+ *  코드만 받는다 — 고객 글·이름은 서버가 넣지 않는다. 모르는 코드는 줄을 늘리지 않는다 */
+export const FALLBACK_DETAIL: Record<string, string> = {
+  scene_count: '장면 수가 3~6개가 아니어서',
+  prompt_rule: '장면 프롬프트가 규칙에 걸려서',
+  'prompt_rule:text_request': '프롬프트에 글자를 그리라는 말이 있어서',
+  'prompt_rule:real_person': '프롬프트에 실존 인물 낱말이 있어서',
+  'prompt_rule:real_brand': '프롬프트에 실제 브랜드 낱말이 있어서',
+  'prompt_rule:url_or_number': '프롬프트에 주소·긴 숫자가 있어서',
+  'prompt_rule:injection': '프롬프트에 규칙을 바꾸라는 말이 있어서',
+  real_name_in_scene: '장면에 주제 후보 이름이 들어가서',
+  marketing_word: '마케팅이 막는 말(참여 유도·과장)이 있어서',
+  invented_offer_number: '혜택 문구에 근거 없는 숫자가 있어서',
+  concept_starts_with_product: '콘셉트가 상품 이름으로 시작해서',
+  report_title_as_topic: '보고서 이름을 소재로 써서',
+}
+/** 규칙 초안이고 이유가 있을 때만 그 한 줄, 아니면 '' (지금 화면 그대로). 자세한 이유가 있으면 뒤에 붙인다 */
+export const videoFallbackLine = (v: Pick<VideoPlanView, 'writtenBy' | 'fallbackReason' | 'fallbackDetail'>) => {
+  if (v.writtenBy !== 'rule' || !v.fallbackReason) return ''
+  const detail = v.fallbackDetail ? FALLBACK_DETAIL[v.fallbackDetail] : undefined
+  return detail ? `${VIDEO_FALLBACK_LINE[v.fallbackReason]} · ${detail}` : VIDEO_FALLBACK_LINE[v.fallbackReason]
+}
+
+export type CharacterSourceReason = 'no_record_id' | 'read_failed' | 'gate_held' | 'no_look'
+/** 회사 캐릭터를 못 써 회사 브랜드로 쓴 이유 (계약 VideoPlan.character_source_reason, 11/26 U).
+ *  no_record_id는 고르지 않은 것이라 줄을 늘리지 않는다 */
+export const CHARACTER_REASON: Record<CharacterSourceReason, string> = {
+  no_record_id: '',
+  read_failed: '고른 회사 캐릭터를 읽지 못했어요',
+  gate_held: '회사 캐릭터 읽기가 승인 대기예요',
+  no_look: '회사 캐릭터 시트에 외형 글이 없어요',
+}
+const CHARACTER_REASONS = new Set<string>(Object.keys(CHARACTER_REASON))
 
 type Json = Record<string, unknown>
 const obj = (v: unknown): Json | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Json) : null)
@@ -234,6 +272,9 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
   const offerKo = str(pick(o, 'offerKo', 'offer_ko')), ctaKo = str(pick(o, 'ctaKo', 'cta_ko'))
   const fallback = str(pick(o, 'fallbackReason', 'fallback_reason'))
   const svgWhy = str(pick(o, 'svgReason', 'svg_reason'))
+  const fallbackDetail = str(pick(o, 'fallbackDetail', 'fallback_detail'))
+  const svgDetail = str(pick(o, 'svgDetail', 'svg_detail'))
+  const sourceWhy = str(pick(o, 'characterSourceReason', 'character_source_reason'))
   const source = str(pick(o, 'characterSource', 'character_source'))
   const characterKo = str(pick(o, 'characterKo', 'character_ko'))
   const look = str(pick(o, 'characterLook', 'character_look'))
@@ -254,6 +295,10 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     ...(ctaKo ? { ctaKo } : {}),
     ...(FALLBACKS.has(fallback) ? { fallbackReason: fallback as VideoFallbackReason } : {}),
     ...(FALLBACKS.has(svgWhy) ? { svgReason: svgWhy as VideoFallbackReason } : {}),
+    // 11/26 U: 코드만 받는다 (모양이 다르면 버린다)
+    ...(FALLBACKS.has(fallback) && fallbackDetail in FALLBACK_DETAIL ? { fallbackDetail } : {}),
+    ...(FALLBACKS.has(svgWhy) && /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(svgDetail) ? { svgDetail } : {}),
+    ...(source === 'brand' && CHARACTER_REASONS.has(sourceWhy) ? { characterSourceReason: sourceWhy as CharacterSourceReason } : {}),
     ...(source === 'company_character' || source === 'brand' ? { characterSource: source } : {}),
     ...(source === 'company_character' && characterKo ? { characterKo } : {}),
     ...(source === 'company_character' && (look === 'photo' || look === 'illustration') ? { characterLook: look } : {}),

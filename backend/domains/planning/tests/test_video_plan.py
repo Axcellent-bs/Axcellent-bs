@@ -128,19 +128,23 @@ def test_llm_scene_count_spreads_evenly() -> None:
 
 
 @pytest.mark.parametrize(
-    "out",
+    ("out", "detail"),
     [
-        _llm_out(prompt="The cat holds a sign with the shop name written on it"),
-        _llm_out(prompt="A celebrity lookalike cat at the Starbucks counter"),
-        _llm_out(n=2),
-        _llm_out(n=7),
+        (_llm_out(prompt="The cat holds a sign with the shop name written on it"),
+         "prompt_rule:text_request"),
+        (_llm_out(prompt="A celebrity lookalike cat at the Starbucks counter"),
+         "prompt_rule:real_person"),
+        (_llm_out(n=2), "scene_count"),
+        (_llm_out(n=7), "scene_count"),
     ],
-)
-def test_llm_plan_breaking_rules_falls_back_to_rule(out) -> None:
+)  # fmt: skip
+def test_llm_plan_breaking_rules_falls_back_to_rule(out, detail) -> None:  # noqa: ANN001
     plan = asyncio.run(vp.write(_mock(out), _prop(), "ctx"))
     # 11/25 규칙 제작안 이유가 같이 남는다 (나머지 칸은 규칙 제작안 그대로).
     # 가짜 LLM에 포즈 답이 없어 콘티 단계는 실패 → svg_reason="error"(5-1)
-    want = {"fallback_reason": "rejected", "svg_reason": "error"}
+    # 11/26 U: 어느 규칙인지(fallback_detail)·콘티 예외 종류(svg_detail, 가짜 LLM은 KeyError)도
+    want = {"fallback_reason": "rejected", "svg_reason": "error",
+            "fallback_detail": detail, "svg_detail": "KeyError"}  # fmt: skip
     assert plan == vp.rule_plan(_prop()).model_copy(update=want)
 
 

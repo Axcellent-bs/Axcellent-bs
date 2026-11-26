@@ -55,6 +55,18 @@ from planning_agent import proposals as ext
 log = logging.getLogger("ax.planning")
 REVISE_ACTION = "revise_video_plan"  # 안전 관문 액션 (registry.toml 등록은 사람이 한다)
 REVISE_MAX_VERSION = 2  # 제안당 고치기 1회 (1판 → 2판)
+
+
+def character_reason(got: Any) -> str:
+    """회사 캐릭터 읽기 실패(MarketingBrief.character의 이유 글·예외 종류) → 이유 코드.
+
+    승인 관문 보류는 A2A input-required, 시트에 외형 글이 없으면 no_look, 그 밖은 read_failed."""
+    text = str(got or "")
+    if text.startswith("input-required"):
+        return "gate_held"
+    if text == ext.NO_LOOK:
+        return "no_look"
+    return "read_failed"
 PULL_CTX = "ctx_proposals"
 PULL_DONE = "pull_insights"  # 받아오기 결과 기록 (화면이 마지막 것을 보여 준다)
 PULL_FAILED = "pull_insights_failed"
@@ -472,10 +484,12 @@ class ProposalMixin:
         if p is None:
             return res
         writer = self._proposal_writer  # 테스트 가짜는 llm이 없다 → 규칙 제작안
-        character = await self._company_character(p)
+        character, why = await self._company_character_why(p)
         if character is not None:
             p = p.model_copy(update={"company_character": character})
         video = await video_plan.write(getattr(writer, "llm", None), p, _ctx(p))
+        if character is None and why:  # 11/26 U: 회사 브랜드로 쓴 이유 코드 (화면 "주인공" 줄 옆)
+            video = video.model_copy(update={"character_source_reason": why})
 
         async def keep(s: State) -> ActionResult:
             q = _find(s, pid)
@@ -541,19 +555,30 @@ class ProposalMixin:
     async def _company_character(self: Any, p: Proposal) -> CompanyCharacter | None:
         """의뢰에서 고른 회사 캐릭터를 마케팅 A2A로 읽는다(11/26). 번호가 없거나 못 읽으면 None
         (회사 브랜드 기본 캐릭터, 지금 동작). 이미 읽었으면 그것."""
-        if p.company_character is not None or not p.brand_character_record_id:
-            return p.company_character
+        return (await self._company_character_why(p))[0]
+
+    async def _company_character_why(
+        self: Any, p: Proposal
+    ) -> tuple[CompanyCharacter | None, str]:
+        """`_company_character`와 같고, 못 쓰면 이유 코드(계약 VideoPlan.character_source_reason)
+        를 같이 돌려준다. 못 읽은 경우는 warning 한 줄(제안 번호·코드만)."""
+        if p.company_character is not None:
+            return p.company_character, ""
+        if not p.brand_character_record_id:
+            return None, "no_record_id"
         read = getattr(self._marketing, "character", None)
         if read is None:
-            return None
-        try:
-            got = await read(_ctx(p), p.brand_character_record_id)
-        except Exception as exc:  # noqa: BLE001 - 못 읽으면 회사 브랜드로 (종류만 로그)
-            got = type(exc).__name__
+            got: Any = "no_reader"
+        else:
+            try:
+                got = await read(_ctx(p), p.brand_character_record_id)
+            except Exception as exc:  # noqa: BLE001 - 못 읽으면 회사 브랜드로 (종류만 로그)
+                got = type(exc).__name__
         if isinstance(got, CompanyCharacter):
-            return got
-        log.info("회사 캐릭터 못 읽음 → 회사 브랜드 캐릭터: %s %s", p.id, got)
-        return None
+            return got, ""
+        why = character_reason(got)
+        log.warning("회사 캐릭터 못 읽음 → 회사 브랜드 캐릭터: %s %s", p.id, why)
+        return None, why
 
     async def _option_sources(
         self: Any, ctx: str

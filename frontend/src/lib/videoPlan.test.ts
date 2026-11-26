@@ -196,6 +196,32 @@ test("의뢰 지시 ✓/✕ (계약 request_rules): 칩 N/N · 줄 문구 · 모
   assert.equal(requestRulesChip(toVideoPlan({ ...RAW, request_rules: [] })!), "");
 });
 
+test("규칙 초안 진짜 이유 (계약 fallback_detail·svg_detail·character_source_reason, 11/26 U): 코드 → 짧은 한국어", () => {
+  const rule = (extra: Record<string, unknown>) => toVideoPlan({ ...RAW, written_by: "rule", fallback_reason: "rejected", ...extra })!;
+  assert.equal(videoFallbackLine(rule({ fallback_detail: "real_name_in_scene" })), "AI 답이 금지 규칙에 걸려 규칙으로 썼어요 · 장면에 주제 후보 이름이 들어가서");
+  assert.equal(videoFallbackLine(rule({ fallback_detail: "prompt_rule:real_person" })), "AI 답이 금지 규칙에 걸려 규칙으로 썼어요 · 프롬프트에 실존 인물 낱말이 있어서");
+  for (const code of ["scene_count", "prompt_rule", "marketing_word", "invented_offer_number", "concept_starts_with_product", "report_title_as_topic",
+    "prompt_rule:text_request", "prompt_rule:real_brand", "prompt_rule:url_or_number", "prompt_rule:injection"]) {
+    assert.match(videoFallbackLine(rule({ fallback_detail: code })), / · .+서$/, code);
+  }
+  // 모르는 코드·값이 든 글은 버린다 (화면에 서버 글을 그대로 내지 않는다)
+  for (const bad of ["prompt_rule:Starbucks", "별빛소년단", "unknown"]) {
+    const v = rule({ fallback_detail: bad });
+    assert.equal("fallbackDetail" in v, false);
+    assert.equal(videoFallbackLine(v), "AI 답이 금지 규칙에 걸려 규칙으로 썼어요");
+  }
+  assert.equal(videoFallbackLine(rule({})), "AI 답이 금지 규칙에 걸려 규칙으로 썼어요"); // 예전 제작안 그대로
+  const svg = toVideoPlan({ ...RAW, svg_reason: "error", svg_detail: "LLMResponseError" })!;
+  assert.equal(videoSvgLine(svg), "콘티 호출이 실패했어요 (LLMResponseError)");
+  assert.equal(videoSvgLine(toVideoPlan({ ...RAW, svg_reason: "error", svg_detail: "고객 글" })!), "콘티 호출이 실패했어요");
+  const brand = (why: string) => characterLine(toVideoPlan({ ...RAW, character_source: "brand", character_source_reason: why })!);
+  assert.equal(brand("read_failed"), "회사 브랜드 기본 캐릭터 · 고른 회사 캐릭터를 읽지 못했어요");
+  assert.equal(brand("gate_held"), "회사 브랜드 기본 캐릭터 · 회사 캐릭터 읽기가 승인 대기예요");
+  assert.equal(brand("no_look"), "회사 브랜드 기본 캐릭터 · 회사 캐릭터 시트에 외형 글이 없어요");
+  assert.equal(brand("no_record_id"), "회사 브랜드 기본 캐릭터"); // 고르지 않음 = 지금 그대로
+  assert.equal(brand("이상한 값"), "회사 브랜드 기본 캐릭터");
+});
+
 test("금칙어 든 의뢰 대사 줄: ✕ 이 문장은 광고 금칙어라 못 넣어요 (기획 BLOCKED_WHERE)", () => {
   const v = toVideoPlan({ ...RAW, request_rules: [
     { kind: "quote", text_ko: "업계 최고 서점", kept: false, where: "광고 금칙어라 넣지 않아요" },

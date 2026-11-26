@@ -988,6 +988,18 @@ def reject_reason(
     return None
 
 
+def reject_detail(
+    p: Proposal, got: _PlanOut, style_: str = PRODUCT, purpose: str = CHANNEL_CONTENT
+) -> str:
+    """계약 VideoPlan.fallback_detail (11/26 U): reject_reason 코드, prompt_rule이면 첫 걸린
+    장면의 첫 프롬프트 규칙 코드를 붙인다("prompt_rule:real_person"). 쓸 수 있으면 ""."""
+    reason = reject_reason(p, got, style_, purpose) or ""
+    if reason == "prompt_rule":
+        code = next((c[0] for s in got.scenes if (c := prompt_problems(s.prompt))), "")
+        return f"{reason}:{code}" if code else reason
+    return reason
+
+
 def _keyframes(i: int, s: _SceneOut) -> dict[str, str]:
     """장면 키프레임 네 칸. 한 칸이라도 prompt와 같은 금지에 걸리면 그 장면 네 칸을 모두 비운다
     (장면 prompt·visual·caption은 그대로). 로그는 장면 번호와 이유 코드만."""
@@ -1026,14 +1038,15 @@ def _checked(
     purpose: str = CHANNEL_CONTENT,
     elapsed: float = 0.0,
     even: bool = False,
-) -> tuple[VideoPlan | None, str]:
-    """`_from_llm`과 같고, 못 쓰면 규칙 제작안 이유(`rejected`·`bad_format`)를 같이 돌려준다.
+) -> tuple[VideoPlan | None, str, str]:
+    """`_from_llm`과 같고, 못 쓰면 규칙 제작안 이유(`rejected`·`bad_format`)와 자세한 코드
+    (fallback_detail, rejected일 때만)를 같이 돌려준다.
 
     even: 장면을 고르게 나눈다 (11/26 마케팅이 장면 길이가 짧다고 고치기를 요청했을 때)."""
-    reason = reject_reason(p, got, style_, purpose)
-    if reason:
-        log.info("LLM 영상 제작안 거절 → 규칙 제작안: %s %.1fs", reason, elapsed)
-        return None, "rejected"
+    detail = reject_detail(p, got, style_, purpose)
+    if detail:  # 11/26 U: 운영에 남게 warning. 제안 번호·코드·초만 (고객 글·이름·프롬프트 없음)
+        log.warning("LLM 영상 제작안 거절 → 규칙 제작안: %s %s %.1fs", detail, p.id, elapsed)
+        return None, "rejected", detail
     n = len(got.scenes)
     ad = purpose in PURPOSE_DIRECTION
     cuts = fun_timings(d, n) if style_ == FUN_FIRST or ad else timings(d, n)
@@ -1090,8 +1103,8 @@ def _checked(
         )  # fmt: skip
     except ValidationError:
         log.info("LLM 영상 제작안 형식 → 규칙 제작안: ValidationError %.1fs", elapsed)
-        return None, "bad_format"
-    return plan, ""
+        return None, "bad_format", ""
+    return plan, "", ""
 
 
 # 규칙 제작안으로 쓴 이유 (계약 VideoPlan.fallback_reason). 시간 초과·형식은 예외 종류로 가른다
@@ -1158,8 +1171,10 @@ def _adjustments(got: _PlanOut) -> list[PlanAdjustment]:
     return out
 
 
-def _rule(p: Proposal, promo: tuple[str, str], reason: str) -> VideoPlan:
-    return rule_plan(p, promo).model_copy(update={"fallback_reason": reason})
+def _rule(p: Proposal, promo: tuple[str, str], reason: str, detail: str = "") -> VideoPlan:
+    return rule_plan(p, promo).model_copy(
+        update={"fallback_reason": reason, "fallback_detail": detail}
+    )
 
 
 async def write(
@@ -1290,9 +1305,9 @@ async def _write_with(
         except Exception as exc:  # noqa: BLE001 - 다시 쓰기 실패면 첫 답으로 계속
             log.warning("영상 제작안 다시 쓰기 실패 → 첫 답: %s", type(exc).__name__)
     elapsed = time.monotonic() - started
-    plan, reason = _checked(p, got, d, b, style_, purpose, elapsed)
+    plan, reason, detail = _checked(p, got, d, b, style_, purpose, elapsed)
     if plan is None:
-        plan = _rule(p, promo, reason)
+        plan = _rule(p, promo, reason, detail)
     else:  # 검사 기록: 다시 썼으면 2판 검사도 남긴다. 다시 써도 ✕면 그 제작안을 쓰고 ✕를 남긴다
         if rewritten:
             log_rows.append(attempt_log(2, plan_problems(p, got)))
@@ -1399,7 +1414,7 @@ async def revise(
     if not got.request_rules and old.request_rules:  # 지시는 처음 뽑은 것을 그대로 본다
         rules = [_RuleOut(kind=r.kind, text_ko=r.text_ko) for r in old.request_rules]
         got = got.model_copy(update={"request_rules": rules})
-    plan, reason = _checked(p, got, d, b, style_, purpose, even="duration" in kinds)
+    plan, reason, _ = _checked(p, got, d, b, style_, purpose, even="duration" in kinds)
     if plan is None:
         raise ReviseRefused(reason or "rejected")
     log_rows = [*old.check_log, asked, attempt_log(from_version + 1, plan_problems(p, got))][-6:]

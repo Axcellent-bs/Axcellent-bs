@@ -262,8 +262,10 @@ def svg_reason_of(exc: BaseException) -> str:
     return "error"
 
 
-def _failed(plan: VideoPlan, reason: str) -> tuple[VideoPlan, int]:
-    return plan.model_copy(update={"svg_reason": reason}), 0
+def _failed(plan: VideoPlan, reason: str, detail: str = "") -> tuple[VideoPlan, int]:
+    """detail: 계약 svg_detail (호출 실패 예외 종류 이름, 로그 줄과 같은 값. 11/26 U)."""
+    code = re.sub(r"[^A-Za-z0-9_]", "", detail)[:40]
+    return plan.model_copy(update={"svg_reason": reason, "svg_detail": code}), 0
 
 
 async def draw(
@@ -288,7 +290,7 @@ async def draw(
     except Exception as exc:  # noqa: BLE001 - 포즈·SVG 없이 제작안 그대로
         log.warning("마네킹 콘티 포즈 실패: %s %.1fs 0/%d장면", type(exc).__name__,
                     time.monotonic() - started, len(plan.scenes))  # fmt: skip
-        return _failed(plan, svg_reason_of(exc))
+        return _failed(plan, svg_reason_of(exc), type(exc).__name__)
     out, changed = apply(plan, got, only)
     elapsed = time.monotonic() - started
     if not changed:
@@ -297,4 +299,4 @@ async def draw(
                     len(plan.scenes))  # fmt: skip
         return _failed(plan, reason)
     log.info("마네킹 콘티: %.1fs %d/%d장면", elapsed, changed, len(plan.scenes))
-    return out.model_copy(update={"svg_reason": ""}), changed
+    return out.model_copy(update={"svg_reason": "", "svg_detail": ""}), changed

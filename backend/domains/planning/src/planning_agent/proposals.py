@@ -755,9 +755,11 @@ class MarketingBrief:
         out = await _ask(self._call, "marketing", req, self.timeout)
         if isinstance(out, str):
             return out
-        return character_of((out.output or {}).get("sheet")) or "시트에 외형 없음"
+        return character_of((out.output or {}).get("sheet")) or NO_LOOK
 
 
+# character()가 돌려주는 이유 글 (기획 character_source_reason no_look)
+NO_LOOK = "시트에 외형 없음"
 CREATIVE_RECORD_GET_SKILL = "creative_record_get"
 SHEET_KINDS = ("real_photo", "virtual_human", "illustration")
 

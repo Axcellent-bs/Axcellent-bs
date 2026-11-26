@@ -169,7 +169,9 @@ def test_llm_failure_keeps_plan_without_pose_or_svg() -> None:
         drawn, changed = asyncio.run(sb.draw(llm, plan, "ctx"))
         assert changed == 0 and drawn.svg_reason  # 11/25 5-1: 이유를 남긴다 (장면은 그대로)
         assert drawn.scenes == plan.scenes
-        assert drawn.model_copy(update={"svg_reason": ""}) == plan
+        # 11/26 U: 호출 실패면 예외 종류 이름(svg_detail)도 남는다 (LLM 없음은 "")
+        assert drawn.svg_detail == ("" if llm is None else "KeyError")
+        assert drawn.model_copy(update={"svg_reason": "", "svg_detail": ""}) == plan
     assert all(s.start_pose is None and not s.start_svg for s in plan.scenes)
 
 
