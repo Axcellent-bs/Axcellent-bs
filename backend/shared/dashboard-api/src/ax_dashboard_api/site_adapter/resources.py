@@ -284,6 +284,42 @@ def to_sales_row(
     }
 
 
+def product_names(products: list[dict[str, Any]]) -> dict[str, tuple[str | None, str | None]]:
+    """상품 목록(`to_product` 모양) → 상품 id → (이름, 분류 값)."""
+    out: dict[str, tuple[str | None, str | None]] = {}
+    for p in products:
+        name = p.get("name")
+        cat = p.get("category_code")
+        out[str(p["product_id"])] = (
+            str(name) if name not in (None, "") else None,
+            str(cat) if cat not in (None, "") else None,
+        )
+    return out
+
+
+def with_product_names(
+    row: dict[str, Any], names: dict[str, tuple[str | None, str | None]]
+) -> dict[str, Any]:
+    """판매 기록 한 줄의 상품 줄마다 이름(`title`)·분류(`category_code`)를 상품 목록에서 채운다.
+
+    상품 목록에 없는 상품(지워진 상품)은 비운 채(지어내지 않는다). 분류 값은 사이트 값 그대로
+    (분류 표가 없는 회사는 그 값이 화면 이름이 된다, `sales_analysis.category_label`).
+    """
+    if not names:
+        return row
+    lines = []
+    for line in row["lines"]:
+        title, cat = names.get(str(line["product_id"]), (None, None))
+        lines.append(
+            {
+                **line,
+                "title": line.get("title") or title,
+                "category_code": line.get("category_code") or cat,
+            }
+        )
+    return {**row, "lines": lines}
+
+
 def customers_from(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """고객 내보내기 (`CustomerRow`). 가입 시각이 없는 사이트라 첫 주문 시각을 joined_at으로."""
     seen: dict[str, dict[str, Any]] = {}

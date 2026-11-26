@@ -206,7 +206,7 @@ def test_real_quotes_compares_without_spaces_and_punctuation() -> None:
     assert pc.real_quotes(rules, "")[1] == 2  # 의뢰문이 비면 quote는 모두 버린다
 
 
-CLAIM = "캣북스가 업계 최고 서점"  # 광고 금칙어(최고)가 든 의뢰 대사
+CLAIM ="캣북스가 업계 최고 서점"  # 광고 금칙어(최고)가 든 의뢰 대사
 
 
 def test_quote_with_a_forbidden_claim_is_not_kept_and_rewritten_out() -> None:
