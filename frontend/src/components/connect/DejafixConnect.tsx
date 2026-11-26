@@ -3,6 +3,7 @@ import { Notice, SectionHead, StatusChip } from './parts'
 import { ToolForm, useToolList } from './ToolForm'
 import { deleteTool, type ToolList } from '@/lib/toolConnections'
 import { dejafixStatus, saveZabbixSettings, zabbixSettings, zabbixSummary, type ZabbixSettings } from '@/lib/dejafix'
+import { zabbixInsecure } from '@/lib/zabbixSettings'
 import { when } from '@/lib/toolForms'
 import { dejafixCard, dejafixSummary, type DejafixStatus, type SavedDejafix } from '@/lib/toolForms'
 
@@ -115,6 +116,7 @@ function ZabbixConnect() {
           <input type="checkbox" checked={verify} onChange={(e) => setVerify(e.target.checked)} />
           HTTPS 인증서 확인 (사내 자체 인증서면 끄세요)
         </label>
+        {zabbixInsecure(url, verify) && <p className="text-sm text-amber-800" role="note">{zabbixInsecure(url, verify)}</p>}
         <div className="flex flex-wrap items-center gap-2">
           <button className="btn-primary" disabled={busy || !url.trim() || (!token.trim() && !now?.token_set)}>{busy ? '연결 확인하는 중…' : '확인하고 저장'}</button>
         </div>

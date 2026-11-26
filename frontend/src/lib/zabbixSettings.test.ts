@@ -30,3 +30,11 @@ test("모르는 모양은 null", () => {
   assert.equal(parseZabbixSettings({ data: { source: "vault" } }), null);
   assert.equal(parseZabbixSettings({ error: { code: "X" } }), null);
 });
+
+test("토큰이 보호되지 않는 연결이면 경고", async () => {
+  const { zabbixInsecure } = await import("./zabbixSettings.ts");
+  assert.match(zabbixInsecure("http://zbx.example/api_jsonrpc.php", true) ?? "", /http:\/\//);
+  assert.match(zabbixInsecure("https://zbx.example/api_jsonrpc.php", false) ?? "", /인증서/);
+  assert.equal(zabbixInsecure("https://zbx.example/api_jsonrpc.php", true), null);
+  assert.equal(zabbixInsecure("", false), null);
+});
