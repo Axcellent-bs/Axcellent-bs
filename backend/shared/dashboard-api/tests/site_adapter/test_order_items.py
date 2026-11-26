@@ -122,3 +122,46 @@ def test_setup_proposes_order_lines_and_accepts_them() -> None:
         {"version": 1, "resources": {"orders": proposed, "products": products}}
     )
     setup._complete(m)  # 빈 칸 없음
+
+
+# ------------------------------------------------- 패키지(번들) 줄 이름·분류 (11/26)
+# 실서버: 스터디온 판매 줄 9%(패키지 SO-PKG-*)가 이름·분류 빈칸. 사이트에 패키지 목록 API가 없어
+# 강좌 목록으로 못 채운다 → 줄의 종류(kind=bundle)를 분류로, 패키지 번호를 이름으로.
+
+COURSES = resources.product_names(
+    [{"product_id": "C-PY", "name": "파이썬 기초", "category_code": "DEV"}]
+)
+
+
+def _sales(order: dict[str, Any] = ORDER, names: Any = COURSES) -> Any:
+    from ax_contracts.data_access.shop_sales import SalesOrderRow
+
+    row = resources.with_product_names(resources.sales_row(order, MAPPING), names)
+    return SalesOrderRow.model_validate(row)  # 계약에 없는 칸(종류)은 남지 않는다
+
+
+def test_bundle_line_gets_code_as_name_and_kind_as_category() -> None:
+    course, bundle = _sales().lines
+    # 강좌는 예전처럼 강좌 목록 값
+    assert (course.title, course.category_code) == ("파이썬 기초", "DEV")
+    # 패키지는 사이트 값: 이름 = 패키지 번호, 분류 = 줄 종류
+    assert (bundle.product_id, bundle.title, bundle.category_code) == ("B-CERT", "B-CERT", "bundle")
+
+
+def test_line_name_from_site_wins_over_code() -> None:
+    items = [{**ORDER["items"][1], "title": "자격증 패키지"}]
+    (bundle,) = _sales({**ORDER, "items": items}).lines
+    assert (bundle.title, bundle.category_code) == ("자격증 패키지", "bundle")
+
+
+def test_products_unreadable_keeps_lines_empty_and_orders_flow() -> None:
+    """상품 목록을 못 읽은 회차는 예전처럼 비운 채(종류로 강좌까지 'course'로 채우지 않는다)."""
+    row = _sales(names={})
+    assert row.order_id == "SO1001"
+    assert all(line.title is None and line.category_code is None for line in row.lines)
+
+
+def test_kind_does_not_override_course_category() -> None:
+    """목록에 있는 강좌는 줄 종류(course)가 아니라 강좌 분류 그대로."""
+    course, _ = _sales().lines
+    assert course.category_code == "DEV"
