@@ -74,6 +74,9 @@ SYSTEM_PROMPT = (
 _BOARD = re.compile(r"스토리보드|줄거리|스토리|장면|콘티")
 RECORD_ID_RE = r"^CR-[0-9a-f]{12}$"
 CREATIVE_TIMEOUT_SEC = 150
+# 11/26 대화의 스토리보드는 긴 LLM(handlers.long_storyboard_llm_factory, 240초)을 쓰므로
+# 기다리는 제한도 240초
+STORYBOARD_TIMEOUT_SEC = 240
 STORY_PROMPT = (
     "사람이 마케팅 AI에게 보낸 메시지(message)에서 스토리보드로 만들 줄거리를 찾아 "
     "StoryAsk로만 답한다.\n"
@@ -365,15 +368,19 @@ class ChatService:
             "character_en": (rec["sheet"] or {}).get("consistency_en") or "",
         }
         script = await self._script(rid, rec, story, shots, llm)
+        # 스토리보드만 긴 LLM(240초). 대본은 위에서 대화 LLM 그대로.
+        # handlers가 chat을 읽어서 여기서 불러온다
+        from marketing_agent.handlers import long_storyboard_llm_factory
+
         try:
             board = await asyncio.wait_for(
                 _storyboard.make_storyboard(
                     untrusted,
-                    lambda: llm,
+                    long_storyboard_llm_factory(fallback=lambda: llm),
                     script_scenes=_script.storyboard_scenes(script),
                     cta=str((script or {}).get("cta_ko") or ""),
                 ),
-                CREATIVE_TIMEOUT_SEC,
+                STORYBOARD_TIMEOUT_SEC,
             )
         except _storyboard.StoryboardRefused as refused:
             done = "대본은 만들어 아래 카드에 남겼어요. " if script else ""
