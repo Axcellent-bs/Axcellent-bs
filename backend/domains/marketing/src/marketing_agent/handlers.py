@@ -2382,7 +2382,9 @@ async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
     items = _narrow(_with_states(result.output), exclude_platform, wanted)
     # 썸네일 기능 전에 만든 영상: 후보가 없으면 한 번 만든다(ffmpeg 프레임, 크레딧 0). 거르고
     # 남긴 건만 대상으로 한다
-    lacking = [str(i.get("post_draft_id")) for i in items if i.get("labeled") and not i.get("covers")]
+    lacking = [
+        str(i.get("post_draft_id")) for i in items if i.get("labeled") and not i.get("covers")
+    ]
     cover_errors: dict[str, str] = {}
     if lacking:
         made, cover_errors = await asyncio.to_thread(_request_cover.backfill, STATE.sns, lacking)
