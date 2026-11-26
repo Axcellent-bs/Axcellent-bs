@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Chip, Empty, TONE, Waiting } from "@/components/finance/bits";
+import { Chip, Empty, TONE } from "@/components/finance/bits";
 import { okEvidence, type SkillState } from "@/components/data/useSkill";
 import { safeLink } from "@/lib/safeLink";
 import { briefTriggerLabel, versionLabel } from "@/lib/briefTrigger";
@@ -33,6 +33,17 @@ const num = (v: number, digits = 0) => v.toLocaleString("ko-KR", { maximumFracti
 const times = (v: number) => `평소의 ${num(v, 2)}배`;
 const FORMAT_SOURCE = { topic: "이 주제 숏츠", category: "같은 카테고리 숏츠 통계", all: "전체 숏츠 통계" } as const;
 const COMPACT_VIEWS = new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
+
+/** 매일 브리프를 묶는 동안: 회색 줄 2개 (11/26, 글자 "인사이트를 묶는 중…"은 화면 읽기용으로만) */
+function BriefSkeleton() {
+  return (
+    <div role="status" className="space-y-2 py-1">
+      <span className="sr-only">인사이트를 묶는 중…</span>
+      <div aria-hidden="true" className="h-4 w-3/4 animate-pulse rounded bg-ink-100" />
+      <div aria-hidden="true" className="h-4 w-1/2 animate-pulse rounded bg-ink-100" />
+    </div>
+  );
+}
 
 function material(i: TrendInsight): { label: string; tone: string } {
   if (i.ad_material === true && i.real_entity) return { label: "광고 재료 가능 · 이름 주의", tone: TONE.warn };
@@ -558,7 +569,7 @@ export function InsightBrief({ state, examples, examplesCount }: {
           이전 판({hhmm(out.created_at)})을 보고 있어요. 기획에 넘기는 내용은 최신 판({hhmm(latestRow(head)?.created_at)}) 기준이에요.
         </p>
       )}
-      {state.kind === "loading" ? <Waiting what="인사이트를 묶는 중…" />
+      {state.kind === "loading" ? <BriefSkeleton />
         : state.kind === "failed" ? <Empty>인사이트를 받지 못했어요. {state.reason} {DATA_SERVER}가 켜져 있는지 확인해 주세요.</Empty>
         : out && (
           <>
