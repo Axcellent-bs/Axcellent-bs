@@ -23,7 +23,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from ax_agent_template.tenant import setting as tenant_setting
 from ax_contracts.schemas import Evidence
@@ -207,6 +207,7 @@ async def list_sources(
     store: ProbeStore | None = None,
     recheck: bool = False,
     tenant_id: str | None = None,
+    sales_sync: Any = None,
 ) -> SourcesResult:
     """출처 목록과 상태. 확인이 필요한 출처는 저장된 확인 결과가 없을 때만 1번 부른다."""
     now = now or datetime.now(UTC)
@@ -268,6 +269,8 @@ async def list_sources(
         f" 키 필요 {', '.join(need) or '없음'}"
     )
     out.collectors = collector_states(env, now)  # 요약 문장은 그대로 (출처 목록만 센다)
+    if tenant_id and sales_sync is not None:
+        out.collectors.append(sales_state(sales_sync, env, now))  # 요청 회사 판매 기록 수집
     if tenant_id and (agg := aggregate_state(env, tenant_id, now)) is not None:
         out.collectors.append(agg)  # 일별 집계 병행 비교 한 줄 (3단계 설계 6.3)
     out.llm_usage = llm_usage_today(env)
@@ -388,6 +391,29 @@ def collector_states(env: Mapping[str, str], now: datetime) -> list[CollectorSta
             stalled=warning is not None, warning=warning, reason=state.reason,
         ))  # fmt: skip
     return out
+
+
+def sales_state(sync: Any, env: Mapping[str, str], now: datetime) -> CollectorStatus:
+    """요청 회사의 판매 기록 수집 상태 한 줄 (그 회사 tenant의 sync 기록, 11/26 회사 분리).
+
+    `sync`는 `SalesStore.sync_state(그 회사)`. 끝까지 받은 적이 없으면 멈춤으로 보이고
+    이유를 단다."""
+    max_age = collector_max_age(env)
+    last = sync.last_synced_at.astimezone(UTC) if sync.last_synced_at else None
+    age = (now - last).total_seconds() / 3600 if last else None
+    warning = None
+    if age is None:
+        warning = "수집 멈춤: 판매 기록을 아직 끝까지 받은 적이 없음"
+    elif age > max_age:
+        warning = f"수집 멈춤: 마지막 수집 {age:.1f}시간 전 (기준 {max_age:g}시간)"
+    reason = f"출처 {sync.source or '없음'}"
+    if sync.last_error:
+        reason += f" · 마지막 오류: {sync.last_error}"
+    return CollectorStatus(
+        collector_id="sales_collect", name="판매 기록 수집", running=warning is None,
+        last_collected_at=last, max_age_hours=max_age,
+        stalled=warning is not None, warning=warning, reason=reason,
+    )  # fmt: skip
 
 
 AGGREGATE_MAX_AGE_HOURS = 26.0  # 하루 한 번(한국 00:30 뒤) 계산. 이보다 오래되면 집계 멈춤

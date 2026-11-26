@@ -215,28 +215,58 @@ async def ensure_summary(store: SalesStore, tenant_id: str) -> bool:
     return result is not None
 
 
+async def _warm_tenant(
+    get_store: Callable[[], SalesStore],
+    get_catalog: Callable[[], MetricCatalog],
+    tenant_id: str,
+    last: dict[str, int],
+) -> None:
+    """회사 하나: 요약 표를 채우고, 그 회사 저장소 버전이 바뀌었으면 기본 조회를 미리 계산한다."""
+    store = get_store()
+    # 요약 표가 준비되지 않았으면(예전 파일·리셋 뒤 바꿔 끼운 파일) 먼저 채운다
+    await ensure_summary(store, tenant_id)
+    version = await asyncio.to_thread(store.data_version, tenant_id)
+    if version and version != last.get(tenant_id):
+        # 카탈로그는 지금 회사 범위의 것 (다른 회사는 `company_scope.using` 안에서 부른다)
+        done = await asyncio.to_thread(warm, store, tenant_id, get_catalog(), datetime.now(UTC))
+        logger.info("판매 분석 미리 계산 %s (저장소 버전 %s): %s", tenant_id, version,
+                    ", ".join(done))  # fmt: skip
+        last[tenant_id] = version
+
+
 async def run_forever(
     get_store: Callable[[], SalesStore],
     get_catalog: Callable[[], MetricCatalog],
     tenant_id: str,
     poll_seconds: float = WARM_POLL_SECONDS,
+    *,
+    others: Callable[[], list[str]] | None = None,
 ) -> None:
-    """저장소 버전이 바뀔 때마다(수집기가 새 행을 저장하면) 기본 조회를 미리 계산한다."""
-    last: int | None = None
+    """저장소 버전이 바뀔 때마다(수집기가 새 행을 저장하면) 기본 조회를 미리 계산한다.
+
+    `tenant_id`는 캣북스(지금 그대로). `others`가 주는 회사(회사 연결이 켜진 다른 회사, 11/26)도
+    차례로 그 회사 범위·카탈로그로 미리 계산한다. 한 회사가 실패해도 다음 회사는 계속한다."""
+    from ax_agent_template import company_scope
+
+    last: dict[str, int] = {}
     while True:
         try:
-            store = get_store()
-            # 요약 표가 준비되지 않았으면(예전 파일·리셋 뒤 바꿔 끼운 파일) 먼저 채운다
-            await ensure_summary(store, tenant_id)
-            version = await asyncio.to_thread(store.data_version, tenant_id)
-            if version and version != last:
-                done = await asyncio.to_thread(
-                    warm, store, tenant_id, get_catalog(), datetime.now(UTC)
-                )
-                logger.info("판매 분석 미리 계산 (저장소 버전 %s): %s", version, ", ".join(done))
-                last = version
+            await _warm_tenant(get_store, get_catalog, tenant_id, last)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - 미리 계산이 실패해도 서버·수집은 계속 돈다
             logger.warning("판매 분석 미리 계산을 건너뜀", exc_info=True)
+        try:
+            companies = others() if others is not None else []
+        except Exception:  # noqa: BLE001 - 회사 목록을 못 읽어도 캣북스는 그대로
+            logger.warning("미리 계산할 회사 목록을 읽지 못함", exc_info=True)
+            companies = []
+        for cid in companies:
+            try:
+                with company_scope.using(cid):
+                    await _warm_tenant(get_store, get_catalog, cid, last)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - 한 회사가 실패해도 다음 회사는 계속
+                logger.warning("판매 분석 미리 계산을 건너뜀 (%s)", cid, exc_info=True)
         await asyncio.sleep(poll_seconds)

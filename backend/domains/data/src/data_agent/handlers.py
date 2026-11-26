@@ -1970,8 +1970,15 @@ async def data_sources(request: AgentRequest) -> AgentResult:
     data = _parse(request, DataSourcesRequest)
     if isinstance(data, AgentResult):
         return data
-    tenant = sales_tenant(TENANT_ID_DEFAULT, request.meta.tenant_id)
-    result = await list_sources(os.environ, recheck=data.recheck, tenant_id=tenant)
+    from data_agent.sales_collect import request_tenant
+
+    # 요청 회사의 판매 저장소 tenant (캣북스 = 수집기와 같은 값, 다른 회사 = 그 회사 id, 11/26)
+    tenant = request_tenant(os.environ)
+    try:
+        sync = get_sales_store().sync_state(tenant)
+    except Exception:  # noqa: BLE001 - 판매 저장소를 못 읽어도 출처 목록은 보여 준다
+        sync = None
+    result = await list_sources(os.environ, recheck=data.recheck, tenant_id=tenant, sales_sync=sync)
     return _result(
         request,
         TaskStatus.COMPLETED,

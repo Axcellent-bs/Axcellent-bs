@@ -194,6 +194,46 @@ async def snapshot_tick(
     return built
 
 
+async def run_company_snapshots_forever(
+    store: ReportStore,
+    build_for: Callable[[str, str | None], BuildDay],
+    tenant_id: str,
+    companies: Callable[[], list[str]],
+    interval_seconds: int = SNAPSHOT_INTERVAL_SECONDS,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    rounds: int | None = None,
+) -> None:
+    """캣북스(`tenant_id`)와 회사 연결이 켜진 다른 회사마다 `snapshot_tick` (11/26 회사 분리).
+
+    다른 회사는 그 회사 범위(`company_scope.using`) 안에서 그 회사 id로 만들고 저장한다
+    (`build_for(저장 tenant, 범위 회사 id 또는 None)`). 한 회사가 실패해도 다음 회사는 계속한다.
+    `rounds`는 시험용."""
+    import contextlib
+
+    from ax_agent_template import company_scope
+
+    backfill = backfill_days()
+    done = 0
+    while rounds is None or done < rounds:
+        done += 1
+        try:
+            others = companies()
+        except Exception as error:  # noqa: BLE001 - 회사 목록을 못 읽어도 캣북스는 그대로
+            logger.warning("업무 리포트 회사 목록을 읽지 못함: %s", type(error).__name__)
+            others = []
+        for tenant, cid in [(tenant_id, None), *((c, c) for c in others)]:
+            scope = company_scope.using(cid) if cid else contextlib.nullcontext()
+            try:
+                with scope:
+                    await snapshot_tick(store, build_for(tenant, cid), tenant, clock(), backfill)
+            except Exception as error:  # noqa: BLE001 - 한 회사 오류로 다른 회사를 막지 않는다
+                logger.warning("업무 리포트 일간 저장 주기 오류 %s: %s", tenant,
+                               type(error).__name__)  # fmt: skip
+        if rounds is not None and done >= rounds:
+            break
+        await asyncio.sleep(interval_seconds)
+
+
 async def run_snapshots_forever(
     store: ReportStore,
     build_day: BuildDay,
