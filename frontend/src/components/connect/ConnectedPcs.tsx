@@ -66,6 +66,7 @@ export function ConnectedPcs() {
           <p className="text-lg font-semibold">
             {sum.connected.toLocaleString('ko-KR')} / {sum.total.toLocaleString('ko-KR')}곳 연결됨
             {sum.unknown > 0 && <span className="ml-2 text-sm font-normal text-ink-500">확인할 수 없음 {sum.unknown.toLocaleString('ko-KR')}곳</span>}
+            {sum.agentless > 0 && <span className="ml-2 text-sm font-normal text-ink-500">에이전트 없이 감시 {sum.agentless.toLocaleString('ko-KR')}곳</span>}
           </p>
           <div className="h-2 w-40 bg-ink-100" role="img" aria-label={`연결 비율 ${sum.pct}%`}>
             <div className="h-full bg-emerald-700" style={{ width: `${sum.pct}%` }} />
@@ -97,9 +98,10 @@ export function ConnectedPcs() {
                     <tr key={r.name}>
                       <td className="px-4 py-2.5 font-mono">{r.name}</td>
                       <td className="px-4 py-2.5">
-                        {r.state === 'up' && <StatusChip tone="ok">연결됨</StatusChip>}
-                        {r.state === 'unknown' && <StatusChip tone="off">확인할 수 없음</StatusChip>}
-                        {r.state === 'down' && (
+                        {r.agentless && <StatusChip tone="off">에이전트 없이 감시</StatusChip>}
+                        {!r.agentless && r.state === 'up' && <StatusChip tone="ok">연결됨</StatusChip>}
+                        {!r.agentless && r.state === 'unknown' && <StatusChip tone="off">확인할 수 없음</StatusChip>}
+                        {!r.agentless && r.state === 'down' && (
                           <span className="inline-flex items-center gap-2"><StatusChip tone="bad">응답 없음</StatusChip>{r.since && <span className="text-xs text-ink-500">{when(r.since)}부터</span>}</span>
                         )}
                       </td>
@@ -115,7 +117,7 @@ export function ConnectedPcs() {
           )}
       </>}
 
-      <p className="text-xs text-ink-500">연결 상태는 Zabbix가 agent 응답을 받고 있는지로 정해요(장애가 없다고 연결됨으로 보지 않아요). '연결 확인'은 DejaFix에서 지금 상태를 다시 읽어요.</p>
+      <p className="text-xs text-ink-500">연결 상태는 Zabbix가 agent 응답을 받고 있는지로 정해요(장애가 없다고 연결됨으로 보지 않아요). '에이전트 없이 감시'는 HTTP 등으로 감시하는 곳이라 연결 상태 대신 열린 장애 수로 봐요. '연결 확인'은 DejaFix에서 지금 상태를 다시 읽어요.</p>
     </section>
   )
 }

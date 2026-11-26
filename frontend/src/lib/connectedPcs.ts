@@ -3,6 +3,7 @@ import type { DejafixHost, Incident } from "./dejafix";
 // 회원·서버 관리 › DejaFix 연결 › "연결한 PC" 칸이 그리는 값.
 // 1) DejaFix 호스트 목록(`GET /api/hosts`, 계약 #7)이 있으면 그대로: Zabbix 감시 호스트 전부와
 //    에이전트 가용성으로 정한 상태(up·down·unknown), 열린 Problem 수 (`fromHosts`)
+//    - `agent: false`(HTTP 등 에이전트 없이 감시)는 연결 상태를 따질 수 없어 "에이전트 없이 감시"로 따로 센다
 // 2) DejaFix가 아직 호스트 목록을 주지 않으면(옛 버전, 404) 장애 목록에 나온 호스트를 모은다 (`connectedPcs`)
 //    - 목록 = 최근 장애(limit=100) + 열린 장애(status=problem)의 host.name 합집합
 //    - 응답 없음 = 그 호스트의 열린 장애 제목에 "Zabbix agent is not available"이 있음 (가장 이른 started_at부터)
@@ -20,18 +21,21 @@ export interface PcRow {
   since: string | null;
   /** 열린 Problem 수 (호스트 목록에서 온 줄만, 모르면 null) */
   problems: number | null;
+  /** 에이전트 없이 감시하는 호스트 (호스트 목록이 agent:false라고 준 줄만 true) */
+  agentless?: true;
 }
 
 const ORDER: Record<PcState, number> = { down: 0, unknown: 1, up: 2 };
+const rank = (r: PcRow) => (r.agentless ? 3 : ORDER[r.state]);
 const byStateThenName = (a: PcRow, b: PcRow) =>
-  a.state === b.state ? a.name.localeCompare(b.name, "ko") : ORDER[a.state] - ORDER[b.state];
+  rank(a) === rank(b) ? a.name.localeCompare(b.name, "ko") : rank(a) - rank(b);
 
 const isAgentDown = (i: Incident) => i.status === "problem" && i.title.toLowerCase().includes(AGENT_DOWN.toLowerCase());
 
-/** DejaFix 호스트 목록 → 줄. 응답 없음 먼저, 확인할 수 없음, 연결됨 순 */
+/** DejaFix 호스트 목록 → 줄. 응답 없음 먼저, 확인할 수 없음, 연결됨, 에이전트 없이 감시 순 */
 export function fromHosts(hosts: DejafixHost[]): PcRow[] {
   return hosts
-    .map((h) => ({ name: h.name, state: h.state, since: null, problems: h.problems }))
+    .map((h): PcRow => ({ name: h.name, state: h.state, since: null, problems: h.problems, ...(h.agent === false ? { agentless: true as const } : {}) }))
     .sort(byStateThenName);
 }
 
@@ -54,12 +58,13 @@ export function connectedPcs(recent: Incident[], open: Incident[]): PcRow[] {
   return rows.sort(byStateThenName);
 }
 
-/** 요약 줄: "N / M곳 연결됨", 확인할 수 없는 수, 막대 폭(%) */
-export function pcSummary(rows: PcRow[]): { connected: number; unknown: number; total: number; pct: number } {
-  const connected = rows.filter((r) => r.state === "up").length;
-  const unknown = rows.filter((r) => r.state === "unknown").length;
-  const total = rows.length;
-  return { connected, unknown, total, pct: total ? Math.round((connected / total) * 100) : 0 };
+/** 요약 줄: "N / M곳 연결됨"(에이전트로 감시하는 곳만), 확인할 수 없는 수, 막대 폭(%), 에이전트 없이 감시하는 수 */
+export function pcSummary(rows: PcRow[]): { connected: number; unknown: number; total: number; pct: number; agentless: number } {
+  const agentRows = rows.filter((r) => !r.agentless);
+  const connected = agentRows.filter((r) => r.state === "up").length;
+  const unknown = agentRows.filter((r) => r.state === "unknown").length;
+  const total = agentRows.length;
+  return { connected, unknown, total, pct: total ? Math.round((connected / total) * 100) : 0, agentless: rows.length - total };
 }
 
 /** 연결한 PC 읽기 결과 (ConnectedPcs·회사 연결 지도가 같이 쓴다) */
@@ -74,6 +79,7 @@ export function pcMapNode(load: PcLoad | null): { value: string; tone: "ok" | "w
   if ("notConnected" in load) return { value: "DejaFix 연결 전", tone: "off", note: "회원·서버 관리 › DejaFix 연결에서 이어요" };
   if ("error" in load) return { value: "읽지 못함", tone: "bad", note: load.error };
   const s = pcSummary(load.rows);
+  if (s.total === 0 && s.agentless > 0) return { value: `에이전트 없이 ${s.agentless}대`, tone: "off", note: "HTTP 등 에이전트 없이 감시 중이에요" };
   if (s.total === 0) return { value: "0대", tone: "off", note: "Zabbix가 감시하는 PC가 없어요" };
   if (load.fromIncidents) return { value: `응답 없음 ${s.total - s.connected - s.unknown}대`, tone: "wait", note: "장애 기록 기준이라 연결 여부는 일부만 알아요" };
   const down = s.total - s.connected - s.unknown;

@@ -111,6 +111,8 @@ export interface DejafixHost {
   state: "up" | "down" | "unknown";
   /** 열린 Problem 수 */
   problems: number;
+  /** Zabbix 에이전트로 감시하는가(#7 추가 필드). false = HTTP 등 에이전트 없이 감시. 옛 DejaFix는 없음 */
+  agent?: boolean;
 }
 
 /** 호스트 목록. DejaFix가 아직 이 API를 주지 않으면(옛 버전) null */

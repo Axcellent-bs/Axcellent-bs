@@ -46,8 +46,8 @@ test("요약: 연결된 수 / 확인할 수 없는 수 / 전체와 막대 폭", 
     { id: "3", name: "c", state: "down", problems: 2 },
     { id: "4", name: "d", state: "unknown", problems: 0 },
   ]);
-  assert.deepEqual(pcSummary(rows), { connected: 2, unknown: 1, total: 4, pct: 50 });
-  assert.deepEqual(pcSummary([]), { connected: 0, unknown: 0, total: 0, pct: 0 });
+  assert.deepEqual(pcSummary(rows), { connected: 2, unknown: 1, total: 4, pct: 50, agentless: 0 });
+  assert.deepEqual(pcSummary([]), { connected: 0, unknown: 0, total: 0, pct: 0, agentless: 0 });
   // 장애 기록 기준이면 연결된 수는 0 (연결됨을 정하지 못한다)
   assert.equal(pcSummary(connectedPcs([inc("a", "x"), inc("c", AGENT_DOWN)], [])).connected, 0);
 });
@@ -75,4 +75,19 @@ test("회사 연결 지도의 사내 PC 칸: 연결 전·못 읽음·읽기 전�
   assert.deepEqual(pcMapNode(hosts(["up", "down"])), { value: "1 / 2대", tone: "wait", note: "1대 응답 없음" });
   assert.deepEqual(pcMapNode(hosts(["up", "unknown"])), { value: "1 / 2대", tone: "off", note: "1대 확인할 수 없음" });
   assert.equal(pcMapNode(hosts([])).value, "0대");
+});
+
+test("에이전트 없이 감시하는 호스트(#7 agent:false)는 연결 비율에서 빼고 따로 센다, 맨 뒤에", async () => {
+  const { pcMapNode } = await import("./connectedPcs.ts");
+  const rows = fromHosts([
+    { id: "1", name: "tencent-axcellent-server", state: "up", problems: 0, agent: true },
+    { id: "2", name: "catbooks-shop", state: "unknown", problems: 1, agent: false },
+    { id: "3", name: "office-pc", state: "unknown", problems: 0 }, // 옛 DejaFix: agent 없음 → 에이전트로 본다
+  ]);
+  assert.deepEqual(rows.map((r) => `${r.state}:${r.name}:${r.agentless ? "agentless" : "agent"}`), [
+    "unknown:office-pc:agent", "up:tencent-axcellent-server:agent", "unknown:catbooks-shop:agentless",
+  ]);
+  assert.deepEqual(pcSummary(rows), { connected: 1, unknown: 1, total: 2, pct: 50, agentless: 1 });
+  const only = { rows: fromHosts([{ id: "2", name: "catbooks-shop", state: "unknown", problems: 0, agent: false }]), checkedAt: "", fromIncidents: false };
+  assert.deepEqual(pcMapNode(only), { value: "에이전트 없이 1대", tone: "off", note: "HTTP 등 에이전트 없이 감시 중이에요" });
 });
