@@ -90,6 +90,7 @@ from finance_agent import (
     close_alerts,
     close_checklist,
     closing,
+    example_data,
     exports,
     payables,
     pg_file,
@@ -1470,7 +1471,11 @@ def add_finance_api(app: FastAPI) -> None:
     @app.get("/api/finance/bank")
     async def get_bank() -> dict:
         books = await state().books()
-        return ok(await off(bank.match, books, state().records.bank_rows), books.meta())
+        result = await off(bank.match, books, state().records.bank_rows)
+        if not result["uploaded"] and example_data.enabled():
+            # 11/26 임시 예시(실제 입금 아님): 거래내역을 올리기 전에만 붙인다. 원래 칸은 그대로
+            result = result | {"example": await off(example_data.bank_example, books, fc.today())}
+        return ok(result, books.meta())
 
     @app.get("/api/finance/cashflow")
     async def get_cashflow() -> dict:

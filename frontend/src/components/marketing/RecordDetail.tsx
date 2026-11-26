@@ -2,12 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router";
 import { shortDateTime } from "@/lib/format";
 import { redrawBoardImage, thumbSrc, type CreativeRecord } from "@/lib/creativeRecords";
-import { boardBehindScript, nearestCount } from "@/lib/creativeScript";
+import { boardBehindScript, boardMissing, nearestCount } from "@/lib/creativeScript";
 import { isSvgBoard } from "@/lib/storyboardSvg";
 import { usesOriginalReference } from "@/lib/videoAsk";
 import { listRequestVideos } from "@/lib/requestVideos";
 import { VIDEO_NOT_FOUND_KO, canUploadToYoutube, durationKo, type RequestVideo } from "@/lib/requestVideoView";
-import { RECORDS_PATH, defaultStep, hasPublishState, linkedRecordId, renderStatuses, workStatus, workTitle, type StepNo } from "@/lib/recordWorks";
+import { RECORDS_PATH, defaultSteps, hasPublishState, linkedRecordId, renderStatuses, workStatus, workTitle, type StepNo } from "@/lib/recordWorks";
 import { DetailHeader, Fold, Step } from "./RecordSteps";
 import { BoardPicture, FinalVideoArea, Keyframes, MotionArea, RecordPublish, RecordThumbnails, SheetPicture, VideoArea, useRecordRender, type RecordRender } from "./RenderPanel";
 import { RequestVideoCard, RequestVideoPublish } from "./RequestVideoParts";
@@ -25,12 +25,13 @@ import { isHolding, promoChip, promoItem, usePromoSite } from "@/lib/promoSite";
 const WEB_NOTE = "Higgsfield 화면(웹 구독)에서 2단계의 스토리보드 그림을 시작 이미지로 올리고 프롬프트를 붙여 넣어 만드세요. 만든 영상은 위 영상 칸에 끌어 놓거나 [파일 올리기]로 붙이면 완성 영상이 돼요.";
 const PENDING_VIDEO = new Set(["awaiting_approval", "running", "uploading"]);
 
-/** 처음에는 지금 볼 단계 하나만 펼친다. 그 뒤는 사람이 여닫은 대로 */
-function useSteps(first: StepNo | null) {
+/** 처음에는 지금 볼 단계(영상 전이면 1·2)만 펼친다. 그 뒤는 사람이 여닫은 대로 */
+function useSteps(first: StepNo[] | null) {
   const [open, setOpen] = useState<ReadonlySet<StepNo> | null>(null);
+  const key = first?.join(",") ?? null;
   useEffect(() => {
-    if (first !== null) setOpen((prev) => prev ?? new Set([first]));
-  }, [first]);
+    if (key !== null) setOpen((prev) => prev ?? new Set(key.split(",").map(Number) as StepNo[]));
+  }, [key]);
   const toggle = (no: StepNo) => setOpen((prev) => {
     const next = new Set(prev);
     if (!next.delete(no)) next.add(no);
@@ -78,6 +79,9 @@ function BoardStep({ ctx, rec }: { ctx: RecordRender; rec: CreativeRecord }) {
   // 실제 그림이나 영상이 생기면 회색 구도 그림 콘티는 접는다(AI가 그린 SVG 콘티는 펼쳐 둔다)
   const drawn = keyframed || [render.board_image, render.video, render.final_video].some((p) => p?.status === "done");
   const board = rec.storyboard;
+  // 대본만 있고 스토리보드가 없으면(11/26) 처음 만들기 버튼만 두고 옛 안내·빈 그림 칸은 숨긴다. 이미 그림을 올렸으면 그림 칸은 그대로
+  const missing = boardMissing(rec);
+  const hidePicture = missing && !render.board_image?.status;
   const view = board && <StoryboardView r={board} onRedraw={async () => { await redrawBoardImage(rec.record_id); await load(); }} />;
   return (
     <>
@@ -96,12 +100,16 @@ function BoardStep({ ctx, rec }: { ctx: RecordRender; rec: CreativeRecord }) {
       </div>
       <div className="space-y-3 border-t border-ink-100 pt-4">
         <h3 className="text-sm font-semibold text-ink-900">스토리보드</h3>
-        {needsPicture && <div className="max-w-2xl"><BoardPicture ctx={ctx} /></div>}
+        {rec.script && missing && (
+          <RecordBoardFromScript first recordId={rec.record_id} story={rec.story ?? rec.script.title_ko} characterEn={rec.sheet.consistency_en}
+            scenes={rec.script.scenes.length} onRecord={setRec} />
+        )}
+        {needsPicture && !hidePicture && <div className="max-w-2xl"><BoardPicture ctx={ctx} /></div>}
         <Keyframes ctx={ctx} />
-        {!board ? <p className="text-sm text-ink-500">이 기록에는 스토리보드가 없어요. SNS·미디어에서 줄거리를 넣고 다시 만들면 붙어요.</p>
+        {missing ? null : !board ? <p className="text-sm text-ink-500">이 기록에는 스토리보드가 없어요. SNS·미디어에서 줄거리를 넣고 다시 만들면 붙어요.</p>
           : drawn && !isSvgBoard(board) ? <Fold title={`칸 설명과 프롬프트 (${board.shots.length}칸)`}>{view}</Fold>
             : view}
-        {!needsPicture && <Fold title="스토리보드 그림 직접 올리기 (선택)"><div className="max-w-2xl"><BoardPicture ctx={ctx} /></div></Fold>}
+        {!needsPicture && !hidePicture && <Fold title="스토리보드 그림 직접 올리기 (선택)"><div className="max-w-2xl"><BoardPicture ctx={ctx} /></div></Fold>}
       </div>
     </>
   );
@@ -143,7 +151,7 @@ export function RecordDetail({ recordId }: { recordId: string }) {
   const site = promo.status;
   const videos = mine.videos;
   const facts = rec ? { render: renderStatuses(rec.render), shot_count: rec.storyboard?.shots.length ?? 0, script_scenes: rec.script?.scenes.length ?? 0 } : null;
-  const steps = useSteps(facts && videos ? defaultStep(facts, videos) : null);
+  const steps = useSteps(facts && videos ? defaultSteps(facts, videos) : null);
 
   if (!rec) {
     if (!error) return <p className="text-sm text-ink-500">불러오는 중…</p>;
@@ -209,7 +217,7 @@ export function RecordDetail({ recordId }: { recordId: string }) {
 
 /** 기록 없이 의뢰로만 만든 영상: 1·2단계는 비어 있고 3·4단계만 쓴다 */
 function VideoOnly({ videos, onChanged }: { videos: RequestVideo[]; onChanged: () => void }) {
-  const steps = useSteps(defaultStep(null, videos));
+  const steps = useSteps(defaultSteps(null, videos));
   const promo = usePromoSite();
   const site = promo.status;
   const labeled = videos.filter(canUploadToYoutube);

@@ -15,7 +15,13 @@ OTHER_PERSON_WORDS = (
     "아빠", "아이가", "두 사람", "둘이", "셋이", "세 사람", "a friend", "friends", "another person",
     "two people", "a man", "a boy", "a girl", "partner", "coworker", "customer",
 )  # fmt: skip
-CROWD_WORDS = ("군중", "관객", "행인", "배경", "멀리", "crowd", "audience", "background")
+# 11/26 E: "배경"·"background"만으로는 군중이 아니다 ("회색 배경 앞"·"background lights"처럼
+# 거의 모든 장면 글에 있어 "친구와 마주 보고 대화, 배경은 카페"도 통과됐다)
+# → 사람이 뒤에 있다는 말만 군중으로 본다
+CROWD_WORDS = (
+    "군중", "관객", "행인", "멀리", "배경의 사람들", "뒤쪽 관객", "crowd", "audience",
+    "people in the background", "background crowd", "crowd in the background",
+)  # fmt: skip
 WIDE_WORDS = ("wide", "full shot", "long shot", "establishing", "와이드", "전신", "멀리서")
 
 

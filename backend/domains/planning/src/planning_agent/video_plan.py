@@ -117,6 +117,22 @@ _BRAND_WORDS = (
     "네이버", "교보", "알라딘", "스타벅스", "해리포터", "유튜브", "인스타그램", "틱톡",
 )  # fmt: skip
 _INJECTION_WORDS = ("ignore", "instruction", "system prompt", "jailbreak", "무시", "지시")
+# 11/26 A: "no text"·"글자 없이"처럼 하지 말라는 말은 글자 요청이 아니다 (LLM이 안전하라고 넣는다.
+# 마케팅 영상 템플릿도 네거티브로 같은 금지를 붙인다). 글자 요청 검사 전에 이 구절을 지운다.
+# 실존 인물·브랜드·주소 검사는 원래 글 그대로 본다
+_NEG_NOUN = (r"(?:on-screen\s+)?(?:text|words?|letters?|captions?|subtitles?|titles?|logos?|"
+             r"watermarks?|signs?|signage|typography|writing)")  # fmt: skip
+_NEG_EN = re.compile(rf"(?i)\b(?:no|without|zero|avoid|free\s+of)\s+{_NEG_NOUN}\b"
+                     rf"(?:\s*(?:,|/|&|\bor\b|\band\b)\s*{_NEG_NOUN}\b)*")  # fmt: skip
+_NEG_FREE = re.compile(r"(?i)\b(?:text|logo|watermark|caption)[- ]free\b")
+_NEG_KO = re.compile(r"(?:글자|자막|로고|문구|텍스트|간판)\s*(?:없이|없는|금지|넣지\s*않)")
+
+
+def without_negations(text: str) -> str:
+    """글자 금지 구절("no text, no logo"·"text-free"·"글자 없이")을 공백으로 바꾼 글."""
+    for pattern in (_NEG_EN, _NEG_FREE, _NEG_KO):
+        text = pattern.sub(" ", text)
+    return text
 _URL = re.compile(r"(?i)https?://|www\.")
 _LONG_DIGITS = re.compile(r"\d{4,}")
 _CLEAN = re.compile(r"[^0-9A-Za-z가-힣 ]+")
@@ -305,7 +321,7 @@ def prompt_problems(prompt: str) -> list[str]:
     """장면 프롬프트가 지키지 않은 규칙 코드 (없으면 빈 목록)."""
     text = unicodedata.normalize("NFKC", prompt)
     out = []
-    if _has(text, _TEXT_WORDS):
+    if _has(without_negations(text), _TEXT_WORDS):
         out.append("text_request")
     if _has(text, _PERSON_WORDS):
         out.append("real_person")
@@ -617,6 +633,55 @@ def overlay_safe(
     ]
 
 
+# 11/26 D: 규칙 초안이 떨어져도 말이 되게 (운영 wr_bc24dee53e 누비투어: "원본 일러스트 캐릭터",
+# "'누비투어' 순간에", 2장면 자막이 콘셉트 문장 통째)
+RULE_HERO_KO = "주인공"
+THEME_FALLBACK = "요즘 관심사"
+RULE_CAPTION_MAX = 18
+
+
+def _ga(word: str) -> str:
+    """주격 조사: 받침이 있으면 "이", 없으면 "가" (주인공이 · 회사 캐릭터가)."""
+    last = word.strip()[-1:] if word.strip() else ""
+    if "가" <= last <= "힣":
+        return "이" if (ord(last) - 0xAC00) % 28 else "가"
+    return "가"
+
+
+def company_names() -> list[str]:
+    """비교용 회사 이름 (화면 이름·회사 설정 id, _fold, 두 글자 이상)."""
+    raw = [_company().get("name") or "", tenant.current() or ""]
+    return sorted({_fold(n) for n in raw if len(_fold(n)) >= 2})
+
+
+def _has_company(text: str, names: list[str]) -> bool:
+    folded = _fold(text)
+    return any(n in folded for n in names)
+
+
+def rule_theme(p: Proposal, names: list[str] | None = None) -> str:
+    """규칙 초안 주제. 회사 이름이 주제 자리에 오면 보고서 주제 후보(topic_of) → "요즘 관심사"."""
+    names = company_names() if names is None else names
+    theme = _theme(p)
+    if not _has_company(theme, names):
+        return theme
+    topic = " ".join(_CLEAN.sub(" ", str(topic_of(p)["topic"] or "")).split())[:40]
+    if topic and not _has_company(topic, names) and not prompt_problems(topic):
+        return topic
+    return THEME_FALLBACK
+
+
+def body_caption(text: str, concept: str, names: list[str], *, keep_concept: bool = False) -> str:
+    """본론 장면 자막: 한 줄 18자 안. 회사 이름이 있거나 콘셉트 문장과 같으면 비운다
+    (keep_concept: 훅 장면은 제목 자막을 그대로 둔다)."""
+    one = " ".join((text or "").split())
+    if not one or _has_company(one, names):
+        return ""
+    if not keep_concept and _fold(one) == _fold(concept):
+        return ""
+    return _short(one, RULE_CAPTION_MAX)
+
+
 def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     """재미 먼저, 브랜드는 끝에 (11/24 재현 님).
 
@@ -626,25 +691,38 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     caption: 화면엔 안 넣는다(회사 이름은 엔드카드로 얹는다). 마지막 장면 자막은 늘 비운다."""
     d = duration_of(p)
     b = cast(p)  # 11/26 회사 캐릭터를 골랐으면 그 캐릭터가 주인공
-    who, where, who_ko = b["character_en"], FREE_SETTING_EN, b["character_ko"]  # 배경 묶지 않음
-    theme = _theme(p)
+    who, where = b["character_en"], FREE_SETTING_EN  # 배경 묶지 않음
+    # 11/26 D: 회사 캐릭터를 안 골랐고 회사 설정 주인공도 기본값이면 화면 글은 "주인공" (기본
+    # "원본 일러스트 캐릭터"는 고른 것처럼 읽혔다, 운영 wr_bc24dee53e). 회사가 [brand]에 직접 정한
+    # 주인공(예: 누비투어 "원본 일러스트 여행자")은 그대로. 영어 묘사(who)는 지금 그대로
+    default_ko = tenant.BRAND_DEFAULTS["character_ko"]
+    who_ko = (RULE_HERO_KO if not cast_fields(p) and b["character_ko"] == default_ko
+              else b["character_ko"])  # fmt: skip
+    names = company_names()
+    theme = rule_theme(p, names)
     tone = TONE.get(p.angle or "", "warm and friendly")
     product = _CLEAN.sub(" ", p.products[0]).strip()[:40] if p.products else ""
     company = _company()["name"]
     prop = exposure == PROP and product
+    ideas = [
+        t
+        for t in (_short(idea_of(p), 200), subject_of(p))
+        if not starts_with_product(t, p.products)
+    ]
+    concept = _pick(*ideas, FUN_CONCEPT)
     beats = [
         (
             _pick(
-                f"첫 1초 반전: '{theme}' 순간에 {who_ko}가 깜짝 놀라 돌아본다",
+                f"첫 1초 반전: '{theme}' 순간에 {who_ko}{_ga(who_ko)} 깜짝 놀라 돌아본다",
                 OPEN_VISUAL.format(who_ko),
             ),
-            _pick(subject_of(p), ""),
+            body_caption(_pick(subject_of(p), ""), concept, names, keep_concept=True),
             f"Opening hook in {where}: {who} suddenly freezing, then doing a surprised double take "
             f"toward the camera in the very first second, {tone} mood, themed around {theme}",
         ),
         (
             _pick(f"대상이 좋아하는 소재 '{theme}'로 공감 가는 순간을 보여 준다", AGAIN_VISUAL),
-            _pick(_short(idea_of(p), 60), ""),
+            body_caption(_pick(idea_of(p), ""), concept, names),
             f"A relatable, funny everyday moment about {theme} acted out by {who} with playful "
             f"gestures in {where}, {tone} mood",
         ),
@@ -657,7 +735,7 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
         (
             "마무리: 채널 이름 엔드 카드"
             if exposure == END_CARD
-            else f"마무리: {who_ko}가 손을 흔들며 끝낸다",
+            else f"마무리: {who_ko}{_ga(who_ko)} 손을 흔들며 끝낸다",
             "",  # 회사 이름은 마케팅 코드가 마지막 2초 엔드카드로 얹는다
             "Simple calm plain background with soft light and empty space in the center and "
             "lower area"
@@ -673,12 +751,6 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     ]
     scenes = overlay_safe(made, company)
     script = " → ".join(f"{s.start_s}~{s.end_s}초 {s.visual}" for s in scenes)
-    ideas = [
-        t
-        for t in (_short(idea_of(p), 200), subject_of(p))
-        if not starts_with_product(t, p.products)
-    ]
-    concept = _pick(*ideas, FUN_CONCEPT)
     return VideoPlan(
         concept=concept, duration_s=d, script=_short(script, 800), scenes=scenes,
         style=style(b, fixed_setting=False), negative=NEGATIVE, written_by="rule",
@@ -1004,6 +1076,53 @@ def reject_detail(
     return reason
 
 
+# 11/26 B: 고칠 수 있는 거절은 규칙 초안 대신 다시 쓰기 1회(제작 검사와 같은 1회)에 문제 줄로.
+# 장면 수·지어낸 혜택 숫자는 고쳐도 다시 틀리기 쉬워 지금처럼 바로 규칙 초안
+FIXABLE_REJECTS = frozenset({"prompt_rule", "marketing_word", "real_name_in_scene",
+                             "concept_starts_with_product", "report_title_as_topic"})  # fmt: skip
+PROMPT_RULE_FIX = {
+    "text_request": "화면 속 글자·간판·자막을 그리라는 말을 뺀다 (글자 금지는 공통 금지에 있다)",
+    "real_person": "실존 인물·유명인을 빼고 원본 캐릭터로 쓴다",
+    "real_brand": "실제 브랜드 이름을 뺀다",
+    "url_or_number": "주소와 네 자리 이상 숫자를 뺀다",
+    "injection": "지시·명령 같은 말을 뺀다",
+}
+REJECT_FIX = {
+    "marketing_word": "concept·script에 광고 금칙어(성과 과장·인력 대체)가 있다: 그 말을 뺀다",
+    "real_name_in_scene": "장면 글·프롬프트에 주제 후보 실존 이름이 있다: 상황으로 바꿔 쓴다",
+    "concept_starts_with_product": "concept가 상품 이름으로 시작한다: 상황으로 시작한다",
+    "report_title_as_topic": "보고서 이름이 소재로 들어갔다: 보고서 이름을 빼고 주제로 쓴다",
+}
+REJECT_KIND = "text"  # 검사 기록 kind (계약 Literal 그대로, 글 규칙). 자세한 코드는 code 칸
+CODE_MAX = 24  # 계약 CheckProblem.code 길이
+
+
+def reject_code(detail: str) -> str:
+    """검사 기록 code 칸 (24자 안: 자세한 코드가 길면 앞 코드)."""
+    if len(detail) <= CODE_MAX:
+        return detail
+    return detail.split(":")[0][:CODE_MAX]
+
+
+def reject_problems(got: _PlanOut, detail: str) -> list[dict[str, Any]]:
+    """고칠 수 있는 거절 → 검사 기록 문제와 다시 쓰기 "고칠 점" 줄(fix). 고객 글·이름 없음."""
+    reason = detail.split(":")[0]
+    if reason not in FIXABLE_REJECTS:
+        return []
+    out: list[dict[str, Any]] = []
+    if reason == "prompt_rule":
+        for n, s in enumerate(got.scenes, start=1):
+            for code in prompt_problems(s.prompt)[:1]:
+                fix = PROMPT_RULE_FIX.get(code, "그 말을 뺀다")
+                out.append({"kind": REJECT_KIND, "scene": n,
+                            "code": reject_code(f"{reason}:{code}"),
+                            "detail_ko": f"금지 규칙 {reason}:{code}",
+                            "fix": f"장면 {n} prompt가 금지 규칙({code})에 걸렸다: {fix}"})
+        return out
+    return [{"kind": REJECT_KIND, "scene": None, "code": reject_code(reason),
+             "detail_ko": f"금지 규칙 {reason}", "fix": REJECT_FIX[reason]}]  # fmt: skip
+
+
 def _keyframes(i: int, s: _SceneOut) -> dict[str, str]:
     """장면 키프레임 네 칸. 한 칸이라도 prompt와 같은 금지에 걸리면 그 장면 네 칸을 모두 비운다
     (장면 prompt·visual·caption은 그대로). 로그는 장면 번호와 이유 코드만."""
@@ -1058,7 +1177,8 @@ def _checked(
     # 11/26 보고서 추천 형식 카드: LLM이 비트를 적었고 의뢰 지시를 다 지켰을 때만 (형식보다 먼저)
     card = plan_format.card_for(p)
     kept = all(r["kept"] or plan_checks.blocked_quote(r)  # 금칙어 대사는 일부러 안 넣은 것
-               for r in plan_checks.check_rules(rules, _check_scenes(got), got.script))  # fmt: skip
+               for r in plan_checks.check_rules(rules, _check_scenes(got), got.script,
+                                                _company()["name"]))  # fmt: skip
     use_card = card is not None and kept and all(s.beat_ko.strip() for s in got.scenes)
     if use_card and card is not None and not even:
         fun = style_ == FUN_FIRST or ad
@@ -1104,7 +1224,8 @@ def _checked(
             media_hints=media_hints(p, got.category), purpose=purpose,
             offer_ko=_short(got.offer_ko, 60) if ad else "",
             cta_ko=_short(got.cta_ko, 40) if ad else "", **cast_fields(p),
-            request_rules=plan_checks.check_rules(rules, checked, script), **formatted,
+            request_rules=plan_checks.check_rules(rules, checked, script, _company()["name"]),
+            **formatted,
         )  # fmt: skip
     except ValidationError:
         log.info("LLM 영상 제작안 형식 → 규칙 제작안: ValidationError %.1fs", elapsed)
@@ -1135,7 +1256,8 @@ FEASIBILITY_FIRST = (
 
 def plan_problems(p: Proposal, got: _PlanOut) -> list[dict[str, Any]]:
     """검사 기록에 남는 문제 (제작 검사 + 못 지킨 의뢰 지시). 의뢰 지시는 B와 같은 검사 결과."""
-    checked = plan_checks.check_rules(_rules(p, got), _check_scenes(got), got.script)
+    checked = plan_checks.check_rules(_rules(p, got), _check_scenes(got), got.script,
+                                      _company()["name"])  # fmt: skip
     out = plan_checks.feasibility(got.scenes, has_character=bool(cast_fields(p)))
     return out + [{**plan_checks.rule_problem(r), "rule": r} for r in checked if not r["kept"]]
 
@@ -1291,8 +1413,18 @@ async def _write_with(
         return _rule(p, promo, fallback_of(exc))
     # 11/26 코드 검사에 걸린 것이 있으면 그 목록을 붙여 한 번만 다시 쓴다 (LLM 호출 최대 2회)
     # 11/26 제작 검사 ✕·의뢰 지시 ✕를 한 목록으로 붙여 다시 쓴다 (G가 B와 같은 1회를 쓴다)
-    fixes = plan_fixes(p, got)
-    log_rows = [attempt_log(1, plan_problems(p, got))]
+    # 11/26 B: 고칠 수 있는 거절(금지 규칙 등)은 규칙 초안 대신 같은 1회 다시 쓰기에 문제 줄로.
+    # 장면 수·지어낸 혜택 숫자는 바로 규칙 초안 (다시 쓰지 않는다). 다시 쓴 답도 거절이면 규칙 초안
+    # (fallback_detail은 두 번째 답의 코드). LLM 호출은 그대로 최대 2번
+    detail1 = reject_detail(p, got, style_, purpose)
+    rejects = reject_problems(got, detail1)
+    if detail1 and not rejects:
+        fixes: list[str] = []
+    else:
+        fixes = [x["fix"] for x in rejects] + plan_fixes(p, got)
+        if rejects:
+            log.info("영상 제작안 금지 규칙 → 다시 쓰기 1회: %s %s", detail1, p.id)
+    log_rows = [attempt_log(1, rejects + plan_problems(p, got))]
     rewritten = False
     left = total - (time.monotonic() - started)
     if fixes and left < REWRITE_MIN_SECONDS:  # 시간이 모자라면 1차 답 (✕는 검사 기록에 남는다)

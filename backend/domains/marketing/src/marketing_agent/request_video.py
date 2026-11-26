@@ -280,6 +280,9 @@ class ListRequestVideosInput(AxModel):
     request_id: str | None = Field(default=None, pattern=REQUEST_ID)
     post_draft_id: str | None = Field(default=None, pattern=DRAFT_ID)  # 한 건만 조회(미리보기)
     limit: int = Field(default=20, ge=1, le=100)
+    # 11/26: 이 칸은 `list_request_videos_skill`(handlers.py)만 읽어서 거른다(유튜브·인스타
+    # 상태는 거기서 붙인다). 이 함수는 모르는 칸으로 두고 그대로 통과시킨다
+    exclude_platform: str | None = Field(default=None, pattern=r"^(youtube|instagram)$")
 
 
 class RequestVideoList(AxModel):

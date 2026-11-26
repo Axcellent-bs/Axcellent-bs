@@ -25,10 +25,15 @@ DEPT_LABEL = {
     "finance": "재무",
     "dev": "개발",
     "infra": "인프라",
+    "orchestrator": "총괄",
     "hr": "인사",
     "archive": "아카이브",
 }
 READ_GRADE = "read"
+# 11/26 총괄이 자기 사건 기록을 읽기만 하는 단계(부서를 부르지 않는다).
+# 어떤 skill인지는 아래 목록이 정한다
+SELF_KIND = "self"
+ROLLBACK_STATUS_SKILL = "incident_rollback_status"
 HUMAN_GRADE = "C"  # 총괄이 사람 승인을 먼저 받는 등급(`human_gate`가 있는 단계도 같다)
 BRAND_CHARACTER_KEY = "brand_character_record_id"  # 홍보 영상에 쓸 회사 대표 캐릭터 (11/23)
 # 11/24: 홍보 영상은 회사 캐릭터 답을 먼저 받는다. 이 사람 단계는 사람 확인(승인·거절)이 아니라
@@ -45,11 +50,16 @@ class TaskStep:
     label: str
     grade: str | None  # read · A · B · C (사람 확인 단계는 None)
     after: tuple[str, ...] = ()
-    kind: str = "agent"  # agent | human
+    kind: str = "agent"  # agent | human | self(총괄이 자기 사건 기록을 읽는 읽기 전용 단계)
     # 결과 번호: 이 단계 결과에서 부서가 정한 번호를 읽을 칸 이름(예: "report_id"),
     # 그리고 이 단계가 앞 단계 번호를 받을 입력 칸 이름. 큰 결과는 부서 저장소에 두고 번호만 넘긴다
     ref_key: str | None = None
     takes_ref: str | None = None
+    # 11/26: `takes_ref`로 받을 앞 단계 번호가 없을 때(예: "최근 영상"이 하나도 없음) 보여 줄
+    # 안내문. 있으면 이 단계를 실패(사람 확인으로 넘김)가 아니라 건너뜀으로 닫고 의뢰를
+    # "모두 마쳤다"로 끝낸다(사람이 볼 문제가 아니라 고를 게 없을 뿐이라서). 없으면 기존처럼
+    # 일반 실패(NO_REF)로 처리한다
+    empty_ref_note: str | None = None
     # 부서가 요구하는 고정 입력(예: 긴 작업으로 받기 `caller`), 고객 문장을 넣을 입력 칸 이름
     fixed_input: tuple[tuple[str, Any], ...] = ()
     text_key: str | None = None
@@ -121,8 +131,11 @@ def _one(
     blocked_by: str | None = None,
     fill: str | None = None,
     human_gate: bool = False,
+    ref_key: str | None = None,
 ) -> TaskDef:
-    step = TaskStep("run", dept, skill, label, grade, fill=fill, human_gate=human_gate)
+    step = TaskStep(
+        "run", dept, skill, label, grade, fill=fill, human_gate=human_gate, ref_key=ref_key
+    )
     return TaskDef(name, label, description, examples, (step,), blocked_by)
 
 
@@ -265,7 +278,9 @@ TASKS: tuple[TaskDef, ...] = (
                 "list_request_videos",
                 "최근 의뢰 영상 찾기",
                 READ_GRADE,
-                fixed_input=(("limit", 1),),
+                # 11/26: 유튜브에 이미 올렸거나 승인 대기 중인 영상은 "최근"에서 뺀다
+                # (같은 영상을 또 올리기 요청하는 걸 막는다)
+                fixed_input=(("limit", 1), ("exclude_platform", "youtube")),
                 ref_key="items.0.post_draft_id",
             ),
             TaskStep(
@@ -277,6 +292,8 @@ TASKS: tuple[TaskDef, ...] = (
                 after=("latest",),
                 takes_ref="post_draft_id",
                 ref_key="post_draft_id",
+                empty_ref_note="아직 유튜브에 새로 올릴 의뢰 영상이 없어요. 이미 다 올렸거나, "
+                "만든 의뢰 영상이 아직 없어요.",
             ),
             TaskStep(
                 "run",
@@ -303,7 +320,8 @@ TASKS: tuple[TaskDef, ...] = (
                 "list_request_videos",
                 "최근 의뢰 영상 찾기",
                 READ_GRADE,
-                fixed_input=(("limit", 1),),
+                # 11/26: 인스타에 이미 올렸거나 승인 대기 중인 영상은 "최근"에서 뺀다
+                fixed_input=(("limit", 1), ("exclude_platform", "instagram")),
                 ref_key="items.0.post_draft_id",
             ),
             TaskStep(
@@ -315,6 +333,8 @@ TASKS: tuple[TaskDef, ...] = (
                 after=("latest",),
                 takes_ref="post_draft_id",
                 ref_key="post_draft_id",
+                empty_ref_note="아직 인스타에 새로 올릴 의뢰 영상이 없어요. 이미 다 올렸거나, "
+                "만든 의뢰 영상이 아직 없어요.",
             ),
             TaskStep(
                 "run",
@@ -397,6 +417,7 @@ TASKS: tuple[TaskDef, ...] = (
         "finance",
         "closing_report",
         fill="closing_period",
+        ref_key="ref",  # 11/26 "<기간>:<날짜>". 대화방 카드가 이 번호로 손익 숫자를 다시 읽는다
     ),
     _one(
         "notice_draft",
@@ -415,6 +436,60 @@ TASKS: tuple[TaskDef, ...] = (
         "marketing",
         "draft_sns_post",
         fill="sns_topic",
+    ),
+    # 11/26 인프라(이태윤 정리 글 3번): 총괄 대화방에서 읽기만 하는 인프라 일. 롤백·재시작 같은 상태
+    # 변경은 두지 않는다(롤백은 장애 대응 흐름의 안전 관문(B)에서만 한다)
+    _one(
+        "current_incidents",
+        "지금 장애 확인",
+        "지금 서버·사이트에 장애가 있는지 알려 달라는 의뢰(DejaFix가 보는 현재 장애를 읽는다).",
+        ("지금 장애 있어?", "서버 문제 생긴 거 있어요"),
+        "infra",
+        "current_incidents",
+        ref_key="ref",
+    ),
+    _one(
+        "deployment_status",
+        "배포 상태 확인",
+        "서비스별 지금 어떤 버전이 배포돼 있는지, 최근 배포가 어떤지 알려 달라는 의뢰.",
+        ("배포 상태 알려 주세요", "지금 어떤 버전이 배포돼 있어요"),
+        "infra",
+        "latest_deployments",
+        ref_key="ref",
+    ),
+    _one(
+        "incident_diagnosis",
+        "장애 원인 진단",
+        "장애가 났을 때 원인이 어떤 배포인지 진단해 달라는 의뢰"
+        "(원인 후보만 알려 주고 되돌리지는 않는다).",
+        ("장애 원인 진단해 주세요", "결제 장애 원인이 뭐예요"),
+        "infra",
+        "diagnose_incident",
+        fill="incident_component",
+        ref_key="status",
+    ),
+    # 11/26 롤백 요청 2단계(읽기 전용): 열린 사건의 롤백 승인 대기를 카드에 보여 준다.
+    # 새 실행 경로가 아니다: 총괄이 자기 사건 기록만 읽고(부서·`execute()` 호출 없음),
+    # 롤백은 기존 사건 흐름의 안전 관문(B)에서만 일어난다.
+    # "롤백해 줘" 같은 글도 여기로 와서 지금 상태와 이유를 안내받는다
+    TaskDef(
+        "incident_rollback_status",
+        "사건 롤백 상태 확인",
+        "열린 장애 사건에서 롤백(배포를 이전 버전으로 되돌리기)이 제안됐는지, 승인을 기다리는지, "
+        "어떻게 됐는지 알려 달라는 의뢰. 상태만 보여 주고 이 의뢰로 되돌리지는 않는다"
+        "(롤백은 장애 대응 사건의 안전 관문에서만 한다).",
+        ("롤백 상태 알려 주세요", "결제 장애 롤백 어떻게 돼가요", "배포 되돌려 줘"),
+        (
+            TaskStep(
+                "run",
+                "orchestrator",
+                ROLLBACK_STATUS_SKILL,
+                "사건 롤백 상태",
+                READ_GRADE,
+                kind=SELF_KIND,
+                ref_key="ref",
+            ),
+        ),
     ),
     _one(
         "dev_status",
@@ -490,6 +565,7 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "kind": s.kind,
             "ref_key": s.ref_key,
             "takes_ref": s.takes_ref,
+            "empty_ref_note": s.empty_ref_note,
             "fixed_input": dict(s.fixed_input),
             "text_key": s.text_key,
             "carries": s.carries,

@@ -36,6 +36,8 @@ const DEPT: Record<string, { label: string; cls: string }> = {
   data: { label: "데이터분석", cls: "text-brand-700" },
   planning: { label: "기획", cls: "text-emerald-800" },
   marketing: { label: "마케팅", cls: "text-amber-800" },
+  infra: { label: "인프라", cls: "text-brand-700" },
+  orchestrator: { label: "총괄", cls: "text-brand-700" },
 };
 export function deptTag(dept: string | null): { label: string; cls: string } {
   if (!dept) return { label: "사람", cls: "text-ink-700" };

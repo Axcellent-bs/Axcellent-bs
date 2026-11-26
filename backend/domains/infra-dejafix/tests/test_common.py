@@ -27,6 +27,9 @@ def test_agent_card_format_and_served() -> None:
         "diagnose_incident",
         "rollback_deployment",
         "verify_recovery",
+        # 총괄 대화방 의뢰용 현황 읽기 (읽기만)
+        "current_incidents",
+        "latest_deployments",
         # 같은 유형 과거 장애의 처리 방식(장애 상태 해제) 다시 하기
         "release_fault",
         # 승인된 개발 배포를 연결된 배포 도구로 띄우기·실행 상태 읽기 (dev 전용)
@@ -48,6 +51,9 @@ def test_agent_card_format_and_served() -> None:
     assert skills["verify_recovery"].allowed_requesters == ["orchestrator"]
     assert skills["release_fault"].allowed_requesters == ["orchestrator"]
     assert skills["deploy_version"].allowed_requesters == ["dev"]
+    for read_only in ("current_incidents", "latest_deployments"):
+        assert skills[read_only].grade == "read"
+        assert skills[read_only].allowed_requesters == ["orchestrator"]
     assert skills["deploy_run_status"].grade == "read"
     assert "orchestrator" in skills["diagnose_incident"].allowed_requesters
     for skill in card.skills:

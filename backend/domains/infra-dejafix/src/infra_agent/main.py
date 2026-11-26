@@ -27,7 +27,7 @@ from ax_agent_template.server import create_agent_app, verify_token
 from ax_contracts.schemas import AgentCard
 from infra_agent import dejafix_watch, deploy_poll
 from infra_agent.chat.a2a import CHAT_HANDLERS
-from infra_agent.deployments import Deployment
+from infra_agent.deployments import Deployment, latest_running
 from infra_agent.handlers import HANDLERS
 from infra_agent.runtime import get_runtime
 
@@ -204,17 +204,6 @@ def latest_deployments(
         if not company:
             return {"data": []}
     history = get_runtime().history_for(company)
-    # 한 번만 읽은 사본으로 고른다. live()는 보관함을 읽으므로 서비스마다 부르지 않고(요청당 한 번),
-    # deploy_poll이 이벤트 루프에서 이력 목록을 통째로 바꿔도 이 스레드는 같은 사본을 본다
-    live = list(history.live())
-    rolled_back = set(history.rolled_back)
-    latest: dict[str, Deployment] = {}
-    for d in live:
-        if d.source is None or d.deploy_id in rolled_back:
-            continue  # 도구에서 받은 배포가 아니거나 되돌린 배포
-        current = latest.get(d.service)
-        if current is None or d.deployed_at > current.deployed_at:
-            latest[d.service] = d
     rows: list[dict[str, Any]] = [
         {
             "service": d.service,
@@ -224,7 +213,7 @@ def latest_deployments(
             "is_rollback": d.is_rollback,
             "version_from_sha": d.version_from_sha,
         }
-        for _, d in sorted(latest.items())
+        for d in latest_running(history)
     ]
     return {"data": rows}
 

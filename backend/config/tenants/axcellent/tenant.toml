@@ -1,0 +1,37 @@
+# 자사: 캣북스·누비투어에 AX 솔루션을 주는 회사. 자사 홍보 영상(유튜브)용
+# 고객사가 아니다. 자기 솔루션으로 자기 홍보 영상을 만들고 성과를 잰다(트렌드&콘텐츠 › 성과).
+# 회사 한 곳 = 카탈로그 + 커넥터 + 조직도 (backend/README.md "새 회사를 붙일 때"). 비밀값을 두지 않는다.
+# 쇼핑몰이 없다: 회사 연결(사이트 주소)을 하지 않으므로 판매 데이터는 "연결 안 됨"으로 건너뛴다.
+# 카탈로그·커넥터는 로더 형식(scripts/tenant_env.py)을 따라 틀 기본값(common·shop-api)을 적는다
+
+name = "AXcellent"
+# data 지표 카탈로그: 틀 기본값 (domains/data/src/data_agent/catalogs/common.toml)
+catalog = "common"
+connector = "shop-api"
+org = "org.yaml"
+# 검색어 급상승·YouTube 키워드 (이 폴더 기준). 키워드는 재현 님이 채운다
+trends = "trends.toml"
+youtube = "youtube.toml"
+
+timezone = "Asia/Seoul"
+
+# 도메인 프로필(data domain_profile)이 읽는 회사 소개. 키워드·카테고리·출처는 적지 않는다(AI가 카탈로그로 고름)
+[profile]
+about = "회사 업무를 부서별 AI 에이전트가 나눠 맡는 AX 솔루션 회사"
+
+[profile.override]
+
+# 홍보 영상 브랜드: 기본값을 쓴다 (tenant.py BRAND_DEFAULTS)
+[brand]
+
+# 영상 성과 깊게 읽기 (11/26). 값은 사람이 넣는다. 비어 있으면 그 출처는 건너뛴다 (지어내지 않는다)
+# 유튜브 채널 id (UC로 시작). AXcellent 채널은 @Axcellent7. 위 youtube(키워드 파일)와 이름이 겹쳐
+# [youtube]가 아니라 [youtube_channel]에 둔다 (TOML은 같은 이름을 두 번 쓸 수 없다)
+[youtube_channel]
+channel_id = ""
+
+# 광고 계정 (읽기만). google_customer_id: 구글 애즈 고객 번호(숫자 10자리, - 없이),
+# meta_ad_account_id: 메타 광고 계정 번호(act_ 없이 숫자)
+[ads]
+google_customer_id = ""
+meta_ad_account_id = ""

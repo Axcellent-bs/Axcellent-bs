@@ -6,15 +6,21 @@ import { when } from "@/components/data/Sources";
 import { safeLink } from "@/lib/safeLink";
 import type { Proposal } from "@/lib/proposals";
 import { sectionState, type SectionState } from "@/lib/segmentView";
-import { reportHash, reportLabel } from "@/lib/trendReportView";
+import { reportHash } from "@/lib/trendReportView";
 import {
   HANDOFF_GATED_TEXT, deliveryOf, handoffChip, handoffGated, insightReports, proposalFor, reportInsightId, type ChipTone, type DeliveryChip,
 } from "@/lib/handoffView";
-import { dataAi, type ReceiveInsightInput, type TrendReportHandoffOutput, type TrendReportListItem } from "@/lib/data";
+import {
+  FIRST_ROWS, cardHead, directionChips, evidenceFacts, factFlags, insightSourceLabel, orderFacts, planResult, reportStatusLabel, themeCandidates, weakWarning,
+} from "@/lib/insightView";
+import { dataAi, type ReceiveInsightFact, type ReceiveInsightInput, type TrendReportHandoffOutput, type TrendReportListItem } from "@/lib/data";
 
 // 인사이트 탭 맨 위 "분석 의뢰 보고서" 인사이트 카드 (11/20 v3). 보고서 화면 맨 아래도 같은 카드를 쓴다.
 // - 목록: trend_report_list(10) 중 완료·부분 완료이고 has_insight가 false 아닌 것. 카드마다 trend_report_insight(처음 한 번, 동시에 최대 3개)
-// - 보여 줄 것: "분석 의뢰 · TR-xxxx" · 만든 시각 · 전달 상태 칩, 제목·요약, 근거 상위 4개 타일, "근거 N개 보기"(링크는 safeLink)·"보고서 열기"·"기획에 보내기"
+// - 11/26 카드 = "기획에 넘긴 것" (lib/insightView.ts): 머리 "TR-xxxx → 기획 PROP-n"(없으면 "아직 기획에 안 감") · 완료/일부 완료 · 시각,
+//   기획에 넘긴 것 상자(결론 · 방향 칩 · 주제 후보 · 형식), 근거 표 처음 3줄(약하지 않은 근거 먼저, 출처는 한국어 섹션 이름) + "근거 N개 모두 ▸",
+//   처음 3줄이 모두 약하면 경고 한 줄, 기획 결과 한 줄(AI 제작안·규칙 초안·사람이 씀 + 상태), 보고서 열기 · PROP-n 열기 · 기획에 보내기
+// - 보여 줄 것(옛): "분석 의뢰 · TR-xxxx" · 만든 시각 · 전달 상태 칩, 제목·요약, "보고서 열기"·"기획에 보내기" (외부 링크는 safeLink)
 // - 기획에 보내기: trend_report_handoff. 누르는 동안·보낸 뒤 버튼을 끈다. 이미 기획 기록에 있거나 목록 handoff가 created·duplicate면 칩만.
 //   게이트웨이에 막히면(403·404·거부) "기획에 보내기 준비 중 (허용 목록 추가 대기)"
 // - 전달 상태: 기획 기록(proposals from data, insightId = "trend_report:" + report_id) → 보낸 결과 → "아직 기획에 안 감" (lib/handoffView.ts)
@@ -43,7 +49,7 @@ function limited<T>(job: () => Promise<T>): Promise<T> {
 
 const TONE_OF: Record<ChipTone, string> = { ok: TONE.ok, warn: TONE.warn, muted: TONE.muted, bad: TONE.bad };
 export function DeliveryBadge({ chip }: { chip: DeliveryChip }) {
-  return <span className={`chip text-[11px] ${TONE_OF[chip.tone]}`}>{chip.text}</span>;
+  return <span className={`chip text-[12.5px] ${TONE_OF[chip.tone]}`}>{chip.text}</span>;
 }
 
 type SendState = { kind: "idle" } | { kind: "busy" } | { kind: "sent"; out: TrendReportHandoffOutput } | { kind: "gated" } | { kind: "failed"; message: string };
@@ -89,9 +95,63 @@ function useReportInsight(reportId: string): InsightLoad {
   return load;
 }
 
-/** 보고서 인사이트 카드 하나. listHandoff: 목록이 준 지난 전달 결과 (보고서 화면에서는 없음) */
-export function ReportInsightCard({ reportId, createdAt, listHandoff = null, sent, onSent }: {
+const ROW_TONE: Record<"ok" | "warn" | "bad", ChipTone> = { ok: "ok", warn: "warn", bad: "bad" };
+
+/** 근거 표 한 줄: 근거 · 값(줄어드는 중 ↓·표본 작음 칩) · 출처 */
+function FactRow({ f, reportId }: { f: ReceiveInsightFact; reportId: string }) {
+  const flags = factFlags(f.value);
+  const link = safeLink(f.link);
+  return (
+    <tr className="border-t border-ink-100 align-top">
+      <td className="break-words py-1.5 pr-2 text-ink-900">{f.label}</td>
+      <td className="break-words py-1.5 pr-2">
+        <span className={`font-bold tabular-nums ${flags.falling ? "text-red-700" : "text-ink-900"}`}>{flags.falling && <span aria-hidden="true">↓ </span>}{f.value}</span>
+        {flags.falling && <span className={`chip ml-1 text-[12.5px] ${TONE.bad}`}>줄어드는 중</span>}
+        {flags.smallSample && <span className={`chip ml-1 text-[12.5px] ${TONE.warn}`}>표본 작음</span>}
+      </td>
+      <td className="break-words py-1.5 text-[13.5px] text-ink-500">
+        {insightSourceLabel(f, reportId)}
+        {link && <> · <a href={link} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">원문</a></>}
+      </td>
+    </tr>
+  );
+}
+
+function FactTable({ rows, reportId, caption }: { rows: ReceiveInsightFact[]; reportId: string; caption: string }) {
+  return (
+    <table className="w-full table-fixed text-[14.5px]">
+      <caption className="sr-only">{caption}</caption>
+      <colgroup><col /><col className="w-[34%]" /><col className="w-[28%]" /></colgroup>
+      <thead><tr className="text-left text-[12.5px] text-ink-500"><th scope="col" className="pb-1 font-medium">근거</th><th scope="col" className="pb-1 font-medium">값</th><th scope="col" className="pb-1 font-medium">출처</th></tr></thead>
+      <tbody>{rows.map((f, k) => <FactRow key={`${f.label}-${k}`} f={f} reportId={reportId} />)}</tbody>
+    </table>
+  );
+}
+
+/** "기획에 넘긴 것" 상자: 결론 · 방향 칩 · 주제 후보 · 형식 (없는 줄은 생략) */
+function Handed({ insight }: { insight: ReceiveInsightInput }) {
+  const dirs = directionChips(insight.facts);
+  const themes = themeCandidates(insight.facts);
+  return (
+    <div className="space-y-2 rounded-xl bg-ink-50 px-3.5 py-3">
+      <p className="text-[12.5px] font-semibold text-ink-500">기획에 넘긴 것</p>
+      <p className="whitespace-pre-line break-words text-[14.5px] text-ink-900"><b>결론</b> {insight.summary}</p>
+      {dirs.length > 0 && (
+        <p className="flex flex-wrap items-center gap-1.5 text-[14.5px] text-ink-700"><b className="text-ink-900">방향</b>
+          {dirs.map((d) => <span key={d} className={`chip text-[12.5px] ${TONE.info}`}>{d}</span>)}
+        </p>
+      )}
+      {themes.length > 0 && <p className="break-words text-[14.5px] text-ink-700"><b className="text-ink-900">주제 후보</b> {themes.join(" · ")}</p>}
+      {insight.shorts_format && <p className="break-words text-[14.5px] text-ink-700"><b className="text-ink-900">형식</b> {insight.shorts_format}</p>}
+    </div>
+  );
+}
+
+/** 보고서 인사이트 카드 하나 = 기획에 넘긴 것 (11/26). listHandoff: 목록이 준 지난 전달 결과 (보고서 화면에서는 없음) */
+export function ReportInsightCard({ reportId, createdAt, status = null, listHandoff = null, sent, onSent }: {
   reportId: string; createdAt: string | null; listHandoff?: TrendReportHandoffOutput | null;
+  /** 보고서 상태(done·partial) → 완료·일부 완료 칩. 모르면 칩 없음 */
+  status?: string | null;
   /** 바깥(보고서 머리 버튼)과 결과를 같이 쓸 때 */
   sent?: TrendReportHandoffOutput | null; onSent?: (out: TrendReportHandoffOutput) => void;
 }) {
@@ -105,55 +165,52 @@ export function ReportInsightCard({ reportId, createdAt, listHandoff = null, sen
   const handle = (out: TrendReportHandoffOutput) => { setMine(out); onSent?.(out); };
   const open = () => navigate(`/data/trend${reportHash(reportId)}`);
   const insight = load.kind === "ok" ? load.insight : null;
+  const facts = insight ? orderFacts(evidenceFacts(insight.facts)) : [];
+  const warn = weakWarning(facts);
+  const plan = planResult(proposal);
+  const statusText = reportStatusLabel(status);
 
   return (
-    <li className="card space-y-2 border-l-4 border-l-brand-500 p-4">
+    <li className="card space-y-3 border-l-4 border-l-brand-500 p-4">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className={`chip text-[11px] ${TONE.info}`}>분석 의뢰 · {reportLabel(reportId)}</span>
-        {createdAt && <span className={`chip text-[11px] ${TONE.muted}`}>{when(createdAt)}</span>}
-        <DeliveryBadge chip={chip} />
+        <b className="text-[15px] text-ink-900">{cardHead(reportId, proposal)}</b>
+        {statusText && <span className={`chip text-[12.5px] ${status === "done" ? TONE.ok : TONE.warn}`}>{statusText}</span>}
+        {createdAt && <span className={`chip text-[12.5px] ${TONE.muted}`}>{when(createdAt)}</span>}
+        {!proposal && <DeliveryBadge chip={chip} />}
       </div>
+      {warn && <p role="note" className="rounded-lg bg-amber-50 px-3 py-2 text-[14.5px] font-semibold text-amber-800">⚠ {warn}</p>}
       {load.kind === "loading" ? <Waiting what="보고서 인사이트를 읽는 중…" />
         : load.kind === "error" ? (
-          <p className="text-sm text-ink-500">{load.state.kind === "missing" ? "보고서 인사이트는 데이터 AI에 붙이는 중이에요 (준비 중)" : load.state.message}</p>
+          <p className="text-[14.5px] text-ink-500">{load.state.kind === "missing" ? "보고서 인사이트는 데이터 AI에 붙이는 중이에요 (준비 중)" : load.state.message}</p>
         ) : !insight ? (
-          <p className="text-sm text-ink-500">{load.reason ?? "이 보고서에서는 기획에 보낼 인사이트를 뽑지 못했어요"}</p>
+          <p className="text-[14.5px] text-ink-500">{load.reason ?? "이 보고서에서는 기획에 보낼 인사이트를 뽑지 못했어요"}</p>
         ) : (
           <>
-            <h4 className="text-[15px] font-bold text-ink-900">{insight.title}</h4>
-            <p className="whitespace-pre-line break-words text-sm text-ink-700">{insight.summary}</p>
-            {insight.facts.length > 0 && (
-              <dl className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-1.5">
-                {insight.facts.slice(0, 4).map((f, k) => (
-                  <div key={`${f.label}-${k}`} className="min-w-0 rounded-lg bg-ink-50 px-2.5 py-1.5">
-                    <dd className="break-words text-sm font-bold text-ink-900">{f.value}</dd>
-                    <dt className="break-words text-xs text-ink-700">{f.label}</dt>
-                    <dd className="text-[11px] text-ink-400">{f.source}</dd>
-                  </div>
-                ))}
-              </dl>
+            <h4 className="break-words text-base font-bold text-ink-900">{insight.title}</h4>
+            <Handed insight={insight} />
+            {facts.length > 0 && (
+              <div className="space-y-1">
+                <FactTable rows={facts.slice(0, FIRST_ROWS)} reportId={reportId} caption="기획이 먼저 볼 근거" />
+                {facts.length > FIRST_ROWS && (
+                  <details className="group">
+                    <summary className="cursor-pointer select-none text-[14.5px] font-semibold text-brand-700 hover:underline">근거 {facts.length}개 모두 <span aria-hidden="true" className="inline-block group-open:rotate-90">▸</span></summary>
+                    <div className="pt-1"><FactTable rows={facts.slice(FIRST_ROWS)} reportId={reportId} caption="나머지 근거" /></div>
+                  </details>
+                )}
+              </div>
             )}
           </>
         )}
+      {plan && (
+        <p className="flex flex-wrap items-center gap-1.5 text-[14.5px] text-ink-700">
+          <b className="text-ink-900">기획 결과</b> {plan.who} · <span className="min-w-0 break-words">{plan.title}</span>
+          <DeliveryBadge chip={{ text: plan.status, tone: ROW_TONE[plan.tone], sent: true }} />
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-1.5 print-hide">
-        {insight && insight.facts.length > 0 && (
-          <details className="w-full text-xs text-ink-700 sm:w-auto">
-            <summary className="cursor-pointer select-none rounded-md px-2 py-1 font-semibold ring-1 ring-ink-100">근거 {insight.facts.length}개 보기</summary>
-            <ul className="mt-1 space-y-0.5">
-              {insight.facts.map((f, k) => {
-                const link = safeLink(f.link);
-                return (
-                  <li key={`${f.label}-${k}`}>
-                    <b className="text-ink-900">{f.label}</b> {f.value} <span className="text-ink-400">· {f.source}</span>
-                    {link && <> · <a href={link} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:underline">출처</a></>}
-                  </li>
-                );
-              })}
-            </ul>
-          </details>
-        )}
-        <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={open}>보고서 열기</button>
-        {insight && <HandoffButton reportId={reportId} already={chip.sent || !!result} onSent={handle} className="btn-primary px-2.5 py-1 text-xs" />}
+        <button type="button" className="btn-ghost px-2.5 py-1 text-[14px]" onClick={open}>보고서 열기</button>
+        {proposal && <button type="button" className="btn-ghost px-2.5 py-1 text-[14px]" onClick={() => navigate(`/planning/proposals/${encodeURIComponent(proposal.id)}`)}>{proposal.id} 열기</button>}
+        {insight && <HandoffButton reportId={reportId} already={chip.sent || !!result} onSent={handle} className="btn-primary px-2.5 py-1 text-[14px]" />}
       </div>
     </li>
   );
@@ -184,7 +241,7 @@ export function ReportInsights({ load }: { load: ListLoad }) {
   if (load.items.length === 0) return <p className="text-sm text-ink-500">인사이트를 뽑을 분석 의뢰 보고서가 아직 없어요. 분석 의뢰 탭에서 보고서를 만들면 여기에 나와요.</p>;
   return (
     <ul className="space-y-3" aria-label="분석 의뢰 보고서 인사이트">
-      {load.items.map((i) => <ReportInsightCard key={i.report_id} reportId={i.report_id} createdAt={i.created_at} listHandoff={i.handoff ?? null} />)}
+      {load.items.map((i) => <ReportInsightCard key={i.report_id} reportId={i.report_id} createdAt={i.created_at} status={i.status} listHandoff={i.handoff ?? null} />)}
     </ul>
   );
 }

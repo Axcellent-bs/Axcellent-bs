@@ -1,0 +1,7 @@
+# AXcellent(자사) YouTube 영상 통계 스냅샷(data youtube_collect)이 하루 1번 검색하는 키워드. 재현 님이 채운다.
+# 키워드 하나에 할당량 101단위(검색 100 + 통계 1). 비어 있으면 검색하지 않는다 (캣북스 youtube.toml과 같은 형식)
+region = "KR"
+
+# 예:
+# [[queries]]
+# q = "키워드"

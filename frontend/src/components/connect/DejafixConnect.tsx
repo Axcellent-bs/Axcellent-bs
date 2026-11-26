@@ -3,7 +3,7 @@ import { Notice, SectionHead, StatusChip } from './parts'
 import { ToolForm, useToolList } from './ToolForm'
 import { deleteTool, type ToolList } from '@/lib/toolConnections'
 import { dejafixStatus, saveZabbixSettings, zabbixSettings, zabbixSummary, type ZabbixSettings } from '@/lib/dejafix'
-import { zabbixInsecure } from '@/lib/zabbixSettings'
+import { zabbixInsecure, zabbixUnsupported } from '@/lib/zabbixSettings'
 import { when } from '@/lib/toolForms'
 import { dejafixCard, dejafixSummary, type DejafixStatus, type SavedDejafix } from '@/lib/toolForms'
 
@@ -61,6 +61,8 @@ function BackToBuiltin({ saved, admin, onChanged }: { saved: SavedDejafix; admin
 function ZabbixConnect() {
   const [now, setNow] = useState<ZabbixSettings | null | undefined>(undefined)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // 옛 DejaFix(501 DEJAFIX_TOO_OLD): 읽기도 저장도 안 되니 저장 폼을 숨기고 안내만 보인다
+  const [unsupported, setUnsupported] = useState(false)
   const [url, setUrl] = useState('')
   const [token, setToken] = useState('')
   const [verify, setVerify] = useState(true)
@@ -72,7 +74,7 @@ function ZabbixConnect() {
     let live = true
     zabbixSettings()
       .then((z) => { if (!live) return; setNow(z); setUrl(z.url ?? ''); setVerify(z.verify_tls) })
-      .catch((e) => { if (live) { setNow(null); setLoadError((e as Error).message) } })
+      .catch((e) => { if (live) { setNow(null); setLoadError((e as Error).message); setUnsupported(zabbixUnsupported(e)) } })
     return () => { live = false }
   }, [])
 
@@ -93,6 +95,7 @@ function ZabbixConnect() {
         <p className="mt-0.5 text-sm leading-6 text-ink-500">회사에서 쓰는 Zabbix 주소와 읽기 전용 API 토큰을 넣으면, DejaFix가 연결을 확인한 뒤 그 Zabbix의 장애를 받아요. 토큰은 서버에만 저장되고 화면에 다시 보이지 않아요.</p>
       </div>
       {loadError && <Notice tone="bad">Zabbix 연결을 읽지 못했어요: {loadError}</Notice>}
+      {unsupported ? null : <>
       {now && (
         <p className="text-sm text-ink-700">
           지금: <span className="font-mono">{zabbixSummary(now)}</span>
@@ -121,6 +124,7 @@ function ZabbixConnect() {
           <button className="btn-primary" disabled={busy || !url.trim() || (!token.trim() && !now?.token_set)}>{busy ? '연결 확인하는 중…' : '확인하고 저장'}</button>
         </div>
       </form>
+      </>}
       {done && <p role="status" className="text-sm text-emerald-800">Zabbix 연결을 확인하고 저장했어요. 장애 목록이 곧 새 Zabbix 기준으로 바뀌어요.</p>}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
     </div>

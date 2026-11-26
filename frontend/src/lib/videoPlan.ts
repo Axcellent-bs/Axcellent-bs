@@ -173,10 +173,25 @@ export const VIDEO_SVG_LINE: Record<VideoFallbackReason, string> = {
   rejected: '포즈 답이 규칙에 걸렸어요',
   error: '콘티 호출이 실패했어요',
 }
+/** 콘티 호출 실패의 자세한 코드 (11/26 C, 기획 storyboard_svg.failure_detail) → 짧은 한국어 */
+export const VIDEO_SVG_DETAIL: Record<string, string> = {
+  LLMResponseError_ReadTimeout: 'AI 응답이 늦어 끊겼어요',
+  LLMResponseError_429: 'AI 호출 한도에 걸렸어요',
+  // 11/26 F: 400(잘못된 요청) 공급자 메시지 갈래 (기획 storyboard_svg.bad_request_kind)
+  LLMResponseError_400_schema: 'AI 응답 형식이 맞지 않았어요',
+  LLMResponseError_400_length: 'AI 입력·출력이 너무 길어요',
+  LLMResponseError_400_model: 'AI 모델 설정이 맞지 않아요',
+}
 /** 콘티를 못 그린 이유가 있을 때만 그 한 줄, 아니면 '' (지금 화면 그대로).
- *  예외 종류 이름(계약 svg_detail, 예: LLMResponseError)이 있으면 괄호로 붙인다 (11/26 U) */
-export const videoSvgLine = (v: Pick<VideoPlanView, 'svgReason' | 'svgDetail'>) =>
-  v.svgReason ? `${VIDEO_SVG_LINE[v.svgReason]}${v.svgDetail ? ` (${v.svgDetail})` : ''}` : ''
+ *  예외 종류 이름(계약 svg_detail, 예: LLMResponseError)이 있으면 괄호로 붙인다 (11/26 U).
+ *  아는 코드(ReadTimeout·429)면 괄호 대신 짧은 한국어를 붙인다 (11/26 C) */
+export function videoSvgLine(v: Pick<VideoPlanView, 'svgReason' | 'svgDetail'>): string {
+  if (!v.svgReason) return ''
+  const base = VIDEO_SVG_LINE[v.svgReason]
+  if (!v.svgDetail) return base
+  const known = Object.prototype.hasOwnProperty.call(VIDEO_SVG_DETAIL, v.svgDetail) ? VIDEO_SVG_DETAIL[v.svgDetail] : ''
+  return known ? `${base} · ${known}` : `${base} (${v.svgDetail})`
+}
 
 export type VideoFallbackReason = 'no_llm' | 'timeout' | 'bad_format' | 'rejected' | 'error'
 /** 규칙 초안 칩 옆 이유 한 줄 (계약 VideoPlan.fallback_reason) */

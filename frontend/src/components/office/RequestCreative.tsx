@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { KeyframePairs } from "@/components/marketing/KeyframePairs";
 import { SheetBoard } from "@/components/marketing/SheetBoard";
+import { ChatReviewDecision } from "@/components/office/ChatReviewDecision";
 import { PlanVersions } from "@/components/planning/PlanChecks";
 import { framesOf } from "@/lib/keyframes";
 import { StoryboardView } from "@/components/marketing/StoryboardMaker";
@@ -18,7 +19,7 @@ import type { WorkRequestRow } from "@/lib/workRequests";
 // 대화방 의뢰 진행 카드의 [이미지 시트][스토리보드] · 영상 승인 대기 (홍보 영상 의뢰, 11/23 시안 ②).
 // - 의뢰의 제작 기록(CR-…) = 영상 준비 단계 결과 번호. 있으면 대화방 안 패널에 마케팅 1:1과 같은 SheetBoard·StoryboardView
 // - 제작 기록이 없는 의뢰(캐릭터 없이)는 [스토리보드]만 두고, 기획 제작안 장면 글을 칸으로 보여 준다(그림 없음)
-// - "영상 승인 대기"면 [승인 화면 열기]. 승인은 지금 승인 화면에서만 한다(여기서 바로 승인하지 않는다)
+// - "영상 승인 대기"면 [승인 화면 열기] + 카드 안 승인·거절(ChatReviewDecision, 11/26). 요청한 본인 승인은 안전 장치가 막는다
 
 // 11/25 키프레임 영상이면 [키프레임] 탭(프레임마다 SVG 구도 | 실사 키프레임 쌍 · 다시 그리기)이 더 생긴다
 type Tab = "sheet" | "storyboard" | "keyframes";
@@ -153,11 +154,14 @@ function VideoRetry({ recordId, version }: { recordId: string; version: string }
   };
   if (video?.status === "awaiting_approval") {
     return (
+      <>
       <p className="flex flex-wrap items-center gap-1.5">
         <ApprovalDeadline reviewId={video.review_id} />
         <Link className="btn-ghost btn-card inline-flex items-center" to={approvalLink(video.review_id ?? null)}>승인 화면 열기</Link>
         <span className="text-[11px] text-ink-500">다시 요청했어요. 승인하면 제작 기록에서 영상을 만들어요.</span>
       </p>
+      {video.review_id && <ChatReviewDecision reviewId={video.review_id} what="영상 만들기" />}
+      </>
     );
   }
   if (!timedOut(video)) return null;
@@ -213,6 +217,7 @@ export function RequestCreative({ row, plan }: { row: WorkRequestRow; plan: Pick
           {recordId && <MotionUpload recordId={recordId} />}
         </p>
       )}
+      {approval?.reviewId && <ChatReviewDecision reviewId={approval.reviewId} what="영상 만들기" />}
       {closed && recordId && <VideoRetry recordId={recordId} version={row.updated_at} />}
       {recordId && !closed && !approval && <VideoQcStage recordId={recordId} version={row.updated_at} />}
       {(buttons.sheet || buttons.storyboard) && (

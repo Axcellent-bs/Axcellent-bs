@@ -2249,6 +2249,42 @@ async def campaign_effect(request: AgentRequest) -> AgentResult:
     )
 
 
+async def ad_performance(request: AgentRequest) -> AgentResult:
+    """회사 광고 성과 (메타·구글 애즈 캠페인, 연령·성별). 저장분만 읽는다, grade read."""
+    from ax_contracts.schemas.ad_performance import AdPerformanceRequest
+    from data_agent.skills.ad_performance import ad_performance as run
+
+    data = _parse(request, AdPerformanceRequest)
+    if isinstance(data, AgentResult):
+        return data
+    result = run(data, env=os.environ)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
+async def video_insights(request: AgentRequest) -> AgentResult:
+    """게시한 영상 깊은 지표 (유지율·유입 경로·시청층·노출 클릭률). 저장분만 읽는다, grade read."""
+    from ax_contracts.schemas.data import VideoInsightsRequest
+    from data_agent.skills.video_insights import video_insights as run
+
+    data = _parse(request, VideoInsightsRequest)
+    if isinstance(data, AgentResult):
+        return data
+    result = run(data, env=os.environ)
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        outcome=result.output.status,
+        output=result.output.model_dump(mode="json"),
+        evidence=result.evidence,
+    )
+
+
 async def video_performance(request: AgentRequest) -> AgentResult:
     """게시한 영상 성과 (1시간·1일·3일·7일). 영상 등록(추적 목록)과 시점 측정만, grade read."""
     from ax_contracts.schemas.data import ShortsStatsOutput, VideoPerformanceRequest
@@ -2504,6 +2540,8 @@ HANDLERS = {
     "answer_planning_question": answer_planning_question,
     "campaign_effect": campaign_effect,
     "video_performance": video_performance,
+    "ad_performance": ad_performance,
+    "video_insights": video_insights,
     "campaign_result": campaign_result,
     "trend_age": trend_age,
     "trend_insight_brief": trend_insight_brief,

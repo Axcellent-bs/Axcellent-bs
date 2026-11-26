@@ -1,7 +1,7 @@
 import { DEJAFIX_API_URL, SAFETY_HUMAN_TOKEN } from "./env";
 import { SESSION_HEADER, sessionReadAuth } from "./humanToken";
 import { parseDejafixStatus, type DejafixStatus } from "./toolForms";
-import { parseZabbixSettings, type ZabbixSettings } from "./zabbixSettings";
+import { parseZabbixSettings, ZabbixCallError, type ZabbixSettings } from "./zabbixSettings";
 
 export { parseZabbixSettings, zabbixSummary, type ZabbixSettings } from "./zabbixSettings";
 
@@ -143,8 +143,8 @@ async function zabbixCall(method: "GET" | "POST", body?: unknown): Promise<Zabbi
   }
   const json: unknown = await res.json().catch(() => undefined);
   if (!res.ok) {
-    const message = (json as { error?: { message?: string } } | undefined)?.error?.message;
-    throw new Error(message || `DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`);
+    const error = (json as { error?: { message?: string; code?: string } } | undefined)?.error;
+    throw new ZabbixCallError(error?.message || `DejaFix가 오류를 돌려줬습니다 (HTTP ${res.status}).`, res.status, typeof error?.code === "string" ? error.code : null);
   }
   const parsed = parseZabbixSettings(json);
   if (!parsed) throw new Error("DejaFix 응답을 읽을 수 없습니다.");

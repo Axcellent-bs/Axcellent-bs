@@ -576,7 +576,7 @@
     },
     {
       "id": "list_request_videos",
-      "description": "의뢰(wr_*) 홍보 영상 목록(읽기). 총괄 PROMO_VIDEO 흐름의 릴스 초안(context ctx_wr_*) 중 영상이 만들어진 것을 최신 순으로 돌려준다(post_draft_id·request_id·media_id·duration_s·caption_ko·created_at·labeled·status). labeled는 초안이 연결한 파일이 AI 라벨을 입힌 labeled.mp4이고 기록된 해시와 같을 때만 true이며, 이때만 prepared(asset_ref·asset_sha256)를 담는다. 입력 request_id로 한 의뢰만, post_draft_id로 한 건만 조회한다. 초안 저장소와 meta.json을 읽기만 한다. 항목마다 youtube(의뢰 영상 유튜브 올리기 상태, 없으면 null)를 붙이고, 유튜브 승인 대기 건은 같은 키로 관문을 다시 물어 승인됐으면 올린다.",
+      "description": "의뢰(wr_*) 홍보 영상 목록(읽기). 총괄 PROMO_VIDEO 흐름의 릴스 초안(context ctx_wr_*) 중 영상이 만들어진 것을 최신 순으로 돌려준다(post_draft_id·request_id·media_id·duration_s·caption_ko·created_at·labeled·status). labeled는 초안이 연결한 파일이 AI 라벨을 입힌 labeled.mp4이고 기록된 해시와 같을 때만 true이며, 이때만 prepared(asset_ref·asset_sha256)를 담는다. 입력 request_id로 한 의뢰만, post_draft_id로 한 건만 조회한다. 초안 저장소와 meta.json을 읽기만 한다. 항목마다 youtube(의뢰 영상 유튜브 올리기 상태, 없으면 null)를 붙이고, 유튜브 승인 대기 건은 같은 키로 관문을 다시 물어 승인됐으면 올린다. 입력 exclude_platform(\"youtube\"·\"instagram\")을 주면 그 플랫폼에 이미 올렸거나 승인 대기 중인 영상은 뺀다(list_request_videos_skill만 읽어서 거르고, 모자라면 더 넓게 가져온 뒤 거른다. 11/26, 총괄 대화방이 \"최근 영상\"으로 같은 영상을 또 올리기 요청하는 걸 막는다).",
       "input_schema": "agents/marketing/src/marketing_agent/request_video.py#ListRequestVideosInput",
       "output_schema": "agents/marketing/src/marketing_agent/request_video.py#RequestVideoList",
       "grade": "read",

@@ -70,7 +70,7 @@ export interface FinanceKpis {
 export interface FinanceOverview { date: string; kpis: FinanceKpis; todo: FinanceTodo[] }
 
 // ---------------------------------------------------------------- ① 결산·리포트
-export type ClosingPeriod = "day" | "month";
+export type ClosingPeriod = "day" | "week" | "month";
 export interface ClosingLine { code: string; label: string; amount: number | null }
 export interface JournalEntry { account: string; debit: number; credit: number; memo: string }
 /** 판단에 쓴 규칙과 근거 (finance_rules.toml) */
@@ -326,6 +326,8 @@ export interface BankMatch {
   counts: Partial<Record<BankStatus, number>>;
   days: BankDay[];
   pg_memo: string;
+  /** 11/26 임시 예시(실제 입금 아님): 거래내역을 올리기 전에만 온다. 끄면(FINANCE_EXAMPLE_DATA=0) 없음 */
+  example?: { note: string; from: string; to: string; counts: Partial<Record<BankStatus, number>>; days: BankDay[] } | null;
 }
 export type TransferStatus = "paid" | "waiting" | "not_found" | "not_covered";
 export interface BankTransfer {
@@ -386,6 +388,8 @@ export interface TeamBudget {
   approved: TeamBudgetApproval | null;
   /** 팀별 실제 지출 자료가 아직 없어 늘 null (화면은 "준비 중") */
   actual_spend: null;
+  /** 11/26 임시 예시 지출(팀 예산의 70~105%, 실제 아님). 인원을 못 받았거나 끄면 null (옛 응답은 없음) */
+  example_spend?: { note: string; total: number; rows: { team: string; budget: number; spend: number; rate_pct: number }[] } | null;
 }
 
 // ---------------------------------------------------------------- ⑤ 세무 지원
@@ -821,9 +825,9 @@ export const finance = {
   lastSelfTest: () => fin<{ data: SelfTest | null; meta?: SelfTestLastMeta }>("/api/finance/self-test/last"),
   // 안전 장치 보류 큐 (정산 묶음 지급 승인 등 C 등급)
   reviews: (live = false) => data(saf<{ data: Review[] }>("/api/safety/reviews", { live })),
-  /** C 보류 결정. 사람 토큰만 받는다 (에이전트 토큰은 safety가 거부). `decidedAs`: 공용 토큰일 때 승인자 이름 */
-  decide: (reviewId: string, decision: "approved" | "rejected", note?: string, live = false, decidedAs?: string | null) =>
-    data(saf<{ data: Review }>(`/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, { method: "POST", body: { decision, note: note || null, ...(decidedAs ? { decided_as: decidedAs } : {}) }, human: true, live })),
+  /** C 보류 결정. 사람 토큰만 받는다 (에이전트 토큰은 safety가 거부). `decidedAs`: 공용 토큰일 때 승인자 이름. `confirm`(선택, 롤백 3-b): 승인할 때 서버가 보류의 서비스 이름과 견준다. 안 넣으면 본문에 안 실린다 */
+  decide: (reviewId: string, decision: "approved" | "rejected", note?: string, live = false, decidedAs?: string | null, confirm?: string) =>
+    data(saf<{ data: Review }>(`/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, { method: "POST", body: { decision, note: note || null, ...(decidedAs ? { decided_as: decidedAs } : {}), ...(confirm !== undefined ? { confirm } : {}) }, human: true, live })),
 };
 
 // ---------------------------------------------------------------- 표시 도우미 (쉬운 말)

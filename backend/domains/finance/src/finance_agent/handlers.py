@@ -510,6 +510,7 @@ async def closing_report(request: AgentRequest) -> AgentResult:
         window_from=report["from"],
         window_to=report["to"],
         unavailable=books.meta()["unavailable"],
+        ref=f"{data.period}:{report['date']}",
     )
     return _result(
         request,

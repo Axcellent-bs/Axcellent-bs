@@ -42,7 +42,7 @@ from ax_safety import cost_policy
 from ax_safety.auth import agent_from_token, bearer, human_from_token, human_tokens
 from ax_safety.chat import threads as chat_threads
 from ax_safety.chat.turn import ChatRefused, ChatService
-from ax_safety.gate import Gate, Publisher, SelfApprovalError, Verifier
+from ax_safety.gate import ConfirmError, Gate, Publisher, SelfApprovalError, Verifier
 from ax_safety.rules import load_registry, load_thresholds
 from ax_safety.store import Store, StoreWriteError
 from ax_safety.verify import call_verifier, publish_safety_event
@@ -69,6 +69,9 @@ class ReviewDecisionBody(BaseModel):
     decided_as: (
         Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)] | None
     ) = None
+    # 서비스 이름 확인(선택). 승인일 때만 보류의 서비스 이름과 견준다. 안 보내면 예전과 같고,
+    # 거절에는 검사하지 않는다. 감사 로그에는 남기지 않는다
+    confirm: Annotated[str, StringConstraints(max_length=64)] | None = None
 
 
 class CostPolicyRequestBody(BaseModel):
@@ -327,12 +330,14 @@ def create_app(
             return _error(404, "NOT_FOUND", "보류 건이 없다")  # 다른 회사 승인 대기는 없는 것처럼
         try:
             review = await gate.decide_review(
-                review_id, body.decision, person, body.note, body.decided_as
+                review_id, body.decision, person, body.note, body.decided_as, body.confirm
             )
         except KeyError:
             return _error(404, "NOT_FOUND", "보류 건이 없다")
         except SelfApprovalError as exc:
             return _error(403, "SELF_APPROVAL", str(exc))
+        except ConfirmError as exc:
+            return _error(422, exc.code, str(exc))
         except StoreWriteError as exc:
             logger.exception("보류 결정 기록 실패: %s", review_id)
             return _error(503, "STATE_UNAVAILABLE", str(exc))

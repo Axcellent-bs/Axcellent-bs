@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { ChatReviewDecision } from "@/components/office/ChatReviewDecision";
 import { InstagramPanel } from "@/components/marketing/InstagramPanel";
 import { YoutubePanel } from "@/components/marketing/YoutubePanel";
 import { listRequestVideos, requestVideoCoverUrl } from "@/lib/requestVideos";
@@ -7,7 +8,7 @@ import { PUBLISH_CHANNELS, canUploadToYoutube, publishStatusKo, type PublishChan
 // 대화방 의뢰 카드 › 영상 제작 단계 아래 "어디에 올릴까요?" (11/26). 제작 기록에 있던 유튜브·인스타 칸을 대화방 안에서 그대로 연다.
 // - 의뢰로 만든 영상(AI 표시 입힌 것)이 있을 때만 보인다. 없으면 아무것도 그리지 않는다
 // - [유튜브] [인스타그램 (릴스)]: 누르면 그 칸이 카드 안에 펼쳐진다(AI 초안 → 올리기 요청). 둘 다 해도 된다
-// - 올리기는 늘 사람 승인(안전 처리 로그, 요청한 계정과 다른 계정). 여기서 바로 올리지 않는다
+// - 올리기는 늘 사람 승인(안전 처리 로그, 요청한 계정과 다른 계정). 승인 대기면 이 카드 안에서 바로 승인·거절한다(11/26)
 
 export function RequestPublish({ requestId }: { requestId: string }) {
   const [video, setVideo] = useState<RequestVideo | null>(null);
@@ -35,6 +36,8 @@ export function RequestPublish({ requestId }: { requestId: string }) {
           );
         })}
       </span>
+      {video.youtube?.status === "awaiting_approval" && video.youtube.review_id && <ChatReviewDecision reviewId={video.youtube.review_id} what="유튜브 올리기" onDone={load} />}
+      {video.instagram?.status === "awaiting_approval" && video.instagram.review_id && <ChatReviewDecision reviewId={video.instagram.review_id} what="인스타그램 올리기" onDone={load} />}
       {open === "youtube" && <YoutubePanel requestVideoId={video.post_draft_id} youtube={video.youtube} onChanged={load} />}
       {open === "instagram" && <InstagramPanel requestVideoId={video.post_draft_id} instagram={video.instagram} cover={cover} onChanged={load} />}
     </section>

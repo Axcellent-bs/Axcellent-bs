@@ -67,3 +67,16 @@ def test_server_state_reduces_the_fault_switch() -> None:
     assert server_state({"degraded": True, "failing": False}) == "fault"
     assert server_state({"active": False, "failing": False, "degraded": False}) == "ok"
     assert server_state(None) == "unknown"
+
+
+@pytest.mark.usefixtures("real_mode")
+def test_rollback_reads_only_the_same_companys_diagnosis(runtime, a2a_body) -> None:
+    from ax_agent_template import company_scope
+
+    _diagnose(a2a_body)  # 요청 밖(캣북스 칸)에 저장
+    assert runtime.diagnosis_of("ctx_inc_0001") is runtime.diagnoses["ctx_inc_0001"]
+    with company_scope.using("catbooks"):
+        assert runtime.diagnosis_of("ctx_inc_0001") is not None
+    with company_scope.using("nubi-tour"):  # 다른 회사 요청은 못 본다
+        assert runtime.diagnosis_of("ctx_inc_0001") is None
+        assert runtime.diagnoses_in_scope() == {}

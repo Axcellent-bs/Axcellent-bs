@@ -29,6 +29,56 @@ export function handoffSummary(list: Proposal[]): HandoffSummary {
   };
 }
 
+// ---- 11/26 무리 나누기: 진행 중 → 오래 기다림 → 끝남 → 폐기 (자동으로 지우거나 상태를 바꾸지 않는다)
+
+/** 확인 대기로 이 날 수를 넘으면 "오래 기다림" */
+export const STALE_DAYS = 3;
+const DAY_MS = 86_400_000;
+const KST_MS = 9 * 3_600_000;
+
+/** 기획 기록 created(KST "MM-DD HH:mm", 해 없음) → 시각(ms). 지금보다 하루 넘게 뒤면 지난해로 본다. 모르면 null */
+export function createdAt(created: string | null | undefined, now: number): number | null {
+  const m = /^(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec((created ?? "").trim());
+  if (!m) return null;
+  const year = new Date(now + KST_MS).getUTCFullYear();
+  const at = (y: number) => Date.UTC(y, Number(m[1]) - 1, Number(m[2]), Number(m[3]), Number(m[4])) - KST_MS;
+  const t = at(year);
+  return t > now + DAY_MS ? at(year - 1) : t;
+}
+
+/** 끝남: 기획이 확정해 넘긴 것(마케팅 전달·진행 중·성과 확인·기획서로). 마케팅 전달 실패는 아직 진행 중 */
+const FINISHED: ReadonlySet<string> = new Set(["마케팅 전달", "진행 중", "성과 확인", "기획서로"]);
+export type HandoffGroup = "active" | "stale" | "done" | "rejected";
+export function handoffGroup(p: Proposal, now: number): HandoffGroup {
+  if (p.status === "폐기") return "rejected";
+  if (FINISHED.has(p.status) && !handoffFailed(p)) return "done";
+  if (p.status === "확인 대기") {
+    const at = createdAt(p.created, now);
+    if (at !== null && now - at > STALE_DAYS * DAY_MS) return "stale";
+  }
+  return "active";
+}
+
+export type HandoffGroups = Record<HandoffGroup, Proposal[]>;
+/** 무리마다 목록 (받은 순서 = dataProposals의 최신 위 그대로) */
+export function handoffGroups(list: Proposal[], now: number): HandoffGroups {
+  const out: HandoffGroups = { active: [], stale: [], done: [], rejected: [] };
+  for (const p of list) out[handoffGroup(p, now)].push(p);
+  return out;
+}
+
+/** 위 숫자 3칸: 진행 중 · 오래 기다림 · 마케팅 전달(handoff 있음). 지금 기록에서 센 그대로 */
+export function handoffCounts(list: Proposal[], now: number): { active: number; stale: number; marketing: number } {
+  const g = handoffGroups(list, now);
+  return { active: g.active.length, stale: g.stale.length, marketing: list.filter((p) => p.handoff?.ok === true).length };
+}
+
+/** 탭 옆 배지: "진행 N" (진행 중 수, 0이면 null) */
+export function handoffBadge(list: Proposal[], now: number): string | null {
+  const n = handoffGroups(list, now).active.length;
+  return n > 0 ? `진행 ${n}` : null;
+}
+
 /** 줄 머리 출처 칩: 보고서 인사이트면 "분석 의뢰 · TR-xxxx", 아니면 skill 이름 */
 export function sourceChip(p: Pick<Proposal, "skill" | "insightId">): string {
   const rid = reportIdOfInsight(p.insightId);

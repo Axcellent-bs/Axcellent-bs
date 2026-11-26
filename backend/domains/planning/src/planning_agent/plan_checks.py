@@ -166,11 +166,40 @@ def blocked_quote(rule: dict[str, Any]) -> bool:
     return rule.get("kind") == "quote" and has_claim(str(rule.get("text_ko") or ""))
 
 
-def check_rule(rule: dict[str, str], scenes: list[Scene], script: str) -> tuple[bool, str]:
-    """(지켰나, 어디서). 금칙어 든 대사는 늘 (False, BLOCKED_WHERE)."""
+# 11/26 G: 채널 이름 엔드카드는 마케팅 코드가 마지막 2초에 늘 얹는다. "끝에 채널 이름 넣기"처럼
+# 회사·채널 이름·로고·엔드카드를 끝에 넣으라는 말뿐인 ending 지시는 코드가 지킨다
+# (마지막 장면 글로 보지 않음)
+END_CARD_WHERE = "엔드카드(마지막 2초, 코드)"
+END_CARD_MARKS = ("채널", "로고", "엔드카드", "엔드", "이름", "channel", "logo", "end", "card",
+                  "name")  # fmt: skip
+# 연출이 아닌 말 (낱말 앞부분이 같으면 뺀다: 넣어줘·나오게·보이게 해줘)
+END_CARD_FILLER = (
+    "끝", "마지막", "넣", "나오", "나와", "보이", "보여", "표시", "띄우", "띄워", "해줘", "해주",
+    "하기", "하게", "주세요", "줘", "카드", "put", "show", "add", "at", "the",
+)  # fmt: skip
+
+
+def end_card_only(text: str, company: str = "") -> bool:
+    """회사·채널 이름·로고·엔드카드를 끝에 넣으라는 말뿐인가 (남는 연출 낱말이 없음)."""
+    names = [w for w in keywords(company) if w]
+    words = keywords(text)
+    marks = [w for w in words if w in names or any(w.startswith(m) for m in END_CARD_MARKS)]
+    rest = [w for w in words if w not in marks
+            and not any(w.startswith(f) for f in END_CARD_FILLER)]  # fmt: skip
+    return bool(marks) and not rest
+
+
+def check_rule(
+    rule: dict[str, str], scenes: list[Scene], script: str, company: str = ""
+) -> tuple[bool, str]:
+    """(지켰나, 어디서). 금칙어 든 대사는 늘 (False, BLOCKED_WHERE).
+
+    company: 회사 이름 (ending 지시가 채널 이름 엔드카드뿐인지 볼 때)."""
     kind, text = rule["kind"], rule["text_ko"]
     if blocked_quote(rule):
         return False, BLOCKED_WHERE
+    if kind == "ending" and end_card_only(text, company):
+        return True, END_CARD_WHERE
     if kind == "quote":
         want = bare(text)
         for s in scenes:
@@ -197,12 +226,12 @@ def check_rule(rule: dict[str, str], scenes: list[Scene], script: str) -> tuple[
 
 
 def check_rules(
-    rules: list[dict[str, str]], scenes: list[Scene], script: str
+    rules: list[dict[str, str]], scenes: list[Scene], script: str, company: str = ""
 ) -> list[dict[str, Any]]:
     """지시마다 {kind, text_ko, kept, where} (계약 RequestRule 모양)."""
     out = []
     for r in rules:
-        kept, where = check_rule(r, scenes, script)
+        kept, where = check_rule(r, scenes, script, company)
         out.append({**r, "kept": kept, "where": where})
     return out
 
@@ -284,11 +313,37 @@ def limits() -> tuple[int, int, int]:
             _limit(PROPS_MAX_ENV, PROPS_MAX))  # fmt: skip
 
 
+# 11/26 H: 낱말 한가운데는 세지 않는다 (운영 wr_eabc06b19e 장면 4 "손을 흔들고 마무리"의 "무리"를
+# 3명으로 셌다). 앞에 한글이 붙어 있으면 다른 낱말이다
+_WORD_START = r"(?<![가-힣])"
+# 글에 한 명이라고 분명히 적힌 말 (인물 수 칸보다 글을 믿는다). "한 명"·"1명"은 "친구 한 명과"처럼
+# 둘을 뜻할 때가 있어 넣지 않는다
+SOLO_WORDS = ("혼자", "홀로")
+
+
+def _found(word: str, text: str) -> bool:
+    return re.search(_WORD_START + re.escape(word), text) is not None
+
+
 def people_in_text(text: str) -> int:
-    """장면 글에서 읽은 인물 수 (못 읽으면 0)."""
-    found = [n for w, n in PEOPLE_WORDS if w in (text or "")]
-    found += [int(m.group(1)) for m in _PEOPLE_NUM.finditer(text or "")]
+    """장면 글에서 읽은 인물 수 (못 읽으면 0). 낱말은 낱말 처음에서만 맞춘다."""
+    text = text or ""
+    found = [n for w, n in PEOPLE_WORDS if _found(w, text)]
+    found += [int(m.group(1)) for m in _PEOPLE_NUM.finditer(text)]
     return max(found, default=0)
+
+
+def solo_in_text(text: str) -> bool:
+    """장면 글이 한 명이라고 말하고 여럿을 뜻하는 말은 없나 ("주인공 혼자 …")."""
+    text = text or ""
+    return any(_found(w, text) for w in SOLO_WORDS) and people_in_text(text) <= 1
+
+
+def scene_people(said: int, text: str) -> int:
+    """장면 인물 수: LLM 칸과 글 중 큰 값. 글이 한 명이라고 분명히 말하면 글을 믿는다."""
+    if solo_in_text(text):
+        return 1
+    return max(said, people_in_text(text))
 
 
 def action_count(action_en: str, visual: str) -> tuple[int, str]:
@@ -361,13 +416,13 @@ def feasibility(scenes: Sequence[Any], has_character: bool = False) -> list[dict
         text = " ".join(str(_get(s, k) or "") for k in ("visual", "start_frame", "end_frame"))
         said = _get(s, "people", 1)
         said = said if isinstance(said, int) and not isinstance(said, bool) else 1
-        people = max(said, people_in_text(text))
-        if has_character:
+        if has_character:  # #1911 기준 그대로 (LLM 칸과 글 중 큰 값)
             camera = f"{_get(s, 'camera_en') or ''} {visual}"
+            people = max(said, people_in_text(text))
             if plan_rules.close_other_person(text, camera, people):
                 out.append({"kind": "people", "code": CLOSE_PERSON, "scene": n,
                             "detail_ko": CLOSE_PERSON_KO})  # fmt: skip
-        elif people > people_max:
+        elif (people := scene_people(said, text)) > people_max:
             out.append({"kind": "people", "scene": n,
                         "detail_ko": f"인물 {people}명 (허용 {people_max}명)"})  # fmt: skip
         count, joined = action_count(str(_get(s, "action_en") or ""), visual)

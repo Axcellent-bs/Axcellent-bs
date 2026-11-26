@@ -57,6 +57,7 @@ from ax_agent_template.tenant import setting as tenant_setting
 from data_agent import collector_lock, keyword_pool, meme_shorts, shorts_backfill, youtube_quota
 from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat, YouTubeConnector
+from data_agent.connectors.youtube_analytics import YouTubeAnalytics
 from data_agent.stage_timing import install_sqlite_timer
 from data_agent.trend_precompute import precompute
 from data_agent.youtube_store import (
@@ -487,6 +488,8 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
             print(result.line(), flush=True)
             await measure_videos(connector, env)  # 게시한 영상 성과: 지금 잴 시점만 (실패해도 계속)
             await measure_instagram_videos(env)  # 인스타 게시 영상: 계정마다 한 번 (실패해도 계속)
+            await collect_insights(env)  # 영상 깊은 지표: 영상마다 하루 1번 (실패해도 계속)
+            await collect_ads(env)  # 광고 성과: 회사·플랫폼마다 하루 1번 (실패해도 계속)
             await track_fresh(env)  # 새 숏츠 추적: 같은 형식 비교 기준 표본 (실패해도 계속)
             # 숏츠 표본의 빠진 게시 시각 채우기 (하루 상한, 미리 계산 바로 앞. 실패해도 계속)
             await shorts_backfill.run(env)
@@ -571,6 +574,66 @@ async def measure_instagram_videos(
     if saved or problems:
         print(f"[video] 인스타 성과 시점 값 {saved}개" + (f", {'; '.join(problems)}" if problems
                                                     else ""), flush=True)  # fmt: skip
+    return saved
+
+
+async def collect_ads(env: Mapping[str, str], now: datetime | None = None) -> int:
+    """회사 광고 성과 (메타·구글 애즈, 회사·플랫폼마다 `DATA_ADS_EVERY_HOURS`에 한 번). 저장한 수.
+    실패해도 수집은 계속한다. 토큰·주소는 찍지 않는다 (오류 코드만)."""
+    from data_agent.connectors.google_ads import GoogleAds
+    from data_agent.connectors.meta_ads import MetaAds
+    from data_agent.skills import ad_performance as ap
+
+    meta, google = MetaAds(env), GoogleAds(env)
+    if not meta.configured and not google.configured:
+        return 0  # 연결 대기 (화면에 필요한 것이 보인다)
+    store = ap.store_of(env)
+    try:
+        result = await ap.collect_due(store, env, meta=meta, google=google, now=now)
+    except Exception as error:  # 광고 성과가 실패해도 수집은 계속
+        print(f"[ads] 광고 성과 수집 실패 ({type(error).__name__})", flush=True)
+        return 0
+    finally:
+        store.close()
+    if result.saved or result.problems:
+        print(result.line(), flush=True)
+    return result.saved
+
+
+async def collect_insights(
+    env: Mapping[str, str], now: datetime | None = None, conn: YouTubeAnalytics | None = None,
+    graph: object | None = None,
+) -> int:
+    """video_performance 추적 목록의 영상 깊은 지표 (유튜브 Analytics·Reporting, 인스타 우리 계정
+    인사이트. 영상마다 하루 한 번). 저장한 영상 수. 실패해도 수집은 계속한다.
+    토큰·주소는 찍지 않는다 (오류 코드만)."""
+    from data_agent.connectors.instagram_graph import InstagramGraph
+    from data_agent.skills import video_insights as vi
+    from data_agent.skills import video_performance as vp
+
+    path = env.get(vp.DB_ENV) or vp.DEFAULT_DB
+    if str(path) != ":memory:" and not Path(path).is_file():
+        return 0  # 등록된 영상이 없다
+    videos, store = vp.VideoStore(path), vi.InsightStore(path)
+    saved = 0
+    try:
+        for name, run in (
+            ("유튜브", lambda: vi.collect_due(videos, store, conn or YouTubeAnalytics(env), env,
+                                            now)),
+            ("인스타", lambda: vi.collect_instagram_due(videos, store, graph or InstagramGraph(env),
+                                                     env, now)),
+        ):  # fmt: skip
+            try:
+                result = await run()
+            except Exception as error:  # 깊은 지표가 실패해도 수집은 계속
+                print(f"[insights] {name} 깊은 지표 수집 실패 ({type(error).__name__})", flush=True)
+                continue
+            if result.saved or result.problems:
+                print(f"{result.line()} ({name})", flush=True)
+            saved += result.saved
+    finally:
+        videos.close()
+        store.close()
     return saved
 
 

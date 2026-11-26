@@ -14,11 +14,13 @@ import YoutubeMemeKeywordsSetup from "@/components/data/YoutubeMemeKeywordsSetup
 import { okOut, useSkill, type SkillState } from "@/components/data/useSkill";
 import { Basis, Sources, when } from "@/components/data/Sources";
 import { PROBE_STATUS, TREND_TABS, trendTabFromHash, trendTabHash, type LoopProbe, type TrendTab } from "@/lib/contentLoop";
-import { activeCount, dataProposals, insightFilterFromHash, insightFilterHash, type InsightFilter } from "@/lib/handoffView";
+import { dataProposals, handoffBadge as handoffBadgeText, insightFilterFromHash, insightFilterHash, type InsightFilter } from "@/lib/handoffView";
 import {
   DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
-  type A2AResult, type KeywordWindow, type PromoConceptsOutput, type TrendInsightBriefOutput, type TrendPopularOutput, type TrendScanOutput, type TrendVerdict,
+  type A2AResult, type CampaignEffectOutput, type KeywordWindow, type PromoConceptsOutput, type TrendInsightBriefOutput, type TrendPopularOutput, type TrendScanOutput,
+  type TrendVerdict, type VideoPerformanceVideo,
 } from "@/lib/data";
+import { campaignRows, resultTabTag } from "@/lib/resultCampaigns";
 import { fadedChip } from "@/lib/keywordTrendView";
 
 // 감지 탭이 아닌 하위 탭·인스타 칩 칸은 처음 열 때 받는다. 첫 화면(감지)은 이 코드 없이 먼저 그린다 (11/25 Lighthouse)
@@ -36,7 +38,7 @@ const InstagramMemo = lazy(() => import("@/components/data/InstagramMemo").then(
 // - 주소에 하위 탭을 남긴다: /data/trend#detect · #request(보고서는 #request?id=<report_id>) · #recommend(필터 ?from=report|brief) · #handoff · #result · #sources.
 //   없으면 감지. 옛 #trend/<단계> 주소는 Data.tsx가 새 주소로 옮긴다
 // - 머리: 제목 · 설명 접힘 · YouTube 인기 기준 시각. 예전 단계 줄(① 감지 → … ④ 성과)은 탭과 같은 내용이라 뺐다
-// - 탭 옆: 기획 전달 = 진행 중 제안 수(0이면 숨김), 성과 = 지금 단계 칩 문구(측정 대기 등)
+// - 탭 옆: 기획 전달 = "진행 N"(진행 중 무리 수, 0이면 숨김, 11/26), 성과 = 지금 단계 칩 문구(측정 대기 등)
 // - 1 감지: 맨 위 한 줄(오늘 가장 큰 화제, trend_popular) → 플랫폼 칩(#detect?view=all|youtube|instagram|search, lib/detectView.ts)
 //   인스타 = 인스타 레이더 → 인기 오디오 → 인스타 트렌드 메모. 키가 없으면 레이더·오디오 대신 한 줄
 //   종합 = 요약 줄(1위 유행·검색 급상승 1위·인스타 오디오) + 요즘 유행·밈 / 유튜브 = 유행 표(쇼츠 칸 중심) + 영상 탐색 /
@@ -310,9 +312,15 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
   // 기획 AI 기록: 기획 전달 탭 · 인사이트 전달 칩 · 탭 배지가 같이 쓴다 (30초마다)
   const planning = usePlanningProposals();
   const planningAll = proposalsOf(planning.load);
-  const handoffBadge = activeCount(dataProposals(planningAll));
+  const handoffBadge = handoffBadgeText(dataProposals(planningAll), Date.now());
   // 성과 탭 옆 칩: 측정 전(측정 대기)이라도 데이터 AI 상태 확인이 실패했으면 "연결 확인 필요"
   const resultProbe: LoopProbe = !kpiLive ? "failed" : campaignProbe === "idle" && dataUp === false ? "failed" : campaignProbe;
+  // 성과 탭 (11/26): 마케팅에 넘어간 캠페인(기획 기록 handoff) · 영상 성과가 받은 영상 · 이 화면에서 잰 캠페인 효과
+  const campaigns = campaignRows(dataProposals(planningAll));
+  const [videos, setVideos] = useState<VideoPerformanceVideo[] | null>(null);
+  const [effects, setEffects] = useState<Readonly<Record<string, CampaignEffectOutput>>>({});
+  const onEffect = useCallback((id: string, out: CampaignEffectOutput) => setEffects((all) => ({ ...all, [id]: out })), []);
+  const resultTag = resultTabTag(PROBE_STATUS[resultProbe].label, resultProbe, campaigns, new Set(Object.keys(effects)));
   // 2번째 이후 하위 탭은 처음 열 때 그린다(감지를 빨리 열려고). 그 뒤에는 숨기기만 한다
   const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set([tab.key]));
   useEffect(() => {
@@ -333,10 +341,10 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
         onClick={() => openTab(t)}
         className={`-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-[15px] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500 ${t.side ? "ml-auto" : ""} ${on ? "border-brand-600 font-bold text-brand-700" : `border-transparent ${t.side ? "text-ink-400" : "text-ink-500"} hover:text-ink-900`}`}>
         {t.side ? `⚙ ${t.title}` : t.title}
-        {t.key === "handoff" && handoffBadge > 0 && (
-          <span className="rounded-full bg-brand-50 px-1.5 text-[11px] font-bold text-brand-700" aria-label={`진행 중 제안 ${handoffBadge}개`}>{handoffBadge}</span>
+        {t.key === "handoff" && handoffBadge && (
+          <span className="rounded-full bg-brand-50 px-1.5 text-[12.5px] font-bold text-brand-700">{handoffBadge}</span>
         )}
-        {t.key === "result" && <span className="text-[11px] font-normal text-ink-400">{PROBE_STATUS[resultProbe].label}</span>}
+        {t.key === "result" && <span className="text-[12.5px] font-normal text-ink-500">{resultTag}</span>}
       </button>
     );
   };
@@ -383,10 +391,10 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
               // 기획 전달: 기획 AI가 받은 데이터 인사이트와 진행 상태
               <PlanningHandoff load={planning.load} onRetry={planning.reload} />
             ) : (
-              // 성과: 게시 영상 성과(위) + 캠페인 효과(아래). 측정 결과가 하위 탭을 오가도 남게 숨기기만 한다
+              // 성과 (11/26): 마케팅에 넘어간 캠페인 목록 + [측정](위) → 게시 영상 성과(아래). 측정 결과가 하위 탭을 오가도 남게 숨기기만 한다
               <div className="flex flex-col gap-4">
-                <VideoPerformance />
-                <CampaignEffect onProbe={setCampaignProbe} />
+                <CampaignEffect onProbe={setCampaignProbe} campaigns={campaigns} videos={videos} effects={effects} onEffect={onEffect} />
+                <VideoPerformance onVideos={setVideos} />
               </div>
             )}</Suspense></ErrorBoundary>}
           </div>

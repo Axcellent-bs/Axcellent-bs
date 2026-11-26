@@ -311,6 +311,44 @@ def test_list_skill_attaches_youtube_state_and_checks_approval(
     assert rvy.get(DRAFT_ID)["status"] == "done"
 
 
+def test_exclude_platform_skips_an_already_uploaded_video_for_the_latest_pick(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """11/26: 총괄 대화방이 "최근 영상"으로 고를 때 이미 유튜브에 올린 영상은 건너뛴다.
+
+    (post_draft_id가 알파벳으로 더 뒤인 spd_b가 더 "최근"으로 뽑히게 만들고, 그 영상을 먼저
+    올려 둔 뒤 exclude_platform="youtube"로 물으면 아직 안 올린 spd_a가 나와야 한다)
+    """
+    monkeypatch.setattr(handlers.STATE, "sns", env["sns"])
+    _with_labeled_video(env, env["draft"])  # DRAFT_ID(spd_a): 안 올린 쪽
+    uploaded = _draft(ctx="ctx_wr_zzz999", n="b")
+    env["sns"].save(uploaded)
+    _with_labeled_video(env, uploaded)  # spd_b: 먼저 올려 둘 쪽
+    _run(lambda: rvy.write_draft(env["sns"], "spd_b", FakeLlm, "ctx"))
+    _run(lambda: rvy.request_upload(META, env["sns"], "spd_b", "태윤"))
+    env["gate"].status = "executed"
+    _run(lambda: rvy.check_upload(META, env["sns"], "spd_b"))
+    assert rvy.get("spd_b")["status"] == "done"
+
+    # 필터 없이 물으면 (알파벳상 더 뒤인) 이미 올린 영상이 "최근"으로 뽑힌다
+    plain = AgentRequest(meta=META, skill="list_request_videos", input={"limit": 1})
+    plain_result = _run(lambda: handlers.list_request_videos_skill(plain))
+    assert plain_result.output["items"][0]["post_draft_id"] == "spd_b"
+
+    # exclude_platform을 주면 이미 올린 영상은 빠지고 아직 안 올린 쪽이 나온다
+    request = AgentRequest(
+        meta=META,
+        skill="list_request_videos",
+        input={"limit": 1, "exclude_platform": "youtube"},
+    )
+    result = _run(lambda: handlers.list_request_videos_skill(request))
+    assert result.status == TaskStatus.COMPLETED
+    items = result.output["items"]
+    assert len(items) == 1
+    assert items[0]["post_draft_id"] == DRAFT_ID
+    assert (items[0].get("youtube") or {}).get("status") is None
+
+
 def test_skills_return_contract_output(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:

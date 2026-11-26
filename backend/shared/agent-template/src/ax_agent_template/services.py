@@ -317,6 +317,8 @@ SERVICES: tuple[Service, ...] = (
             "answer_planning_question",
             "campaign_effect",
             "video_performance",
+            "ad_performance",
+            "video_insights",
             "campaign_result",
             "receive_idea_report",
             "list_idea_reports",
@@ -486,6 +488,9 @@ SERVICES: tuple[Service, ...] = (
             "diagnose_incident",
             "rollback_deployment",
             "verify_recovery",
+            # 총괄 대화방 의뢰용 현황 읽기: 지금 장애·서비스별 최근 배포 (읽기만)
+            "current_incidents",
+            "latest_deployments",
             # 같은 유형 과거 장애의 처리 방식(장애 상태 해제) 다시 하기
             "release_fault",
             # 승인된 개발 배포를 연결된 배포 도구로 띄우기·그 실행 상태 읽기 (dev → infra)
