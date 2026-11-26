@@ -154,3 +154,12 @@ sudo systemctl enable --now ax-autodeploy-watchdog.timer
 ### 안전 범위
 
 감시는 상태를 읽고 알린다. 배포·`restart-backend`·`rollback`·`deploy-bundle`·`ax-gate` 를 부르지 않고, 파일을 지우거나 `systemctl` 을 바꾸지 않는다. 앞으로 복구 동작을 넣더라도 범위는 **자동 배포 프로세스를 되살리는 것**(예: 타이머 재시작)까지이고, 배포·백엔드 재시작·롤백은 게이트 규칙을 따른다. `backend-in-progress` 가 남은 경우는 사람만 처리한다. 참고: flock 점유 확인을 위해 `lock` 파일을 읽기 전용으로 열어 잠깐(밀리초) 잡았다 놓으므로, 같은 순간에 시작한 자동 배포 주기는 `busy` 로 한 번 건너뛸 수 있다.
+
+## 홍보 파일이 백엔드 배포에 묻히지 않게 (11/26)
+
+- 문제: 백엔드를 배포한 주기는 프론트 단계를 건너뛰고 기준 ref 만 올린다(프론트는 `deploy-bundle` 이 같이 빌드). 그래서 같은 묶음의 `docs/promo` 변경(#1907: `index.html`·릴스 파일)은 홍보 사이트에 올라가지 않았다. 홍보 파일은 번들에 없다.
+- 고침: 기준을 올리기 전에 `promo_catchup` 이 기준..배포한 커밋 사이의 홍보 파일을 먼저 올린다(새 파일 먼저, `index.html` 마지막, 실패하면 이전 파일로 복원하고 기준을 올리지 않아 다음 주기에 다시). `--dry-run` 은 올릴 파일만 알려 준다.
+- 새 파일 허용 범위: `assets/` 에 더해 `instagram/assets/` 아래도 새 파일을 올린다. 문서·소스(`*.md` `*.mjs` `*.json` `README*` `content.*` `build.*`)는 여전히 안 올린다.
+- 같이 들어간 것: green 선택(tip 의 CI 가 끝나지 않아도 최근 green 커밋을 배포)과 PR 조회 때 토큰이 비워지던 버그 수정(서버에 11/25~26 먼저 적용했던 것을 저장소에 맞춘다).
+- 시험: `python -m unittest discover -s docs/ops/autodeploy/tests -p test_promo_catchup.py -v`
+
