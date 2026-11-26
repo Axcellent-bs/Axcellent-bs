@@ -125,6 +125,34 @@ TIME_KO = {
 }
 
 
+# 승인 대기 단계 기록에 남기는 값(11/26 롤백 요청 2단계): 롤백 서비스·버전과 안전 관문 기준표 정수
+# 4개. 부서가 쓴 문장은 남기지 않는다(문자열은 짧은 코드·버전 모양만, 정수는 숫자만)
+HOLD_TEXT_KEYS = ("service", "from_version", "to_version", "hold_reason")
+HOLD_INT_KEYS = ("suspect_count", "low_confidence", "irreversible_count", "prior_rollbacks")
+_HOLD_TEXT = re.compile(r"[\w:.\-+/]{1,80}")
+
+
+def hold_facts(output: object) -> dict[str, Any]:
+    """승인 대기 결과에서 화면이 읽을 값만 고른다. 모양이 맞지 않는 값은 버린다."""
+    if not isinstance(output, dict):
+        return {}
+    facts: dict[str, Any] = {}
+    for key in HOLD_TEXT_KEYS:
+        value = output.get(key)
+        if isinstance(value, str) and _HOLD_TEXT.fullmatch(value):
+            facts[key] = value
+    params = output.get("path_params")
+    if isinstance(params, dict):
+        ints = {
+            k: params[k]
+            for k in HOLD_INT_KEYS
+            if isinstance(params.get(k), int) and not isinstance(params.get(k), bool)
+        }
+        if ints:
+            facts["path_params"] = ints
+    return facts
+
+
 def _record_note(note: object) -> str | None:
     """이벤트에 보관된 설명에서 중복 머리말을 떼고 영어 코드를 한국어로 바꾼다."""
     if not isinstance(note, str) or not note:
@@ -849,6 +877,7 @@ class Engine:
         inc.holds[step.id] = hold
         run.status = "held"
         run.note = (result.output or {}).get("hold_reason", "") or "사람 승인 대기"
+        run.output = hold_facts(result.output)  # 대화방 롤백 상태 카드가 읽는 값만(11/26)
         inc.log(f"{run.label}: C 등급 보류 — 승인 대기열에 올림")
         self._save(inc)
         early = self._early_reviews.pop(hold.review_id, None) if hold.review_id else None

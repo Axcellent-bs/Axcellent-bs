@@ -25,10 +25,15 @@ DEPT_LABEL = {
     "finance": "재무",
     "dev": "개발",
     "infra": "인프라",
+    "orchestrator": "총괄",
     "hr": "인사",
     "archive": "아카이브",
 }
 READ_GRADE = "read"
+# 11/26 총괄이 자기 사건 기록을 읽기만 하는 단계(부서를 부르지 않는다).
+# 어떤 skill인지는 아래 목록이 정한다
+SELF_KIND = "self"
+ROLLBACK_STATUS_SKILL = "incident_rollback_status"
 HUMAN_GRADE = "C"  # 총괄이 사람 승인을 먼저 받는 등급(`human_gate`가 있는 단계도 같다)
 BRAND_CHARACTER_KEY = "brand_character_record_id"  # 홍보 영상에 쓸 회사 대표 캐릭터 (11/23)
 # 11/24: 홍보 영상은 회사 캐릭터 답을 먼저 받는다. 이 사람 단계는 사람 확인(승인·거절)이 아니라
@@ -45,7 +50,7 @@ class TaskStep:
     label: str
     grade: str | None  # read · A · B · C (사람 확인 단계는 None)
     after: tuple[str, ...] = ()
-    kind: str = "agent"  # agent | human
+    kind: str = "agent"  # agent | human | self(총괄이 자기 사건 기록을 읽는 읽기 전용 단계)
     # 결과 번호: 이 단계 결과에서 부서가 정한 번호를 읽을 칸 이름(예: "report_id"),
     # 그리고 이 단계가 앞 단계 번호를 받을 입력 칸 이름. 큰 결과는 부서 저장소에 두고 번호만 넘긴다
     ref_key: str | None = None
@@ -372,6 +377,29 @@ TASKS: tuple[TaskDef, ...] = (
         "diagnose_incident",
         fill="incident_component",
         ref_key="status",
+    ),
+    # 11/26 롤백 요청 2단계(읽기 전용): 열린 사건의 롤백 승인 대기를 카드에 보여 준다.
+    # 새 실행 경로가 아니다: 총괄이 자기 사건 기록만 읽고(부서·`execute()` 호출 없음),
+    # 롤백은 기존 사건 흐름의 안전 관문(B)에서만 일어난다.
+    # "롤백해 줘" 같은 글도 여기로 와서 지금 상태와 이유를 안내받는다
+    TaskDef(
+        "incident_rollback_status",
+        "사건 롤백 상태 확인",
+        "열린 장애 사건에서 롤백(배포를 이전 버전으로 되돌리기)이 제안됐는지, 승인을 기다리는지, "
+        "어떻게 됐는지 알려 달라는 의뢰. 상태만 보여 주고 이 의뢰로 되돌리지는 않는다"
+        "(롤백은 장애 대응 사건의 안전 관문에서만 한다).",
+        ("롤백 상태 알려 주세요", "결제 장애 롤백 어떻게 돼가요", "배포 되돌려 줘"),
+        (
+            TaskStep(
+                "run",
+                "orchestrator",
+                ROLLBACK_STATUS_SKILL,
+                "사건 롤백 상태",
+                READ_GRADE,
+                kind=SELF_KIND,
+                ref_key="ref",
+            ),
+        ),
     ),
     _one(
         "dev_status",

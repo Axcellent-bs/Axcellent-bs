@@ -270,3 +270,15 @@ test("인프라 의뢰 단계: 끝났고 번호 모양이 맞을 때만 결과�
   assert.equal(infraOfRequest(row("diagnose_incident", "completed", "rollback")), null);
   assert.equal(infraOfRequest({ plan: [], steps: {} }), null);
 });
+
+test("롤백 상태 단계(11/26, 읽기 전용): 총괄이 센 열린 사건 수 번호만 읽는다", () => {
+  const plan = [{ step_id: "run", dept: "orchestrator", skill: "incident_rollback_status", label: "사건 롤백 상태", after: [] as string[], kind: "self" }];
+  const row = (status: StepStatus, result_ref: string | null) => ({ plan, steps: { run: { status, result_ref } as never } });
+  assert.deepEqual(infraOfRequest(row("completed", "open:0")), { kind: "rollback", open: 0 });
+  assert.deepEqual(infraOfRequest(row("completed", "open:2")), { kind: "rollback", open: 2 });
+  assert.equal(infraOfRequest(row("running", "open:2")), null);
+  assert.equal(infraOfRequest(row("completed", "open:x")), null);
+  assert.equal(infraOfRequest(row("completed", "rollback")), null);
+  // 다른 부서가 같은 skill 이름을 쓴다고 읽지 않는다
+  assert.equal(infraOfRequest({ plan: [{ ...plan[0], dept: "data" }], steps: { run: { status: "completed", result_ref: "open:1" } as never } }), null);
+});
