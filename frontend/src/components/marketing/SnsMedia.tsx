@@ -18,7 +18,7 @@ import { BRIEFS_LIST_MAX, KIND_SOURCE_KO, briefs, briefsEnabled, briefsError, dr
 // 보류 결정은 장애·공지·캠페인 탭의 보류 큐에서 한다. 이 탭은 결정하지 않는다.
 // 이미지 시트 · 스토리보드 카드(Higgsfield 결과는 카드 안 RenderPanel이 보여 준다).
 // 11/23 화면 정리: 카드를 한 줄로 늘어놓지 않고 탭(만들기·넘어온 기획안·승인 대기·계정·연결)으로 나눈다.
-// '의뢰로 만든 영상'은 제작 기록(/marketing/records?view=videos)으로 옮겼다. 옛 주소(?view=videos·?request=)는 그리로 보낸다.
+// 의뢰 영상은 제작 기록(/marketing/records)에서 본다. 옛 주소(?view=videos·?request=)는 그리로 보낸다.
 // 고른 탭은 주소 ?view=에 남는다. 유튜브 연결에서 돌아오면(?youtube=) 계정·연결 탭을 연다.
 
 const REFRESH_MS = 15_000;

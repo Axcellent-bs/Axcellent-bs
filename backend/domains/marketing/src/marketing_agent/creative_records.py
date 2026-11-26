@@ -297,6 +297,7 @@ class CreativeRecords:
                     "script_at": script.get("at") if script else None,
                     "kind": upload_kind(sheet),
                     "references": references_of(sheet),
+                    **_video_preview(r["render"]),
                 }
             )
         return out
@@ -564,6 +565,25 @@ def _statuses(raw: str | None) -> dict[str, str]:
     """목록용: 단계별 상태만(sheet_image·board_image·video)."""
     render = json.loads(raw) if raw else {}
     return {k: str((v or {}).get("status") or "") for k, v in render.items() if isinstance(v, dict)}
+
+
+def _video_preview(raw: str | None) -> dict[str, Any]:
+    """목록의 영상 칸 미리보기(11/26): 지금 정해진 썸네일과 영상 길이. 없으면 None.
+
+    썸네일은 고른 후보, 고르지 않았으면 첫 후보다(`creative_thumbnails.chosen_id`와 같은 규칙)."""
+    render = json.loads(raw) if raw else {}
+    thumbs = render.get("thumbnails") or {}
+    ids = [str(c.get("media_id")) for c in thumbs.get("candidates") or [] if c.get("media_id")]
+    cover = None
+    if ids:
+        cover = thumbs.get("chosen") if thumbs.get("chosen") in ids else ids[0]
+    # 지금 보여 주는 영상(완성 영상이 있으면 그것)의 길이만. 직접 올린 파일은 길이를 몰라 None
+    final = render.get("final_video") or {}
+    info = final if final.get("status") == "done" else render.get("video") or {}
+    sped = (render.get("overlay") or {}).get("speed_applied")  # 배속했으면 재생 길이는 계획 길이
+    value = (info.get("plan_seconds") if sped else None) or info.get("seconds")
+    known = info.get("status") == "done" and isinstance(value, int | float) and value > 0
+    return {"cover_media_id": cover, "video_seconds": float(value) if known else None}
 
 
 _store: CreativeRecords | None = None

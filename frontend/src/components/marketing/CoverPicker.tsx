@@ -3,7 +3,7 @@ import { useAuthedMedia } from "@/lib/authedMedia";
 import { listRequestVideos, requestVideoCoverUrl, selectRequestVideoCover } from "@/lib/requestVideos";
 import { COVER_CONFIRM_KO, canCommitCover, coverCells, coverErrorKo, needsCoverConfirm, type CoverCell, type RequestVideo } from "@/lib/requestVideoView";
 
-// 의뢰 영상 썸네일 후보 3장 → 사람이 고르기 (시안 ③). 제작 기록 › 의뢰로 만든 영상 카드와 대화방 의뢰 카드(영상 제작 완료)에 둔다.
+// 의뢰 영상 썸네일 후보 3장 → 사람이 고르기 (시안 ③). 제작 기록 상세의 영상 단계와 대화방 의뢰 카드(영상 제작 완료)에 둔다.
 // 후보는 AI 라벨을 입힌 영상에서 뽑은 그림이라 AI 표시가 들어 있다. 고르지 않으면 첫 후보가 기본값이고 게시·유튜브 승인에 같이 들어간다.
 // 승인 대기·승인 뒤에 바꾸면 그 승인이 풀려 다시 받아야 한다(바꾸기 전에 확인 상자).
 

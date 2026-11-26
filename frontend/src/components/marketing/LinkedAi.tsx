@@ -24,7 +24,7 @@ const LINKS: Record<MarketingTab, Link[]> = {
   ],
   sns: [
     { who: "안전 장치", dir: "시킴", line: "이미지·영상 생성(generate_media)과 SNS 게시(publish_sns)를 execute로 요청합니다. 게시는 항상 사람 승인을 거칩니다." },
-    { who: "총괄 AI", dir: "받음", line: "홍보 영상 의뢰(wr_…)가 만든 영상 초안을 '의뢰로 만든 영상'에서 읽기만 합니다." },
+    { who: "총괄 AI", dir: "받음", line: "홍보 영상 의뢰(wr_…)가 만든 영상 초안을 읽어 제작 기록 목록에 함께 보여 줍니다." },
   ],
   records: [
     { who: "이 화면", dir: "받음", line: "SNS·미디어에서 만든 이미지 시트·스토리보드 기록을 읽기만 합니다(creative_records_list·creative_record_get)." },
