@@ -60,7 +60,8 @@ def _client(handler) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=create_app(upstream)),
         base_url="http://proxy",
-        headers={"Authorization": f"Bearer {CALLER}"},  # /status도 호출자 토큰을 확인한다
+        # /status도 호출자 토큰을 확인한다. 회사 없이 부르면 연결 전이라 회사를 싣는다(11/26)
+        headers={"Authorization": f"Bearer {CALLER}", "X-AX-Company": "catbooks"},
     )
 
 

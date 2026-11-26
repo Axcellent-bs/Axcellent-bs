@@ -9,6 +9,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from ax_agent_template import company_scope
 from ax_agent_template import config as template_config
 from ax_contracts.schemas import AgentResult, ExecuteDecision, TaskStatus
 from dev_agent.deploy import (
@@ -256,7 +257,8 @@ def test_dejafix_source_with_mock_transport() -> None:
     async def run() -> list[Signal]:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
             src = DejaFixIncidentSource("http://dejafix.test/", client=http)
-            return await src.signals(_dep(), T0, T0)
+            with company_scope.using("catbooks"):  # 배포 확인은 요청 회사로 부른다
+                return await src.signals(_dep(), T0, T0)
 
     rows = asyncio.run(run())
     assert seen[0].url.path == "/api/incidents"
@@ -277,11 +279,31 @@ def test_dejafix_source_sends_agent_token(monkeypatch: pytest.MonkeyPatch) -> No
 
     async def run() -> list[Signal]:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-            with template_config.agent_name_scope("dev"):
+            with template_config.agent_name_scope("dev"), company_scope.using("c-cf2f0d"):
                 return await DejaFixIncidentSource("http://d", client=http).signals(_dep(), T0, T0)
 
     asyncio.run(run())
     assert seen[0].headers["authorization"] == "Bearer tok-dev"
+    assert seen[0].headers["x-ax-company"] == "c-cf2f0d"  # 그 회사 Zabbix를 거친 장애만
+
+
+def test_dejafix_source_without_company_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """요청 회사가 없으면 DejaFix를 부르지 않는다(캣북스로 떨어지지 않는다, 11/26)."""
+    monkeypatch.setenv("AX_AGENT_TOKENS", "dev=tok-dev")
+    called: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        called.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    async def run() -> list[Signal]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            with template_config.agent_name_scope("dev"):
+                return await DejaFixIncidentSource("http://d", client=http).signals(_dep(), T0, T0)
+
+    with pytest.raises(SignalUnavailable):
+        asyncio.run(run())
+    assert called == []
 
 
 def test_dejafix_source_without_token_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -297,8 +319,8 @@ def test_dejafix_source_without_token_is_unavailable(monkeypatch: pytest.MonkeyP
     async def run() -> list[Signal]:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
             src = CombinedSource([("dejafix", DejaFixIncidentSource("http://d", client=http))])
-            with template_config.agent_name_scope("dev"):
-                return await src.signals(_dep(), T0, T0)
+            with template_config.agent_name_scope("dev"), company_scope.using("catbooks"):
+                return await src.signals(_dep(), T0, T0)  # 회사는 있고 토큰만 없다
 
     rows = asyncio.run(run())
     assert [r.kind for r in rows] == ["unavailable"]
@@ -312,7 +334,8 @@ def test_dejafix_source_error_becomes_unavailable() -> None:
     async def run() -> list[Signal]:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
             src = CombinedSource([("dejafix", DejaFixIncidentSource("http://d", client=http))])
-            return await src.signals(_dep(), T0, T0)
+            with company_scope.using("catbooks"):
+                return await src.signals(_dep(), T0, T0)
 
     rows = asyncio.run(run())
     assert [r.kind for r in rows] == ["unavailable"]

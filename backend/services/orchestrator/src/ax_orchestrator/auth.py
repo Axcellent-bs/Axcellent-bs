@@ -21,6 +21,8 @@ from collections.abc import AsyncIterator, Callable
 from fastapi import Header, HTTPException
 
 from ax_agent_template import company_scope, human_auth
+from ax_agent_template.companies import canonical_company_id
+from ax_agent_template.company_connection import CALLER_COMPANY_HEADER
 from ax_agent_template.config import is_mock
 from ax_agent_template.server import verify_token
 from ax_agent_template.services import department_of
@@ -75,16 +77,33 @@ def _session_company(authorization: str | None, x_session: str | None = None) ->
         return None
 
 
+def _agent_company(authorization: str | None, x_company: str | None) -> str | None:
+    """검증된 에이전트 토큰이 실은 부르는 회사(`X-AX-Company`). 아니면 None.
+
+    다른 AI(재무 장애 비용·인프라 대화)가 그 회사의 사건(DejaFix에서 온 장애 포함)만 읽게 한다
+    (11/26). 에이전트 토큰이 아니면 머리를 믿지 않는다(머리만 바꿔 남의 회사를 못 읽게)."""
+    scheme, _, token = (authorization or "").partition(" ")
+    if not x_company or scheme.lower() != "bearer" or not token.strip():
+        return None  # 토큰이 없으면 거절하지 않고 회사만 안 고른다(읽기는 예전 그대로)
+    if _agent(token.strip()) is None:
+        return None
+    return canonical_company_id(x_company.strip())
+
+
 async def bind_company(
     authorization: str | None = Header(default=None),
     x_ax_session: str | None = Header(default=None, alias=human_auth.SESSION_HEADER),
+    x_ax_company: str | None = Header(default=None, alias=CALLER_COMPANY_HEADER),
 ) -> AsyncIterator[None]:
     """화면에서 온 요청이 로그인한 사람의 회사 기록만 보게 한다 (여러 회사 5단계).
 
-    세션 토큰의 회사(`cid`)를 이 요청의 회사로 걸어 둔다. 공용 사람 토큰·에이전트 토큰·토큰이 없는
-    요청은 회사를 정하지 않아 기본 회사(catbooks) 기록을 본다(지금까지와 같다).
+    세션 토큰의 회사(`cid`)를 이 요청의 회사로 걸어 둔다. 세션이 없으면 검증된 에이전트 토큰이
+    실은 `X-AX-Company`(11/26). 공용 사람 토큰·토큰이 없는 요청은 회사를 정하지 않아 기본 회사
+    (catbooks) 기록을 본다(지금까지와 같다).
     """
-    cid = _session_company(authorization, x_ax_session)
+    cid = _session_company(authorization, x_ax_session) or _agent_company(
+        authorization, x_ax_company
+    )
     if cid is None:
         yield
         return

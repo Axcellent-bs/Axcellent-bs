@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from ax_agent_template import company_scope
 from ax_contracts.schemas import (
     AgentRequest,
     AgentResult,
@@ -152,12 +153,54 @@ async def test_only_resolved_incident_is_final(
     """degraded는 나중에 복구 신호로 영향 구간이 바뀔 수 있어 계속 기억하지 않는다."""
     live = LiveSources()
 
-    async def read_json(url: str, timeout: float) -> Any:
+    async def read_json(url: str, timeout: float, headers: Any = None) -> Any:
         return {"data": [_incident_row(status)]}
 
     monkeypatch.setattr(live, "_read_json", read_json)
     found = await live.incident_window("ctx_inc_0001")
     assert found is not None and found["final"] is final
+
+
+@pytest.mark.asyncio
+async def test_incident_list_is_read_per_company(monkeypatch: pytest.MonkeyPatch) -> None:
+    """누비투어 화면은 누비투어 사건만(11/26): 총괄에 토큰·회사를 싣고, 기억도 회사마다 따로다.
+
+    예전에는 회사를 싣지 않아 총괄 기본 회사(캣북스) 사건으로 누비투어 장애 비용을 셈했다."""
+    monkeypatch.setenv("FINANCE_TOKEN", "tok-finance")
+    live = LiveSources()
+    sent: list[dict[str, str] | None] = []
+
+    async def read_json(url: str, timeout: float, headers: Any = None) -> Any:
+        sent.append(headers)
+        company = (headers or {}).get("X-AX-Company")
+        return {"data": [_incident_row("resolved")] if company == "catbooks" else []}
+
+    monkeypatch.setattr(live, "_read_json", read_json)
+    with company_scope.using("c-cf2f0d"):
+        assert await live.incident_window("ctx_inc_0001") is None  # 캣북스 사건이 안 보인다
+    with company_scope.using("catbooks"):
+        assert await live.incident_window("ctx_inc_0001") is not None
+    assert [h and h.get("X-AX-Company") for h in sent] == ["c-cf2f0d", "catbooks"]
+    assert all(h and h["Authorization"] == "Bearer tok-finance" for h in sent)
+
+
+@pytest.mark.asyncio
+async def test_other_company_without_token_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """토큰이 없으면 그 회사 사건만 골라 읽을 수 없다: 다른 회사는 확인할 수 없음(부르지 않음)."""
+    # CI가 켜 두는 목 모드면 목 토큰이 생기므로 끈다
+    for name in ("FINANCE_TOKEN", "AX_AGENT_TOKENS", "AGENT_TEMPLATE_MOCK", "FINANCE_MOCK"):
+        monkeypatch.delenv(name, raising=False)
+    live = LiveSources()
+    called: list[str] = []
+
+    async def read_json(url: str, timeout: float, headers: Any = None) -> Any:
+        called.append(url)
+        return {"data": [_incident_row("resolved")]}
+
+    monkeypatch.setattr(live, "_read_json", read_json)
+    with company_scope.using("c-cf2f0d"):
+        assert await live.incident_window("ctx_inc_0001") is None
+    assert called == []
 
 
 # --- 진행 중 요청 합치기: 같은 사건을 동시에 여러 번 물어도 데이터분석에는 한 번 ---

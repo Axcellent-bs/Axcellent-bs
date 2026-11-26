@@ -179,6 +179,30 @@ async def test_shared_token_with_session_header_reads_that_company() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_token_reads_the_company_it_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    """다른 AI(재무 장애 비용·인프라 대화)는 에이전트 토큰 + `X-AX-Company`로 그 회사 사건만 읽는다
+    (11/26: 누비투어 장애 비용이 캣북스 사건으로 셈해지던 것). 토큰 없이 머리만이면 무시한다."""
+    monkeypatch.setenv("AX_AGENT_TOKENS", "finance=tok-finance")
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK", raising=False)
+    mine = await _open("nubitour", "evt_g1")
+    cat = await _open(None, "evt_g2")
+    client = TestClient(app)
+
+    def listed(headers: dict[str, str]) -> set[str]:
+        return {
+            row["context_id"]
+            for row in client.get("/api/incidents", headers=headers).json()["data"]
+        }
+
+    agent = {"Authorization": "Bearer tok-finance"}
+    assert listed({**agent, "X-AX-Company": "nubitour"}) == {mine}
+    assert listed({**agent, "X-AX-Company": "catbooks"}) == {cat}
+    assert listed({"X-AX-Company": "nubitour"}) == {cat}  # 토큰 없음: 머리를 믿지 않는다
+    bad = {"Authorization": "Bearer not-a-token", "X-AX-Company": "nubitour"}
+    assert listed(bad) == {cat}
+
+
+@pytest.mark.asyncio
 async def test_chat_threads_are_kept_per_company() -> None:
     with company_scope.using("nubitour"):
         threads.get_store().create("누비 대화", "u1")

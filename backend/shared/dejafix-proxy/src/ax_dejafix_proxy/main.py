@@ -13,7 +13,8 @@ DEJAFIX_USERNAME·DEJAFIX_PASSWORD) → 없으면 503. 계정은 화면·로그�
 DejaFix 관리자 계정(`DEJAFIX_ADMIN_*`)으로 넘긴다.
 
 회사(11/25, 로드맵 6단계): 부르는 회사의 연결만 쓴다. 회사는 로그인 세션 토큰의 `cid`, 에이전트
-토큰이면 `X-AX-Company` 머리글, 둘 다 없으면 캣북스(예전 그대로). 보관함은 그 회사 것을 읽고
+토큰이면 `X-AX-Company` 머리글, 둘 다 없으면 회사 없음(연결 전, 11/26 — 캣북스로 떨어지지
+않는다). 보관함은 그 회사 것을 읽고
 (`tool_connections`가 요청 회사 폴더를 본다). 보관함에 없으면 환경변수 연결(같이 설치된 DejaFix,
 이 설치의 것)을 쓴다(11/26: 고객사는 한 회사로 쓰고 그 회사 관리자가 화면에서 Zabbix를 넣는다).
 다른 회사 보관함의 DejaFix는 쓰지 않는다. 로그인 토큰(세션)도 회사마다 따로 둔다.
@@ -157,9 +158,11 @@ Target = tuple[str, str, str]
 
 
 def caller_company(request: Request) -> str | None:
-    """부르는 회사(정식 회사 ID). 세션 토큰은 `cid`, 에이전트는 `X-AX-Company`, 없으면 캣북스.
+    """부르는 회사(정식 회사 ID). 세션 토큰은 `cid`, 그 밖(에이전트·공용 토큰)은 `X-AX-Session`의
+    세션 → `X-AX-Company` 머리글. 모두 없으면 None: 어느 회사 연결도 쓰지 않는다(연결 전).
 
-    소속 회사가 없는 계정(`nocid`)이면 None(어느 회사 연결도 쓰지 않는다)."""
+    예전에는 없으면 캣북스였다. 11/26부터 회사 없이 부르는 길은 캣북스로 떨어지지 않는다
+    (DejaFix 데이터는 그 회사 회사 연결 설정의 Zabbix를 거쳐야 한다). 소속 회사 없는 계정도 None."""
     token = human_auth.bearer(request.headers.get("authorization")) or ""
     if human_auth.is_session_token(token):
         try:
@@ -177,7 +180,7 @@ def caller_company(request: Request) -> str | None:
         except human_auth.HumanAuthError:
             pass
     header = request.headers.get(company_connection.CALLER_COMPANY_HEADER, "")
-    return canonical_company_id(header.strip()) or company_scope.CATBOOKS
+    return canonical_company_id(header.strip())
 
 
 def company_scoped(company: str | None, from_vault: bool, res: httpx.Response) -> bool:
@@ -186,12 +189,12 @@ def company_scoped(company: str | None, from_vault: bool, res: httpx.Response) -
     회사 보관함의 DejaFix는 그 회사 것, 캣북스는 같이 설치된 DejaFix의 원래 주인이라 그대로 된다.
     그 밖의 회사는 DejaFix가 그 회사로 걸렀다고 `X-DejaFix-Company`로 돌려줄 때만 된다.
     """
-    if from_vault or company in (None, "", company_scope.CATBOOKS):
+    if from_vault or company == company_scope.CATBOOKS:
         return True
     return res.headers.get(COMPANY_ECHO, "").strip() == company
 
 
-def _target(company: str | None = company_scope.CATBOOKS) -> tuple[Target, bool] | None:
+def _target(company: str | None) -> tuple[Target, bool] | None:
     """부를 때마다 정한다: 그 회사 보관함 `dejafix` → 환경 변수(같이 설치된 DejaFix) → 없음(None).
     둘째 값: 보관함에서 왔는가."""
     if company is None:

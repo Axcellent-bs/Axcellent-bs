@@ -211,7 +211,10 @@ async def test_session_header_picks_company_when_authorization_is_not_a_session(
     async with _client(
         rec, AGENT_TOKEN, {"X-AX-Session": f"{prefix}.{body}.{'A' * len(sig)}"}
     ) as c:
-        assert (await c.get("/api/incidents")).status_code == 200  # 위조: 회사 안 고름 = 캣북스
+        # 위조: 회사를 못 고른다 = 회사 없음 = 연결 전(11/26부터 캣북스로 떨어지지 않는다)
+        assert (await c.get("/api/incidents")).status_code == 503
+    async with _client(rec, AGENT_TOKEN, {"X-AX-Session": _session("catbooks")}) as c:
+        assert (await c.get("/api/incidents")).status_code == 200
     assert rec.logins == ["cat-viewer"]
 
 
@@ -220,9 +223,28 @@ async def test_agent_token_follows_company_header() -> None:
     rec = Recorder()
     async with _client(rec, AGENT_TOKEN, {"X-AX-Company": NUBI}) as c:
         assert (await c.get("/api/incidents")).status_code == 503
-    async with _client(rec, AGENT_TOKEN) as c:  # 머리글 없음 = 캣북스 (예전 그대로)
+    async with _client(rec, AGENT_TOKEN, {"X-AX-Company": "catbooks"}) as c:
         assert (await c.get("/api/incidents")).status_code == 200
     assert rec.logins == ["cat-viewer"]
+
+
+@pytest.mark.parametrize("token", [AGENT_TOKEN, "human"])
+async def test_no_company_is_not_connected_not_catbooks(
+    token: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """회사 없이 부르면(머리글·세션 없음) 어느 회사 DejaFix도 안 쓴다: 캣북스로 안 떨어진다(11/26).
+
+    DejaFix 데이터는 그 회사 회사 연결 설정의 Zabbix를 거쳐야 한다(예진 님)."""
+    monkeypatch.setenv("SAFETY_HUMAN_TOKENS", "yejin:human")
+    _save("cat-viewer", "pw-cat")
+    _builtin(monkeypatch)
+    rec = Recorder()
+    async with _client(rec, token) as c:
+        res = await c.get("/api/incidents")
+        status = (await c.get("/status")).json()
+    assert res.status_code == 503 and res.json()["error"]["code"] == "DEJAFIX_NOT_CONNECTED"
+    assert status["source"] == "none"
+    assert rec.logins == [] and rec.reads == 0  # DejaFix에 로그인조차 하지 않는다
 
 
 async def test_vault_without_company_folders_is_empty_for_other_company(

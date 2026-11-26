@@ -13,6 +13,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from ax_agent_template import company_scope
 from infra_agent import clients
 from infra_agent.main import app
 
@@ -63,14 +64,44 @@ def test_orchestrator_lookup_reads_the_incident_record(monkeypatch: pytest.Monke
         {"context_id": "ctx_inc_other", "opened_at": "2026-10-21T04:00:00Z"},
         {"context_id": "ctx_inc_0001", "opened_at": OPENED},
     ]
-    transport = httpx.MockTransport(lambda req: httpx.Response(200, json={"data": rows}))
+    sent: list[tuple[str | None, str | None]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        sent.append((req.headers.get("authorization"), req.headers.get("x-ax-company")))
+        return httpx.Response(200, json={"data": rows})
+
+    transport = httpx.MockTransport(handler)
     real_client = httpx.AsyncClient
     monkeypatch.setattr(clients, "is_mock", lambda _name=None: False)
     monkeypatch.setattr(
         clients.httpx, "AsyncClient", lambda **kw: real_client(**dict(kw, transport=transport))
     )
-    assert asyncio.run(clients.orchestrator_opened_at("ctx_inc_0001")) == OPENED
-    assert asyncio.run(clients.orchestrator_opened_at("ctx_inc_none")) is None
+    monkeypatch.setenv("INFRA_TOKEN", "tok-infra")
+    with company_scope.using("c-cf2f0d"):  # 롤백 요청(A2A)은 그 회사로 걸려 온다
+        assert asyncio.run(clients.orchestrator_opened_at("ctx_inc_0001")) == OPENED
+        assert asyncio.run(clients.orchestrator_opened_at("ctx_inc_none")) is None
+    # 그 회사 사건만 읽게 토큰과 회사를 싣는다(11/26)
+    assert sent == [("Bearer tok-infra", "c-cf2f0d")] * 2
+
+
+def test_orchestrator_lookup_without_company_does_not_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """요청 회사가 없으면 총괄을 부르지 않는다(캣북스 사건으로 떨어지지 않는다, 11/26)."""
+    called: list[httpx.Request] = []
+    transport = httpx.MockTransport(lambda req: called.append(req) or httpx.Response(200))
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(clients, "is_mock", lambda _name=None: False)
+    monkeypatch.setattr(
+        clients.httpx, "AsyncClient", lambda **kw: real_client(**dict(kw, transport=transport))
+    )
+    monkeypatch.setenv("INFRA_TOKEN", "tok-infra")
+    token = company_scope._ACTIVE.set(None)
+    try:
+        assert asyncio.run(clients.orchestrator_opened_at("ctx_inc_0001")) is None
+    finally:
+        company_scope._ACTIVE.reset(token)
+    assert called == []
 
 
 def test_orchestrator_lookup_is_off_in_mock_mode() -> None:
