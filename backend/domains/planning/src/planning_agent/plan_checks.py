@@ -121,6 +121,21 @@ def clean_rules(raw: Sequence[Any] | None) -> list[dict[str, str]]:
     return out[:MAX_RULES]
 
 
+QUOTE_NOT_IN_REQUEST = "quote_not_in_request"  # 버린 quote 로그 이유 코드 (문장은 남기지 않는다)
+
+
+def real_quotes(
+    rules: list[dict[str, str]], request_text: str
+) -> tuple[list[dict[str, str]], int]:
+    """의뢰문에 실제로 있는 quote만 남긴다 (11/26 예진 님 리뷰, 공백·문장부호 무시).
+
+    LLM이 의뢰문에 없는 문장을 quote로 적으면 그 문장이 금칙어 검사에서 빠지므로 버린다.
+    돌려주는 값: (남긴 지시, 버린 quote 수). quote가 아닌 지시는 그대로 둔다."""
+    request = bare(request_text)
+    kept = [r for r in rules if r["kind"] != "quote" or (request and bare(r["text_ko"]) in request)]
+    return kept, len(rules) - len(kept)
+
+
 def check_rule(rule: dict[str, str], scenes: list[Scene], script: str) -> tuple[bool, str]:
     """(지켰나, 어디서)."""
     kind, text = rule["kind"], rule["text_ko"]

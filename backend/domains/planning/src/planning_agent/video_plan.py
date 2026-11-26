@@ -865,9 +865,19 @@ REQUEST_RULE = (
 REQUEST_TEXT_MAX = 1000  # 제작안 LLM 데이터 칸에 넣는 의뢰문 길이
 
 
-def _rules(p: Proposal, got: _PlanOut) -> list[dict[str, str]]:
-    """LLM이 뽑은 의뢰 지시. 의뢰문이 없으면 [] (지어낸 지시를 받지 않는다)."""
-    return plan_checks.clean_rules(got.request_rules) if p.request_text else []
+def _rules(p: Proposal, got: _PlanOut, note: bool = False) -> list[dict[str, str]]:
+    """LLM이 뽑은 의뢰 지시. 의뢰문이 없으면 [] (지어낸 지시를 받지 않는다).
+
+    11/26 예진 님 리뷰: 의뢰문에 없는 quote는 버린다 (그 문장은 금칙어 검사를 그대로 받는다).
+    note: 버린 수를 로그에 남긴다 (이유 코드·수만, 문장은 남기지 않는다. 마지막 검사에서 한 번)."""
+    if not p.request_text:
+        return []
+    rules, dropped = plan_checks.real_quotes(
+        plan_checks.clean_rules(got.request_rules), p.request_text
+    )
+    if dropped and note:
+        log.info("영상 제작안 의뢰 지시 버림: %s %d건", plan_checks.QUOTE_NOT_IN_REQUEST, dropped)
+    return rules
 
 
 def _check_scenes(got: _PlanOut) -> list[plan_checks.Scene]:
@@ -1020,7 +1030,7 @@ def _checked(
     n = len(got.scenes)
     ad = purpose in PURPOSE_DIRECTION
     cuts = fun_timings(d, n) if style_ == FUN_FIRST or ad else timings(d, n)
-    rules = _rules(p, got)
+    rules = _rules(p, got, note=True)
     # 11/26 보고서 추천 형식 카드: LLM이 비트를 적었고 의뢰 지시를 다 지켰을 때만 (형식보다 먼저)
     card = plan_format.card_for(p)
     kept = all(r["kept"] for r in plan_checks.check_rules(rules, _check_scenes(got), got.script))

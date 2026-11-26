@@ -168,6 +168,44 @@ def test_script_with_more_time_slices_than_scenes_is_rewritten() -> None:
     assert len(sent) == 2 and "시간 구간이 5개인데 장면은 4개" in sent[1]
 
 
+SAID = "지금 공유하고 만나요"
+
+
+def _said_answer() -> Any:
+    """지킨 답 + 대본에 금칙어(공유)가 든 대사 + 그 대사를 quote로 적은 지시."""
+    rules = [*RULES, {"kind": "quote", "text_ko": SAID}]
+    return _answer(True, rules=rules).model_copy(update={"script": f"노래하고 춤춘다. {SAID}"})
+
+
+def test_quote_from_the_request_is_kept_and_skips_the_marketing_word_check() -> None:
+    """11/26 예진 님 리뷰: 의뢰문에 실제로 있는 대사만 quote로 받는다 (있으면 지금처럼)."""
+    plan, sent = _write(_said_answer(), request=f"{REQUEST} · 첫 대사는 “{SAID}.”")
+    assert len(sent) == 1 and plan.written_by == "llm"
+    said = [r for r in plan.request_rules if r.kind == "quote" and r.text_ko == SAID]
+    assert len(said) == 1 and said[0].kept and said[0].where == "대본"
+
+
+def test_quote_not_in_the_request_is_dropped_and_the_marketing_word_rejects(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """LLM이 의뢰문에 없는 문장을 quote로 적으면 버린다 → 금칙어 검사에 그대로 걸린다."""
+    caplog.set_level("INFO", logger=vp.log.name)
+    got = _said_answer()
+    rules = vp._rules(V._prop(request_text=REQUEST), got, note=True)  # noqa: SLF001
+    assert [r["text_ko"] for r in rules if r["kind"] == "quote"] == [QUOTE]
+    assert "quote_not_in_request 1건" in caplog.text and SAID not in caplog.text
+    plan, _ = _write(got)
+    assert plan.written_by == "rule" and plan.fallback_reason == "rejected"
+
+
+def test_real_quotes_compares_without_spaces_and_punctuation() -> None:
+    rules = [{"kind": "quote", "text_ko": "지금, 캣북스에서 만나요"},
+             {"kind": "quote", "text_ko": "지어낸 문장"}, {"kind": "prop", "text_ko": "마이크"}]
+    kept, dropped = pc.real_quotes(rules, REQUEST)
+    assert dropped == 1 and [r["text_ko"] for r in kept] == ["지금, 캣북스에서 만나요", "마이크"]
+    assert pc.real_quotes(rules, "")[1] == 2  # 의뢰문이 비면 quote는 모두 버린다
+
+
 def test_marketing_words_in_the_quote_do_not_reject_the_plan() -> None:
     said = "지금 공유하고 만나요"
     rules = [{"kind": "quote", "text_ko": said}]
