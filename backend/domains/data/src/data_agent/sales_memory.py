@@ -79,6 +79,7 @@ async def run_forever(
         RunResult,
         aggregate_daily,
         collect_once,
+        collect_other_companies,
         every_seconds,
         get_source,
         source_name,
@@ -91,6 +92,7 @@ async def run_forever(
     print(NOTICE, flush=True)
     store: SalesStore | None = None
     streak = ErrorStreak()
+    streaks: dict[str, ErrorStreak] = {}
     done = 0
     while rounds is None or done < rounds:
         done += 1
@@ -120,6 +122,8 @@ async def run_forever(
             # 메모리 저장소는 재시작 뒤 모든 주문의 synced_at이 새것이라 첫 하루 계산은 전체 날짜를
             # 다시 만든다(정확하고 조금 느림)
             aggregate_daily(store, tenant, env, clock())
+            # 연결된 다른 회사도 같은 메모리 저장소에 회사 id(tenant)로 받는다(첫 회차는 처음부터)
+            await collect_other_companies(store, env, clock(), streaks, source_factory)
         if rounds is not None and done >= rounds:
             break
         await asyncio.sleep(wait)
