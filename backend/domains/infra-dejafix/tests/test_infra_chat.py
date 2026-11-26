@@ -59,10 +59,13 @@ def _req(skill: str, data: dict) -> AgentRequest:
 
 
 def test_send_returns_answering_then_answer_arrives_with_infra_facts() -> None:
+    from ax_agent_template import company_scope
+
     async def run() -> None:
         llm = FakeLLM()
         svc = _service(llm)
-        th = svc.send("yejin", None, "최근 배포 알려 줘")
+        with company_scope.using("catbooks"):  # 요청 회사 칸의 배포만 사실에 넣는다
+            th = svc.send("yejin", None, "최근 배포 알려 줘")
         assert th["id"] == "infrachat-1" and th["status"] == "answering"
         await svc.wait_idle()
         done = svc.get("yejin", th["id"])
@@ -227,7 +230,10 @@ def test_facts_keep_going_when_one_part_fails(monkeypatch: pytest.MonkeyPatch) -
         raise RuntimeError("shop down")
 
     monkeypatch.setattr(facts, "_shop", boom)
-    got = asyncio.run(facts.collect())
+    from ax_agent_template import company_scope
+
+    with company_scope.using("catbooks"):
+        got = asyncio.run(facts.collect())
     assert "shop_payment_server" in got["unavailable"] and "shop_payment_server" not in got
     assert got["recent_deployments"]
 
@@ -431,3 +437,47 @@ def test_prompt_separates_human_confirmed_cause_from_ai_candidates() -> None:
 
     assert "confirmed_cause" in SYSTEM_PROMPT and "사람이 확정한 원인" in SYSTEM_PROMPT
     assert "섞지 말고" in SYSTEM_PROMPT and "지어내지 않는다" in SYSTEM_PROMPT
+
+
+def _diag(minutes: int = 0):
+    from ax_contracts.schemas import DiagnoseIncidentOutput
+    from infra_agent.diagnosis import Diagnosis
+
+    return Diagnosis(
+        output=DiagnoseIncidentOutput(status="undetermined", suspects=[]),
+        candidates=(),
+        diagnosed_at=datetime(2026, 11, 9, 6, minutes, tzinfo=UTC),
+        window_from=None,
+    )
+
+
+def test_facts_diagnoses_are_only_the_requesting_companys() -> None:
+    from ax_agent_template import company_scope
+    from infra_agent.runtime import get_runtime
+
+    rt = get_runtime()
+    with company_scope.using("nubi-tour"):
+        rt.save_diagnosis("ctx-nubi", _diag(1))
+    with company_scope.using("catbooks"):
+        rt.save_diagnosis("ctx-cat", _diag(2))
+    with company_scope.using("catbooks"):
+        got = asyncio.run(facts.collect())
+    assert [d["context_id"] for d in got["recent_diagnoses"]] == ["ctx-cat"]
+    with company_scope.using("nubi-tour"):
+        got = asyncio.run(facts.collect())
+    assert [d["context_id"] for d in got["recent_diagnoses"]] == ["ctx-nubi"]
+
+
+def test_facts_without_company_see_no_diagnoses_and_no_catbooks_deployments() -> None:
+    from ax_agent_template import company_scope
+    from infra_agent.runtime import get_runtime
+
+    with company_scope.using("catbooks"):
+        get_runtime().save_diagnosis("ctx-cat", _diag(2))
+        assert asyncio.run(facts.collect())["recent_deployments"]
+    token = company_scope._ACTIVE.set(None)
+    try:
+        got = asyncio.run(facts.collect())
+    finally:
+        company_scope._ACTIVE.reset(token)
+    assert got["recent_diagnoses"] == [] and got["recent_deployments"] == []

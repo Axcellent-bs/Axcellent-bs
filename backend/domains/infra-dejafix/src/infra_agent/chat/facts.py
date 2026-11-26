@@ -40,7 +40,7 @@ def _iso(value: Any) -> str | None:
 
 
 def _deployments() -> list[dict[str, Any]]:
-    history = get_runtime().history_for()
+    history = get_runtime().read_history()  # 요청 회사 칸만(회사 없으면 빈 이력)
     rows = sorted(history.deployments, key=lambda d: d.deployed_at, reverse=True)[:RECENT]
     return [
         {
@@ -61,7 +61,9 @@ async def _shop() -> dict[str, Any]:
 
 
 def _diagnoses() -> list[dict[str, Any]]:
-    rows = sorted(get_runtime().diagnoses.items(), key=lambda kv: kv[1].diagnosed_at, reverse=True)
+    rows = sorted(
+        get_runtime().diagnoses_in_scope().items(), key=lambda kv: kv[1].diagnosed_at, reverse=True
+    )
     out = []
     for context_id, diag in rows[:RECENT]:
         o = diag.output

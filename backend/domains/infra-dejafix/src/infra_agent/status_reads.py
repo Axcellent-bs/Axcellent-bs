@@ -130,7 +130,8 @@ async def latest_deployments(request: AgentRequest) -> AgentResult:
         LatestDeploymentsInput.model_validate(request.input)
     except ValidationError as exc:
         return _invalid(request, exc)
-    history = get_runtime().history_for()  # 요청의 회사 칸(다른 회사 이력은 섞지 않는다)
+    # 요청의 회사 칸만(다른 회사 이력은 섞지 않는다). 회사가 없으면 빈 이력(캣북스로 안 떨어짐)
+    history = get_runtime().read_history()
     # live()가 보관함 파일을 읽으므로 이벤트 루프 밖에서 돈다
     rows = await asyncio.to_thread(latest_running, history)
     out = LatestDeploymentsOutput(
