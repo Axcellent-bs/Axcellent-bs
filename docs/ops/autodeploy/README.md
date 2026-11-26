@@ -15,7 +15,7 @@
    - `docs/promo/` 변경 -> 이미 `/var/www/promo` 에 있는 파일 갱신 + `assets/` 아래 새 파일 추가. `*.mjs *.md *.sh *.py *.json INTAKE* README* content.* build.*` 는 배포 안 함
    - 웹 변경이 없으면 기준 ref 만 갱신하고 끝(빌드 안 함)
    - 변경 파일 500개 초과면 중단(`abort`)
-5. CI: `/etc/ax-autodeploy/gh-readonly-token` 이 있으면 GitHub check-runs 가 모두 끝났고 success(skipped·neutral 허용)일 때만 배포. 진행 중이면 다음 주기에 다시, 실패면 배포 안 함. 파일이 없으면 CI 확인 없이 진행하고 로그에 `ci-check=off`. 토큰은 이 스크립트가 만들지 않는다(읽기 전용 토큰을 사람이 둔다)
+5. CI: `/etc/ax-autodeploy/gh-readonly-token` 이 있으면 GitHub check-runs 가 모두 끝났고 success(skipped·neutral 허용)일 때만 배포. 진행 중이면 다음 주기에 다시, 실패면 배포 안 함. 파일이 없거나 비어 있으면 화면 배포도 하지 않고 이번 주기를 건너뛴다(로그 `wait: ci-check=off(no token file)` / `ci-check=off(empty token file)`, 사유 문구 포함. fail-closed, 백엔드 단계와 같음). 토큰은 이 스크립트가 만들지 않는다(읽기 전용 토큰을 사람이 둔다)
 6. `/opt/axcellent/deploy.sh` 재사용(`AXCELLENT_REPO=빌드 전용 트리`, 두 웹 루트에 한 번씩). 열람 전용 토큰은 운영 `backend/.env` 의 `SHOP_VIEWER_TOKEN` 만 읽어 `VITE_SHOP_VIEWER_TOKEN` 으로 넘긴다(값 출력 없음), 사람 토큰은 자리표시자 `human-via-nginx`
 7. 검증: index.html 이 가리키는 파일 존재 + HTTP 200 + **토큰 검사**(nginx 사람 토큰 맵·`.env` 의 HUMAN/WORK/ADMIN 토큰 실제 값이 번들에 없고 자리표시자만 있는지)
 8. 실패(빌드 실패·시간 초과(1200초)·200 아님·토큰 검사 실패·예상 못 한 종료)면 배포 직전 백업(`/var/lib/ax-autodeploy/prev/`)으로 즉시 복원하고 기준 ref 는 갱신하지 않는다. 같은 커밋으로 3회 연속 실패하면 그 커밋은 `skipped-ref` 에 적고 다음 새 커밋을 기다린다
@@ -42,7 +42,7 @@ echo <배포된 커밋 40자> > /var/lib/ax-autodeploy/last-deployed-ref
 sudo systemctl enable --now ax-autodeploy.timer
 ```
 
-CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-autodeploy/gh-readonly-token`(600)에 둔다. 없으면 `ci-check=off`.
+CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-autodeploy/gh-readonly-token`(600)에 둔다. 없거나 비어 있으면 화면·백엔드 모두 배포하지 않는다(`ci-check=off`, 백엔드는 `ci-off`).
 
 ## 정지
 
@@ -125,7 +125,7 @@ CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-aut
 
 여러 개가 겹치면 심각도 큰 것을 대표로 하고 나머지는 같이 적는다.
 
-**토큰 파일이 없거나 비어 있을 때 백엔드와 프론트가 다르다.** 백엔드 단계(`ax-autodeploy` `ci-off` 판정)는 확인 없이 배포하지 않고 멈춘다(fail-closed). 그래서 `ci-off-stuck` 으로 알린다. 프론트 단계(`ci_check`)는 반대로 `CI_STATE="ci-check=off"` 로 두고 반환 0(통과)이라 CI 확인 없이 그대로 배포한다(fail-open). 프론트도 fail-closed 로 바꿀지는 이재헌이 정할 일로 남겨 두었고, 이 감시 스크립트는 프론트 동작을 바꾸지 않는다.
+**토큰 파일이 없거나 비어 있으면 백엔드와 화면 모두 멈춘다(fail-closed).** 백엔드 단계는 `ci-off` 판정으로, 화면 단계(`ci_check`)는 `CI_STATE="ci-check=off(...)"` 와 반환 2(`ci_rc != 0`)로 이번 주기 배포를 건너뛰고 기준 ref 도 올리지 않는다(`last-run` 은 `ci-wait`). 화면 단계가 막혀도(백엔드 단계가 켜져 있으면) `watchdog` 은 백엔드 `ci-off` 판정으로 `ci-off-stuck` 을 알린다(#1925). 백엔드가 `ci-off` 로 멈추면 `promo_catchup`(백엔드 배포 뒤 홍보 파일 올리기)은 실행되지 않으므로 영향이 없다. 토큰이 있을 때 동작(CI 통과면 배포, 진행 중·실패·API 오류면 보류)은 그대로다. 이 감시 스크립트는 배포 동작을 바꾸지 않는다.
 
 ### 사용법
 
