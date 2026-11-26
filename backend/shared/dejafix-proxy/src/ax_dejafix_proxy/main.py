@@ -374,8 +374,9 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         session = admin_session((target[0], user, password), key)
         try:
             upstream = await session.send("GET", "/api/settings/zabbix")
-            if upstream.status_code != 404 and not company_scoped(company, False, upstream):
+            if not company_scoped(company, False, upstream):
                 # 회사별을 모르는 DejaFix: 그 설정은 캣북스 Zabbix다(읽지도 덮지도 않는다)
+                # 옛 DejaFix(404·405)도 다른 회사에는 "업데이트 필요" 대신 이 한 가지 이유만 보인다
                 return _error(409, "DEJAFIX_NO_COMPANY", NOT_SCOPED)
             if method == "PUT" and upstream.status_code != 404:
                 upstream = await session.send(method, "/api/settings/zabbix", "", body)
