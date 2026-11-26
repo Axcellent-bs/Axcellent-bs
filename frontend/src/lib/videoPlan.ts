@@ -177,6 +177,10 @@ export const VIDEO_SVG_LINE: Record<VideoFallbackReason, string> = {
 export const VIDEO_SVG_DETAIL: Record<string, string> = {
   LLMResponseError_ReadTimeout: 'AI 응답이 늦어 끊겼어요',
   LLMResponseError_429: 'AI 호출 한도에 걸렸어요',
+  // 11/26 F: 400(잘못된 요청) 공급자 메시지 갈래 (기획 storyboard_svg.bad_request_kind)
+  LLMResponseError_400_schema: 'AI 응답 형식이 맞지 않았어요',
+  LLMResponseError_400_length: 'AI 입력·출력이 너무 길어요',
+  LLMResponseError_400_model: 'AI 모델 설정이 맞지 않아요',
 }
 /** 콘티를 못 그린 이유가 있을 때만 그 한 줄, 아니면 '' (지금 화면 그대로).
  *  예외 종류 이름(계약 svg_detail, 예: LLMResponseError)이 있으면 괄호로 붙인다 (11/26 U).
