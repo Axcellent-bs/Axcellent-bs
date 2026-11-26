@@ -182,7 +182,8 @@ def test_old_style_llm_answer_without_new_fields_still_works() -> None:
         }
     )
     plan = asyncio.run(vp.write(_mock(old), _prop(), "ctx"))
-    assert plan.written_by == "llm" and all(s.end_frame == "" for s in plan.scenes)
+    # 11/26 바뀐 기대값: 예전엔 빈 칸 그대로("") → 이제 코드가 visual로 채운다 (거절은 그대로 없음)
+    assert plan.written_by == "llm" and all(s.end_frame == s.visual for s in plan.scenes)
 
 
 EMPTY_KEYFRAMES = ("", "", "", "")

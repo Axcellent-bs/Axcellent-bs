@@ -189,6 +189,23 @@ def end_card_only(text: str, company: str = "") -> bool:
     return bool(marks) and not rest
 
 
+# 11/26 CR-cb113dca245a: 엔드카드 칸에도 콘티 마네킹이 그려졌다. 이 낱말이 있으면 사람이 나오는
+# 장면이라 엔드카드로 보지 않는다
+END_CARD_PEOPLE = (
+    "주인공", "사람", "인물", "캐릭터", "마스코트", "손", "얼굴", "흔들", "웃", "고양이",
+    "person", "people", "character", "mascot", "hand", "wave", "waving", "smil",
+)  # fmt: skip
+
+
+def end_card_scene(text: str, company: str = "") -> bool:
+    """장면 글이 엔드카드인가: "엔드카드" 낱말이 있거나 회사·채널 이름·로고뿐이고(`end_card_only`,
+    #1947 ending 판정과 같은 낱말), 사람 낱말(`END_CARD_PEOPLE`)이 없다. 콘티가 사람 없이 그린다."""
+    low = (text or "").lower()
+    if not low.strip() or any(w in low for w in END_CARD_PEOPLE):
+        return False
+    return is_end_card(low) or end_card_only(low, company)
+
+
 def check_rule(
     rule: dict[str, str], scenes: list[Scene], script: str, company: str = ""
 ) -> tuple[bool, str]:
