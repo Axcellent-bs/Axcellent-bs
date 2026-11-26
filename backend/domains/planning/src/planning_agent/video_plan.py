@@ -1177,7 +1177,8 @@ def _checked(
     # 11/26 보고서 추천 형식 카드: LLM이 비트를 적었고 의뢰 지시를 다 지켰을 때만 (형식보다 먼저)
     card = plan_format.card_for(p)
     kept = all(r["kept"] or plan_checks.blocked_quote(r)  # 금칙어 대사는 일부러 안 넣은 것
-               for r in plan_checks.check_rules(rules, _check_scenes(got), got.script))  # fmt: skip
+               for r in plan_checks.check_rules(rules, _check_scenes(got), got.script,
+                                                _company()["name"]))  # fmt: skip
     use_card = card is not None and kept and all(s.beat_ko.strip() for s in got.scenes)
     if use_card and card is not None and not even:
         fun = style_ == FUN_FIRST or ad
@@ -1223,7 +1224,8 @@ def _checked(
             media_hints=media_hints(p, got.category), purpose=purpose,
             offer_ko=_short(got.offer_ko, 60) if ad else "",
             cta_ko=_short(got.cta_ko, 40) if ad else "", **cast_fields(p),
-            request_rules=plan_checks.check_rules(rules, checked, script), **formatted,
+            request_rules=plan_checks.check_rules(rules, checked, script, _company()["name"]),
+            **formatted,
         )  # fmt: skip
     except ValidationError:
         log.info("LLM 영상 제작안 형식 → 규칙 제작안: ValidationError %.1fs", elapsed)
@@ -1254,7 +1256,8 @@ FEASIBILITY_FIRST = (
 
 def plan_problems(p: Proposal, got: _PlanOut) -> list[dict[str, Any]]:
     """검사 기록에 남는 문제 (제작 검사 + 못 지킨 의뢰 지시). 의뢰 지시는 B와 같은 검사 결과."""
-    checked = plan_checks.check_rules(_rules(p, got), _check_scenes(got), got.script)
+    checked = plan_checks.check_rules(_rules(p, got), _check_scenes(got), got.script,
+                                      _company()["name"])  # fmt: skip
     out = plan_checks.feasibility(got.scenes, has_character=bool(cast_fields(p)))
     return out + [{**plan_checks.rule_problem(r), "rule": r} for r in checked if not r["kept"]]
 

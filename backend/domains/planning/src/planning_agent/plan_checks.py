@@ -166,11 +166,40 @@ def blocked_quote(rule: dict[str, Any]) -> bool:
     return rule.get("kind") == "quote" and has_claim(str(rule.get("text_ko") or ""))
 
 
-def check_rule(rule: dict[str, str], scenes: list[Scene], script: str) -> tuple[bool, str]:
-    """(지켰나, 어디서). 금칙어 든 대사는 늘 (False, BLOCKED_WHERE)."""
+# 11/26 G: 채널 이름 엔드카드는 마케팅 코드가 마지막 2초에 늘 얹는다. "끝에 채널 이름 넣기"처럼
+# 회사·채널 이름·로고·엔드카드를 끝에 넣으라는 말뿐인 ending 지시는 코드가 지킨다
+# (마지막 장면 글로 보지 않음)
+END_CARD_WHERE = "엔드카드(마지막 2초, 코드)"
+END_CARD_MARKS = ("채널", "로고", "엔드카드", "엔드", "이름", "channel", "logo", "end", "card",
+                  "name")  # fmt: skip
+# 연출이 아닌 말 (낱말 앞부분이 같으면 뺀다: 넣어줘·나오게·보이게 해줘)
+END_CARD_FILLER = (
+    "끝", "마지막", "넣", "나오", "나와", "보이", "보여", "표시", "띄우", "띄워", "해줘", "해주",
+    "하기", "하게", "주세요", "줘", "카드", "put", "show", "add", "at", "the",
+)  # fmt: skip
+
+
+def end_card_only(text: str, company: str = "") -> bool:
+    """회사·채널 이름·로고·엔드카드를 끝에 넣으라는 말뿐인가 (남는 연출 낱말이 없음)."""
+    names = [w for w in keywords(company) if w]
+    words = keywords(text)
+    marks = [w for w in words if w in names or any(w.startswith(m) for m in END_CARD_MARKS)]
+    rest = [w for w in words if w not in marks
+            and not any(w.startswith(f) for f in END_CARD_FILLER)]  # fmt: skip
+    return bool(marks) and not rest
+
+
+def check_rule(
+    rule: dict[str, str], scenes: list[Scene], script: str, company: str = ""
+) -> tuple[bool, str]:
+    """(지켰나, 어디서). 금칙어 든 대사는 늘 (False, BLOCKED_WHERE).
+
+    company: 회사 이름 (ending 지시가 채널 이름 엔드카드뿐인지 볼 때)."""
     kind, text = rule["kind"], rule["text_ko"]
     if blocked_quote(rule):
         return False, BLOCKED_WHERE
+    if kind == "ending" and end_card_only(text, company):
+        return True, END_CARD_WHERE
     if kind == "quote":
         want = bare(text)
         for s in scenes:
@@ -197,12 +226,12 @@ def check_rule(rule: dict[str, str], scenes: list[Scene], script: str) -> tuple[
 
 
 def check_rules(
-    rules: list[dict[str, str]], scenes: list[Scene], script: str
+    rules: list[dict[str, str]], scenes: list[Scene], script: str, company: str = ""
 ) -> list[dict[str, Any]]:
     """지시마다 {kind, text_ko, kept, where} (계약 RequestRule 모양)."""
     out = []
     for r in rules:
-        kept, where = check_rule(r, scenes, script)
+        kept, where = check_rule(r, scenes, script, company)
         out.append({**r, "kept": kept, "where": where})
     return out
 
