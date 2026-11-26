@@ -48,3 +48,23 @@ export function zabbixInsecure(url: string, verifyTls: boolean): string | null {
   if (!verifyTls && /^\s*https:\/\//i.test(url)) return "인증서 확인을 끄면 중간에서 토큰을 가로챌 수 있어요. 사내 자체 인증서일 때만 끄세요.";
   return null;
 }
+
+/** `/settings/zabbix` 호출이 HTTP 오류로 끝났을 때. 상태 코드와 프록시 오류 코드(error.code)를 함께 들고 있다 */
+export class ZabbixCallError extends Error {
+  status: number;
+  code: string | null;
+  constructor(message: string, status: number, code: string | null) {
+    super(message);
+    this.name = "ZabbixCallError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/**
+ * 옛 DejaFix라 화면에서 Zabbix를 바꾸지 못하는 경우인가. 프록시가 옛 DejaFix의 404·405를
+ * 501 DEJAFIX_TOO_OLD로 바꿔 준다. 이때만 true — 502·409·401·403 등 다른 오류는 false.
+ */
+export function zabbixUnsupported(err: unknown): boolean {
+  return err instanceof ZabbixCallError && (err.status === 501 || err.code === "DEJAFIX_TOO_OLD");
+}
