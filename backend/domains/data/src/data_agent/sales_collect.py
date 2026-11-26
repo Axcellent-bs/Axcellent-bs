@@ -394,10 +394,20 @@ AGGREGATE_ENV = "DATA_AGGREGATE_DAILY"  # "1"이면 하루 집계 계산 (3-1b).
 AGGREGATE_AFTER = (0, 30)  # 한국 00:30 뒤 첫 회차에 (설계 5.1)
 
 
-def aggregate_daily(store: SalesStore, tenant: str, env: Mapping[str, str], now: datetime) -> None:
-    """일별 집계 하루 계산 (회사마다 하루 한 번). 실패해도 판매 수집은 그대로 이어 간다."""
+def aggregate_daily(  # noqa: PLR0913 - 저장소·회사·환경·시각 + 다시 만들기
+    store: SalesStore,
+    tenant: str,
+    env: Mapping[str, str],
+    now: datetime,
+    *,
+    rebuild: bool = False,
+) -> bool:
+    """일별 집계 하루 계산 (회사마다 하루 한 번). 실패해도 판매 수집은 그대로 이어 간다.
+
+    `rebuild`면 그 회사 일별 행을 첫 주문 날부터 지금 다시 만든다(다시 받기 뒤, 시각 조건 없음).
+    다시 만들기가 끝났으면 True."""
     if env.get(AGGREGATE_ENV, "").strip() != "1":
-        return
+        return False
     from data_agent import catalog
     from data_agent.aggregate.daily import run_daily
     from data_agent.aggregate.store import AggregateStore
@@ -405,19 +415,22 @@ def aggregate_daily(store: SalesStore, tenant: str, env: Mapping[str, str], now:
     from data_agent.sales_quality import KST
 
     local = now.astimezone(KST)
-    if (local.hour, local.minute) < AGGREGATE_AFTER:
-        return
+    if not rebuild and (local.hour, local.minute) < AGGREGATE_AFTER:
+        return False
     try:
         agg = AggregateStore(agg_db_path(dict(env)))
         try:
             from data_agent.sales_memory import memory_mode
 
-            run_daily(store, agg, tenant, catalog.current(env).sales, now,
-                      input_name="company_server" if memory_mode(env) else "sales_db")  # fmt: skip
+            run = run_daily(store, agg, tenant, catalog.current(env).sales, now,
+                            input_name="company_server" if memory_mode(env) else "sales_db",
+                            rebuild=rebuild)  # fmt: skip
         finally:
             agg.close()
     except Exception as error:  # noqa: BLE001 - 집계 때문에 수집이 멈추지 않게
         print(f"[aggregate] 하루 계산을 시작하지 못함 {describe(error)}", flush=True)
+        return False
+    return rebuild and run is not None and run.status == "done"
 
 
 def watched_companies(env: Mapping[str, str]) -> list[str]:
@@ -479,7 +492,13 @@ async def collect_company(  # noqa: PLR0913 - 저장소·회사·환경·시각�
         streak = streaks.setdefault(cid, ErrorStreak())
         for line in streak.lines(result):
             print(line.replace("[sales]", f"[sales {cid}]", 1), flush=True)
-        aggregate_daily(store, cid, env, now)
+        # 다시 받기(--recollect)를 끝까지 받은 회차면 그 회사 일별 집계를 처음부터 (11/26)
+        marker = rebuild_marker(env, cid)
+        rebuild = result.finished and not result.errors and marker.is_file()
+        if aggregate_daily(store, cid, env, now, rebuild=rebuild):
+            marker.unlink(missing_ok=True)
+            print(f"[aggregate {cid}] 다시 받은 판매 기록으로 일별 집계를 처음부터 다시 만듦",
+                  flush=True)  # fmt: skip
     return result
 
 
@@ -692,12 +711,22 @@ def clear_cursors(store: SalesStore, env: Mapping[str, str], cid: str) -> str:
     store.save_cursor(cid, name, None)
     # 고객 내보내기도 처음부터 (변환기가 새로 꺼낸 고객 속성 연령대·성별을 받게, 11/26)
     store.save_cursor(cid, customers_source(name), None)
+    # 다 받으면 그 회사 일별 집계도 처음부터 다시 만들게 표시를 남긴다 (11/26 누비투어 "이름 없는
+    # 분류" 98%: 다시 받기 전 분류 빈 줄로 만든 지난 날 집계가 다음 날 계산까지 그대로 읽혔다)
+    marker = rebuild_marker(env, cid)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(datetime.now(UTC).isoformat(), encoding="utf-8")
     return name
 
 
 def request_dir(env: Mapping[str, str]) -> Path:
     """돌고 있는 수집기에 남기는 "다시 받기 요청" 폴더 (판매 저장소 옆, 회사마다 파일 하나)."""
     return db_path(env).with_name("sales_recollect")
+
+
+def rebuild_marker(env: Mapping[str, str], cid: str) -> Path:
+    """다시 받기 뒤 "일별 집계를 처음부터 다시 만들기" 표시 (요청 폴더, 회사마다 파일 하나)."""
+    return request_dir(env) / f"{cid}.rebuild"
 
 
 def request_recollect(env: Mapping[str, str], cid: str) -> Path:
