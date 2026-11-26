@@ -396,7 +396,8 @@ function Result({ out, at, campaigns }: { out: VideoPerformanceListOutput; at: s
   );
 }
 
-export function VideoPerformance() {
+/** onVideos(11/26): 받은 영상 목록을 성과 탭 캠페인 표(CampaignEffect)와 같이 쓴다. 따로 부르지 않는다 */
+export function VideoPerformance({ onVideos }: { onVideos?: (videos: VideoPerformanceVideo[]) => void } = {}) {
   const [run, setRun] = useState(0);
   const [state, setState] = useState<State>(() =>
     kpiLive ? { kind: "loading" } : { kind: "failed", reason: "데이터 AI 토큰(VITE_DATA_A2A_TOKEN)이 없어 영상 성과를 받지 않아요. backend/의 scripts/run_web.sh로 화면을 켜면 토큰이 들어갑니다." },
@@ -413,6 +414,7 @@ export function VideoPerformance() {
       .then((r) => {
         if (!live) return;
         setState({ kind: "ok", out: r.output, at: r.evidence?.collected_at ?? null });
+        onVideos?.(r.output.videos);
         // 시험 영상이 아닌 영상의 캠페인만 (나온 순서대로, 한 번씩)
         const ids = [...new Set(r.output.videos.filter((v) => !v.test).map((v) => v.campaign_id).filter((x): x is string => !!x))];
         setCampaigns(ids.map((id) => ({ id, kind: "loading" })));

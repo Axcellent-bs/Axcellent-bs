@@ -17,8 +17,10 @@ import { PROBE_STATUS, TREND_TABS, trendTabFromHash, trendTabHash, type LoopProb
 import { activeCount, dataProposals, insightFilterFromHash, insightFilterHash, type InsightFilter } from "@/lib/handoffView";
 import {
   DATA_SERVER, TREND_MAX_GROUPS, dataAi, evidenceLines, kpiLive,
-  type A2AResult, type KeywordWindow, type PromoConceptsOutput, type TrendInsightBriefOutput, type TrendPopularOutput, type TrendScanOutput, type TrendVerdict,
+  type A2AResult, type CampaignEffectOutput, type KeywordWindow, type PromoConceptsOutput, type TrendInsightBriefOutput, type TrendPopularOutput, type TrendScanOutput,
+  type TrendVerdict, type VideoPerformanceVideo,
 } from "@/lib/data";
+import { campaignRows, resultTabTag } from "@/lib/resultCampaigns";
 import { fadedChip } from "@/lib/keywordTrendView";
 
 // 감지 탭이 아닌 하위 탭·인스타 칩 칸은 처음 열 때 받는다. 첫 화면(감지)은 이 코드 없이 먼저 그린다 (11/25 Lighthouse)
@@ -313,6 +315,12 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
   const handoffBadge = activeCount(dataProposals(planningAll));
   // 성과 탭 옆 칩: 측정 전(측정 대기)이라도 데이터 AI 상태 확인이 실패했으면 "연결 확인 필요"
   const resultProbe: LoopProbe = !kpiLive ? "failed" : campaignProbe === "idle" && dataUp === false ? "failed" : campaignProbe;
+  // 성과 탭 (11/26): 마케팅에 넘어간 캠페인(기획 기록 handoff) · 영상 성과가 받은 영상 · 이 화면에서 잰 캠페인 효과
+  const campaigns = campaignRows(dataProposals(planningAll));
+  const [videos, setVideos] = useState<VideoPerformanceVideo[] | null>(null);
+  const [effects, setEffects] = useState<Readonly<Record<string, CampaignEffectOutput>>>({});
+  const onEffect = useCallback((id: string, out: CampaignEffectOutput) => setEffects((all) => ({ ...all, [id]: out })), []);
+  const resultTag = resultTabTag(PROBE_STATUS[resultProbe].label, resultProbe, campaigns, new Set(Object.keys(effects)));
   // 2번째 이후 하위 탭은 처음 열 때 그린다(감지를 빨리 열려고). 그 뒤에는 숨기기만 한다
   const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set([tab.key]));
   useEffect(() => {
@@ -336,7 +344,7 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
         {t.key === "handoff" && handoffBadge > 0 && (
           <span className="rounded-full bg-brand-50 px-1.5 text-[11px] font-bold text-brand-700" aria-label={`진행 중 제안 ${handoffBadge}개`}>{handoffBadge}</span>
         )}
-        {t.key === "result" && <span className="text-[11px] font-normal text-ink-400">{PROBE_STATUS[resultProbe].label}</span>}
+        {t.key === "result" && <span className="text-[12.5px] font-normal text-ink-500">{resultTag}</span>}
       </button>
     );
   };
@@ -383,10 +391,10 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
               // 기획 전달: 기획 AI가 받은 데이터 인사이트와 진행 상태
               <PlanningHandoff load={planning.load} onRetry={planning.reload} />
             ) : (
-              // 성과: 게시 영상 성과(위) + 캠페인 효과(아래). 측정 결과가 하위 탭을 오가도 남게 숨기기만 한다
+              // 성과 (11/26): 마케팅에 넘어간 캠페인 목록 + [측정](위) → 게시 영상 성과(아래). 측정 결과가 하위 탭을 오가도 남게 숨기기만 한다
               <div className="flex flex-col gap-4">
-                <VideoPerformance />
-                <CampaignEffect onProbe={setCampaignProbe} />
+                <CampaignEffect onProbe={setCampaignProbe} campaigns={campaigns} videos={videos} effects={effects} onEffect={onEffect} />
+                <VideoPerformance onVideos={setVideos} />
               </div>
             )}</Suspense></ErrorBoundary>}
           </div>
