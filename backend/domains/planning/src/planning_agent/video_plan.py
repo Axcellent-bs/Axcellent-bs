@@ -774,17 +774,22 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
   - caption: 자막 (한국어, 30자 안팎, 편집 때 화면 위에 얹는다. 없으면 빈 문자열)
   - prompt: 그 장면을 만들 영상 생성 프롬프트 (영어, 500자 이내). 카메라·동작·분위기·배경을
     구체적으로. 등장인물은 {character_ko}, {setting_rule}
-  - start_frame: 장면 첫 화면 (한국어, 200자 이내). 멈춘 한 장면처럼: 인물 수, 위치(왼쪽·가운데·
-    오른쪽, 앞·뒤), 시선 방향, 손에 든 소품, 배경을 적는다
-  - end_frame: 장면 끝 화면 (한국어, 200자 이내). start_frame과 같은 방식으로
+  - start_frame: 장면 첫 화면 (한국어, 200자 이내). 멈춘 한 장면처럼: 누가(인물 수) 어디에서
+    (왼쪽·가운데·오른쪽, 앞·뒤, 서 있나·앉아 있나) 무엇을 들고 어느 쪽을 보며 어떤 표정인지,
+    배경 소품 2~3개를 적는다 (예: "주인공이 거실 소파 가운데 앉아 오른손 휴대폰을 내려다봄, 멍한
+    표정. 뒤에 스탠드·낮은 탁자·창")
+  - end_frame: 장면 끝 화면 (한국어, 200자 이내). start_frame과 같은 방식으로 같은 칸을 모두
   - action_en: start_frame에서 end_frame까지 일어나는 동작 (영어, 400자 이내, 동사 중심.
-    누가 무엇을 어떻게 하는지 순서대로)
-  - camera_en: 샷 크기와 카메라 움직임 (영어, 120자 이내. 예: medium shot, slow push-in)
+    처음 동작 → 끝 동작 순서로. 예: scrolls the phone, then looks up with wide eyes)
+  - camera_en: 샷 크기 + 앵글 + 카메라 움직임 세 가지를 모두 (영어, 120자 이내. 예: medium shot,
+    eye level, slow push-in / close-up, slightly high angle, static / full shot, low angle,
+    tracking left)
   - people: 화면에 보이는 인물·캐릭터 수 (정수, 주인공 포함)
   - props: 손으로 다루거나 꼭 보이는 소품 (짧은 한국어 목록, 없으면 빈 목록)
-  - place_ko: 그 장면의 장소 (짧은 한국어, 예: 책상·무대·지하철)
+  - place_ko: 그 장면의 구체 장소 (짧은 한국어, 예: 거실 소파·카페 창가·공항 대합실·눈 덮인 거리)
   - 장면마다 people·props를 사실대로 적는다 (규칙에 맞추려고 줄여 적지 않는다)
-  - 장면마다 place_ko를 사실대로, 같은 장소면 같은 말로 적는다
+  - 장면마다 place_ko·start_frame·end_frame·camera_en·action_en을 반드시 채운다 (비우지 않는다).
+    place_ko는 사실대로, 같은 장소면 같은 말로 적는다
 - offer_ko: 혜택·이점 한 줄 (한국어, 60자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
 - cta_ko: 마지막 행동 문구 (한국어, 40자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
 - category: 데이터 블록 categories(회사 상품 분류) 중 이 영상이 보여 주는 상품에 맞는 것 하나를
@@ -1138,6 +1143,49 @@ def _keyframes(i: int, s: _SceneOut) -> dict[str, str]:
     }
 
 
+# 11/26 CR-cb113dca245a: 기획 LLM이 장소·첫/끝 화면·카메라를 비우거나 짧게 써 콘티가 빈약했다.
+# 비어도 거절하지 않고(다시 쓰기 "고칠 점"에도 넣지 않음) 검사·콘티를 마친 뒤 코드가 채운다
+DETAIL_FILLED_LOG = "scene_detail_filled n=%d scenes=%d"
+SHOT_EN = {"close": "close-up", "medium": "medium shot", "full": "full shot"}
+FILLED_CAMERA_TAIL = "eye level, static"
+
+
+def fill_scene_detail(plan: VideoPlan, got: _PlanOut | None = None) -> VideoPlan:
+    """LLM 제작안 장면의 빈 칸을 채운다: place_ko ← visual 앞 낱말, start/end_frame ← visual,
+    camera_en ← start_pose 샷 크기 + "eye level, static" (포즈가 없으면 medium).
+
+    금지 낱말로 키프레임 칸을 비운 장면(`keyframe_problems`)과 엔드카드 장면은 그대로 둔다.
+    규칙 제작안은 그대로. 로그 한 줄(채운 칸 수·장면 수만, 장면 글은 남기지 않는다)."""
+    if plan.written_by != "llm":
+        return plan
+    cleared = {i for i, s in enumerate(got.scenes, start=1) if keyframe_problems(s)} if got \
+        else set()  # fmt: skip
+    company = _company()["name"]
+    filled, touched, scenes = 0, 0, []
+    for s in plan.scenes:
+        if s.n in cleared or plan_checks.end_card_scene(s.visual, company):
+            scenes.append(s)
+            continue
+        update: dict[str, str] = {}
+        if not s.place_ko.strip():
+            word = next(iter(plan_checks.keywords(s.visual)), "")
+            if word:
+                update["place_ko"] = word[:20]
+        for key in ("start_frame", "end_frame"):
+            if not getattr(s, key).strip():
+                update[key] = _short(s.visual, 200)
+        if not s.camera_en.strip():
+            shot = s.start_pose.shot if s.start_pose is not None else "medium"
+            update["camera_en"] = f"{SHOT_EN[shot]}, {FILLED_CAMERA_TAIL}"
+        if update:
+            filled, touched = filled + len(update), touched + 1
+        scenes.append(s.model_copy(update=update) if update else s)
+    if not filled:
+        return plan
+    log.info(DETAIL_FILLED_LOG, filled, touched)
+    return plan.model_copy(update={"scenes": scenes})
+
+
 def _from_llm(
     p: Proposal,
     got: _PlanOut,
@@ -1454,7 +1502,7 @@ async def _write_with(
         )
     # 11/25 예진: 장면별 첫·끝 화면 SVG 콘티를 같은 LLM으로 그려 함께 넘긴다(실패해도 그대로)
     drawn, _ = await storyboard_svg.draw(llm, plan, context_id)
-    return drawn
+    return fill_scene_detail(drawn, got)  # 11/26 빈 장소·화면·카메라 칸은 코드가 (검사 뒤)
 
 
 # ---------------------------------------------------------------- 고치기 (11/26 I, 마케팅 요청)
@@ -1561,7 +1609,7 @@ async def revise(
         "version": from_version + 1, "check_log": log_rows,
         "adjustments": _adjustments(got) or old.adjustments,
     })  # fmt: skip
-    return redraw(old, plan)
+    return fill_scene_detail(redraw(old, plan), got)
 
 
 PURPOSE_LABEL = {
