@@ -54,6 +54,22 @@ min_period_orders = 20
 min_group_size = 5
 active_days = 365
 
+# 분류 이름 (11/26). 사이트 변환기가 넘기는 분류 값은 강의 분야 코드(DEV 등)와 패키지 줄의 종류 값(bundle, #1901)이고,
+# 스터디온 /api/v1(courses.category)은 분야 이름을 주지 않는다(serialize.ts courseV1: category: c.category.code).
+# 그래서 사이트 레포의 분야 정의를 그대로 옮긴다: study-on-edu prisma/seed-data/categories.ts CATEGORIES.
+# bundle은 사이트 주문 항목의 종류 값(prisma OrderItem.kind: course·bundle)이고 사이트 화면도 "패키지"로 보인다
+# (src/app/(site)/my/orders/[code]/page.tsx, CartView.tsx).
+# 닫힌 목록이 아니다 — 여기 없는 새 분야는 사이트 값 그대로 보인다
+[sales.category_names]
+DEV = "개발·프로그래밍"
+DATA = "데이터·AI"
+CERT = "자격증"
+LANG = "어학"
+DSGN = "디자인"
+BIZ = "비즈니스·마케팅"
+EXAM = "수능·내신"
+bundle = "패키지"
+
 # 고객 속성 (11/26). 사이트 변환기가 고객사 주문 원본에서 꺼내는 code와 같다
 # (dashboard-api `site_adapter/customer_attrs.py`: 성별 → female·male, 생년 → 연령대).
 # 사이트가 이 값을 주지 않으면 고객·시장 분석은 "이 회사 사이트에서 받은 고객 속성이 없어요"로 멈춘다

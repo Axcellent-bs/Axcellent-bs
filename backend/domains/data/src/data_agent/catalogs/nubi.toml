@@ -56,6 +56,18 @@ min_period_orders = 20
 min_group_size = 5
 active_days = 365
 
+# 분류 이름 (11/26). 사이트 변환기가 넘기는 분류 값은 투어 지역 코드(japan 등)뿐이고,
+# 누비투어 /api/v1(tours.region·bookings)은 지역 이름을 주지 않는다(serialize.ts tourV1: region: p.region.code).
+# 그래서 사이트 레포의 지역 정의를 그대로 옮긴다: nubi-tour prisma/seed-data/products.ts REGIONS
+# (사이트 화면 지역 이름과 같다). 닫힌 목록이 아니다 — 여기 없는 새 지역은 사이트 값 그대로 보인다
+[sales.category_names]
+japan = "일본"
+southeast-asia = "동남아"
+china = "중화권"
+europe = "유럽"
+americas = "미주·캐나다"
+oceania = "괌·사이판·대양주"
+
 # 고객 속성 (11/26). 사이트 변환기가 고객사 주문 원본에서 꺼내는 code와 같다
 # (dashboard-api `site_adapter/customer_attrs.py`: 성별 → female·male, 생년 → 연령대).
 # 사이트가 이 값을 주지 않으면 고객·시장 분석은 "이 회사 사이트에서 받은 고객 속성이 없어요"로 멈춘다
