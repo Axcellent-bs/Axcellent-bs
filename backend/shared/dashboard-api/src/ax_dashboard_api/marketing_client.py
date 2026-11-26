@@ -927,6 +927,12 @@ VIDEO_REFUSALS = {
     "higgsfield_not_connected": (409, "HIGGSFIELD_NOT_CONNECTED"),
     "higgsfield_app_missing": (409, "HIGGSFIELD_APP_MISSING"),
     "quota_exceeded": (409, "QUOTA_EXCEEDED"),
+    # 홍보 사이트 올리기·내리기(11/26)
+    "company_not_allowed": (403, "COMPANY_NOT_ALLOWED"),
+    "title_required": (422, "TITLE_REQUIRED"),
+    "feed_not_configured": (409, "FEED_NOT_CONFIGURED"),
+    "limit_reached": (409, "PROMO_LIMIT_REACHED"),
+    "feed_write_failed": (500, "FEED_WRITE_FAILED"),
     "quota_not_configured": (409, "QUOTA_NOT_CONFIGURED"),
     "in_progress": (409, "IN_PROGRESS"),
     "storage_error": (500, "STORAGE_ERROR"),
@@ -998,6 +1004,23 @@ async def creative_video_call(
     if regenerate:
         payload["regenerate"] = True
     return await _creative_read("creative_video_request", payload)
+
+
+async def promo_site_status_call() -> dict[str, Any]:
+    """홍보 사이트에 올린 영상과 남은 자리(마케팅 `promo_site_status`, read)."""
+    return await _creative_read("promo_site_status", {})
+
+
+async def promo_site_publish_call(payload: dict[str, Any]) -> dict[str, Any]:
+    """고른 영상을 홍보 사이트에 올리기를 사람 승인에 올린다(마케팅 `promo_site_publish`).
+
+    AI 표시를 입히는 시간까지 기다린다."""
+    return await _creative_read("promo_site_publish", payload, deadline_s=120)
+
+
+async def promo_site_remove_call(item_id: str, who: str) -> dict[str, Any]:
+    """홍보 사이트에서 내린다(마케팅 `promo_site_remove`)."""
+    return await _creative_read("promo_site_remove", {"item_id": item_id, "who": who})
 
 
 OVERLAY_DEADLINE_SECONDS = 120  # ffmpeg로 자막을 얹는 시간까지 기다린다

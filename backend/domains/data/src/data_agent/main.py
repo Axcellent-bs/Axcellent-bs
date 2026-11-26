@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import logging
 import os
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -22,8 +22,9 @@ from data_agent import catalog as metric_catalog
 from data_agent.clients.log_client import get_log_source
 from data_agent.connectors.shop_api import close_shared_client
 from data_agent.handlers import get_sales_store, scoped_handlers, use_sales_store
-from data_agent.monitor import run_snapshots_forever
+from data_agent.monitor import run_company_snapshots_forever
 from data_agent.report_store import Snapshot, get_report_store
+from data_agent.sales_collect import catbooks_tenant, watched_companies
 from data_agent.skills.activity_report import build_day_snapshot
 from data_agent.skills.anomaly_detection import get_metric_source
 from data_agent.stage_timing import install_sqlite_timer
@@ -76,16 +77,26 @@ def start_report_snapshots(env: Mapping[str, str] | None = None) -> asyncio.Task
         return None
     metrics = get_metric_source(env)
 
-    async def build_day(day: date) -> Snapshot:
-        meta = RequestMeta(
-            context_id=SNAPSHOT_CONTEXT,
-            token=agent_token("data"),
-            tenant_id=TENANT_ID_DEFAULT,
-            deadline=datetime.now(UTC) + SNAPSHOT_DEADLINE,
-        )
-        return await build_day_snapshot(day, meta, logs, metrics, call_agent)
+    def build_for(tenant: str, company: str | None) -> Callable[[date], Awaitable[Snapshot]]:
+        """그 회사 하루 값 만들기. 다른 회사는 그 회사 범위 안에서 불려 그 회사 커넥터를 쓴다."""
 
-    return asyncio.create_task(run_snapshots_forever(store, build_day, TENANT_ID_DEFAULT))
+        async def build_day(day: date) -> Snapshot:
+            meta = RequestMeta(
+                context_id=SNAPSHOT_CONTEXT,
+                token=agent_token("data"),
+                tenant_id=tenant,
+                deadline=datetime.now(UTC) + SNAPSHOT_DEADLINE,
+            )
+            source = metrics if company is None else get_metric_source(env)
+            return await build_day_snapshot(day, meta, logs, source, call_agent)
+
+        return build_day
+
+    return asyncio.create_task(
+        run_company_snapshots_forever(
+            store, build_for, TENANT_ID_DEFAULT, lambda: watched_companies(env)
+        )
+    )
 
 
 def build_app() -> FastAPI:
@@ -107,7 +118,7 @@ def build_app() -> FastAPI:
             sends = asyncio.create_task(campaign_update.run_forever())
             # 구매자 요약 표 (11/18): 준비되지 않았으면(예전 파일) 시작하며 채운다 (뒤에서)
             summary = asyncio.create_task(
-                sales_reads.ensure_summary(get_sales_store(), TENANT_ID_DEFAULT)
+                sales_reads.ensure_summary(get_sales_store(), catbooks_tenant(os.environ))
             )
             # 판매 분석 미리 계산 (11/18): 수집기가 새 행을 저장하면 기본 조회를 캐시에 넣는다
             warm = (
@@ -115,7 +126,9 @@ def build_app() -> FastAPI:
                     sales_reads.run_forever(
                         get_sales_store,
                         metric_catalog.current,
-                        TENANT_ID_DEFAULT,
+                        catbooks_tenant(os.environ),
+                        # 회사 연결이 켜진 다른 회사도 그 회사 카탈로그로 (11/26 회사 분리)
+                        others=lambda: watched_companies(os.environ),
                     )
                 )  # fmt: skip
                 if sales_reads.warm_enabled()

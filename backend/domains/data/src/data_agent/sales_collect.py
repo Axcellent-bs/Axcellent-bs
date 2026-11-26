@@ -497,6 +497,11 @@ async def collect_other_companies(
     return out
 
 
+def catbooks_tenant(env: Mapping[str, str] = os.environ) -> str:
+    """캣북스 판매 저장소 tenant (`DATA_SALES_TENANT_ID`, 기본 shop-demo). 수집기·집계와 같은 값."""
+    return (env.get(TENANT_ENV) or TENANT_ID_DEFAULT).strip()
+
+
 def request_tenant(env: Mapping[str, str] = os.environ) -> str:
     """지금 요청 회사의 판매 저장소 tenant: 캣북스면 `DATA_SALES_TENANT_ID`(수집기와 같은 값),
     다른 회사면 그 회사 id(`collect_company`가 쓰는 값)."""

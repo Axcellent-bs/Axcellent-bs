@@ -4,7 +4,8 @@
   사람이 이어받는 경우. 이어받는 사람이 없는 교대(공백)는 `gaps.compute_gaps`가 따로 알린다.
 - `start_due_handovers`: 위 목록마다 `start_handover`를 hr 스스로 요청한다. 사건 번호는 영역·교대
   끝 시각으로 정해 같은 교대에 두 번 만들어지지 않는다(멱등).
-- 주기 실행은 `HR_TIMER=1`일 때만 서버 시작 시 켜진다(기본 꺼짐).
+- 주기 실행은 `HR_TIMER=1`일 때만 서버 시작 시 켜진다(기본 꺼짐). 회차마다 회사를 돈다
+  (캣북스 + 회사 연결이 켜진 회사, `ax_agent_template.company_jobs`).
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
+from ax_agent_template.company_jobs import for_each_company, meta_tenant_id
 from ax_contracts.schemas import AgentRequest, RequestMeta
 from hr_agent.clients.errors import UpstreamError, bind_meta
 from hr_agent.narrative import Narrator
@@ -73,6 +75,7 @@ async def start_due_handovers(svc: Services, horizon_minutes: int = 60) -> list[
                 deadline=svc.clock() + timedelta(seconds=30),
                 idempotency_key=f"{ctx}:start_handover",
                 requester="hr",
+                tenant_id=meta_tenant_id(),  # 회사마다 돌 때 그 회사로(회사 분리 11/26)
             ),
             skill="start_handover",
             input={
@@ -102,10 +105,20 @@ async def start_due_handovers(svc: Services, horizon_minutes: int = 60) -> list[
     return started
 
 
+async def start_due_handovers_all(horizon_minutes: int = 60) -> dict[str, list[dict[str, Any]]]:
+    """회사마다(캣북스 + 회사 연결이 켜진 회사) 그 회사 조직도로 교대 인수인계를 시작한다.
+
+    저장소는 회사 범위(`company_scope.using`)를 보고 그 회사 파일을 연다(store/__init__.py).
+    """
+    return await for_each_company(
+        lambda _cid: start_due_handovers(get_services(), horizon_minutes), "교대 점검"
+    )
+
+
 async def run_forever(interval_seconds: int = 60) -> None:
     while True:
         try:
-            await start_due_handovers(get_services())
+            await start_due_handovers_all()
         except Exception:  # noqa: BLE001 - 타이머는 어떤 오류에도 멈추지 않는다
             log.exception("교대 점검 실패")
         await asyncio.sleep(interval_seconds)

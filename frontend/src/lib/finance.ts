@@ -969,9 +969,9 @@ export const purposeKo = (...codes: (string | null | undefined)[]) => {
 };
 
 /** 마케팅 화면에서 결정하는 보류 건 */
-export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_media", "start_campaign", "set_publish_control", "generate_creative_video", "generate_creative_thumbnails", "publish_youtube", "publish_instagram_video"] as const;
+export const MARKETING_HOLD_ACTIONS = ["issue_coupon", "publish_notice", "publish_sns", "generate_media", "start_campaign", "set_publish_control", "generate_creative_video", "generate_creative_thumbnails", "publish_youtube", "publish_instagram_video", "publish_promo_video"] as const;
 /** 마케팅 › SNS·미디어 › 사람 결정 대기에서 결정하는 보류 건 (게시·이미지·영상 만들기·썸네일 후보 만들기·유튜브 올리기·인스타 릴스 올리기, 11/23) */
-export const SNS_HOLD_ACTIONS = ["publish_sns", "generate_media", "generate_creative_video", "generate_creative_thumbnails", "publish_youtube", "publish_instagram_video"] as const;
+export const SNS_HOLD_ACTIONS = ["publish_sns", "generate_media", "generate_creative_video", "generate_creative_thumbnails", "publish_youtube", "publish_instagram_video", "publish_promo_video"] as const;
 export const SNS_HOLD_PAGE = "/marketing/sns?view=holds";
 /** 개발·배포 화면(/dev/work/holds)에서 결정하는 보류 건 (PR 만들기·머지·되돌리기, 자동 머지 기준 바꾸기, 배포 되돌리기) */
 export const DEV_HOLD_ACTIONS = ["generate_pr", "merge_pr", "repo_revert_pr", "auto_policy_update", "rollback_deployment"] as const;
@@ -991,7 +991,7 @@ export const NOT_FINANCE_ACTIONS = new Set<string>(["refund_request", SETTLEMENT
 
 export const ACTION_KO: Record<string, string> = {
   issue_coupon: "쿠폰 지급", refund_request: "환불", confirm_settlement: "판매자 정산 지급",
-  publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", generate_creative_video: "스토리보드 영상 만들기", generate_creative_thumbnails: "영상 썸네일 후보 만들기", publish_youtube: "유튜브에 영상 올리기", publish_instagram_video: "인스타그램에 릴스 올리기", start_campaign: "캠페인 집행", set_publish_control: "Instagram 자동 게시 다시 켜기",
+  publish_notice: "공지 올리기", publish_sns: "SNS 게시", generate_media: "이미지·영상 만들기", generate_creative_video: "스토리보드 영상 만들기", generate_creative_thumbnails: "영상 썸네일 후보 만들기", publish_youtube: "유튜브에 영상 올리기", publish_promo_video: "홍보 사이트에 영상 공개", unpublish_promo_video: "홍보 사이트에서 영상 내리기", publish_instagram_video: "인스타그램에 릴스 올리기", start_campaign: "캠페인 집행", set_publish_control: "Instagram 자동 게시 다시 켜기",
   rollback_deployment: "배포 되돌리기", restart_service: "서비스 다시 켜기", generate_pr: "코드 변경 만들기", merge_pr: "코드 변경 합치기", repo_revert_pr: "코드 변경 되돌리기", auto_policy_update: "자동 머지 기준 바꾸기",
   approve_data_deletion: "데이터 삭제 승인", purge_expired_inquiries: "기한 지난 문의 지우기", purge_expired_claims: "기한 지난 클레임 지우기",
 };

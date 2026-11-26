@@ -99,6 +99,17 @@ CREATE TABLE IF NOT EXISTS marketing_brief_creative (
 """
 
 
+# 홍보 사이트에 올린(올리는 중인) 영상(11/26, promo_site). 사이트가 하나라 회사 전체에서 센다
+_PROMO_SITE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS marketing_promo_site (
+    item_id TEXT NOT NULL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
+
 UPLOAD_KINDS = ("real_photo", "virtual_human", "illustration")
 
 
@@ -139,6 +150,7 @@ class CreativeRecords:
             self._conn.execute(_REQUEST_YOUTUBE_SCHEMA)
             self._conn.execute(_REQUEST_INSTAGRAM_SCHEMA)
             self._conn.execute(_BRIEF_RECORD_SCHEMA)
+            self._conn.execute(_PROMO_SITE_SCHEMA)
             info = self._conn.execute("PRAGMA table_info(marketing_creative_records)")
             have = {r["name"] for r in info}
             if "render" not in have:  # 2026-11-20 Higgsfield 그림·영상 칸
@@ -267,6 +279,42 @@ class CreativeRecords:
                 ),
             )
         return cur.rowcount == 1
+
+    # ------------------------------------------------ 홍보 사이트(11/26)
+    def promo_rows(self) -> list[tuple[str, str, dict[str, Any]]]:
+        """모든 회사의 (항목 번호, 회사, 상태). 올린 순서와 상관없다."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT item_id, tenant_id, state FROM marketing_promo_site ORDER BY item_id"
+            ).fetchall()
+        return [(r["item_id"], r["tenant_id"], json.loads(r["state"])) for r in rows]
+
+    def promo_get(self, item_id: str) -> tuple[str, dict[str, Any]] | None:
+        """(회사, 상태). 없으면 None."""
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT tenant_id, state FROM marketing_promo_site WHERE item_id = ?", (item_id,)
+            ).fetchone()
+        return (r["tenant_id"], json.loads(r["state"])) if r else None
+
+    def promo_put(self, item_id: str, state: dict[str, Any]) -> None:
+        """이 회사의 항목 상태를 적는다. 다른 회사의 항목은 바꾸지 않는다."""
+        now = datetime.now(UTC).isoformat()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO marketing_promo_site (item_id, tenant_id, state, updated_at)"
+                " VALUES (?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET"
+                " state = excluded.state, updated_at = excluded.updated_at"
+                " WHERE tenant_id = excluded.tenant_id",
+                (item_id, self.company_id, json.dumps(state, ensure_ascii=False), now),
+            )
+
+    def promo_delete(self, item_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "DELETE FROM marketing_promo_site WHERE item_id = ? AND tenant_id = ?",
+                (item_id, self.company_id),
+            )
 
     def list(self, limit: int = 50) -> list[dict[str, Any]]:
         """목록은 가볍게: 요약·미리보기·칸 수만."""

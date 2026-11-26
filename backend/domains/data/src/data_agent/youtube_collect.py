@@ -21,7 +21,11 @@
    브리프에 쓰는 영상은 유지. 50개당 1단위, 최대 `[tracking] max_tracked`(기본 500)개.
    로그에 "추적에서 뺀 수"(지난 실행엔 있었고 이번에 뺀 영상)
 5. 보관: `[tracking] retention_days`(기본 30)일이 지난 스냅샷 줄은 한국 날짜 하루 1번 지운다
-3. 회사 키워드 검색(한국 날짜 하루 1번): 키워드마다 검색 100단위 + 통계 1단위
+3. 회사 키워드 검색(한국 날짜 하루 1번): 키워드마다 검색 100단위 + 통계 1단위.
+   11/26부터 회사마다: 캣북스(예전 그대로) 다음에 회사 연결이 켜진 회사마다 그 회사 `youtube.toml`
+   (회사 설정이 없으면 틀 기본값 — 키워드 없음이면 검색 안 함)으로 검색해
+   `search@<회사 id>:<키워드>`로 남긴다. 캣북스 키워드로 다른 회사를 검색하지 않는다.
+   한 회사 실패는 다른 회사를 막지 않는다
 4. 저장(`youtube_store`): 같은 시각 같은 영상은 한 줄. 실행 기록에 쓴 할당량 단위를 남긴다
 
 - 키: `YOUTUBE_API_KEY`. 환경변수가 먼저고, 없으면 `backend/.env`에서 읽는다(값은 출력하지 않는다)
@@ -43,7 +47,7 @@ import sqlite3
 import subprocess
 import sys
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -55,7 +59,15 @@ from data_agent.connectors import ConnectorUnavailable
 from data_agent.connectors.youtube import VideoStat, YouTubeConnector
 from data_agent.stage_timing import install_sqlite_timer
 from data_agent.trend_precompute import precompute
-from data_agent.youtube_store import DB_ENV, DEFAULT_DB, KST, Row, SnapshotStore
+from data_agent.youtube_store import (
+    CATBOOKS,
+    DB_ENV,
+    DEFAULT_DB,
+    KST,
+    Row,
+    SnapshotStore,
+    search_source,
+)
 
 BACKEND = Path(__file__).resolve().parents[4]
 CONFIG_ENV = "DATA_YOUTUBE_CONFIG"
@@ -89,6 +101,7 @@ class RunResult:
     dropped: int = 0  # 지난 실행엔 추적했지만 이번에 뺀 영상 수
     pruned: int = 0  # 보관 기간이 지나 지운 스냅샷 줄 수 (그날 첫 실행만)
     errors: list[str] = field(default_factory=list)
+    company_searched: dict[str, int] = field(default_factory=dict)  # 다른 회사 id → 검색한 영상 수
 
     def line(self) -> str:
         search = (
@@ -102,6 +115,7 @@ class RunResult:
             f" 추적 {self.tracked}개(추적에서 뺀 수 {self.dropped}개), {search},"
             f" 저장 {self.saved}줄, 할당량 {self.quota_units}단위"
             + (f", 보관 기간 지나 지움 {self.pruned}줄" if self.pruned else "")
+            + "".join(f", {cid} 검색 {n}개" for cid, n in self.company_searched.items())
             + errors
         )
 
@@ -124,12 +138,39 @@ def load_env(env: Mapping[str, str], path: Path = BACKEND / ".env") -> dict[str,
 def config_path(env: Mapping[str, str]) -> Path:
     """회사 `youtube.toml`: 환경변수 → `AX_TENANT` 폴더 → 회사 연결에서 고른 회사.
 
-    연결 전이면 없는 경로(설정 없음)."""
+    연결 전이면 없는 경로(설정 없음). 환경변수·`AX_TENANT`는 설치 하나에 하나(캣북스 것)라
+    캣북스가 아닌 회사 범위에서는 보지 않고 그 회사 설정(없으면 틀 기본값)만 본다."""
+    if _other_company():
+        return Path(tenant_setting(CONFIG_ENV) or NOT_CONNECTED)
     if value := env.get(CONFIG_ENV):
         return Path(value)
     if tenant := (env.get("AX_TENANT") or "").strip():
         return BACKEND / "config" / "tenants" / tenant / "youtube.toml"
     return Path(tenant_setting(CONFIG_ENV) or NOT_CONNECTED)
+
+
+def _other_company() -> bool:
+    from ax_agent_template.company_connection import company_of
+
+    return company_of() != CATBOOKS
+
+
+def company_configs(env: Mapping[str, str]) -> list[tuple[str, YouTubeConfig]]:
+    """캣북스 말고 이번 회차에 키워드를 검색할 회사와 그 회사 키워드 (#1878 `watched_companies`).
+
+    회사마다 그 회사 범위에서 `youtube.toml`을 읽는다(캣북스 환경변수·폴더로 떨어지지 않음).
+    회사 하나를 못 읽어도 다른 회사는 그대로."""
+    from ax_agent_template import company_scope
+    from data_agent.sales_collect import watched_companies
+
+    out: list[tuple[str, YouTubeConfig]] = []
+    for cid in watched_companies(env):
+        try:
+            with company_scope.using(cid):
+                out.append((cid, load_config(config_path(env))))
+        except Exception as error:  # noqa: BLE001 - 한 회사 설정 오류가 다른 회사를 막지 않게
+            print(f"[youtube] {cid} 키워드를 읽지 못함 ({type(error).__name__})", flush=True)
+    return out
 
 
 def load_config(path: Path) -> YouTubeConfig:
@@ -199,10 +240,12 @@ async def collect_once(
     *,
     now: datetime | None = None,
     in_use: set[str] | None = None,
+    companies: Sequence[tuple[str, YouTubeConfig]] = (),
 ) -> RunResult:
     """한 번 수집해 저장한다. 실패는 기록하고 받은 것까지는 저장한다.
 
     `in_use`: 브리프에 쓰는 영상 (인기·검색에서 빠졌어도 추적 유지).
+    `config`의 키워드는 캣북스 것, `companies`는 다른 회사 (회사 id, 그 회사 키워드).
     """
     collected_at = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
     result = RunResult(collected_at)
@@ -255,7 +298,31 @@ async def collect_once(
             except ConnectorUnavailable as error:
                 failed(f"검색 '{query}'", error)
 
+    searched: list[str] = []
+    for cid, company in companies:  # 다른 회사 키워드 (회사마다 한국 날짜 하루 1번)
+        if stop:
+            break
+        if not company.queries or store.searched_on(today, cid):
+            continue
+        found_n = 0
+        after = collected_at - timedelta(days=SEARCH_DAYS)
+        for query in company.queries:
+            if stop:
+                break
+            try:
+                found = await connector.search(query, after, company.region)
+                _merge(rows, found, search_source(cid, query))
+                found_n += len(found)
+            except ConnectorUnavailable as error:
+                failed(f"{cid} 검색 '{query}'", error)
+            except Exception as error:  # noqa: BLE001 - 한 회사 실패가 다른 회사를 막지 않게
+                result.errors.append(f"{cid} 검색 '{query}' [{type(error).__name__}]")
+        searched.append(cid)
+        result.company_searched[cid] = found_n
+
     result.saved = store.save(collected_at, rows.values())
+    for cid in searched:
+        store.mark_searched(today, cid, result.company_searched[cid])
     if config.retention_days > 0 and not store.pruned_on(today):  # 보관 기간 지난 줄 (하루 1번)
         result.pruned = store.prune(today, collected_at - timedelta(days=config.retention_days))
     result.quota_units = connector.quota_used - start_quota
@@ -348,7 +415,7 @@ async def run_details(env: Mapping[str, str]) -> int:
 
 async def run(every: int | None, env: Mapping[str, str], precompute_after: bool = True) -> int:
     store = SnapshotStore(env.get(DB_ENV) or DEFAULT_DB)
-    config = load_config(config_path(env))
+    config = load_config(config_path(env))  # 캣북스 (예전 그대로)
     if not config.queries:
         print(
             f"[youtube] 회사 키워드 없음 ({config_path(env)}): 검색은 하지 않는다", file=sys.stderr
@@ -356,8 +423,8 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
     try:
         while True:
             connector = YouTubeConnector(env, caller="youtube_collect")
-            result = await collect_once(connector, store, config,
-                                        in_use=in_use_ids(env))  # fmt: skip
+            result = await collect_once(connector, store, config, in_use=in_use_ids(env),
+                                        companies=company_configs(env))  # fmt: skip
             print(result.line(), flush=True)
             await measure_videos(connector, env)  # 게시한 영상 성과: 지금 잴 시점만 (실패해도 계속)
             await measure_instagram_videos(env)  # 인스타 게시 영상: 계정마다 한 번 (실패해도 계속)
