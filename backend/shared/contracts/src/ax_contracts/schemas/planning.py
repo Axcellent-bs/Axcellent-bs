@@ -812,6 +812,9 @@ class KeyPose(AxModel):
     # 아래는 예전 포즈는 없다. 책방 밖 소품 (11/26 무대 의뢰에 마이크·조명을 못 그렸다). id는
     # agent-template pose_render.EXTRA_PROPS(mic·laptop·bag·spotlight·screen·sign_blank)만 쓴다
     extra_props: list[str] = Field(default_factory=list, max_length=2)
+    # 아래는 예전 포즈는 없다 ("stand"). 몸 자세 (11/26 소파 장면도 서 있게 그려졌다).
+    # sit = 앉음, kneel = 무릎 꿇음, lie = 누움. pose_render가 엉덩이 높이·무릎을 바꿔 그린다
+    posture: Literal["stand", "sit", "kneel", "lie"] = "stand"
 
     @model_validator(mode="before")
     @classmethod
