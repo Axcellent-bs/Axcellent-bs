@@ -22,6 +22,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ax_agent_template import company_scope
 from ax_contracts.schemas.data import TrendInsight
 from ax_contracts.schemas.marketing_channels import ChannelFollowersOutput
 from ax_contracts.schemas.planning import (
@@ -570,14 +571,19 @@ class ProposalMixin:
         if read is None:
             got: Any = "no_reader"
         else:
+            # 11/26 H: 요청 밖(제작안을 뒤에서 쓸 때)이면 company_scope가 비어 기본 회사로 묻는다 →
+            # 이 서비스(제안이 있는 회사)로 묻는다. 요청 안이면 그 요청 회사 그대로
+            own = company_scope.active() or getattr(self, "company", None) or self.tenant_id
             try:
-                got = await read(_ctx(p), p.brand_character_record_id)
+                with company_scope.using(own):
+                    got = await read(_ctx(p), p.brand_character_record_id)
             except Exception as exc:  # noqa: BLE001 - 못 읽으면 회사 브랜드로 (종류만 로그)
                 got = type(exc).__name__
         if isinstance(got, CompanyCharacter):
             return got, ""
         why = character_reason(got)
-        log.warning("회사 캐릭터 못 읽음 → 회사 브랜드 캐릭터: %s %s", p.id, why)
+        detail = " ".join(str(got or "").split())[:120]  # 이유 글 ("N초 안에 응답 없음" 등)
+        log.warning("회사 캐릭터 못 읽음 → 회사 브랜드 캐릭터: %s %s (%s)", p.id, why, detail)
         return None, why
 
     async def _option_sources(

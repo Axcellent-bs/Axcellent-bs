@@ -1006,12 +1006,16 @@ async def creative_records_list(request: AgentRequest) -> AgentResult:
 
 
 async def creative_record_get(request: AgentRequest) -> AgentResult:
-    """제작 기록 하나(read). 없으면 not_found."""
+    """제작 기록 하나(read). 없으면 not_found.
+
+    기획(planning)은 고른 회사 캐릭터 외형만 읽는다(11/26 H) → 진행 확인(영상·썸네일·업로드)은
+    건너뛴다. 화면(dashboard-api)이 읽을 때만 이어 만든다."""
     data = _parse(request, CreativeRecordGetInput)
     if isinstance(data, AgentResult):
         return data
     if (
-        _creative.store().get(data.record_id) is not None
+        request.meta.requester != "planning"
+        and _creative.store().get(data.record_id) is not None
     ):  # 승인된 영상은 이어 만들고 끊긴 단계는 정리
         try:
             _render.expire_stale(data.record_id)

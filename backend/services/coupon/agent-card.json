@@ -162,12 +162,13 @@
     },
     {
       "id": "creative_record_get",
-      "description": "제작 기록 하나(input.record_id: CR-…)의 이미지 시트 결과와 이어 만든 스토리보드 결과 전체. 없으면 outcome not_found. 상태를 바꾸지 않는다.",
+      "description": "제작 기록 하나(input.record_id: CR-…)의 이미지 시트 결과와 이어 만든 스토리보드 결과 전체. 없으면 outcome not_found. 상태를 바꾸지 않는다. 기획(planning)이 고른 회사 캐릭터 외형을 읽을 때는 영상·썸네일·업로드 진행 확인을 하지 않고 읽기만 한다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeRecordGetInput",
       "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#CreativeRecordGetOutput",
       "grade": "read",
       "allowed_requesters": [
-        "dashboard-api"
+        "dashboard-api",
+        "planning"
       ],
       "verifier": null,
       "priority": "recommended"

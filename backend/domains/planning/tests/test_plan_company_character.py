@@ -183,9 +183,12 @@ class Marketing:
         return self.answer
 
 
-def _receive(marketing: Any, record: str | None = RECORD) -> tuple[PlanningService, Any]:
+def _receive(
+    marketing: Any, record: str | None = RECORD, company: str | None = None
+) -> tuple[PlanningService, Any]:
+    more: dict[str, Any] = {"tenant_id": company, "company": company} if company else {}
     svc = PlanningService(
-        gate=V._gate, relater=None, marketing=marketing, proposal_writer=V.Writer(None)  # noqa: SLF001
+        gate=V._gate, relater=None, marketing=marketing, proposal_writer=V.Writer(None), **more  # noqa: SLF001
     )
     inp = V._insight().model_copy(update={"brand_character_record_id": record})  # noqa: SLF001
     res = asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp))
@@ -229,3 +232,60 @@ def test_marketing_client_reads_the_record_of_the_request_company() -> None:
         got = asyncio.run(client.character("ctx", RECORD))
     assert isinstance(got, CompanyCharacter) and got.photo
     assert seen == [("marketing", "creative_record_get", {"record_id": RECORD}, "nubitour")]
+
+
+# ------------------------------------------------------- 11/26 H: 의뢰 흐름에서 실제로 읽기
+
+
+def _marketing_brief(answer: Any, timeout: float = 30.0) -> tuple[ext.MarketingBrief, list[str]]:
+    """진짜 MarketingBrief에 가짜 A2A 호출. 물은 회사(meta.tenant_id)를 남긴다."""
+    from ax_contracts.schemas import AgentResult, TaskStatus
+
+    tenants: list[str] = []
+
+    async def call(target, req):
+        tenants.append(req.meta.tenant_id)
+        if answer == "slow":
+            await asyncio.sleep(1)
+        if answer == "not_found":
+            return AgentResult(meta=req.meta, status=TaskStatus.FAILED, outcome="not_found")
+        return AgentResult(meta=req.meta, status=TaskStatus.COMPLETED, output={"sheet": SHEET})
+
+    return ext.MarketingBrief(caller=call, timeout=timeout), tenants
+
+
+def test_relay_without_a_request_company_reads_the_record_of_the_proposal_company() -> None:
+    assert ext.company_scope.active() is None  # 의뢰 흐름 뒤(요청 밖)
+    client, tenants = _marketing_brief("sheet")
+    svc, out = _receive(client)
+    assert tenants == ["catbooks"]  # 캣북스 서비스 → 캣북스 기록
+    assert out.video_plan and out.video_plan.character_source == "company_character"
+    assert not out.video_plan.character_source_reason
+    p = next(x for x in svc.state.proposals if x.id == out.proposal_id)
+    assert p.company_character and "a young woman" in p.company_character.look_en
+    client2, tenants2 = _marketing_brief("sheet")
+    _receive(client2, company="nubitour")
+    assert tenants2 == ["nubitour"]  # 누비투어 서비스면 누비투어 기록 (다른 회사에서 찾지 않는다)
+
+
+def test_timeout_is_read_failed_with_the_reason_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, _ = _marketing_brief("slow", timeout=0.05)
+    with caplog.at_level("WARNING", logger="ax.planning"):
+        _, out = _receive(client)
+    assert out.video_plan and out.video_plan.character_source == "brand"
+    assert out.video_plan.character_source_reason == "read_failed"
+    line = next(r.getMessage() for r in caplog.records if "회사 캐릭터 못 읽음" in r.getMessage())
+    assert "read_failed" in line and "초 안에 응답 없음" in line
+
+
+def test_record_of_another_company_is_not_read(caplog: pytest.LogCaptureFixture) -> None:
+    client, tenants = _marketing_brief("not_found")  # 마케팅이 그 회사 폴더에 없다고 답함
+    with caplog.at_level("WARNING", logger="ax.planning"):
+        svc, out = _receive(client, company="nubitour")
+    assert tenants == ["nubitour"]
+    assert out.video_plan and out.video_plan.character_source == "brand"
+    p = next(x for x in svc.state.proposals if x.id == out.proposal_id)
+    assert p.company_character is None
+    assert any("failed not_found" in r.getMessage() for r in caplog.records)
