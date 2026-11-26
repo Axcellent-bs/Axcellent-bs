@@ -98,21 +98,23 @@ function DropArea({ enabled, busy, onFile, onError, children }: { enabled: boole
   );
 }
 
-function Picture({ recordId, part, info, label, onChanged, onError, playPart, version }: { recordId: string; part: RenderPartKey; info?: RenderPart | null; label: string; onChanged: () => void; onError: (m: string) => void; playPart?: PlayPart; version?: string }) {
+function Picture({ recordId, part, info, label, onChanged, onError, playPart, version, uploadPart }: { recordId: string; part: RenderPartKey; info?: RenderPart | null; label: string; onChanged: () => void; onError: (m: string) => void; playPart?: PlayPart; version?: string; uploadPart?: RenderPartKey }) {
   const done = info?.status === "done" && !!info.sha256;
   const uploaded = info?.source === "upload";
-  const busy = info?.status === "running" || info?.status === "awaiting_approval";
+  // uploadPart: 직접 올린 파일을 다른 칸에 넣는다(상세의 영상 칸 하나 → 완성 영상). 그때는 이 칸이 만드는 중이어도 올릴 수 있다
+  const target = uploadPart ?? part;
+  const busy = !uploadPart && (info?.status === "running" || info?.status === "awaiting_approval");
   // 자막을 얹은 파일(overlay_video)을 재생할 때는 그 파일 주소를 쓴다(올리기·끌어 놓기는 늘 원래 칸 part)
   const { src, failed } = useAuthedMedia(done ? assetUrl(recordId, playPart ?? part, playPart === "overlay_video" && version ? version : info?.sha256 ?? null) : null);
-  const { busy: uploading, upload } = useUpload(recordId, part, onChanged, onError);
+  const { busy: uploading, upload } = useUpload(recordId, target, onChanged, onError);
   return (
     <figure className="space-y-1">
       <figcaption className="flex items-center gap-2 text-xs font-medium text-ink-700">
         {label} <Status part={info} />
         {uploaded && <span className="chip bg-ink-50 text-ink-700" title={info?.by ? `${info.by}님이 올림` : undefined}>직접 올림{info?.label ? ` · ${info.label}` : ""}</span>}
-        {!busy && <UploadButton part={part} busy={uploading} onPick={(f) => void upload(f)} />}
+        {!busy && <UploadButton part={target} busy={uploading} onPick={(f) => void upload(f)} />}
       </figcaption>
-      <DropArea enabled={IS_VIDEO(part) && !busy} busy={uploading} onFile={(f) => void upload(f)} onError={onError}>
+      <DropArea enabled={IS_VIDEO(target) && !busy} busy={uploading} onFile={(f) => void upload(f)} onError={onError}>
       {done ? (
         src ? (IS_VIDEO(part)
           ? <video src={src} controls playsInline className="w-full max-w-sm rounded-xl bg-black" />
@@ -129,7 +131,7 @@ function Picture({ recordId, part, info, label, onChanged, onError, playPart, ve
 }
 
 /** Higgsfield 웹 구독(Ultra)으로 만들기: 영상 요청과 같은 프롬프트를 복사하고 새 탭으로 Higgsfield를 연다(API 키 없음) */
-function HiggsfieldWeb({ board, speed, reference }: { board: StoryboardResult; speed?: number | null; reference?: string | null }) {
+function HiggsfieldWeb({ board, speed, reference, note }: { board: StoryboardResult; speed?: number | null; reference?: string | null; note: string }) {
   // 대본을 따라 만든 스토리보드면 장면 흐름(시각 × 배속)·대사 요지 + 글자 금지 문장(영상 요청과 같은 문장).
   // 배속·참조 방식은 기록의 영상 요약(없으면 1.0·스토리보드 그림)
   const prompt = storyboardVideoPrompt(board.style_en, board.script_used ? board.shots : null, { speed, reference });
@@ -150,7 +152,7 @@ function HiggsfieldWeb({ board, speed, reference }: { board: StoryboardResult; s
         <button type="button" className="btn-ghost text-xs" onClick={() => void go()}>영상 프롬프트 복사 + Higgsfield 열기</button>
         {copy === "ok" && <span role="status" className="text-emerald-800">프롬프트를 복사했어요</span>}
       </div>
-      <p className="text-ink-500">Higgsfield 화면(웹 구독)에서 위 스토리보드 그림을 시작 이미지로 올리고 프롬프트를 붙여 넣어 만드세요. 만든 영상은 아래 칸에 끌어 놓거나 [파일 올리기]로 붙여요.</p>
+      <p className="text-ink-500">{note}</p>
       {copy === "failed" && (
         <div className="space-y-1">
           <p role="alert" className="text-amber-800">자동 복사가 안 됐어요. 아래 프롬프트를 선택해 복사하세요.</p>
@@ -161,7 +163,10 @@ function HiggsfieldWeb({ board, speed, reference }: { board: StoryboardResult; s
   );
 }
 
-export function RenderPanel({ recordId }: { recordId: string }) {
+const PANEL_WEB_NOTE = "Higgsfield 화면(웹 구독)에서 위 스토리보드 그림을 시작 이미지로 올리고 프롬프트를 붙여 넣어 만드세요. 만든 영상은 아래 칸에 끌어 놓거나 [파일 올리기]로 붙여요.";
+
+/** 제작 기록 한 건의 상태와 동작. `RenderPanel`과 제작 기록 상세(단계별 화면)가 같이 쓴다 */
+export function useRecordRender(recordId: string) {
   const [rec, setRec] = useState<CreativeRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
@@ -194,9 +199,6 @@ export function RenderPanel({ recordId }: { recordId: string }) {
     <OverlayControls recordId={recordId} overlay={render.overlay} speed={render.video?.summary?.speed} shots={rec?.storyboard?.shots} showOriginal={showOriginal} canToggle={canToggleOriginal(render)}
       onToggle={() => setShowOriginal((v) => !v)} onChanged={() => { setOverlayNonce((n) => n + 1); setShowOriginal(false); void load(); }} />
   );
-  const summaryLine = videoSummaryLine(video?.status, video?.summary);
-  const thumb = chosenThumb(render.thumbnails); // 인스타 릴스 표지 = 고른 썸네일(안 고르면 첫 장)
-  const reelCover = thumb ? { url: thumbUrl(recordId, thumb.media_id), picked: thumb.picked } : null;
   // 11/25 키프레임 방식이면 스토리보드 그림 대신 키프레임이 모두 그려져야 영상을 요청한다
   const keyframed = framesOf(render.keyframes).length > 0;
   const inputReady = keyframed ? keyframesDone(render.keyframes) : render.board_image?.status === "done";
@@ -218,56 +220,123 @@ export function RenderPanel({ recordId }: { recordId: string }) {
     }
   };
 
+  return { recordId, rec, setRec, load, error, setError, asking, ask, render, video, keyframed, inputReady, canAsk, showOriginal, overlayVersion, overlayControls };
+}
+
+export type RecordRender = ReturnType<typeof useRecordRender>;
+
+export function SheetPicture({ ctx }: { ctx: RecordRender }) {
+  return <Picture recordId={ctx.recordId} part="sheet_image" info={ctx.render.sheet_image} label="이미지 시트 그림" onChanged={() => void ctx.load()} onError={ctx.setError} />;
+}
+
+export function BoardPicture({ ctx }: { ctx: RecordRender }) {
+  return <Picture recordId={ctx.recordId} part="board_image" info={ctx.render.board_image} label="스토리보드 그림" onChanged={() => void ctx.load()} onError={ctx.setError} />;
+}
+
+export function Keyframes({ ctx }: { ctx: RecordRender }) {
+  if (!ctx.keyframed) return null;
+  return (
+    <KeyframePairs recordId={ctx.recordId} state={ctx.render.keyframes} scenes={ctx.rec?.storyboard?.plan_scenes} videoStatus={ctx.video?.status}
+      speed={ctx.video?.summary?.speed} onChanged={() => void ctx.load()} />
+  );
+}
+
+/** 11/25 모션 참조 영상: 올리면 승인 뒤 영상 모델이 그 동작·카메라 움직임만 따라 만든다 */
+export function MotionArea({ ctx }: { ctx: RecordRender }) {
+  return (
+    <>
+      <Picture recordId={ctx.recordId} part="motion_video" info={ctx.render.motion_video} label="모션 참조 영상 (선택)" onChanged={() => void ctx.load()} onError={ctx.setError} />
+      <p className="text-xs text-ink-500">따라 할 춤·동작 영상(MP4)을 올리면 영상을 만들 때 앞 10초의 동작과 카메라 움직임만 따라요. 배경·사람·글자는 따라 하지 않아요.</p>
+    </>
+  );
+}
+
+/** 만드는 영상 칸: 요약·재생·자막·기술 검사·승인·요청 버튼·Higgsfield 웹 */
+export function VideoArea({ ctx, label = "스토리보드 영상", uploadPart, webNote = PANEL_WEB_NOTE }: { ctx: RecordRender; label?: string; uploadPart?: RenderPartKey; webNote?: string }) {
+  const { recordId, rec, render, video, keyframed, inputReady, canAsk, asking, ask, load, setError, showOriginal, overlayVersion, overlayControls } = ctx;
+  const summaryLine = videoSummaryLine(video?.status, video?.summary);
+  return (
+    <>
+      {summaryLine && <p className="text-xs text-ink-700" aria-label="영상 만들기 요약">{summaryLine}</p>}
+      <Picture recordId={recordId} part="video" info={video} label={label} onChanged={() => void load()} onError={setError}
+        playPart={playPartFor("video", render, showOriginal)} version={overlayVersion} uploadPart={uploadPart} />
+      {overlayControls("video")}
+      {video?.status === "done" && (
+        <VideoQc qc={render.qc} videoStatus={video.status} credits={video.summary?.credits_estimate} busy={asking} regenerate={video.regenerate} onRegenerate={() => void ask(true)} />
+      )}
+      {video?.status === "awaiting_approval" && (
+        <p className="text-xs text-ink-700"><ApprovalDeadline reviewId={video.review_id} className="mr-1" />사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>
+      )}
+      {/* 11/26 기한 지나 자동 취소: 같은 기록으로 영상 요청만 다시(콘티·키프레임 재사용) */}
+      {timedOut(video) && canAsk && <TimedOutRetry busy={asking} onRetry={() => void ask()} />}
+      {canAsk && !timedOut(video) && (
+        <button type="button" className="btn-primary text-xs" disabled={asking} onClick={() => void ask()}>
+          {asking ? "요청 중…" : video?.status ? "영상 다시 요청 (사람 승인)" : "영상 만들기 요청 (사람 승인)"}
+        </button>
+      )}
+      {!canAsk && !video?.status && !inputReady && <p className="text-xs text-ink-500">{keyframed ? "키프레임이 모두 그려지면 영상을 요청할 수 있어요." : "스토리보드 그림이 끝나면 영상을 요청할 수 있어요."}</p>}
+      {!keyframed && canAsk && render.board_image?.status !== "done" && usesOriginalReference(rec?.sheet?.kind) && <p className="text-xs text-ink-500">AI 가상 인물·그림 캐릭터는 올린 원본을 참조로 써서 스토리보드 그림 없이 만들어요.</p>}
+      {rec?.storyboard && <HiggsfieldWeb board={rec.storyboard} speed={video?.summary?.speed} reference={video?.summary?.reference} note={webNote} />}
+    </>
+  );
+}
+
+export function FinalVideoArea({ ctx }: { ctx: RecordRender }) {
+  return (
+    <>
+      <Picture recordId={ctx.recordId} part="final_video" info={ctx.render.final_video} label="완성 영상" onChanged={() => void ctx.load()} onError={ctx.setError}
+        playPart={playPartFor("final_video", ctx.render, ctx.showOriginal)} version={ctx.overlayVersion} />
+      {ctx.overlayControls("final_video")}
+    </>
+  );
+}
+
+export function RecordThumbnails({ ctx }: { ctx: RecordRender }) {
+  const { render } = ctx;
+  return (
+    <ThumbnailPicker recordId={ctx.recordId} state={render.thumbnails} youtubeStatus={render.youtube?.status} instagramStatus={render.instagram?.status}
+      hasVideo={render.video?.status === "done" || render.final_video?.status === "done"} onChanged={() => void ctx.load()} />
+  );
+}
+
+export function RecordPublish({ ctx }: { ctx: RecordRender }) {
+  const { recordId, render, load } = ctx;
+  const thumb = chosenThumb(render.thumbnails); // 인스타 릴스 표지 = 고른 썸네일(안 고르면 첫 장)
+  const reelCover = thumb ? { url: thumbUrl(recordId, thumb.media_id), picked: thumb.picked } : null;
+  return (
+    <>
+      <YoutubePanel recordId={recordId} youtube={render.youtube} hasVideo={render.video?.status === "done"}
+        hasFinal={render.final_video?.status === "done"} onChanged={() => void load()} />
+      <InstagramPanel recordId={recordId} instagram={render.instagram} hasVideo={render.video?.status === "done"}
+        hasFinal={render.final_video?.status === "done"} cover={reelCover} onChanged={() => void load()} />
+    </>
+  );
+}
+
+export function RenderPanel({ recordId }: { recordId: string }) {
+  const ctx = useRecordRender(recordId);
+  const { rec, error, render, keyframed } = ctx;
+
   if (!rec && !error) return <p className="text-xs text-ink-500">Higgsfield 결과를 불러오는 중…</p>;
   return (
     <section className="space-y-3 rounded-2xl bg-surface p-3 ring-1 ring-ink-100" aria-label="Higgsfield로 만든 그림과 영상">
       <p className="text-xs font-semibold text-ink-900">만든 결과 <span className="font-normal text-ink-500">· Higgsfield AI 생성 또는 직접 올림</span></p>
       <div className="grid gap-3 md:grid-cols-2">
-        <Picture recordId={recordId} part="sheet_image" info={render.sheet_image} label="이미지 시트 그림" onChanged={() => void load()} onError={setError} />
-        {(!keyframed || render.board_image) && <Picture recordId={recordId} part="board_image" info={render.board_image} label="스토리보드 그림" onChanged={() => void load()} onError={setError} />}
+        <SheetPicture ctx={ctx} />
+        {(!keyframed || render.board_image) && <BoardPicture ctx={ctx} />}
       </div>
-      {keyframed && (
-        <KeyframePairs recordId={recordId} state={render.keyframes} scenes={rec?.storyboard?.plan_scenes} videoStatus={video?.status}
-          speed={video?.summary?.speed} onChanged={() => void load()} />
-      )}
+      <Keyframes ctx={ctx} />
       <div className="space-y-2 border-t border-ink-100 pt-3">
-        {/* 11/25 모션 참조 영상: 올리면 승인 뒤 영상 모델이 그 동작·카메라 움직임만 따라 만든다 */}
-        <Picture recordId={recordId} part="motion_video" info={render.motion_video} label="모션 참조 영상 (선택)" onChanged={() => void load()} onError={setError} />
-        <p className="text-xs text-ink-500">따라 할 춤·동작 영상(MP4)을 올리면 영상을 만들 때 앞 10초의 동작과 카메라 움직임만 따라요. 배경·사람·글자는 따라 하지 않아요.</p>
+        <MotionArea ctx={ctx} />
       </div>
       <div className="space-y-2 border-t border-ink-100 pt-3">
-        {summaryLine && <p className="text-xs text-ink-700" aria-label="영상 만들기 요약">{summaryLine}</p>}
-        <Picture recordId={recordId} part="video" info={video} label="스토리보드 영상" onChanged={() => void load()} onError={setError}
-          playPart={playPartFor("video", render, showOriginal)} version={overlayVersion} />
-        {overlayControls("video")}
-        {video?.status === "done" && (
-          <VideoQc qc={render.qc} videoStatus={video.status} credits={video.summary?.credits_estimate} busy={asking} regenerate={video.regenerate} onRegenerate={() => void ask(true)} />
-        )}
-        {video?.status === "awaiting_approval" && (
-          <p className="text-xs text-ink-700"><ApprovalDeadline reviewId={video.review_id} className="mr-1" />사람 승인이 필요해요. <Link to="/safety" className="text-brand-700 underline">안전 처리 로그</Link>의 사람 결정 대기에서 승인하면 Higgsfield로 영상을 만들어요.</p>
-        )}
-        {/* 11/26 기한 지나 자동 취소: 같은 기록으로 영상 요청만 다시(콘티·키프레임 재사용) */}
-        {timedOut(video) && canAsk && <TimedOutRetry busy={asking} onRetry={() => void ask()} />}
-        {canAsk && !timedOut(video) && (
-          <button type="button" className="btn-primary text-xs" disabled={asking} onClick={() => void ask()}>
-            {asking ? "요청 중…" : video?.status ? "영상 다시 요청 (사람 승인)" : "영상 만들기 요청 (사람 승인)"}
-          </button>
-        )}
-        {!canAsk && !video?.status && !inputReady && <p className="text-xs text-ink-500">{keyframed ? "키프레임이 모두 그려지면 영상을 요청할 수 있어요." : "스토리보드 그림이 끝나면 영상을 요청할 수 있어요."}</p>}
-        {!keyframed && canAsk && render.board_image?.status !== "done" && usesOriginalReference(rec?.sheet?.kind) && <p className="text-xs text-ink-500">AI 가상 인물·그림 캐릭터는 올린 원본을 참조로 써서 스토리보드 그림 없이 만들어요.</p>}
-        {rec?.storyboard && <HiggsfieldWeb board={rec.storyboard} speed={video?.summary?.speed} reference={video?.summary?.reference} />}
+        <VideoArea ctx={ctx} />
       </div>
       <div className="border-t border-ink-100 pt-3">
-        <Picture recordId={recordId} part="final_video" info={render.final_video} label="완성 영상" onChanged={() => void load()} onError={setError}
-          playPart={playPartFor("final_video", render, showOriginal)} version={overlayVersion} />
-        {overlayControls("final_video")}
+        <FinalVideoArea ctx={ctx} />
       </div>
-      <ThumbnailPicker recordId={recordId} state={render.thumbnails} youtubeStatus={render.youtube?.status} instagramStatus={render.instagram?.status}
-        hasVideo={render.video?.status === "done" || render.final_video?.status === "done"} onChanged={() => void load()} />
-      <YoutubePanel recordId={recordId} youtube={render.youtube} hasVideo={render.video?.status === "done"}
-        hasFinal={render.final_video?.status === "done"} onChanged={() => void load()} />
-      <InstagramPanel recordId={recordId} instagram={render.instagram} hasVideo={render.video?.status === "done"}
-        hasFinal={render.final_video?.status === "done"} cover={reelCover} onChanged={() => void load()} />
+      <RecordThumbnails ctx={ctx} />
+      <RecordPublish ctx={ctx} />
       {error && <p className="text-xs text-accent" role="alert">{error}</p>}
     </section>
   );

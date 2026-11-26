@@ -41,6 +41,9 @@ class CreativeRecordSummary(AxModel):
     kind: CharacterUploadKind = "real_photo"
     # 11/25 참조 이미지 목록(0번 대표). 옛 기록은 빈 목록 = 대표만
     references: list[CharacterReference] = Field(default_factory=list)
+    # 11/26 목록의 영상 칸 미리보기(추가): 정해진 썸네일 번호와 영상 길이(초). 없으면 None
+    cover_media_id: str | None = None
+    video_seconds: float | None = None
 
 
 class CreativeRecordsListOutput(AxModel):

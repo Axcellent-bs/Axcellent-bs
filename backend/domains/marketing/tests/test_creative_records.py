@@ -149,3 +149,29 @@ def test_record_failure_does_not_break_the_sheet(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(cr, "store", lambda: Broken())
     out = _run("character_sheet_prompt", untrusted={"image": IMAGE})
     assert out.status == TaskStatus.COMPLETED and out.output["record_id"] is None
+
+
+def test_list_carries_the_video_preview(mem_store: cr.CreativeRecords) -> None:
+    rid = mem_store.add_sheet({"summary_ko": "x"}, None, None)
+    (item,) = mem_store.list()
+    assert item["cover_media_id"] is None and item["video_seconds"] is None
+    candidates = [{"media_id": "thm_aaaaaaaaaaaa"}, {"media_id": "thm_bbbbbbbbbbbb"}]
+    render = {
+        "video": {"status": "done", "seconds": 15, "plan_seconds": 12},
+        "thumbnails": {"status": "done", "candidates": candidates},
+    }
+    mem_store.set_render(rid, render)
+    (item,) = mem_store.list()
+    assert item["cover_media_id"] == "thm_aaaaaaaaaaaa"  # 안 골랐으면 첫 장
+    assert item["video_seconds"] == 15
+    render["thumbnails"]["chosen"] = "thm_bbbbbbbbbbbb"
+    mem_store.set_render(rid, render)
+    assert mem_store.list()[0]["cover_media_id"] == "thm_bbbbbbbbbbbb"
+    out = handlers.CreativeRecordsListOutput.model_validate({"items": mem_store.list()})
+    assert out.items[0].video_seconds == 15
+    render["overlay"] = {"status": "applied", "speed_applied": True}  # 배속한 영상
+    mem_store.set_render(rid, render)
+    assert mem_store.list()[0]["video_seconds"] == 12
+    render["final_video"] = {"status": "done"}  # 직접 올린 완성 영상은 길이를 모른다
+    mem_store.set_render(rid, render)
+    assert mem_store.list()[0]["video_seconds"] is None

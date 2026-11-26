@@ -2,7 +2,7 @@ import { failureError } from "./apiError";
 import { DASHBOARD_API_URL, dashboardAuth } from "./env";
 import { COVER_ID, isRequestId, type RequestVideo } from "./requestVideoView";
 
-// 마케팅 › SNS·미디어 › 의뢰로 만든 영상. dashboard-api GET /marketing/request-videos (목록) ·
+// 마케팅 › 제작 기록의 의뢰 영상. dashboard-api GET /marketing/request-videos (목록) ·
 // /marketing/sns-drafts/{post_draft_id}/media/preview (라벨 입힌 mp4만). 둘 다 로그인 세션 토큰(dashboardAuth)만 쓴다.
 // 미리보기는 <video src>에 헤더를 못 붙이므로 useAuthedMedia(fetch → blob:)로 읽는다.
 

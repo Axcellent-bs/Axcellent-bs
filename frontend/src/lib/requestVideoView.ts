@@ -1,6 +1,6 @@
 // 의뢰로 만든 영상(홍보 영상 의뢰 wr_… → SNS 초안 reel)의 순수 계산. node --test (requestVideoView.test.ts).
 // 환경 값(env)에 기대지 않는 것만 둔다. 읽기·주소는 lib/requestVideos.ts.
-// 화면은 제작 기록(/marketing/records?view=videos)의 '의뢰로 만든 영상' 탭에 둔다(11/23, 제작 기록과 같이 본다).
+// 화면은 제작 기록(/marketing/records)의 작업 목록과 상세에 둔다(11/26, 탭을 없앴다. ?request=wr_…는 그 작업 상세).
 // 영상마다 회사 유튜브 올리기(사람 승인 C)를 할 수 있다. Instagram 게시 승인은 기획안 카드의 승인 패널 그대로다.
 import type { WorkRequestRow } from "./workRequests.ts";
 import type { InstagramPostState } from "./instagramPost.ts";

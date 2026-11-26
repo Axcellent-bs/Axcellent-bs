@@ -31,6 +31,9 @@ export interface CreativeRecordSummary {
   /** 대본 장면 수(없으면 0)·저장 시각(11/23) */
   script_scenes?: number;
   script_at?: string | null;
+  /** 정해진 썸네일 번호와 영상 길이(초, 11/26). 옛 서버는 보내지 않는다 */
+  cover_media_id?: string | null;
+  video_seconds?: number | null;
 }
 
 export type RenderPartKey = "sheet_image" | "board_image" | "video" | "final_video" | "motion_video";
