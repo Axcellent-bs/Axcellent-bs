@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -15,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ax_agent_template import company_scope, tool_connections
-from infra_agent import dejafix_watch, handlers
+from infra_agent import dejafix_watch, handlers, status_reads
 from infra_agent.deploy_tools import ToolRun
 from infra_agent.main import app
 from infra_agent.runtime import Runtime
@@ -205,3 +206,40 @@ def test_latest_deployments_skips_rolled_back_and_keeps_companies_apart(
     runtime.history.mark_rolled_back(top)
     again = _call(a2a_body, "latest_deployments")["output"]["deployments"]
     assert [d["version"] for d in again] == ["v3.0.0"]
+
+
+def test_latest_deployments_without_company_is_empty_not_catbooks(runtime: Runtime) -> None:
+    # 요청 회사가 없으면(요청 밖) 캣북스 이력으로 떨어지지 않고 빈 목록
+    _fill(runtime, None, "shop-api", [_run("1", "v3.0.0", 30)])
+    token = company_scope._ACTIVE.set(None)
+    try:
+        res = asyncio.run(status_reads.latest_deployments(_agent_request()))
+    finally:
+        company_scope._ACTIVE.reset(token)
+    assert res.outcome == "no_deployment" and res.output["deployments"] == []
+    # 캣북스 회사 요청은 그대로 캣북스 이력을 본다
+    with company_scope.using("catbooks"):
+        res = asyncio.run(status_reads.latest_deployments(_agent_request()))
+    assert [d["service"] for d in res.output["deployments"]] == ["shop-api"]
+
+
+def test_history_for_still_defaults_to_catbooks_without_company(runtime: Runtime) -> None:
+    # 쓰기·롤백 경로가 쓰는 history_for()의 캣북스 기본값은 그대로다
+    token = company_scope._ACTIVE.set(None)
+    try:
+        assert runtime.history_for() is runtime.history
+        assert runtime.read_history() is not runtime.history
+    finally:
+        company_scope._ACTIVE.reset(token)
+
+
+def _agent_request():
+    from ax_contracts.schemas import AgentRequest, RequestMeta
+
+    meta = RequestMeta(
+        context_id="ctx-t",
+        token="t",
+        deadline=datetime.now(UTC) + timedelta(seconds=30),
+        idempotency_key="k-1",
+    )
+    return AgentRequest(meta=meta, skill="latest_deployments", input={})
