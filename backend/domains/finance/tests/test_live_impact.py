@@ -187,7 +187,8 @@ async def test_incident_list_is_read_per_company(monkeypatch: pytest.MonkeyPatch
 @pytest.mark.asyncio
 async def test_other_company_without_token_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     """토큰이 없으면 그 회사 사건만 골라 읽을 수 없다: 다른 회사는 확인할 수 없음(부르지 않음)."""
-    for name in ("FINANCE_TOKEN", "AX_AGENT_TOKENS"):
+    # CI가 켜 두는 목 모드면 목 토큰이 생기므로 끈다
+    for name in ("FINANCE_TOKEN", "AX_AGENT_TOKENS", "AGENT_TEMPLATE_MOCK", "FINANCE_MOCK"):
         monkeypatch.delenv(name, raising=False)
     live = LiveSources()
     called: list[str] = []
