@@ -47,8 +47,8 @@ import sqlite3
 import subprocess
 import sys
 import tomllib
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO
@@ -171,6 +171,64 @@ def company_configs(env: Mapping[str, str]) -> list[tuple[str, YouTubeConfig]]:
         except Exception as error:  # noqa: BLE001 - 한 회사 설정 오류가 다른 회사를 막지 않게
             print(f"[youtube] {cid} 키워드를 읽지 못함 ({type(error).__name__})", flush=True)
     return out
+
+
+MAX_AUTO_QUERIES = 3  # 설정 없는 회사의 자동 키워드 수 (검색 1번 = 100단위, 회사마다 하루 1번)
+_BRACKETS = re.compile(r"[\[\(（【].*?[\]\)）】]")
+
+
+def auto_queries(categories: Mapping[str, str], product_names: Sequence[str]) -> tuple[str, ...]:
+    """회사 연결 정보(그 회사 상품 목록)에서 만든 검색 키워드 (11/26).
+
+    분류 이름(코드와 다른 진짜 이름)을 먼저, 그다음 상품 이름(괄호 꾸밈말 뺌) 순서로
+    `MAX_AUTO_QUERIES`개. 다른 회사·캣북스 키워드는 쓰지 않는다. 없으면 빈 값(검색 안 함)."""
+    out: list[str] = []
+    names = [name for code, name in categories.items() if name and name.strip() != code]
+    for raw in [*names, *product_names]:
+        text = " ".join(_BRACKETS.sub(" ", str(raw)).split())
+        if len(text) >= 2 and text not in out:
+            out.append(text)
+        if len(out) >= MAX_AUTO_QUERIES:
+            break
+    return tuple(out)
+
+
+async def with_auto_queries(
+    companies: list[tuple[str, YouTubeConfig]],
+    env: Mapping[str, str],
+    read: Callable[[], Awaitable[tuple[Mapping[str, str], Sequence[str]]]] | None = None,
+) -> list[tuple[str, YouTubeConfig]]:
+    """설정(`youtube.toml`) 키워드가 없는 회사: 그 회사 범위에서 상품 목록을 읽어 자동 키워드로.
+
+    회사가 넣은 키워드가 있으면 그대로(우선). 한 회사 상품 목록을 못 읽어도 다른 회사는 그대로."""
+    from ax_agent_template import company_scope
+
+    out: list[tuple[str, YouTubeConfig]] = []
+    for cid, config in companies:
+        if config.queries:
+            out.append((cid, config))
+            continue
+        try:
+            with company_scope.using(cid):
+                categories, products = await (read or (lambda: _company_catalog(env)))()
+            queries = auto_queries(categories, products)
+        except Exception as error:  # noqa: BLE001 - 한 회사가 다른 회사를 막지 않게
+            print(f"[youtube] {cid} 상품 목록을 읽지 못해 자동 키워드 없음 "
+                  f"({type(error).__name__})", flush=True)  # fmt: skip
+            queries = ()
+        if queries:
+            print(f"[youtube] {cid} 설정 키워드 없음: 상품 목록에서 {len(queries)}개", flush=True)
+        out.append((cid, replace(config, queries=queries)))
+    return out
+
+
+async def _company_catalog(env: Mapping[str, str]) -> tuple[dict[str, str], list[str]]:
+    """지금 회사 범위의 상품 목록 커넥터(그 회사 연결 주소)에서 분류 이름·상품 이름."""
+    from data_agent.clients.shop_client import get_connector
+    from data_agent.skills.product_link import read_catalog
+
+    got = await read_catalog(get_connector(env))
+    return dict(got.categories), [p.name for p in got.products if p.name]
 
 
 def load_config(path: Path) -> YouTubeConfig:
@@ -424,7 +482,8 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
         while True:
             connector = YouTubeConnector(env, caller="youtube_collect")
             result = await collect_once(connector, store, config, in_use=in_use_ids(env),
-                                        companies=company_configs(env))  # fmt: skip
+                                        companies=await with_auto_queries(
+                                            company_configs(env), env))  # fmt: skip
             print(result.line(), flush=True)
             await measure_videos(connector, env)  # 게시한 영상 성과: 지금 잴 시점만 (실패해도 계속)
             await measure_instagram_videos(env)  # 인스타 게시 영상: 계정마다 한 번 (실패해도 계속)
