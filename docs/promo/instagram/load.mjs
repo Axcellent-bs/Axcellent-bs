@@ -5,7 +5,7 @@
 // - 자료에 오류가 있으면 만드는 단계에서 멈춘다(잘못된 숫자·표기가 화면에 나가지 않게). 경고는 알려 주기만 한다.
 // - 사진·영상 경로는 index.html 기준(instagram/assets/…)으로 바꿔 준다.
 // - 반응 숫자의 출처 글에는 metricsKind에 따라 "팀 내 시연 반응 · " 표시가 자동으로 붙는다.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validate } from "./check.mjs";
@@ -17,7 +17,8 @@ const { errors, warnings } = validate(data, { baseDir: HERE, checkFiles: true })
 warnings.forEach((w) => console.warn(`[인스타 자료 경고] ${w}`));
 if (errors.length) throw new Error(`인스타 자료 오류 ${errors.length}건:\n` + errors.map((e) => "  - " + e).join("\n") + "\n(node docs/promo/instagram/check.mjs 로 다시 확인한다)");
 
-const url = (p) => `instagram/${p}`;
+// instagram/ 아래 파일이면 instagram/…, 아니면 홍보 사이트 공용 폴더(assets/instagram/…) 그대로
+const url = (p) => (existsSync(path.join(HERE, p)) ? `instagram/${p}` : p);
 const ko = (iso) => `${Number(iso.slice(5, 7))}월 ${Number(iso.slice(8, 10))}일`;
 
 function post(p) {

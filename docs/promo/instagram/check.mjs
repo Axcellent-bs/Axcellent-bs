@@ -38,7 +38,10 @@ export function validate(data, { baseDir = HERE, checkFiles = true } = {}) {
     if (kind === "video" && !isVid) return err(where, `영상(mp4)이 아니다: ${p}`);
     if (kind === "any" && !isImg && !isVid) return err(where, `jpg·png·webp·mp4만 쓴다: ${p}`);
     if (!checkFiles) return;
-    const full = path.join(baseDir, p);
+    // instagram/ 아래에 없으면 홍보 사이트 공용 폴더(docs/promo/assets/)에서 찾는다.
+    // 자동 배포는 새 파일을 공용 폴더에서만 복사하므로 새 게시물 파일은 assets/instagram/… 에 둔다
+    const own = path.join(baseDir, p);
+    const full = existsSync(own) ? own : path.join(baseDir, "..", p);
     if (!existsSync(full)) return err(where, `파일이 없다: ${p}`);
     const size = statSync(full).size;
     if (isImg && size > MAX_IMG) err(where, `이미지는 2MB 이하여야 한다(${(size / 1048576).toFixed(1)}MB): ${p}`);
