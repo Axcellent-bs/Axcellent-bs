@@ -49,6 +49,10 @@ CALL_SECONDS = 5.0
 # 주문은 전체를 한 번에 읽어서 쌓일수록 오래 걸린다 (#421: 33,850건 22MB에 8초).
 # 부르는 쪽이 먼저 끊어도 끝까지 모아 캐시에 두므로(`cached_live_books`) 다음 요청은 값을 받는다
 ORDERS_CALL_SECONDS = 30.0
+# 캣북스가 아닌 회사는 사이트 변환기가 부를 때마다 고객사 사이트를 쪽마다 읽는다(쪽당 최대 10초).
+# 상품·판매자·쿠폰도 5초면 첫 읽기에서 끊겨 장부가 "products 없음"이 된다(11/26 누비투어 데이터 홈
+# 총거래액 "확인할 수 없음"). 그 회사만 주문과 같은 시간을 준다
+ADAPTER_CALL_SECONDS = ORDERS_CALL_SECONDS
 # 주문 목록 한 페이지(shop-api 최대 1000). 더 있으면 meta.next_cursor로 넘긴다
 ORDERS_PAGE = 1000
 LIVE_CACHE_SECONDS = 30.0
@@ -614,6 +618,12 @@ async def live_books(
         return await _live_books(client, http_client is None, store, full, unavailable)
 
 
+def side_call_seconds() -> float:
+    """상품·판매자·쿠폰 읽기 시간 상한. 캣북스는 예전 그대로, 다른 회사(사이트 변환기)는 길게."""
+    cid = canonical_company_id(company_scope.active() or "") or company_scope.CATBOOKS
+    return CALL_SECONDS if cid == company_scope.CATBOOKS else ADAPTER_CALL_SECONDS
+
+
 async def _live_books(
     client: httpx.AsyncClient,
     own_client: bool,
@@ -633,9 +643,14 @@ async def _live_books(
             headers = {}
         # 주문 조회에도 재무 토큰을 붙인다(shop-api `SHOP_ORDERS_PUBLIC_READ=off` 대비)
         orders_raw = await _get_orders(client, shop, since, headers)
-        products = await _get(client, f"{shop}/api/shop/products")
-        sellers = await _get(client, f"{shop}/api/shop/sellers")
-        coupons_raw = await _get(client, f"{shop}/api/shop/coupons", headers) if headers else None
+        wait = side_call_seconds()
+        products = await _get(client, f"{shop}/api/shop/products", timeout=wait)
+        sellers = await _get(client, f"{shop}/api/shop/sellers", timeout=wait)
+        coupons_raw = (
+            await _get(client, f"{shop}/api/shop/coupons", headers, timeout=wait)
+            if headers
+            else None
+        )
         executions_raw = await _get(client, f"{safety}/api/safety/executions")
     finally:
         if own_client:
