@@ -40,8 +40,41 @@ def _int(value: Any) -> int:
     return int(value or 0)
 
 
+# 주문 줄에 사이트가 직접 주는 이름·분류·종류 칸 (짝에 없으면 이 이름으로 찾는다, 11/26).
+# - `title`·`category_code`: 줄에 사이트가 준 이름·분류. 있으면 그대로(상품 목록보다 먼저)
+# - `kind`: 줄 종류(스터디온 course·bundle). 상품 목록에 없는 상품일 때만 분류 대신 쓴다.
+#   스터디온 패키지(번들)는 사이트에 패키지 목록 API가 없어 상품 목록으로 이름·분류를 못 채운다
+LINE_TEXT: dict[str, tuple[str, ...]] = {
+    "title": ("title", "product_name", "item_name"),
+    "category_code": ("category_code", "category"),
+    "kind": ("kind", "item_kind"),
+}
+
+
+def _line_text(line: dict[str, Any], m: ResourceMap, name: str) -> str | None:
+    """줄의 이름·분류 값. 짝에 식이 있으면 그 식, 없으면 `LINE_TEXT` 이름 중 처음 값 있는 칸.
+
+    없거나 글자가 아니면 None (지어내지 않는다).
+    """
+    expr = m.items.fields.get(name) if m.items else None
+    if expr is not None:
+        try:
+            value = pick(line, expr)
+        except Exception:  # noqa: BLE001 — 선택 칸이라 없으면 비운다
+            value = None
+    else:
+        value = next((line[k] for k in LINE_TEXT[name] if line.get(k) not in (None, "")), None)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        value = str(value)
+    return value.strip() or None if isinstance(value, str) else None
+
+
 def _lines(row: dict[str, Any], m: ResourceMap) -> list[dict[str, Any]]:
-    """주문 줄 목록 짝(`m.items`)으로 줄마다 상품·수량·단가·결제액을 옮긴다."""
+    """주문 줄 목록 짝(`m.items`)으로 줄마다 상품·수량·단가·결제액을 옮긴다.
+
+    줄에 이름·종류 칸이 있으면(`LINE_TEXT`) 같이 옮긴다(판매 기록 줄의 이름·분류를 상품 목록에서
+    못 찾을 때 쓴다).
+    """
     assert m.items is not None
     try:
         raw = pick(row, m.items.path)
@@ -68,9 +101,17 @@ def _lines(row: dict[str, Any], m: ResourceMap) -> list[dict[str, Any]]:
         qty = _int(get("qty", 1)) or 1
         paid = _int(get("paid_amount"))
         unit = _int(get("unit_price", paid // qty if qty else 0))
-        out.append(
-            {"product_id": get("product_id"), "qty": qty, "unit_price": unit, "paid_amount": paid}
-        )
+        item = {
+            "product_id": get("product_id"),
+            "qty": qty,
+            "unit_price": unit,
+            "paid_amount": paid,
+        }
+        for name in LINE_TEXT:
+            text = _line_text(line, m, name)
+            if text is not None:
+                item[name] = text
+        out.append(item)
     return out
 
 
@@ -266,7 +307,12 @@ def to_sales_row(
         "items_amount": order["total_amount"],
         "payment_status": "succeeded" if paid else ("failed" if failed else None),
         "lines": [
-            {"product_id": i["product_id"], "qty": i["qty"], "unit_price": i["unit_price"]}
+            {
+                "product_id": i["product_id"],
+                "qty": i["qty"],
+                "unit_price": i["unit_price"],
+                **{k: i[k] for k in LINE_TEXT if i.get(k)},
+            }
             for i in order["items"]
         ],
         "refunds": (
@@ -302,21 +348,27 @@ def with_product_names(
 ) -> dict[str, Any]:
     """판매 기록 한 줄의 상품 줄마다 이름(`title`)·분류(`category_code`)를 상품 목록에서 채운다.
 
-    상품 목록에 없는 상품(지워진 상품)은 비운 채(지어내지 않는다). 분류 값은 사이트 값 그대로
-    (분류 표가 없는 회사는 그 값이 화면 이름이 된다, `sales_analysis.category_label`).
+    줄에 사이트가 준 이름·분류가 있으면 그대로. 상품 목록에 없는 상품(지워진 상품)은 비운 채
+    (지어내지 않는다) — 다만 상품 목록을 읽었는데 거기 없고 줄에 종류(`kind`, 예: 스터디온
+    `bundle`)가 있으면 사이트 값 그대로 분류로, 이름은 상품 번호로(사이트가 그 번호로 패키지를
+    가리킨다. `order_detail`과 같은 규칙). 분류 값은 사이트 값 그대로(분류 표가 없는 회사는 그
+    값이 화면 이름, `sales_analysis.category_label`).
+    종류 칸은 판매 기록 계약에 없어 내보내지 않는다.
     """
-    if not names:
+    if not names and not any("kind" in line for line in row["lines"]):
         return row
     lines = []
     for line in row["lines"]:
         title, cat = names.get(str(line["product_id"]), (None, None))
-        lines.append(
-            {
-                **line,
-                "title": line.get("title") or title,
-                "category_code": line.get("category_code") or cat,
-            }
+        # 상품 목록을 읽었는데 거기 없는 상품일 때만 종류로 채운다(목록을 못 읽은 회차는 비운 채)
+        kind = line.get("kind") if names else None
+        known = str(line["product_id"]) in names
+        out = {k: v for k, v in line.items() if k != "kind"}
+        out["title"] = (
+            line.get("title") or title or (str(line["product_id"]) if kind and not known else None)
         )
+        out["category_code"] = line.get("category_code") or cat or (kind if not known else None)
+        lines.append(out)
     return {**row, "lines": lines}
 
 
