@@ -14,7 +14,7 @@ from ax_safety.rules import ActionSpec, Rule, ThresholdTable, load_registry, loa
 
 def test_rule_files_load_and_match_agreed_values() -> None:
     registry, table = load_registry(), load_thresholds()
-    assert table.version == 12
+    assert table.version == 13
     assert table.review_timeout_seconds == 600  # 데모 10분 자동 거절
     values = {rule.key: rule.value for rule in table.rules if rule.metric != "param"}
     values.pop("pr_allowed_paths")
@@ -309,6 +309,10 @@ def test_settlement_review_timeout_is_24_hours_and_others_keep_the_default() -> 
         "confirm_settlement": 86_400,
         "generate_creative_video": 3600,  # v12 영상 승인 1시간
         "generate_creative_thumbnails": 3600,
+        "publish_youtube": 3600,  # v13 게시 승인 1시간
+        "publish_instagram_video": 3600,
+        "publish_promo_video": 3600,
+        "publish_sns": 3600,
     }
     assert table.review_timeout_for("confirm_settlement") == 86_400
     assert table.review_timeout_for("issue_coupon") == 600
@@ -323,6 +327,21 @@ def test_creative_video_and_thumbnail_reviews_wait_one_hour() -> None:
     assert table.review_timeout_for("generate_creative_video") == 3600
     assert table.review_timeout_for("generate_creative_thumbnails") == 3600
     assert table.review_timeout_for("generate_media") == 600
+
+
+def test_publish_reviews_wait_one_hour() -> None:
+    """v13(11/26): 대화방 의뢰 카드에서 올리기를 요청하면 다른 계정이 승인한다.
+
+    10분이면 그냥 만료된다."""
+    table = load_thresholds()
+    for action in (
+        "publish_youtube",
+        "publish_instagram_video",
+        "publish_promo_video",
+        "publish_sns",
+    ):
+        assert table.review_timeout_for(action) == 3600
+    assert table.review_timeout_for("publish_notice") == 600
 
 
 def test_env_review_timeout_does_not_shorten_the_video_timeout(

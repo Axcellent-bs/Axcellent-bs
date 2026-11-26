@@ -148,6 +148,17 @@ export function stepRows(r: Pick<WorkRequestRow, "plan" | "steps">): StepRow[] {
 
 // ---- 보고서·기획 제안 잇기
 
+/** 재무 closing_report 단계가 끝났으면 그 결산 기간 (result_ref "<day|week|month>:<YYYY-MM-DD>", 11/26). 아니면 null */
+export function closingOfRequest(r: Pick<WorkRequestRow, "plan" | "steps">, stepId?: string): { period: "day" | "week" | "month"; date: string } | null {
+  for (const p of r.plan) {
+    if (p.skill !== "closing_report" || (stepId && p.step_id !== stepId)) continue;
+    const s = r.steps[p.step_id];
+    const m = s?.status === "completed" ? /^(day|week|month):(\d{4}-\d{2}-\d{2})$/.exec(s.result_ref ?? "") : null;
+    if (m) return { period: m[1] as "day" | "week" | "month", date: m[2] };
+  }
+  return null;
+}
+
 /** 데이터 trend_report_create 단계의 보고서 id (result_ref가 tr_…일 때만) */
 export function reportIdOfRequest(r: Pick<WorkRequestRow, "plan" | "steps">, stepId?: string): string | null {
   for (const p of r.plan) {

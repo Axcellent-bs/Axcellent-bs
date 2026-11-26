@@ -1,7 +1,7 @@
 // node --test로 돈다 (npm test). 대화방 의뢰 진행 카드: 번호 찾기(총괄 문장만) · 단계 칩·버튼 · 같은 의뢰 알림 줄 숨김 · 보고서·제안 잇기 · 토큰 없으면 카드 없음.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { attachRequestCards, directItemId, madeVideo, noticeIdOf, perfStep, placeRequestCards, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, requestIdOf, resultStep, showRequestCard, stepRows } from "./requestCards.ts";
+import { attachRequestCards, closingOfRequest, directItemId, madeVideo, noticeIdOf, perfStep, placeRequestCards, planCard, planLookupDue, proposalOfRequest, requestActionError, reportIdOfRequest, requestIdOf, resultStep, showRequestCard, stepRows } from "./requestCards.ts";
 import { progressKeepPolling } from "./chatCards.ts";
 import type { StepStatus, WorkRequestRow } from "./workRequests.ts";
 
@@ -242,4 +242,16 @@ test("기획 칸 열기 주소: 의뢰 번호를 주면 ?request= 로 붙는다 
   const c = planCard({ id: "PROP-18", title: "제목", idea: "할 일" }, "wr_d8cf3a9691");
   assert.equal(c.openPath, "/planning/proposals/PROP-18?request=wr_d8cf3a9691");
   assert.equal(c.printPath, "/planning/proposals/PROP-18?print=1");
+});
+
+
+test("재무 손익 정리 단계: 끝났고 번호 모양이 맞을 때만 기간을 돌려준다 (11/26)", () => {
+  const plan = [{ step_id: "run", dept: "finance", skill: "closing_report", label: "손익 정리", after: [] as string[] }];
+  const row = (status: StepStatus, result_ref: string | null) => ({ plan, steps: { run: { status, result_ref } as never } });
+  assert.deepEqual(closingOfRequest(row("completed", "month:2026-11-01")), { period: "month", date: "2026-11-01" });
+  assert.deepEqual(closingOfRequest(row("completed", "week:2026-11-23")), { period: "week", date: "2026-11-23" });
+  assert.equal(closingOfRequest(row("running", "month:2026-11-01")), null);
+  assert.equal(closingOfRequest(row("completed", null)), null);
+  assert.equal(closingOfRequest(row("completed", "year:2026-01-01")), null);
+  assert.equal(closingOfRequest({ plan: [], steps: {} }), null);
 });
