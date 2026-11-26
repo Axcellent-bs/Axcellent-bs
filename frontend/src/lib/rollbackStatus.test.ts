@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { OrchIncident, OrchStep } from "./agentChat.ts";
-import { NO_OPEN_INCIDENT, REJECT_CONSEQUENCE, openRollbackIncidents, rollbackCardResult, rollbackStatusOf } from "./rollbackStatus.ts";
+import { NO_OPEN_INCIDENT, REJECT_CONSEQUENCE, openRollbackIncidents, rollbackCardResult, rollbackDecisionOf, rollbackStatusOf, serviceNameMatches } from "./rollbackStatus.ts";
 
 const step = (step_id: string, status: string, output: Record<string, unknown> = {}): OrchStep =>
   ({ step_id, skill: step_id === "rollback" ? "rollback_deployment" : "diagnose_incident", label: step_id, dept: "infra", status, attempts: 1, note: "", grade: null, started_at: null, finished_at: null, transferred_to: null, reason_code: null, output });
@@ -91,12 +91,66 @@ test("가장 최근 열린 사건을 보이고 열린 사건 수를 같이 준�
   if (r.kind === "status") assert.deepEqual([r.status.contextId, r.openCount], ["b", 2]);
 });
 
-test("카드에 승인·거절 버튼이나 결정 호출이 없다 (읽기 전용 고정)", async () => {
+const HOLD = { step_id: "rollback", skill: "rollback_deployment", label: "롤백", review_id: "rev_1", expires_at: "2026-11-26T01:10:00Z" };
+
+test("결정 영역: 승인 대기(held)이고 review_id·서비스가 있을 때만", () => {
+  const d = rollbackDecisionOf(rollbackStatusOf(incident({ out: HELD, pending_holds: [HOLD] })));
+  assert.equal(d?.reviewId, "rev_1");
+  assert.equal(d?.service, "shop-api");
+  assert.equal(d?.confirmText, "운영에서 shop-api v2.4.1→v2.4.0 롤백이 실행돼요. 되돌릴 수 없어요.");
+  // review_id 없음 / 승인 대기 아님 / 서비스 없음 -> 읽기 전용
+  assert.equal(rollbackDecisionOf(rollbackStatusOf(incident({ out: HELD, pending_holds: [{ ...HOLD, review_id: null }] }))), null);
+  assert.equal(rollbackDecisionOf(rollbackStatusOf(incident({ out: HELD }))), null);
+  for (const st of ["completed", "rejected_by_human", "transfer_queued", "skipped", "failed", "running"]) {
+    assert.equal(rollbackDecisionOf(rollbackStatusOf(incident({ rollback: st, out: HELD, pending_holds: [HOLD] }))), null, st);
+  }
+  assert.equal(rollbackDecisionOf(rollbackStatusOf(incident({ rollback: null, pending_holds: [HOLD] }))), null);
+  // 다른 단계의 보류 review_id는 쓰지 않는다
+  assert.equal(rollbackDecisionOf(rollbackStatusOf(incident({ out: HELD, pending_holds: [{ ...HOLD, step_id: "other" }] }))), null);
+});
+
+test("승인 문구: 카드에 없는 버전은 지어내지 않고 뺀다", () => {
+  const d = rollbackDecisionOf(rollbackStatusOf(incident({ out: { service: "shop-api", from_version: "v2.4.1" }, pending_holds: [HOLD] })));
+  assert.equal(d?.confirmText, "운영에서 shop-api 롤백이 실행돼요. 되돌릴 수 없어요.");
+});
+
+test("서비스 이름 확인: 앞뒤 공백만 무시, 대소문자 구분, 빈 값 불가", () => {
+  assert.equal(serviceNameMatches("shop-api", "shop-api"), true);
+  assert.equal(serviceNameMatches("  shop-api 	 ", "shop-api"), true);
+  assert.equal(serviceNameMatches("Shop-API", "shop-api"), false);
+  assert.equal(serviceNameMatches("shop api", "shop-api"), false);
+  assert.equal(serviceNameMatches("shop-ap", "shop-api"), false);
+  assert.equal(serviceNameMatches("", "shop-api"), false);
+  assert.equal(serviceNameMatches("   ", "   "), false);
+  assert.equal(serviceNameMatches("x", null), false);
+});
+
+test("카드 쓰기 경로는 ChatReviewDecision(finance.decide) 한 곳뿐이고 새 POST가 없다", async () => {
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("../components/office/RequestProgressCard.tsx", import.meta.url), "utf8");
   const cell = src.slice(src.indexOf("function RollbackCell"), src.indexOf("function InfraCell"));
   assert.ok(cell.length > 200);
-  assert.doesNotMatch(cell, /<button|onClick|decide|decision|approve|reject\(|POST|method:/i);
+  assert.doesNotMatch(cell, /<button|onClick|finance\.decide|POST|method:|fetch\(/);
+  assert.match(cell, /rollbackDecisionOf\(s\)/);
+  assert.match(cell, /decision && \(/); // 결정 영역은 decision이 있을 때만
+  assert.equal((cell.match(/<ChatReviewDecision/g) ?? []).length, 1);
   const lib = readFileSync(new URL("./rollbackStatus.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(lib, /fetch\(|decide|approve\(/);
+  assert.doesNotMatch(lib, /fetch\(|finance\.decide|approve\(/);
+  const dec = readFileSync(new URL("../components/office/ChatReviewDecision.tsx", import.meta.url), "utf8");
+  assert.equal((dec.match(/finance\.decide\(/g) ?? []).length, 1);
+  assert.doesNotMatch(dec, /fetch\(|method:|POST/);
+});
+
+test("ChatReviewDecision: 이름 확인은 승인하기·승인에만, 거절은 canDecideNow만 본다. props 없으면 기존 동작", async () => {
+  const { readFileSync } = await import("node:fs");
+  const dec = readFileSync(new URL("../components/office/ChatReviewDecision.tsx", import.meta.url), "utf8");
+  assert.match(dec, /const approveEnabled = enabled && \(confirmName === undefined \|\| serviceNameMatches\(typedName, confirmName\)\)/);
+  assert.match(dec, /disabled=\{!approveEnabled\} onClick=\{\(\) => setStep\("confirm"\)\}/);
+  assert.match(dec, /className="btn-primary btn-card" disabled=\{!approveEnabled\} onClick=\{\(\) => void decide\("approved"\)\}/);
+  assert.match(dec, /disabled=\{!enabled\} onClick=\{\(\) => void decide\("rejected"\)\}/);
+  assert.match(dec, /confirmName !== undefined && \(/); // 이름 입력칸은 confirmName이 있을 때만
+  for (const f of ["RequestCreative.tsx", "RequestPublish.tsx"]) {
+    const u = readFileSync(new URL(`../components/office/${f}`, import.meta.url), "utf8");
+    assert.doesNotMatch(u.match(/<ChatReviewDecision[^>]*>/)?.[0] ?? "", /confirmName|confirmText|doneText/, f);
+  }
 });

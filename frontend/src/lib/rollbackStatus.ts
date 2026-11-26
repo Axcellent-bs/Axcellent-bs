@@ -1,6 +1,6 @@
 // 대화방 의뢰 카드의 "사건 롤백 상태" (11/26 롤백 요청 2단계, 읽기 전용). 화면 없는 순수 함수만 둔다.
 // 총괄 사건 목록(GET /orch/api/incidents, 로그인 회사 범위)에서 열린 사건의 롤백 단계를 읽어 보여 주기만 한다.
-// 승인·거절·실행은 여기에 없다(롤백은 기존 사건 흐름의 안전 관문에서만 한다). 값이 없으면 지어내지 않고 null.
+// 승인·거절·실행 호출은 여기에 없다(롤백은 기존 사건 흐름의 안전 관문에서만 한다). 값이 없으면 지어내지 않고 null.
 import type { OrchIncident, OrchStep } from "./agentChat.ts";
 
 export const ROLLBACK_STEP_ID = "rollback";
@@ -13,6 +13,8 @@ export type Confidence = "low" | "mid" | "high";
 
 export interface RollbackStatusView {
   contextId: string;
+  /** 승인 대기 보류의 안전 관문 review_id (대기 중이고 총괄이 값을 줄 때만) */
+  reviewId: string | null;
   title: string;
   openedAt: string | null;
   state: RollbackState;
@@ -89,6 +91,7 @@ export function rollbackStatusOf(inc: OrchIncident): RollbackStatusView {
   const shown = state !== "no_proposal" && state !== "checking";
   return {
     contextId: inc.context_id,
+    reviewId: state === "waiting" ? str(hold?.review_id) : null,
     title: inc.title,
     openedAt: inc.opened_at,
     state,
@@ -114,4 +117,26 @@ export function rollbackCardResult(incidents: readonly OrchIncident[]): Rollback
   const open = openRollbackIncidents(incidents);
   if (open.length === 0) return { kind: "none", text: NO_OPEN_INCIDENT };
   return { kind: "status", status: rollbackStatusOf(open[0]), openCount: open.length };
+}
+
+// ---- 카드 안 결정 영역 (3-a). 결정은 기존 안전 관문 결정 경로(ChatReviewDecision 컴포넌트) 한 곳뿐이다 ----
+
+/** 서비스 이름 확인: 앞뒤 공백만 지우고 대소문자는 구분한다. 빈 값·서비스 없음은 불가 */
+export function serviceNameMatches(typed: string, service: string | null | undefined): boolean {
+  const want = (service ?? "").trim();
+  return want !== "" && typed.trim() === want;
+}
+
+export interface RollbackDecisionView {
+  reviewId: string;
+  service: string;
+  /** 승인 확인 문구. 카드 데이터에 없는 값은 지어내지 않고 뺀다 */
+  confirmText: string;
+}
+
+/** 롤백이 승인 대기(held)이고 review_id와 서비스 이름이 있을 때만 결정 영역을 보인다. 그 밖에는 null(읽기 전용) */
+export function rollbackDecisionOf(s: RollbackStatusView): RollbackDecisionView | null {
+  if (s.state !== "waiting" || !s.reviewId || !s.service) return null;
+  const ver = s.fromVersion && s.toVersion ? ` ${s.fromVersion}→${s.toVersion}` : s.toVersion ? ` (되돌릴 버전 ${s.toVersion})` : "";
+  return { reviewId: s.reviewId, service: s.service, confirmText: `운영에서 ${s.service}${ver} 롤백이 실행돼요. 되돌릴 수 없어요.` };
 }
