@@ -236,6 +236,19 @@ def ticket_text(
     return Fill(payload)
 
 
+def incident_component(
+    text: str, now: datetime, request_id: str | None = None, ctx: dict[str, Any] | None = None
+) -> Fill:
+    """장애 원인 진단 `component`: 문장에 결제 말이 있으면 `payment`.
+    없으면 비워 보낸다(모든 구성요소).
+
+    알려진 부위 이름만 쓰고 문장은 부서에 넘기지 않는다(읽기 진단이라 입력은 부위 하나뿐이다).
+    """
+    if _has(text, r"결제|payment|페이먼트"):
+        return Fill({"component": "payment"}, note="결제 구성요소 기준으로 진단")
+    return Fill({}, note="모든 구성요소 기준으로 진단")
+
+
 BUYER_LINK_MSG = (
     "환불·교환 접수는 계정에 구매자 연결이 있어야 해요. 담당자가 확인해서 알려 드릴게요."
 )
@@ -327,6 +340,7 @@ def sns_topic(
 
 
 RULES: dict[str, Callable[..., Fill]] = {
+    "incident_component": incident_component,
     "claim_input": claim_input,
     "sns_topic": sns_topic,
     "notice_kind": notice_kind,

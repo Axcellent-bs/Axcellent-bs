@@ -8,6 +8,7 @@
   띄운다. 상태를 바꾸므로 `execute(action="deploy_version")`를 거친다. 멱등 키는 dev 배포 기록 id.
 - `deploy_run_status`: dev → infra, 등급 read. 띄운 실행의 지금 상태를 도구에서 읽는다.
 - `deploy_tool_services`: dev → infra, 등급 read. 배포 도구가 연결된 서비스 목록.
+- `current_incidents`·`latest_deployments`: orchestrator → infra, 등급 read. 대화방 의뢰용.
 """
 
 from __future__ import annotations
@@ -90,6 +91,52 @@ class VerifyRecoveryOutput(AxModel):
     infra_metrics_ok: bool
     business_metrics_ok: bool | None = None  # data anomaly_detection 결과, 못 받으면 None
     checked_at: UtcDatetime
+
+
+# ---------------------------------------------------------------- 대화방 현황 읽기 (11/26)
+# 총괄 대화방 의뢰("지금 장애 있어?"·"배포 상태")용 읽기 skill. 상태를 바꾸지 않는다.
+# `ref`는 총괄 의뢰 카드가 그대로 읽는 짧은 결과 번호다("incidents:2"·"deploys:3", 문장 아님).
+
+
+class CurrentIncidentsInput(AxModel):
+    pass
+
+
+class CurrentIncident(AxModel):
+    id: str | None = None  # DejaFix 장애 번호
+    host: str | None = None
+    severity: str | None = None
+    started_at: str | None = None
+    # `component` 태그가 있으면 총괄에 장애로 알린 것, 없으면 DejaFix만 맡는 장애(PC·호스트)
+    component: str | None = None
+
+
+class CurrentIncidentsOutput(AxModel):
+    """DejaFix 현재 장애. 연결 전이면 `configured` false(없다고 말하지 않는다)."""
+
+    configured: bool
+    count: int = 0
+    incidents: list[CurrentIncident] = Field(default_factory=list)
+    ref: str
+
+
+class LatestDeploymentsInput(AxModel):
+    pass
+
+
+class LatestDeployment(AxModel):
+    service: str
+    version: str
+    deployed_at: UtcDatetime
+    source: str | None = None  # "github_actions" | "jenkins"
+    is_rollback: bool = False
+
+
+class LatestDeploymentsOutput(AxModel):
+    """서비스별 지금 돌고 있는 배포(도구에서 받은 성공 배포만, 되돌린 배포 제외)."""
+
+    deployments: list[LatestDeployment] = Field(default_factory=list)
+    ref: str
 
 
 # ---------------------------------------------------------------- 배포 실행 (11/23)
