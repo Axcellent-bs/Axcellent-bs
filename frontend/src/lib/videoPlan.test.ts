@@ -218,6 +218,11 @@ test("규칙 초안 진짜 이유 (계약 fallback_detail·svg_detail·character
   const svgOf = (detail: string) => videoSvgLine(toVideoPlan({ ...RAW, svg_reason: "error", svg_detail: detail })!);
   assert.equal(svgOf("LLMResponseError_ReadTimeout"), "콘티 호출이 실패했어요 · AI 응답이 늦어 끊겼어요");
   assert.equal(svgOf("LLMResponseError_429"), "콘티 호출이 실패했어요 · AI 호출 한도에 걸렸어요");
+  // 11/26 F: 400 갈래 세 가지, 갈래 없는 400은 괄호 그대로
+  assert.equal(svgOf("LLMResponseError_400_schema"), "콘티 호출이 실패했어요 · AI 응답 형식이 맞지 않았어요");
+  assert.equal(svgOf("LLMResponseError_400_length"), "콘티 호출이 실패했어요 · AI 입력·출력이 너무 길어요");
+  assert.equal(svgOf("LLMResponseError_400_model"), "콘티 호출이 실패했어요 · AI 모델 설정이 맞지 않아요");
+  assert.equal(svgOf("LLMResponseError_400"), "콘티 호출이 실패했어요 (LLMResponseError_400)");
   assert.equal(svgOf("LLMResponseError_503"), "콘티 호출이 실패했어요 (LLMResponseError_503)");
   assert.equal(svgOf("toString"), "콘티 호출이 실패했어요 (toString)");
   const brand = (why: string) => characterLine(toVideoPlan({ ...RAW, character_source: "brand", character_source_reason: why })!);

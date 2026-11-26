@@ -208,7 +208,9 @@ def pose_llm(llm: Any) -> Any:
         return LLMClient("planning", settings=replace(settings_for("planning"), model=model),
                          timeout=TIMEOUT_SECONDS)  # fmt: skip
     if type(llm) is LLMClient:
-        return LLMClient(llm.dept, settings=llm.settings, timeout=TIMEOUT_SECONDS)
+        # transport(시험의 가짜 서버 자리, 운영은 None)도 그대로 넘긴다
+        return LLMClient(llm.dept, settings=llm.settings, timeout=TIMEOUT_SECONDS,
+                         transport=llm._transport)  # noqa: SLF001  # fmt: skip
     return llm
 
 
@@ -224,9 +226,33 @@ def failure_detail(exc: BaseException) -> str:
         m = _CALL_FAILED.search(str(exc))
         if isinstance(status, int):
             name = f"{name}_{status}"
+            kind = bad_request_kind(provider_message(exc)) if status == 400 else ""
+            if kind:
+                name = f"{name}_{kind}"
         elif m:
             name = f"{name}_{m.group(1)}"
     return name[:40]
+
+
+# 11/26 F: 400(잘못된 요청)의 공급자 메시지 갈래 (대소문자 무시, 위에서부터)
+BAD_REQUEST_KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("schema", ("schema", "json_schema", "response_format", "additionalproperties", "required")),
+    ("length", ("max_tokens", "too long", "context", "length")),
+    ("model", ("model",)),
+)
+PROVIDER_LOG_MAX = 120  # 로그에 남기는 공급자 메시지 길이 (마케팅 character_sheet와 같다)
+
+
+def provider_message(exc: BaseException) -> str:
+    """LLMResponseError의 공급자 메시지 (래퍼가 키·토큰 모양을 가린 앞 200자). 없으면 ""."""
+    raw = getattr(exc, "provider_message", None)
+    return " ".join(raw.split()) if isinstance(raw, str) else ""
+
+
+def bad_request_kind(message: str) -> str:
+    """400 공급자 메시지 → schema·length·model, 모르면 ""."""
+    low = (message or "").lower()
+    return next((kind for kind, words in BAD_REQUEST_KINDS if any(w in low for w in words)), "")
 
 
 def _cut(text: Any, n: int) -> str:
@@ -315,8 +341,11 @@ async def draw(
             TIMEOUT_SECONDS,
         )  # fmt: skip
     except Exception as exc:  # noqa: BLE001 - 포즈·SVG 없이 제작안 그대로
-        log.warning("마네킹 콘티 포즈 실패: %s %.1fs 0/%d장면", failure_detail(exc),
-                    time.monotonic() - started, len(plan.scenes))  # fmt: skip
+        # 11/26 F: 공급자 메시지(래퍼가 가린 앞 200자)를 120자로 같이 남긴다 (요청·프롬프트는 없음)
+        said = provider_message(exc)[:PROVIDER_LOG_MAX]
+        log.warning("마네킹 콘티 포즈 실패: %s %.1fs 0/%d장면%s", failure_detail(exc),
+                    time.monotonic() - started, len(plan.scenes),
+                    f" — 공급자 메시지: {said}" if said else "")  # fmt: skip
         return _failed(plan, svg_reason_of(exc), failure_detail(exc))
     out, changed = apply(plan, got, only)
     elapsed = time.monotonic() - started
