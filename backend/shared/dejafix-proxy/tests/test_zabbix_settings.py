@@ -265,6 +265,26 @@ async def test_old_dejafix_without_settings_api_is_501() -> None:
     assert res.json()["error"]["code"] == "DEJAFIX_TOO_OLD"
 
 
+async def test_old_dejafix_405_on_save_is_also_501() -> None:
+    """옛 DejaFix는 저장 경로가 GET 전용 경로에 걸려 405를 준다. 405로 내지 않고 501로 안내한다"""
+
+    def old(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"data": {"token": "jwt-dfx-admin"}})
+        return httpx.Response(405, json={"detail": "Method Not Allowed"})
+
+    upstream = httpx.AsyncClient(base_url="http://dejafix.test", transport=httpx.MockTransport(old))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(upstream)),
+        base_url="http://proxy",
+        headers={"Authorization": f"Bearer {_session()}"},
+    ) as c:
+        body = {"url": "http://z.test/api_jsonrpc.php", "token": "t"}
+        res = await c.post("/settings/zabbix", json=body)
+    assert res.status_code == 501
+    assert res.json()["error"]["code"] == "DEJAFIX_TOO_OLD"
+
+
 async def test_other_writes_are_still_refused() -> None:
     dfx = DejaFix()
     async with _client(dfx, _session()) as c:
