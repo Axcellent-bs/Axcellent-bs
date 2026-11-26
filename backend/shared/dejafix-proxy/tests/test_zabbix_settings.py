@@ -291,3 +291,25 @@ async def test_other_writes_are_still_refused() -> None:
         res = await c.put("/api/settings/zabbix", json=BODY)  # 일반 전달 경로는 GET만
     assert res.status_code == 405
     assert dfx.calls == []
+
+
+@pytest.mark.parametrize("status", [404, 405])
+async def test_old_dejafix_shows_only_no_company_to_other_company(status: int) -> None:
+    """누비투어에 "회사별 미지원"과 "업데이트 필요"가 같이 뜨던 것(11/26): 409 하나만."""
+
+    def old(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"data": {"token": "jwt-dfx-admin"}})
+        return httpx.Response(status, json={"error": {"code": "NOT_FOUND", "message": "x"}})
+
+    upstream = httpx.AsyncClient(base_url="http://dejafix.test", transport=httpx.MockTransport(old))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(upstream)),
+        base_url="http://proxy",
+        headers={"Authorization": f"Bearer {_session(company='nubi-tour')}"},
+    ) as c:
+        got = await c.get("/settings/zabbix")
+        saved = await c.put("/settings/zabbix", json=BODY)
+    for res in (got, saved):
+        assert res.status_code == 409
+        assert res.json()["error"]["code"] == "DEJAFIX_NO_COMPANY"
