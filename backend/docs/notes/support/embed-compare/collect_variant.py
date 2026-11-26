@@ -24,7 +24,8 @@
     EMBED_MODEL=text-embedding-3-small EMBED_BASE_URL=https://api.openai.com/v1 EMBED_API_KEY=... \
       uv run python docs/notes/support/embed-compare/collect_variant.py text-embedding-3-small
 
-    EMBED_MODEL=solar-embedding-1-large EMBED_BASE_URL=https://api.upstage.ai/v1/solar EMBED_API_KEY=... \
+    EMBED_MODEL=solar-embedding-1-large \
+      EMBED_BASE_URL=https://api.upstage.ai/v1/solar EMBED_API_KEY=... \
       uv run python docs/notes/support/embed-compare/collect_variant.py solar-embedding-1-large
 
 라벨(두 번째 인자)은 출력 파일 이름에만 쓴다: sims/basic_<라벨>.json

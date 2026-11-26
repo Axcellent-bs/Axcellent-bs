@@ -139,20 +139,23 @@ def main(argv: list[str]) -> int:
     for label in labels:
         path = HERE / "sims" / f"basic_{label}.json"
         if not path.exists():
-            print(f"| {label} | (sims 파일 없음: 먼저 collect_variant.py {label} 실행) | | | | | | |")
+            note = f"(sims 파일 없음: 먼저 collect_variant.py {label} 실행)"
+            print(f"| {label} | {note} | | | | | | |")
             continue
         sims = json.loads(path.read_text(encoding="utf-8"))
         p = select(cases, sims)
         if p is None:
-            print(f"| {label} ({sims['model']}) | 조건(오연결률 0, 정밀도 ≥0.9) 만족 설정 없음 | | | | | | |")
+            note = "조건(오연결률 0, 정밀도 ≥0.9) 만족 설정 없음"
+            print(f"| {label} ({sims['model']}) | {note} | | | | | | |")
             continue
         d, h = evaluate(cases, sims, p, "dev"), evaluate(cases, sims, p, "holdout")
         setting = f"{p.margin_kind} / 유사도≥{p.min_sim:.2f}" + (
             f" / 여유≥{p.min_margin:.2f}" if p.margin_kind != "none" else ""
         )
         print(
-            f"| {label} ({sims['model']}) | {setting} | {_fmt(d.recall)} | {_fmt(d.precision)}"
-            f" | {_fmt(d.false_rate)} | {_fmt(h.recall)} | {_fmt(h.precision)} | {_fmt(h.false_rate)} |"
+            f"| {label} ({sims['model']}) | {setting} | {_fmt(d.recall)}"
+            f" | {_fmt(d.precision)} | {_fmt(d.false_rate)}"
+            f" | {_fmt(h.recall)} | {_fmt(h.precision)} | {_fmt(h.false_rate)} |"
         )
     return 0
 
