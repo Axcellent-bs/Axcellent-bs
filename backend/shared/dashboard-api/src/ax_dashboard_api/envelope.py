@@ -87,7 +87,9 @@ def _company_from_authorization(authorization: str | None) -> str | None:
 
 
 class SessionCompanyMiddleware:
-    """요청의 세션 회사를 contextvar에 담는다 (응답 `meta.tenant_id`가 읽는다)."""
+    """요청의 세션 회사를 contextvar에 담는다 (응답 `meta.tenant_id`가 읽는다).
+
+    Authorization이 로그인 세션이면 그 회사, 아니면 `X-AX-Session`의 세션 회사(검증한 것만)."""
 
     def __init__(self, app: Any) -> None:
         self.app = app
@@ -97,11 +99,19 @@ class SessionCompanyMiddleware:
             await self.app(scope, receive, send)
             return
         authorization = None
+        session = None
         for key, value in scope.get("headers", ()):
             if key == b"authorization":
                 authorization = value.decode("latin-1")
-                break
-        token = _SESSION_COMPANY.set(_company_from_authorization(authorization))
+            elif key == b"x-ax-session":
+                session = value.decode("latin-1").strip()
+        company = _company_from_authorization(authorization)
+        if company is None and session:
+            # 공용 토큰으로 부르는 화면(도구 연결 등)이 같이 싣는 로그인 세션
+            # (`X-AX-Session`, 11/26).
+            # 회사 고르기에만 쓰고 권한은 Authorization 그대로다
+            company = _company_from_authorization(f"Bearer {session}")
+        token = _SESSION_COMPANY.set(company)
         try:
             await self.app(scope, receive, send)
         finally:

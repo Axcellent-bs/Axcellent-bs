@@ -293,7 +293,7 @@ def test_poll_run_forever_reads_vault_off_the_event_loop(runtime, monkeypatch) -
     async def run() -> int:
         main_id = threading.get_ident()
         with pytest.raises(asyncio.CancelledError):
-            await deploy_poll.run_forever(runtime.history)
+            await deploy_poll.run_forever(lambda: runtime)
         return main_id
 
     main_id = asyncio.run(run())

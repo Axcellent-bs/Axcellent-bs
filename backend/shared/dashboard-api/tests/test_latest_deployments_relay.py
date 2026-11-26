@@ -97,3 +97,32 @@ def test_mock_mode_has_no_made_up_rows(monkeypatch: pytest.MonkeyPatch, infra: I
     monkeypatch.setenv("DASHBOARD_MOCK", "1")
     assert TestClient(app).get(PATH).json()["data"] == []
     assert infra.requests == []
+
+
+def _session(company: str) -> str:
+    from ax_agent_template import human_auth
+
+    token, _ = human_auth.issue_session(
+        account_id="acc_1", name="예진", role="admin", company_id=company, company_role="admin"
+    )
+    return token
+
+
+def test_sends_the_session_company_to_infra(
+    live: TestClient, infra: Infra, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """화면 세션의 회사를 실어 인프라가 그 회사 배포 이력만 주게 한다(11/26 회사 분리).
+
+    도구 연결 화면은 공용 토큰 + `X-AX-Session`(로그인 세션)으로 부른다."""
+    monkeypatch.setenv("AX_SESSION_SECRET", "s" * 40)
+    live.get(PATH, headers={"X-AX-Session": _session("c-cf2f0d")})
+    live.get(PATH, headers={"X-AX-Session": _session("catbooks")})
+    live.get(PATH)  # 세션 없음: 싣지 않는다(예전 그대로)
+    sent = [r.headers.get("x-ax-company") for r in infra.requests]
+    assert sent == ["c-cf2f0d", "catbooks", None]
+    assert all(r.headers["authorization"] == "Bearer dash-agent-token" for r in infra.requests)
+
+
+def test_forged_session_header_is_ignored(live: TestClient, infra: Infra) -> None:
+    live.get(PATH, headers={"X-AX-Session": "not-a-session"})
+    assert infra.requests[-1].headers.get("x-ax-company") is None
