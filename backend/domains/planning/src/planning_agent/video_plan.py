@@ -117,6 +117,22 @@ _BRAND_WORDS = (
     "네이버", "교보", "알라딘", "스타벅스", "해리포터", "유튜브", "인스타그램", "틱톡",
 )  # fmt: skip
 _INJECTION_WORDS = ("ignore", "instruction", "system prompt", "jailbreak", "무시", "지시")
+# 11/26 A: "no text"·"글자 없이"처럼 하지 말라는 말은 글자 요청이 아니다 (LLM이 안전하라고 넣는다.
+# 마케팅 영상 템플릿도 네거티브로 같은 금지를 붙인다). 글자 요청 검사 전에 이 구절을 지운다.
+# 실존 인물·브랜드·주소 검사는 원래 글 그대로 본다
+_NEG_NOUN = (r"(?:on-screen\s+)?(?:text|words?|letters?|captions?|subtitles?|titles?|logos?|"
+             r"watermarks?|signs?|signage|typography|writing)")  # fmt: skip
+_NEG_EN = re.compile(rf"(?i)\b(?:no|without|zero|avoid|free\s+of)\s+{_NEG_NOUN}\b"
+                     rf"(?:\s*(?:,|/|&|\bor\b|\band\b)\s*{_NEG_NOUN}\b)*")  # fmt: skip
+_NEG_FREE = re.compile(r"(?i)\b(?:text|logo|watermark|caption)[- ]free\b")
+_NEG_KO = re.compile(r"(?:글자|자막|로고|문구|텍스트|간판)\s*(?:없이|없는|금지|넣지\s*않)")
+
+
+def without_negations(text: str) -> str:
+    """글자 금지 구절("no text, no logo"·"text-free"·"글자 없이")을 공백으로 바꾼 글."""
+    for pattern in (_NEG_EN, _NEG_FREE, _NEG_KO):
+        text = pattern.sub(" ", text)
+    return text
 _URL = re.compile(r"(?i)https?://|www\.")
 _LONG_DIGITS = re.compile(r"\d{4,}")
 _CLEAN = re.compile(r"[^0-9A-Za-z가-힣 ]+")
@@ -305,7 +321,7 @@ def prompt_problems(prompt: str) -> list[str]:
     """장면 프롬프트가 지키지 않은 규칙 코드 (없으면 빈 목록)."""
     text = unicodedata.normalize("NFKC", prompt)
     out = []
-    if _has(text, _TEXT_WORDS):
+    if _has(without_negations(text), _TEXT_WORDS):
         out.append("text_request")
     if _has(text, _PERSON_WORDS):
         out.append("real_person")
