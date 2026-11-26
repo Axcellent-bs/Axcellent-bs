@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 import tomllib
@@ -167,9 +168,25 @@ def cast_fields(p: Proposal) -> dict[str, str]:
     }
 
 
+# 11/26 T (예진 님 리뷰 #1856): 외형이 아닌 물건 이름 안의 낱말은 빼고 센다 (앞 글, 뒤 글).
+# 와인잔(wine glasses·glasses of wine)·병뚜껑(bottle cap)·마스크팩(mask pack·sheet mask)
+_NEVER = r"(?!)"  # 늘 안 맞는 식
+LOOK_EXCEPT: dict[str, tuple[str, str]] = {
+    "glasses": (r"\b(?:wine|drinking)\s+$", r"^\s+of\b"),
+    "cap": (r"\bbottle\s+$", _NEVER),
+    "mask": (r"\bsheet\s+$", r"^\s+(?:pack|sheet)s?\b"),
+}
+
+
 def _has_word(text: str, word: str) -> bool:
     if re.fullmatch(r"[a-z ]+", word):
-        return re.search(rf"(?i)\b{re.escape(word)}\b", text) is not None
+        before, after = LOOK_EXCEPT.get(word, (_NEVER, _NEVER))
+        for m in re.finditer(rf"(?i)\b{re.escape(word)}\b", text):
+            if re.search(f"(?i){before}", text[: m.start()]) is None and re.search(
+                f"(?i){after}", text[m.end() :]
+            ) is None:
+                return True
+        return False
     return word in text
 
 
@@ -1161,14 +1178,36 @@ async def write(
         return _rule(p, promo, "no_llm")
     prompt, data, d, b, style_, purpose = _plan_prompt(p, promo)
     started = time.monotonic()
+    total = total_seconds(timeout)
 
     async def ask(text: str) -> _PlanOut:
+        # 11/26 T: 호출마다 따로가 아니라 제작안 전체 상한 안에서 남은 시간만 기다린다
+        left = max(total - (time.monotonic() - started), 0.0)
         return await asyncio.wait_for(
-            llm.structured(text, _PlanOut, untrusted=data, context_id=context_id), timeout
+            llm.structured(text, _PlanOut, untrusted=data, context_id=context_id), left
         )
 
     return await _write_with(p, promo, ask, prompt, d, b, style_, purpose, started, llm,
-                             context_id)  # fmt: skip
+                             context_id, total)  # fmt: skip
+
+
+# 11/26 T (예진 님 리뷰 #1856·#1858): 다시 쓰기가 생겨 제작안 LLM이 최대 2번이다. 호출마다 제한
+# 시간이 따로면 최악에 제한의 2배를 기다린다 → 제작안 전체 상한 하나(timeout, env로 더 줄일 수
+# 있다). 남은 시간이 REWRITE_MIN_SECONDS보다 적으면 다시 쓰기를 건너뛰고 1차 답(✕ 표시)을 쓴다
+TOTAL_ENV = "PLANNING_VIDEO_PLAN_TOTAL_SECONDS"
+REWRITE_MIN_SECONDS = 20.0
+REWRITE_SKIPPED = "rewrite_skipped_time"  # 로그 이유 코드
+
+
+def total_seconds(timeout: float) -> float:
+    """제작안 전체 시간 상한 (초). env가 있으면 timeout과 env 중 작은 값 (사람 기다림 40초를
+    env가 늘리지 않는다). env가 숫자가 아니거나 0 이하면 timeout."""
+    raw = os.getenv(TOTAL_ENV, "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return timeout
+    return min(timeout, value) if value > 0 else timeout
 
 
 def _plan_prompt(
@@ -1221,6 +1260,7 @@ def _plan_prompt(
 async def _write_with(
     p: Proposal, promo: tuple[str, str], ask: Any, prompt: str, d: int, b: dict[str, str],
     style_: str, purpose: str, started: float, llm: LLMClient, context_id: str,
+    total: float = TIMEOUT_SECONDS,
 ) -> VideoPlan:  # fmt: skip
     try:
         got = await ask(prompt)
@@ -1233,6 +1273,10 @@ async def _write_with(
     fixes = plan_fixes(p, got)
     log_rows = [attempt_log(1, plan_problems(p, got))]
     rewritten = False
+    left = total - (time.monotonic() - started)
+    if fixes and left < REWRITE_MIN_SECONDS:  # 시간이 모자라면 1차 답 (✕는 검사 기록에 남는다)
+        log.info("영상 제작안 다시 쓰기 건너뜀: %s %.1fs 남음", REWRITE_SKIPPED, left)
+        fixes = []
     if fixes:
         log.info("영상 제작안 다시 쓰기 1회: %d건", len(fixes))
         first = got

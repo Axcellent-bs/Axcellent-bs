@@ -253,7 +253,9 @@ PEOPLE_WORDS = (
 )  # fmt: skip
 _PEOPLE_NUM = re.compile(r"(\d+)\s*(?:명|마리)")
 ACTION_JOINS = (" then ", ", and ", " and then ", " while ")
-_KO_JOIN = re.compile(r"[가-힣]+하고\s+[가-힣]+")
+# "~하고 ~" = 동작 2개. "하고 있다"·"하고 서 있다"(보조 용언)는 동작 하나라 세지 않는다
+# (11/26 T 예진 님 리뷰 #1860: "책을 정리하고 있다")
+_KO_JOIN = re.compile(r"[가-힣]+하고\s+(?!있|서(?:\s|$))[가-힣]+")
 
 
 def _limit(env: str, default: int) -> int:
