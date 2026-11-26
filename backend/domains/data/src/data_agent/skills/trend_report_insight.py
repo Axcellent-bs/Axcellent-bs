@@ -36,6 +36,8 @@ from data_agent.skills import trend_report_promo as tp
 SKILL = "trend_report_create"
 SOURCE = "trend_report_create"
 FACTS_MAX = 12
+# 11/26 해시태그를 이번 7일 이만큼 미만 계정이 썼으면 작은 표본(약한 근거, 뒤로)
+HASHTAG_MIN_ACCOUNTS = 5
 LABEL_MAX, VALUE_MAX, SOURCE_MAX = 120, 80, 60
 BODY_MAX = 8000
 NO_REPORT = "보고서 없음"
@@ -187,6 +189,35 @@ def _top(report: TrendReport, rows: dict[str, Row]) -> list[str]:
             *first("competitor:", 2, comp_key)]  # fmt: skip
 
 
+def _row(rows: Sequence[Any], fact_id: str, prefix: str) -> Any:
+    """근거 번호 search:3 → rows[2] (번호가 맞지 않으면 None)."""
+    try:
+        n = int(fact_id.removeprefix(prefix))
+    except ValueError:
+        return None
+    return rows[n - 1] if 1 <= n <= len(rows) else None
+
+
+def is_weak(report: TrendReport, fact_id: str) -> bool:
+    """약한 근거(11/26, TR-BB81): ① 검색·쇼핑·주제 후보 변화율이 음수(줄어드는 숫자)
+    ② 해시태그 이번 7일 계정 수가 HASHTAG_MIN_ACCOUNTS 미만(작은 표본).
+    row_facts가 쓰는 원래 숫자로 본다(value 글자를 다시 읽지 않는다). 그 밖의 근거는 약하지 않다."""
+    s = report.sections
+    if fact_id.startswith("search:"):
+        r = _row(s.search.rows, fact_id, "search:")
+        return r is not None and r.search_change_pct is not None and r.search_change_pct < 0
+    if fact_id.startswith("shopping:"):
+        r = _row(s.search.rows, fact_id, "shopping:")
+        return r is not None and r.shopping_change_pct is not None and r.shopping_change_pct < 0
+    if fact_id.startswith("theme:"):
+        t = _row(s.theme.rows, fact_id, "theme:")
+        return t is not None and t.change_pct is not None and t.change_pct < 0
+    if fact_id.startswith("hashtag:"):
+        h = _row(s.hashtags.rows, fact_id, "hashtag:")
+        return h is not None and h.accounts < HASHTAG_MIN_ACCOUNTS
+    return False
+
+
 def pick_facts(report: TrendReport) -> list[InsightFact]:
     rows = row_facts(report)
     rec = report.sections.recommendation
@@ -196,6 +227,8 @@ def pick_facts(report: TrendReport) -> list[InsightFact]:
     theme_ids = [k for k in rows if k.startswith("theme:")]
     order = list(dict.fromkeys([*(i for i in beat_ids if i in rows), *theme_ids,
                                 *_top(report, rows)]))  # fmt: skip
+    # 11/26 약한 근거(줄어드는 숫자·작은 표본)는 빼지 않고 같은 무리 안 순서를 지킨 채 맨 뒤로
+    order = [i for i in order if not is_weak(report, i)] + [i for i in order if is_weak(report, i)]
     facts = [InsightFact(label=clip(rows[i][0], LABEL_MAX), value=clip(rows[i][1], VALUE_MAX),
                          source=clip(SOURCE, SOURCE_MAX),
                          link=rows[i][2][:500] if rows[i][2] else None)
