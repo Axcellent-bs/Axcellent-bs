@@ -62,6 +62,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from ax_agent_template.company_jobs import for_each_company, meta_tenant_id
 from ax_contracts.schemas import AgentRequest, RequestMeta, TaskStatus
 from ax_contracts.schemas.ad_metrics import GetAdMetricsInput
 from marketing_agent import company_scope
@@ -171,6 +172,7 @@ def ends_at(ends_on: str) -> datetime:
 
 class CampaignTracker:
     """시작된 캠페인 대장. `path`가 없으면 환경변수 `MARKETING_CAMPAIGNS_DB`, 없으면 메모리."""
+
     company_id = company_scope.RequestCompany()  # 요청 회사가 먼저(11/24)
 
     def __init__(self, path: str | None = None, company_id: str | None = None) -> None:
@@ -402,6 +404,7 @@ def _request(
         token="internal:marketing-auto",
         deadline=now + timedelta(seconds=CALL_DEADLINE_S),
         idempotency_key=key or f"auto:result:{item.campaign_id}",
+        tenant_id=meta_tenant_id(),  # 회사마다 돌 때 그 회사로(회사 분리 11/26)
     )
     return AgentRequest(
         meta=meta,
@@ -583,7 +586,13 @@ async def auto_record_loop(
         cfg = AutoConfig.from_env()  # 환경변수를 매 주기 다시 읽어 재시작 없이 끄고 켠다
         await RT.sleep(cfg.poll_s or 600)
         try:
-            await auto_record_once(tracker, brief_content=brief_content, ad_spend=ad_spend)
+            # 회사마다(캣북스 + 회사 연결이 켜진 회사): 저장소가 그 회사 칸만 본다 (회사 분리 11/26)
+            await for_each_company(
+                lambda _cid: auto_record_once(
+                    tracker, brief_content=brief_content, ad_spend=ad_spend
+                ),
+                "캠페인 결과 자동 전달",
+            )
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
