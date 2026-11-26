@@ -825,9 +825,9 @@ export const finance = {
   lastSelfTest: () => fin<{ data: SelfTest | null; meta?: SelfTestLastMeta }>("/api/finance/self-test/last"),
   // 안전 장치 보류 큐 (정산 묶음 지급 승인 등 C 등급)
   reviews: (live = false) => data(saf<{ data: Review[] }>("/api/safety/reviews", { live })),
-  /** C 보류 결정. 사람 토큰만 받는다 (에이전트 토큰은 safety가 거부). `decidedAs`: 공용 토큰일 때 승인자 이름 */
-  decide: (reviewId: string, decision: "approved" | "rejected", note?: string, live = false, decidedAs?: string | null) =>
-    data(saf<{ data: Review }>(`/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, { method: "POST", body: { decision, note: note || null, ...(decidedAs ? { decided_as: decidedAs } : {}) }, human: true, live })),
+  /** C 보류 결정. 사람 토큰만 받는다 (에이전트 토큰은 safety가 거부). `decidedAs`: 공용 토큰일 때 승인자 이름. `confirm`(선택, 롤백 3-b): 승인할 때 서버가 보류의 서비스 이름과 견준다. 안 넣으면 본문에 안 실린다 */
+  decide: (reviewId: string, decision: "approved" | "rejected", note?: string, live = false, decidedAs?: string | null, confirm?: string) =>
+    data(saf<{ data: Review }>(`/api/safety/reviews/${encodeURIComponent(reviewId)}/decision`, { method: "POST", body: { decision, note: note || null, ...(decidedAs ? { decided_as: decidedAs } : {}), ...(confirm !== undefined ? { confirm } : {}) }, human: true, live })),
 };
 
 // ---------------------------------------------------------------- 표시 도우미 (쉬운 말)

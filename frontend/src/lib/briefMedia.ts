@@ -475,6 +475,8 @@ export function canDecideNow(o: { tokenSet: boolean; reviewed: boolean; approver
 /** 승인·거절 호출 오류를 화면 문구로. 서버 문장은 쓰지 않는다 */
 export function decideErrorKo(status: number | undefined, code: string | null | undefined): string {
   if (code === "SELF_APPROVAL") return "요청한 본인은 승인할 수 없습니다. 다른 사람이 눌러 주세요.";
+  if (code === "CONFIRM_MISMATCH") return "서비스 이름이 맞지 않아요. 다시 확인해 주세요.";
+  if (code === "CONFIRM_NOT_APPLICABLE") return "이 건에는 서비스 이름 확인을 쓸 수 없어요. 새로고침해 다시 확인해 주세요.";
   if (status === 409 || code === "ALREADY_DECIDED") return "이미 결정됐거나 승인 시간이 지난 건입니다. 새로고침해 확인해 주세요.";
   if (status === 404) return "보류 건을 찾을 수 없습니다. 승인 시간이 지나 정리됐을 수 있습니다. 새로고침해 확인해 주세요.";
   if (status === 401 || status === 403) return "권한이 없어 처리하지 못했습니다. 로그인이 끝났을 수 있으니 다시 로그인해 주세요.";
