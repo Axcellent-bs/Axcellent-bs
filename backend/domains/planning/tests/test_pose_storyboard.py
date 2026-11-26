@@ -235,10 +235,12 @@ class _Recorder:
     """다른 모델로 만든 포즈 LLM (설정만 기록)."""
 
     made: list[LLMSettings] = []
+    timeouts: list[float | None] = []
 
-    def __init__(self, dept: str, settings: LLMSettings) -> None:
+    def __init__(self, dept: str, settings: LLMSettings, timeout: float | None = None) -> None:
         self.dept = dept
         _Recorder.made.append(settings)
+        _Recorder.timeouts.append(timeout)  # 11/26 C: 포즈 호출만 긴 httpx 타임아웃
         self.calls: list[str] = []
 
     async def structured(self, prompt: str, schema: type[BaseModel], **_: Any) -> Any:
@@ -247,7 +249,7 @@ class _Recorder:
 
 
 def test_svg_model_env_changes_only_the_pose_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    _Recorder.made = []
+    _Recorder.made, _Recorder.timeouts = [], []
     base = LLMSettings(model="plan-model", base_url="https://llm.example/v1", api_key="k-test")
     monkeypatch.setattr(sb, "settings_for", lambda dept: base)
     monkeypatch.setattr(sb, "LLMClient", _Recorder)
@@ -265,6 +267,7 @@ def test_svg_model_env_changes_only_the_pose_call(monkeypatch: pytest.MonkeyPatc
     made = _Recorder.made[0]
     assert made.model == "pose-model"  # 모델만 바뀌고
     assert (made.base_url, made.api_key) == (base.base_url, base.api_key)  # 주소·키는 그대로
+    assert _Recorder.timeouts == [sb.TIMEOUT_SECONDS]  # 11/26 C: 60초에 끊기지 않게
     assert all(s.start_pose and s.start_svg for s in plan.scenes)
 
 
