@@ -44,6 +44,7 @@ import logging
 import math
 import os
 import re
+import shutil
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -626,10 +627,12 @@ def start_sheet(
     sheet: dict[str, Any],
     ref: bytes | None,
     cid: str | None = None,
+    extra_refs: list[bytes] | None = None,
 ) -> None:
     """이미지 시트 프롬프트가 나온 직후 부른다. 설정이 없으면 기록에 이유만 남긴다.
 
-    회사(`cid`, 없으면 `request_company(meta)`)를 여기서 한 번 정해 뒤에서 도는 작업에 넘긴다."""
+    회사(`cid`, 없으면 `request_company(meta)`)를 여기서 한 번 정해 뒤에서 도는 작업에 넘긴다.
+    extra_refs: 대표 참조 다음 추가 참조 (11/26 가상 인물·일러스트 시트, 회사 계정 길만 쓴다)."""
     cid = cid or request_company(meta)
     via = route(cid)
     _log_route(via, cid, "sheet_image", record_id)
@@ -652,6 +655,7 @@ def start_sheet(
             image_aspect(SHEET_ASPECT, cid),
             via,
             cid,
+            extra_refs,
         )  # fmt: skip
     )
 
@@ -660,8 +664,61 @@ def _story_sha(rec: dict[str, Any]) -> str:
     return hashlib.sha256(str(rec.get("storyboard_at") or "").encode()).hexdigest()[:12]
 
 
+# 11/26 C: 영상 초안 준비 때 스토리보드 그림 1장. 첫 참조 = 칸 SVG 구도판, 다음 = 캐릭터 시트(없으면
+# 원본)·추가 참조. 칸 아래 시간·샷·동작·자막 글은 그림에 넣지 않고 화면이 칸 밑에 얹는다
+BOARD_LAYOUT_EN = (
+    "Follow the panel layout, camera and pose of the first reference exactly; same character as "
+    "the sheet (face, glasses, hair, outfit, colors); fully colored illustrated backgrounds "
+    "matching each panel's place; no text in panels."
+)
+LAYOUT_FILE = "board_layout.png"
+LAYOUT_ASPECT = "16:9"  # 구도판(svg_raster.GRID_SIZE)과 같은 그림 비율
+
+
+def layout_board_png(rec: dict[str, Any], cid: str | None = None) -> bytes | None:
+    """스토리보드 칸 SVG를 칸 순서대로 한 장 격자 PNG로 (엔드카드 칸 = 어두운 빈 칸).
+
+    칸이 없거나 8칸을 넘거나 그릴 SVG가 하나도 없으면 None (그때는 지금처럼 시트 참조만)."""
+    from marketing_agent.media import svg_raster
+
+    shots = (rec.get("storyboard") or {}).get("shots") or []
+    if not 1 <= len(shots) <= svg_raster.MAX_GRID_PANELS:
+        return None
+    last = len(shots) - 1
+    panels: list[str | None] = [
+        None if (i == last and i > 0 and not s.get("has_character", True))
+        else str(s.get("svg") or "")
+        for i, s in enumerate(shots)
+    ]
+    if not any(panels):
+        return None
+    try:
+        return svg_raster.grid_png(panels, video_aspect(cid))
+    except svg_raster.RasterError as error:
+        logger.info("스토리보드 구도판을 그리지 못함: %s", error)
+        return None
+
+
+def start_prepared_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
+                         cid: str | None = None) -> None:  # fmt: skip
+    """영상 초안 준비(사람이 누른 단계)에서 스토리보드 그림을 한 번 시작한다 (기다리지 않음).
+
+    [다시 그리기]와 같은 길(`maybe_start_board(force=True)`) + 구도판 참조. 키프레임 모델이면
+    키프레임 쪽이라 그리지 않는다. 같은 이야기(story_sha)로 이미 돌거나 끝났으면 다시 안 그린다."""
+    rec = _creative.store().get(record_id)
+    if rec is None or not rec.get("storyboard") or superseded(record_id):
+        return
+    from marketing_agent import keyframes as _kf
+
+    cid = cid or request_company(meta)
+    if _kf.active(rec, route(cid), cid):
+        return
+    maybe_start_board(ledger, meta, record_id, cid, force=True, layout=True)
+
+
 def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
-                      cid: str | None = None, force: bool = False) -> None:  # fmt: skip
+                      cid: str | None = None, force: bool = False,
+                      layout: bool = False) -> None:  # fmt: skip
     """스토리보드가 붙었고 이미지 시트 그림이 있으면 스토리보드 그림을 만든다.
 
     회사: `cid` → 시트 그림을 만들 때 남긴 회사 → `request_company(meta)`.
@@ -684,7 +741,11 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
             return
     if board.get("status") in ("running", "done") and board.get("story_sha") == _story_sha(rec):
         return
-    if sheet.get("status") != "done":
+    # 11/26 A: 가상 인물·일러스트는 시트 그림을 못 만들었으면 올린 원본으로 그린다 (예전 참조)
+    ref_part = "sheet_image" if sheet.get("status") == "done" else None
+    if ref_part is None and sheet.get("status") != "running":
+        ref_part = original_part(rec)
+    if ref_part is None:
         if sheet.get("status") in ("unavailable", "failed", "blocked"):
             _set(record_id, "board_image", status="unavailable", error="sheet_image_missing")
         return  # 시트 그림이 끝나면 다시 부른다
@@ -698,11 +759,25 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
         _set(record_id, "board_image", status="unavailable", error=why, route=via, company_id=cid)
         return
     try:
-        ref = _ref_bytes(record_id, "sheet_image", cid, rec)  # 올린 원본이면 sheet.png일 수 있다
+        ref = _ref_bytes(record_id, ref_part, cid, rec)  # 올린 원본이면 png일 수 있다
     except OSError:
         _set(record_id, "board_image", status="failed", error="sheet_file_missing")
         return
     board_out = rec["storyboard"]
+    prompt = str(board_out.get("sheet_prompt_en") or "")
+    extra: list[bytes] | None = None
+    # 11/26 C: 회사 계정(MCP)이면 구도판을 첫 참조로, 시트(없으면 원본)·추가 참조를 다음 참조로
+    grid = layout_board_png(rec, cid) if layout and via == MCP else None
+    if grid is not None:
+        extra = [ref, *extra_reference_bytes(record_id, rec, cid)] if ref else None
+        ref = grid
+        prompt = f"{BOARD_LAYOUT_EN} {prompt}"
+        try:
+            folder = _dir(record_id, cid)
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / LAYOUT_FILE).write_bytes(grid)
+        except OSError:
+            logger.info("구도판 파일을 남기지 못함: %s", record_id)
     _creative.store().set_board_source(record_id, "higgsfield")
     _set(
         record_id,
@@ -719,12 +794,13 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
             meta,
             record_id,
             "board_image",
-            str(board_out.get("sheet_prompt_en") or ""),
+            prompt,
             str(board_out.get("negative_prompt_en") or ""),
             ref,
-            image_aspect(BOARD_ASPECT, cid),
+            image_aspect(LAYOUT_ASPECT if grid is not None else BOARD_ASPECT, cid),
             via,
             cid,
+            extra_refs=extra,
         )
     )
 
@@ -740,6 +816,7 @@ async def _render_image(
     aspect: str,
     via: str = API,
     cid: str | None = None,
+    extra_refs: list[bytes] | None = None,
 ) -> None:
     # 회사는 부른 쪽이 정한 값(뒤에서 돌 때 company_scope가 비어도 같은 회사). 없으면 예전 그대로
     cid = cid or request_company(meta)
@@ -770,7 +847,8 @@ async def _render_image(
     try:
         async with CLIENT() as client:
             if via == MCP:
-                sha = await _mcp_render(client, cid, record_id, part, "image", params, ref)
+                sha = await _mcp_render(client, cid, record_id, part, "image", params, ref,
+                                        extra_refs=extra_refs)  # fmt: skip
             else:
                 sha = await _api_image(client, record_id, part, prompt, negative, ref, aspect,
                                        cid)  # fmt: skip
@@ -1000,7 +1078,7 @@ async def request_video(
         "seconds_clamped_from": clamped,
         "aspect": aspect,
         "reference": "character_original"
-        if video_reference(rec, model)[0] == "sheet_image"
+        if video_reference(rec, model)[0] != "board_image"
         else "storyboard_image",
         "credits_estimate": credits,
         "speed": speed,
@@ -1258,7 +1336,7 @@ def _video_mcp_params(
     model = mcp_video_model(cid)
     # 참조 방식은 영상을 만들 때 고르는 것(`video_reference`)과 같다
     part, _ = video_reference(rec, model)
-    reference = REF_CHARACTER if part == "sheet_image" else REF_STORYBOARD
+    reference = REF_CHARACTER if part != "board_image" else REF_STORYBOARD
     prompt = _video_prompt(rec, speed, reference)
     return _mcp.video_params(model, prompt, video_aspect(cid), seconds)
 
@@ -1476,23 +1554,96 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-ORIGINAL_SOURCE = "upload_original"  # 11/24 가상 인물·일러스트: 올린 원본을 시트 그림 자리에
+ORIGINAL_SOURCE = "upload_original"  # 11/24 가상 인물·일러스트: 올린 원본
 _MAGIC = {"image/jpeg": (b"\xff\xd8", "sheet.jpg"), "image/png": (b"\x89PNG", "sheet.png")}
+# 11/26 A: 올린 원본은 시트 그림 자리가 아니라 원본 칸(render.original_image, 계약 없음)에 둔다.
+# 시트 그림(sheet_image)은 일반 캐릭터처럼 Higgsfield로 만든다(정면·옆·뒤·표정·색표, 약 1.5 크레딧)
+ORIGINAL_PART = "original_image"
+ORIGINAL_FILES = ("original.jpg", "original.png")
 
 
 def save_original(record_id: str, data: bytes, mime_type: str, cid: str | None = None) -> None:
-    """올린 원본(화면이 긴 변을 줄인 JPEG·PNG, 업로드 검사를 지난 것)을 그 회사 기록 폴더에
-    시트 그림(`sheet_image`)으로 저장한다. Higgsfield를 부르지 않는다(크레딧 0).
+    """올린 원본(화면이 긴 변을 줄인 JPEG·PNG, 업로드 검사를 지난 것)을 그 회사 기록 폴더의
+    원본 칸(`original_image`, `original.jpg|png`)에 저장한다. Higgsfield를 부르지 않는다.
 
     실제 사람 사진(real_photo)은 부르지 않는다(원본을 저장하지 않는 지금 규칙)."""
     magic, name = _MAGIC.get(mime_type, (b"", ""))
     if not name or not data.startswith(magic):
         raise RenderError("bad_asset")
+    name = name.replace("sheet", "original")
     path = _dir(record_id, cid) / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
-    _set(record_id, "sheet_image", status="done", error=None, asset=name, sha256=_sha256(path),
+    _set(record_id, ORIGINAL_PART, status="done", error=None, asset=name, sha256=_sha256(path),
          source=ORIGINAL_SOURCE, company_id=cid or _request_company.active())  # fmt: skip
+
+
+def legacy_original(rec: dict[str, Any]) -> bool:
+    """11/26 전 기록: 올린 원본이 시트 그림 자리에 있다 (시트 그림이 아니다)."""
+    sheet = (rec.get("render") or {}).get("sheet_image") or {}
+    return sheet.get("status") == "done" and (
+        sheet.get("source") == ORIGINAL_SOURCE or sheet.get("original") is True
+    )
+
+
+def original_part(rec: dict[str, Any]) -> str | None:
+    """올린 원본이 있는 칸: 원본 칸(11/26~) → 예전 기록의 시트 그림 자리. 없으면 None."""
+    item = (rec.get("render") or {}).get(ORIGINAL_PART) or {}
+    if item.get("status") == "done" and item.get("asset") in ORIGINAL_FILES:
+        return ORIGINAL_PART
+    return "sheet_image" if legacy_original(rec) else None
+
+
+def sheet_ready(rec: dict[str, Any]) -> bool:
+    """만든 캐릭터 시트 그림이 있나 (올린 원본 복사본은 시트가 아니다)."""
+    sheet = (rec.get("render") or {}).get("sheet_image") or {}
+    return sheet.get("status") == "done" and not legacy_original(rec)
+
+
+def sheet_missing(rec: dict[str, Any]) -> bool:
+    """원본만 있고 시트 그림이 없는 가상 인물·일러스트 기록 (화면 [캐릭터 시트 만들기])."""
+    return is_reference_kind(rec) and original_part(rec) is not None and not sheet_ready(rec)
+
+
+def move_legacy_original(record_id: str, rec: dict[str, Any], cid: str | None = None) -> bool:
+    """예전 기록의 원본(시트 그림 자리)을 원본 칸으로 복사한다(지우지 않음). 옮겼으면 True."""
+    if original_part(rec) != "sheet_image":
+        return False
+    sheet = (rec.get("render") or {}).get("sheet_image") or {}
+    asset = str(sheet.get("asset") or "")
+    if asset not in UPLOAD_FILES["sheet_image"]:
+        return False
+    source = _dir(record_id, cid) / asset
+    name = asset.replace("sheet", "original")
+    target = _dir(record_id, cid) / name
+    try:
+        shutil.copyfile(source, target)
+    except OSError:
+        return False
+    _set(record_id, ORIGINAL_PART, status="done", error=None, asset=name, sha256=_sha256(target),
+         source=ORIGINAL_SOURCE, company_id=cid or sheet.get("company_id")
+         or _request_company.active(), moved_from="sheet_image")  # fmt: skip
+    return True
+
+
+def start_reference_sheet(ledger: MediaLedger, meta: RequestMeta, record_id: str,
+                          cid: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """가상 인물·일러스트의 캐릭터 시트 그림을 만든다 (사람이 누른 [캐릭터 시트 만들기], 등록 때).
+
+    예전 기록이면 원본을 원본 칸으로 먼저 옮기고, 그림 참조는 원본 + 추가 참조, 프롬프트는 시트
+    설명(prompt_en: 턴어라운드·표정·포즈·HEX 색표·키 비율·소품) 그대로. 돌려주는 값은 시트 칸."""
+    store = _creative.store()
+    rec = store.get(record_id) or {}
+    move_legacy_original(record_id, rec, cid)
+    rec = store.get(record_id) or rec
+    part = original_part(rec)
+    try:
+        ref = _ref_bytes(record_id, part, cid, rec) if part else None
+    except OSError:
+        ref = None
+    start_sheet(ledger, meta, record_id, rec.get("sheet") or {}, ref, cid,
+                extra_refs=extra_reference_bytes(record_id, rec, cid))  # fmt: skip
+    return store.get_render(record_id).get("sheet_image") or {}
 
 
 def save_extra(record_id: str, index: int, data: bytes, mime_type: str, cid: str | None = None
@@ -1531,6 +1682,8 @@ def _ref_bytes(record_id: str, part: str, cid: str | None, rec: dict[str, Any]) 
     name = ((rec.get("render") or {}).get(part) or {}).get("asset")
     if part == "sheet_image" and name in UPLOAD_FILES["sheet_image"]:
         return (_dir(record_id, cid) / str(name)).read_bytes()
+    if part == ORIGINAL_PART and name in ORIGINAL_FILES:
+        return (_dir(record_id, cid) / str(name)).read_bytes()
     return asset_path(record_id, part, cid).read_bytes()
 
 
@@ -1542,16 +1695,14 @@ def is_reference_kind(rec: dict[str, Any] | None) -> bool:
 def video_reference(rec: dict[str, Any], model: str) -> tuple[str, str]:
     """(참조로 올릴 칸, MCP medias role).
 
-    11/24: 가상 인물·일러스트 기록이고 영상 모델이 `image_references`를 받으면 올린 원본(시트 그림
-    자리)을 `image_references`로. 아니면(모르는 모델 포함) 지금처럼 스토리보드 그림을
-    `start_image`로."""
-    sheet = (rec.get("render") or {}).get("sheet_image") or {}
-    # 의뢰 기록은 대표 캐릭터의 원본을 복사해 오므로(`source="brand_copy"`) `original`로 이어 본다
-    original = (sheet.get("source") == ORIGINAL_SOURCE or sheet.get("original") is True) and (
-        sheet.get("status") == "done"
-    )
-    if is_reference_kind(rec) and original and _mcp.takes_image_references(model):
-        return "sheet_image", _mcp.IMAGE_REF_ROLE
+    11/24: 가상 인물·일러스트 기록이고 영상 모델이 `image_references`를 받으면 올린 원본을
+    `image_references`로. 아니면(모르는 모델 포함) 지금처럼 스토리보드 그림을 `start_image`로.
+    11/26 A: 원본은 원본 칸(`original_image`)에서 읽는다. 예전 기록은 시트 그림 자리(원본 복사본,
+    의뢰 기록은 `source="brand_copy"`·`original=True`) 그대로. 만든 시트 그림은 영상 참조가
+    아니다."""
+    part = original_part(rec)
+    if is_reference_kind(rec) and part is not None and _mcp.takes_image_references(model):
+        return part, _mcp.IMAGE_REF_ROLE
     return "board_image", _mcp.VIDEO_START_ROLE
 
 
@@ -1567,7 +1718,7 @@ def board_needed(rec: dict[str, Any], via: str, cid: str | None = None) -> bool:
 
     if _kf.active(rec, via, cid):
         return False
-    return video_reference(rec, mcp_video_model(cid))[0] != "sheet_image"
+    return video_reference(rec, mcp_video_model(cid))[0] == "board_image"
 
 
 def plan_seconds(plan_s: Any, model: str, setting: Any = "plan") -> tuple[int, int | None]:

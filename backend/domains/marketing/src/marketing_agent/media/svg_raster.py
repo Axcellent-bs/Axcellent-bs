@@ -472,4 +472,52 @@ def to_png(svg: str, width: int = 720, height: int = 1280) -> bytes:
     return _png(w, h, rgb)
 
 
-__all__ = ["RasterError", "color", "render", "size_for", "to_png"]
+GRID_SIZE: Final = (1280, 720)  # 구도판 한 장 (16:9)
+GRID_GUTTER: Final = 16
+GRID_BACK: Final = (236, 236, 240)  # 판 배경
+GRID_DARK: Final = (24, 24, 30)  # 엔드카드 칸 (사람 없는 어두운 판)
+GRID_EMPTY: Final = (214, 214, 220)  # 그릴 수 없는 칸
+MAX_GRID_PANELS: Final = 8
+
+
+def grid_layout(count: int) -> tuple[int, int]:
+    """칸 수 → (열, 행). 4칸 이하 가로 한 줄, 5~8칸 4×2."""
+    if not 1 <= count <= MAX_GRID_PANELS:
+        raise RasterError("bad_panel_count")
+    return (count, 1) if count <= 4 else (4, 2)
+
+
+def grid_png(panels: list[str | None], aspect: str | None = None) -> bytes:
+    """칸 SVG들을 칸 순서대로 한 장 격자 PNG로 (11/26 C 스토리보드 그림 구도판).
+
+    None 칸 = 엔드카드(어두운 빈 판), 그릴 수 없는 SVG 칸 = 밝은 빈 판. 칸 모양은 영상 비율.
+    판은 16:9 1280×720, 격자는 가운데. 칸이 0개거나 8개를 넘으면 `RasterError`."""
+    cols, rows = grid_layout(len(panels))
+    width, height = GRID_SIZE
+    pw, ph = size_for(aspect)
+    cw = (width - GRID_GUTTER * (cols + 1)) // cols
+    ch = (height - GRID_GUTTER * (rows + 1)) // rows
+    if cw * ph > ch * pw:  # 칸 비율을 지킨다
+        cw = max(1, ch * pw // ph)
+    else:
+        ch = max(1, cw * ph // pw)
+    left = (width - cols * cw - (cols - 1) * GRID_GUTTER) // 2
+    top = (height - rows * ch - (rows - 1) * GRID_GUTTER) // 2
+    buf = bytearray(bytes(GRID_BACK) * (width * height))
+    for i, svg in enumerate(panels):
+        x0 = left + (i % cols) * (cw + GRID_GUTTER)
+        y0 = top + (i // cols) * (ch + GRID_GUTTER)
+        if svg is None:
+            cell = bytes(GRID_DARK) * (cw * ch)
+        else:
+            try:
+                cell = render(svg, cw, ch)[2]
+            except RasterError:
+                cell = bytes(GRID_EMPTY) * (cw * ch)
+        for r in range(ch):
+            at = ((y0 + r) * width + x0) * 3
+            buf[at : at + cw * 3] = cell[r * cw * 3 : (r + 1) * cw * 3]
+    return _png(width, height, bytes(buf))
+
+
+__all__ = ["RasterError", "color", "grid_layout", "grid_png", "render", "size_for", "to_png"]

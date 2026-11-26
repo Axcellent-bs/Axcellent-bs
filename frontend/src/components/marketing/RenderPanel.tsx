@@ -17,7 +17,8 @@ import { framesOf, keyframesDone } from "@/lib/keyframes";
 import { videoSummaryLine } from "@/lib/creativeVideo";
 import { VideoQc } from "@/components/marketing/VideoQc";
 import { canAskVideo, usesOriginalReference } from "@/lib/videoAsk";
-import { assetUrl, getCreativeRecord, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
+import { assetUrl, getCreativeRecord, redrawBoardImage, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
+import { MAKE_SHEET, SHEET_MISSING_NOTE, sheetMissingBrand, sheetState } from "@/lib/sheetState";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
 // 다른 도구로 만든 결과(그림·완성 영상)는 칸마다 [파일 올리기]로 직접 붙인다.
@@ -112,7 +113,7 @@ function Picture({ recordId, part, info, label, onChanged, onError, playPart, ve
       <figcaption className="flex items-center gap-2 text-xs font-medium text-ink-700">
         {label} <Status part={info} />
         {uploaded && <span className="chip bg-ink-50 text-ink-700" title={info?.by ? `${info.by}님이 올림` : undefined}>직접 올림{info?.label ? ` · ${info.label}` : ""}</span>}
-        {!busy && <UploadButton part={target} busy={uploading} onPick={(f) => void upload(f)} />}
+        {!busy && target !== "original_image" && <UploadButton part={target} busy={uploading} onPick={(f) => void upload(f)} />}
       </figcaption>
       <DropArea enabled={IS_VIDEO(target) && !busy} busy={uploading} onFile={(f) => void upload(f)} onError={onError}>
       {done ? (
@@ -225,8 +226,61 @@ export function useRecordRender(recordId: string) {
 
 export type RecordRender = ReturnType<typeof useRecordRender>;
 
+/** 올린 원본 작은 그림 ("원본", 읽기 전용, 11/26 A) */
+function OriginalThumb({ recordId, part, info }: { recordId: string; part: RenderPartKey; info?: RenderPart | null }) {
+  const { src } = useAuthedMedia(info?.status === "done" && info.sha256 ? assetUrl(recordId, part, info.sha256) : null);
+  if (!src) return null;
+  return (
+    <figure className="w-20 shrink-0 space-y-0.5">
+      <img src={src} alt="올린 원본" className="w-full rounded-lg ring-1 ring-ink-100" />
+      <figcaption className="text-[11px] text-ink-500">원본</figcaption>
+    </figure>
+  );
+}
+
+/** 캐릭터 시트 칸 (11/26 A): 만든 시트가 있으면 "캐릭터 시트" + 옆에 작게 원본, 원본만 있으면
+ *  "원본 사진 (시트 아직 없음)" + [캐릭터 시트 만들기 · 약 1.5 크레딧](기존 다시 그리기 경로) */
 export function SheetPicture({ ctx }: { ctx: RecordRender }) {
-  return <Picture recordId={ctx.recordId} part="sheet_image" info={ctx.render.sheet_image} label="이미지 시트 그림" onChanged={() => void ctx.load()} onError={ctx.setError} />;
+  const { recordId, render, rec, load, setError } = ctx;
+  const state = sheetState(render, rec?.sheet.kind, !rec?.storyboard);
+  const [busy, setBusy] = useState(false);
+  const make = () => {
+    setBusy(true);
+    redrawBoardImage(recordId).then(() => load(), (e: unknown) => setError(e instanceof Error ? e.message : "캐릭터 시트를 만들지 못했어요"))
+      .finally(() => setBusy(false));
+  };
+  const mainPart: RenderPartKey = state.hasSheet || !state.originalPart ? "sheet_image" : state.originalPart;
+  const making = render.sheet_image?.status === "running";
+  // 의뢰 기록: 회사 캐릭터에 시트가 없어 원본만 복사해 왔으면 회사 캐릭터에 시트를 만드는 버튼
+  const brand = sheetMissingBrand(render);
+  const makeBrand = () => {
+    if (!brand) return;
+    setBusy(true);
+    redrawBoardImage(brand).then(() => setNote(true), (e: unknown) => setError(e instanceof Error ? e.message : "캐릭터 시트를 만들지 못했어요"))
+      .finally(() => setBusy(false));
+  };
+  const [note, setNote] = useState(false);
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <Picture recordId={recordId} part={mainPart} info={render[mainPart]} label={state.title} onChanged={() => void load()} onError={setError} />
+        </div>
+        {state.hasSheet && state.originalPart && <OriginalThumb recordId={recordId} part={state.originalPart} info={render[state.originalPart]} />}
+      </div>
+      {!state.hasSheet && state.originalPart && making && <p className="text-xs text-ink-500 animate-pulse">캐릭터 시트를 만드는 중이에요 (보통 30초~2분)</p>}
+      {state.button && !making && (
+        <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={make}>{busy ? "요청하는 중…" : state.button}</button>
+      )}
+      {brand && (
+        <p className="flex flex-wrap items-center gap-2 text-xs text-amber-800">
+          <span>{SHEET_MISSING_NOTE}</span>
+          {note ? <span className="text-ink-500">회사 캐릭터 시트를 만드는 중이에요. 다음 의뢰부터 써요.</span>
+            : <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={makeBrand}>{busy ? "요청하는 중…" : MAKE_SHEET}</button>}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function BoardPicture({ ctx }: { ctx: RecordRender }) {

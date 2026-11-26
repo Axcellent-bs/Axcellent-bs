@@ -98,7 +98,13 @@ def test_three_extras_are_saved_in_order(env: dict[str, Any], monkeypatch) -> No
     assert out.status == TaskStatus.COMPLETED
     rid = out.output["record_id"]
     folder = env["dir"] / "creative" / rid
-    assert (folder / "sheet.jpg").read_bytes() == FRONT
+    # 11/26 A: 원본은 원본 칸(original.jpg). 시트 그림은 Higgsfield 길로 따로 만든다
+    # (예전 기대값: 원본이 sheet.jpg, 그림 관문 호출 0)
+    assert (folder / "original.jpg").read_bytes() == FRONT
+    render = env["store"].get_render(rid)
+    assert render["original_image"]["source"] == "upload_original"
+    assert render["sheet_image"].get("source") != "upload_original"
+    assert render["sheet_image"]["status"] in ("running", "done", "unavailable", "blocked")
     for i, data in enumerate(EXTRAS, start=1):
         assert (folder / f"ref_{i}.jpg").read_bytes() == data
     refs = out.output["references"]
@@ -107,7 +113,8 @@ def test_three_extras_are_saved_in_order(env: dict[str, Any], monkeypatch) -> No
     assert (refs[0]["width"], refs[0]["height"]) == (640, 480)
     assert (refs[1]["width"], refs[1]["height"]) == (300, 200)
     assert env["store"].get(rid)["sheet"]["references"] == refs
-    assert env["gate"].calls == []  # 그림 크레딧 0
+    # 그림은 캐릭터 시트 1장만 (예전 기대값: 그림 크레딧 0)
+    assert len(env["gate"].calls) <= 1
     assert len(LLM_CALLS) == 1  # 시트 설명 LLM은 대표 한 장으로 1회
 
 

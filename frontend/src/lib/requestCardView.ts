@@ -51,7 +51,8 @@ const FUTURE: Record<string, string> = {
   trend_report_insight: "보고서에서 기획에 넘길 인사이트를 골라요",
   receive_insight: "인사이트로 영상 제작안을 써요",
   human_check: "제작안을 보고 진행할지 정해요",
-  [PREPARE_SKILL]: "시트 · 대본 · 스토리보드 · 제작안 확인(필요하면 기획에 고치기 요청)",
+  // 11/26 C: 준비가 스토리보드 그림 1장을 그린다(키프레임 모델이면 그리지 않는다)
+  [PREPARE_SKILL]: "시트 · 대본 · 스토리보드 · 제작안 확인(필요하면 기획에 고치기 요청) · 스토리보드 그림 1장(약 1.5 크레딧)",
   [MAKE_SKILL]: "영상 승인(1시간) 뒤 만들어요",
 };
 export const futureLine = (skill: string): string | null => FUTURE[skill] ?? null;

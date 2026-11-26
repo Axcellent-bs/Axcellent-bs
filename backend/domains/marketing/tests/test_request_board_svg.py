@@ -176,7 +176,12 @@ def test_prepare_skill_draws_svg_after_the_storyboard(
     out = asyncio.run(handlers.prepare_video_draft_from_plan_skill(request))
     assert out.status == TaskStatus.COMPLETED and out.output == {"creative_record_id": rid}
     assert seen == ["llm"]
-    assert env["store"].get(rid)["storyboard"]["board_source"] == "svg"
+    board = env["store"].get(rid)["storyboard"]
+    # 11/26 C: SVG 콘티를 채운 뒤 준비가 스토리보드 그림 1장을 시작해 출처가 higgsfield가 된다.
+    # 칸 SVG(화면의 "구도 참고")는 그대로 남는다
+    assert board["board_source"] == "higgsfield"
+    assert all(_is_mannequin(s["svg"]) for s in board["shots"] if s.get("svg"))
+    assert any(s.get("svg") for s in board["shots"])
 
 
 def test_prepare_skill_without_a_record_does_not_call_the_llm(

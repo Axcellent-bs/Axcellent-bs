@@ -84,7 +84,7 @@ test("막대 아래 짧은 이름 · 부서 꼬리표(사람·데이터분석·�
   const tags = r.rows.map((s) => deptTag(s.dept));
   assert.deepEqual(tags.map((t) => t.label), ["사람", "데이터분석", "데이터분석", "기획", "사람", "마케팅", "마케팅"]);
   assert.equal(new Set([deptTag("data").cls, deptTag("planning").cls, deptTag("marketing").cls, deptTag(null).cls]).size, 4);
-  assert.equal(futureLine("prepare_video_draft_from_plan"), "시트 · 대본 · 스토리보드 · 제작안 확인(필요하면 기획에 고치기 요청)");
+  assert.equal(futureLine("prepare_video_draft_from_plan"), "시트 · 대본 · 스토리보드 · 제작안 확인(필요하면 기획에 고치기 요청) · 스토리보드 그림 1장(약 1.5 크레딧)");
   assert.equal(futureLine("generate_media"), "영상 승인(1시간) 뒤 만들어요");
   assert.equal(futureLine("unknown_skill"), null);
 });
