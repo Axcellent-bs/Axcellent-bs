@@ -823,6 +823,42 @@
       "priority": "optional"
     },
     {
+      "id": "promo_site_status",
+      "description": "AXcellent 홍보 사이트에 올린 영상과 남은 자리(read): available·feed_ready·limit·used·items[{item_id,status,title,customer,review_id,error,video_sha256,published_at}]. 읽을 때 승인 대기를 같은 키로 다시 묻고, 승인됐으면 공개 폴더에 올린다.",
+      "input_schema": "agents/marketing/src/marketing_agent/promo_site.py#PromoSiteStatusInput",
+      "output_schema": "agents/marketing/src/marketing_agent/promo_site.py#PromoSiteStatusInput",
+      "grade": "read",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "promo_site_publish",
+      "description": "제작 기록 영상 또는 의뢰 영상(input.item_id)을 AXcellent 홍보 사이트(로그인 없이 누구나 봄)에 올리기를 사람 승인(C publish_promo_video)에 올린다. title·customer·rights_confirmed=true·who 필요. AI 표시를 입힌 영상만 올리고 최대 3개(승인 대기 포함). 거절 outcome: company_not_allowed·rights_not_confirmed·title_required·feed_not_configured·not_found·video_not_ready·label_failed·limit_reached·media_dir_not_configured·media_dir_mismatch.",
+      "input_schema": "agents/marketing/src/marketing_agent/promo_site.py#PromoSitePublishInput",
+      "output_schema": "agents/marketing/src/marketing_agent/promo_site.py#PromoSitePublishInput",
+      "grade": "C",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
+      "id": "promo_site_remove",
+      "description": "홍보 사이트에 올린(또는 승인 대기 중인) 영상(input.item_id)을 내린다(A unpublish_promo_video). 공개 폴더의 파일을 지우고 목록을 다시 쓴다.",
+      "input_schema": "agents/marketing/src/marketing_agent/promo_site.py#PromoSiteRemoveInput",
+      "output_schema": "agents/marketing/src/marketing_agent/promo_site.py#PromoSiteRemoveInput",
+      "grade": "A",
+      "allowed_requesters": [
+        "dashboard-api"
+      ],
+      "verifier": null,
+      "priority": "recommended"
+    },
+    {
       "id": "prepare_brief_creative",
       "description": "넘어온 기획안(proposal_id)의 영상 제작안(video_plan)으로 제작 기록(CR-…)을 만든다. 입력은 기획안 번호뿐이고 제작안은 보관본에서 읽는다. 회사 대표 캐릭터(기본)가 있으면 시트를 복사하고, 없으면 캐릭터 칸이 빈 기록을 만든 뒤 장면 스토리보드를 코드로 붙인다(LLM 없음). 스토리보드 그림은 화면의 스토리보드 만들기와 같은 규칙(시트 그림이 있고 영상에 필요할 때만, 안전 관문 generate_media B·그림 크레딧 예약)으로 시작한다. 영상 만들기·게시는 하지 않는다(영상은 creative_video_request, C 사람 승인). 같은 기획안은 다시 불러도 같은 기록이다(reused). 출력 record_id·character_record_id·reused. 실패 outcome은 brief_not_found·no_video_plan·no_scenes·storage_error·invalid_input.",
       "input_schema": "agents/marketing/src/marketing_agent/brief_creative.py#PrepareBriefCreativeInput",

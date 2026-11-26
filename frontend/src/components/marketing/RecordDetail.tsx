@@ -16,6 +16,8 @@ import { ScriptPanel } from "./ScriptPanel";
 import { SheetBoard } from "./SheetBoard";
 import { StoryboardView } from "./StoryboardMaker";
 import { PromptBox } from "./PromptParts";
+import { PromoSitePanel } from "./PromoSitePanel";
+import { isHolding, promoChip, promoItem, usePromoSite } from "@/lib/promoSite";
 
 // 제작 기록 상세 (2026-11-26). 만드는 순서 네 단계를 접이식으로 보여 주고, 지금 볼 단계 하나만 펼친다.
 // 1 이미지 시트 → 2 대본·스토리보드 → 3 영상 → 4 올리기. 이 작업의 총괄 의뢰 영상도 3·4단계에 함께 둔다.
@@ -137,6 +139,8 @@ export function RecordDetail({ recordId }: { recordId: string }) {
   const ctx = useRecordRender(recordId);
   const { rec, error, render } = ctx;
   const mine = useVideos(null, (v) => linkedRecordId(v) === recordId);
+  const promo = usePromoSite();
+  const site = promo.status;
   const videos = mine.videos;
   const facts = rec ? { render: renderStatuses(rec.render), shot_count: rec.storyboard?.shots.length ?? 0, script_scenes: rec.script?.scenes.length ?? 0 } : null;
   const steps = useSteps(facts && videos ? defaultStep(facts, videos) : null);
@@ -161,10 +165,13 @@ export function RecordDetail({ recordId }: { recordId: string }) {
   const seconds = labeled[0]?.duration_s ?? (render.final_video?.status !== "done" && made?.seconds ? made.seconds / speed : null);
   const scenes = rec.script?.scenes.length;
   const shots = rec.storyboard?.shots.length;
+  const title = workTitle({ record: { record_id: recordId, created_at: rec.created_at, summary_ko: rec.sheet.summary_ko, storyboard_title_ko: rec.storyboard?.title_ko, shot_count: shots ?? 0 }, videos, key: recordId });
+  const promoted = promoChip(promo.status, [recordId, ...videos.map((v) => v.post_draft_id)]);
+  // 홍보 사이트 칸: 올리는 영상과 같은 규칙. 이미 올린 기록 영상은 의뢰 영상이 생겨도 보여 준다(내릴 수 있게)
+  const recordPromo = (recordVideo && recordPublish) || isHolding(promoItem(promo.status, recordId));
   return (
     <div className="space-y-4">
-      <DetailHeader title={workTitle({ record: { record_id: recordId, created_at: rec.created_at, summary_ko: rec.sheet.summary_ko, storyboard_title_ko: rec.storyboard?.title_ko, shot_count: shots ?? 0 }, videos, key: recordId })}
-        status={status} meta={`${shortDateTime(rec.created_at)} · ${recordId}`} />
+      <DetailHeader title={title} status={status} meta={`${shortDateTime(rec.created_at)} · ${recordId}`} />
       {error && <p className="text-xs text-accent" role="alert">{error}</p>}
       {mine.error && <p className="text-xs text-accent" role="alert">{mine.error}</p>}
       <Step no={1} title="이미지 시트" done open={steps.isOpen(1)} onToggle={() => steps.toggle(1)}
@@ -180,7 +187,14 @@ export function RecordDetail({ recordId }: { recordId: string }) {
         <VideoStep ctx={ctx} videos={videos} showRecordThumbnails={recordPublish || !!render.thumbnails?.status} onVideos={() => void mine.load()} />
       </Step>
       <Step no={4} title="올리기" done={status.text === "게시함"} locked={!anyVideo && !hasPublishState(render)} open={steps.isOpen(4)} onToggle={() => steps.toggle(4)}
-        summary={anyVideo || hasPublishState(render) ? "유튜브, 인스타그램 · 사람 승인 필요" : "영상이 생기면 열려요"}>
+        summary={!anyVideo && !hasPublishState(render) ? "영상이 생기면 열려요" : promoted ? `${promoted.text} · 유튜브, 인스타그램` : "유튜브, 인스타그램, 홍보 사이트 · 사람 승인 필요"}>
+        {promo.error && <p className="text-xs text-ink-500">{promo.error}</p>}
+        {site && labeled.map((v) => (
+          <PromoSitePanel key={`promo-${v.post_draft_id}`} itemId={v.post_draft_id} title={title} label={`의뢰 영상 ${v.request_id}`} status={site} onChanged={() => void promo.load()} />
+        ))}
+        {site && recordPromo && (
+          <PromoSitePanel itemId={recordId} title={title} label={labeled.length > 0 ? "제작 기록 영상" : undefined} status={site} onChanged={() => void promo.load()} />
+        )}
         {labeled.map((v) => <RequestVideoPublish key={v.post_draft_id} v={v} onChanged={() => void mine.load()} />)}
         {recordPublish && (
           <div className="space-y-3">
@@ -196,6 +210,8 @@ export function RecordDetail({ recordId }: { recordId: string }) {
 /** 기록 없이 의뢰로만 만든 영상: 1·2단계는 비어 있고 3·4단계만 쓴다 */
 function VideoOnly({ videos, onChanged }: { videos: RequestVideo[]; onChanged: () => void }) {
   const steps = useSteps(defaultStep(null, videos));
+  const promo = usePromoSite();
+  const site = promo.status;
   const labeled = videos.filter(canUploadToYoutube);
   const status = workStatus(null, videos);
   return (
@@ -207,7 +223,12 @@ function VideoOnly({ videos, onChanged }: { videos: RequestVideo[]; onChanged: (
         {videos.map((v) => <RequestVideoCard key={v.post_draft_id} v={v} onChanged={onChanged} />)}
       </Step>
       <Step no={4} title="올리기" done={status.text === "게시함"} locked={labeled.length === 0} open={steps.isOpen(4)} onToggle={() => steps.toggle(4)}
-        summary={labeled.length > 0 ? "유튜브, 인스타그램 · 사람 승인 필요" : "AI 표시가 입혀지면 열려요"}>
+        summary={labeled.length === 0 ? "AI 표시가 입혀지면 열려요" : promoChip(promo.status, labeled.map((v) => v.post_draft_id))?.text ?? "유튜브, 인스타그램, 홍보 사이트 · 사람 승인 필요"}>
+        {promo.error && <p className="text-xs text-ink-500">{promo.error}</p>}
+        {site && labeled.map((v) => (
+          <PromoSitePanel key={`promo-${v.post_draft_id}`} itemId={v.post_draft_id} title={workTitle({ record: null, videos: [v], key: v.request_id })}
+            label={labeled.length > 1 ? `의뢰 영상 ${v.request_id}` : undefined} status={site} onChanged={() => void promo.load()} />
+        ))}
         {labeled.map((v) => <RequestVideoPublish key={v.post_draft_id} v={v} onChanged={onChanged} />)}
       </Step>
     </div>

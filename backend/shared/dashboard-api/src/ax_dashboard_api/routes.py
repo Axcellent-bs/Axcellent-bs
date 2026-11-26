@@ -1115,6 +1115,54 @@ async def prepare_brief_creative(
     return ok(await marketing_client.brief_creative_call(proposal_id))
 
 
+_PROMO_ITEM = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"  # 제작 기록 번호 또는 의뢰 영상 초안 번호
+
+
+class PromoSitePublishBody(BaseModel):
+    title: str = Field(min_length=1, max_length=40)
+    customer: str = Field(min_length=1, max_length=20)
+    # 사람이 "공개해도 되는 영상이에요(인물·음원·상표 권리)"를 체크했는가. true가 아니면 422
+    rights_confirmed: bool = False
+
+
+@router.get("/marketing/promo-site")
+async def marketing_promo_site_status() -> dict:
+    """AXcellent 홍보 사이트에 올린 영상과 남은 자리(3개). 읽을 때 승인 대기를 다시 확인한다."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "홍보 사이트는 실제 모드에서만 된다")
+    return ok(await marketing_client.promo_site_status_call())
+
+
+@router.post("/marketing/promo-site/{item_id}")
+async def marketing_promo_site_publish(
+    request: Request,
+    body: PromoSitePublishBody,
+    item_id: str = Path(pattern=_PROMO_ITEM),
+) -> dict:
+    """영상을 AXcellent 홍보 사이트에 올리기를 사람 승인에 올린다(C). 사람 토큰이 필요하다.
+
+    권리 확인(rights_confirmed=true)이 없으면 422. 승인 전에는 공개되지 않는다.
+    409 `PROMO_LIMIT_REACHED`(이미 3개)·`FEED_NOT_CONFIGURED`(서버 공개 폴더 미설정)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "홍보 사이트는 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    if not body.rights_confirmed:
+        raise ApiError(422, "RIGHTS_NOT_CONFIRMED", "공개해도 되는 영상인지 확인해 주세요")
+    payload = body.model_dump() | {"item_id": item_id, "who": who}
+    return ok(await marketing_client.promo_site_publish_call(payload))
+
+
+@router.delete("/marketing/promo-site/{item_id}")
+async def marketing_promo_site_remove(
+    request: Request, item_id: str = Path(pattern=_PROMO_ITEM)
+) -> dict:
+    """홍보 사이트에서 내린다(승인 대기 중이면 취소)."""
+    if is_mock():
+        raise ApiError(501, "NOT_SUPPORTED_IN_MOCK", "홍보 사이트는 실제 모드에서만 된다")
+    who = human_from_authorization(request.headers.get("authorization"))
+    return ok(await marketing_client.promo_site_remove_call(item_id, who))
+
+
 class BriefAudioBody(BaseModel):
     """영상 소리 선택. `keep`은 그대로 쓰기, `bgm`은 배경음악 따로 만들기."""
 

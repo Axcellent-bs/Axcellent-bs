@@ -945,3 +945,16 @@ base_grade = "C"
 action = "publish_instagram_video"
 owner = "marketing"
 base_grade = "C"
+
+# 사람이 고른 마케팅 영상을 AXcellent 홍보 사이트에 올리기(11/26). 로그인 없이 누구나 보는 외부
+# 게시라 늘 사람이 승인한다(C). 제목·고객사·영상·그림 sha256이 승인 내용에 들어간다
+[[actions]]
+action = "publish_promo_video"
+owner = "marketing"
+base_grade = "C"
+
+# 홍보 사이트에서 영상 내리기. 공개를 멈추는 안전한 방향이라 A
+[[actions]]
+action = "unpublish_promo_video"
+owner = "marketing"
+base_grade = "A"
