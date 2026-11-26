@@ -212,3 +212,89 @@ def test_recollect_also_clears_that_company_customers_cursor(tmp_path) -> None: 
         assert cat.cursor == "cat-cursor"
     finally:
         store.close()
+
+
+def _seed_cursors(env: dict[str, str]) -> str:
+    store = SalesStore(sc.db_path(env))
+    try:
+        with company_scope.using(STUDY):
+            name = sc.source_name(env)
+        store.save_cursor(STUDY, name, "study-cursor")
+        store.save_cursor(NUBI, name, "nubi-cursor")
+        store.save_cursor(TENANT_ID_DEFAULT, "shop-api", "cat-cursor")
+    finally:
+        store.close()
+    return name
+
+
+def test_recollect_while_collector_runs_leaves_request(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """수집기가 잠금을 잡고 돌고 있어도(11/26 서버) `--recollect`는 실패하지 않고 요청만 남긴다.
+    커서는 아직 안 건드리고, 다음 회차가 처리한다."""
+    monkeypatch.setenv(sc.DB_ENV, str(tmp_path / "sales.db"))
+    env = {sc.DB_ENV: str(tmp_path / "sales.db")}
+    name = _seed_cursors(env)
+    monkeypatch.setattr(sc.collector_lock, "acquire", lambda *a, **k: None)
+
+    assert sc.main(["--recollect", STUDY]) == 0
+    assert (sc.request_dir(env) / f"{STUDY}.request").is_file()
+    assert "다음 회차" in capsys.readouterr().out
+    store = SalesStore(sc.db_path(env))
+    try:
+        assert store.sync_state(STUDY, name).cursor == "study-cursor"  # 아직 그대로
+    finally:
+        store.close()
+
+    assert sc.main(["--recollect", "catbooks"]) == 2  # 캣북스 거부, 요청도 안 남김
+    assert not (sc.request_dir(env) / "catbooks.request").exists()
+
+
+def test_next_round_applies_request_for_that_company_only(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
+) -> None:
+    """다음 회차 시작에 요청한 회사 커서(판매·고객)만 비우고 요청을 지운다.
+    다른 회사·캣북스 그대로."""
+    from data_agent.sales_store import customers_source
+
+    env = {sc.DB_ENV: str(tmp_path / "sales.db")}
+    name = _seed_cursors(env)
+    sc.request_recollect(env, STUDY)
+    (sc.request_dir(env) / "catbooks.request").write_text("x", encoding="utf-8")  # 잘못된 요청
+    monkeypatch.setattr(sc, "watched_companies", lambda e: [])
+    store = SalesStore(sc.db_path(env))
+    try:
+        store.save_cursor(STUDY, customers_source(name), "study-cust")
+        asyncio.run(sc.collect_other_companies(store, env, NOW, {}))
+        assert not store.sync_state(STUDY, name).cursor
+        assert not store.sync_state(STUDY, customers_source(name)).cursor
+        assert store.sync_state(NUBI, name).cursor == "nubi-cursor"
+        assert store.sync_state(TENANT_ID_DEFAULT, "shop-api").cursor == "cat-cursor"
+        assert not list(sc.request_dir(env).glob("*.request"))  # 처리한 요청·잘못된 요청 지움
+    finally:
+        store.close()
+
+
+def test_recollect_in_memory_mode_leaves_request(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
+) -> None:
+    """메모리 모드(3-3)에서도 같은 요청을 남기고, 메모리 저장소 회차가 그 회사 커서를 비운다."""
+    monkeypatch.setenv(sc.DB_ENV, str(tmp_path / "sales.db"))
+    monkeypatch.setenv(sales_memory.STORE_ENV, sales_memory.MEMORY)
+    env = {sc.DB_ENV: str(tmp_path / "sales.db")}
+    assert sc.main(["--recollect", STUDY]) == 0
+    assert (sc.request_dir(env) / f"{STUDY}.request").is_file()
+    monkeypatch.setattr(sc, "watched_companies", lambda e: [])
+    store = SalesStore(":memory:")
+    try:
+        with company_scope.using(STUDY):
+            name = sc.source_name(env)
+        store.save_cursor(STUDY, name, "mem-cursor")
+        asyncio.run(sc.collect_other_companies(store, env, NOW, {}))
+        assert not store.sync_state(STUDY, name).cursor
+    finally:
+        store.close()

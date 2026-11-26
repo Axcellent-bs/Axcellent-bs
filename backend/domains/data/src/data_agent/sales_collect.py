@@ -492,6 +492,7 @@ async def collect_other_companies(
 ) -> dict[str, RunResult]:
     """연결된 다른 회사를 모두 한 번씩 (캣북스 뒤에). 한 회사가 실패해도 다음 회사는 돈다."""
     out: dict[str, RunResult] = {}
+    apply_recollect_requests(store, env)  # --recollect가 남긴 요청 (수집기가 돌고 있을 때, 11/26)
     for cid in watched_companies(env):
         out[cid] = await collect_company(store, cid, env, now, streaks, source_factory)
     return out
@@ -669,30 +670,102 @@ def rebuild_summary(env: Mapping[str, str]) -> int:
         store.close()
 
 
+RECOLLECT_ONLY_OTHERS = "[sales] --recollect는 캣북스가 아닌 회사 id만 (캣북스는 --reset)"
+
+
+def recollect_company(company: str) -> str | None:
+    """--recollect에 넣은 회사 id를 정식 id로. 캣북스이거나 비었으면 None."""
+    from ax_agent_template import company_scope
+
+    cid = company_scope.scope_id(company.strip())
+    if not cid or cid == company_scope.CATBOOKS:
+        return None
+    return cid
+
+
+def clear_cursors(store: SalesStore, env: Mapping[str, str], cid: str) -> str:
+    """그 회사의 판매 기록·고객 커서만 비운다(지우는 기록 없음). 출처 이름을 돌려준다."""
+    from ax_agent_template import company_scope
+
+    with company_scope.using(cid):
+        name = source_name(env)
+    store.save_cursor(cid, name, None)
+    # 고객 내보내기도 처음부터 (변환기가 새로 꺼낸 고객 속성 연령대·성별을 받게, 11/26)
+    store.save_cursor(cid, customers_source(name), None)
+    return name
+
+
+def request_dir(env: Mapping[str, str]) -> Path:
+    """돌고 있는 수집기에 남기는 "다시 받기 요청" 폴더 (판매 저장소 옆, 회사마다 파일 하나)."""
+    return db_path(env).with_name("sales_recollect")
+
+
+def request_recollect(env: Mapping[str, str], cid: str) -> Path:
+    """잠금 없이 요청만 남긴다. 돌고 있는 수집기(파일·메모리 모드)가 다음 회차 시작에 처리한다."""
+    folder = request_dir(env)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{cid}.request"
+    path.write_text(datetime.now(UTC).isoformat(), encoding="utf-8")
+    return path
+
+
+def apply_recollect_requests(store: SalesStore, env: Mapping[str, str]) -> list[str]:
+    """남은 "다시 받기 요청"을 처리한다: 그 회사 커서만 비우고 요청 파일을 지운다.
+
+    캣북스 id 요청은 처리하지 않고 지운다. 한 요청이 실패해도 다른 요청은 처리한다."""
+    folder = request_dir(env)
+    done: list[str] = []
+    if not folder.is_dir():
+        return done
+    for path in sorted(folder.glob("*.request")):
+        cid = recollect_company(path.stem)
+        try:
+            if cid is None:
+                print(f"[sales] 다시 받기 요청 {path.name}: 캣북스·빈 id라 무시", flush=True)
+            else:
+                name = clear_cursors(store, env, cid)
+                print(f"[sales {cid}] 다시 받기 요청 처리: 판매 기록·고객 커서를 비움 ({name})",
+                      flush=True)  # fmt: skip
+                done.append(cid)
+            path.unlink(missing_ok=True)
+        except Exception as error:  # noqa: BLE001 - 한 요청이 실패해도 다음 요청·수집은 돈다
+            print(f"[sales {cid or path.stem}] 다시 받기 요청 처리 실패 {describe(error)}",
+                  flush=True)  # fmt: skip
+    return done
+
+
 def recollect(env: Mapping[str, str], company: str) -> int:
     """캣북스가 아닌 회사 하나의 판매 기록·고객 커서만 비운다 (잠금은 부르는 쪽이 잡는다, 11/26).
 
     지우는 기록은 없다. 다음 수집 회차가 그 회사 주문을 처음부터 다시 받아 같은 주문 번호 줄을
     덮어쓰고(예: 변환기가 새로 채운 상품 이름·분류), 다음 하루 집계가 다시 받은 날을 다시 센다.
     """
-    from ax_agent_template import company_scope
-
-    cid = company_scope.scope_id(company.strip())
-    if not cid or cid == company_scope.CATBOOKS:
-        print("[sales] --recollect는 캣북스가 아닌 회사 id만 (캣북스는 --reset)", flush=True)
+    cid = recollect_company(company)
+    if cid is None:
+        print(RECOLLECT_ONLY_OTHERS, flush=True)
         return 2
     store = SalesStore(db_path(env))
     try:
-        with company_scope.using(cid):
-            name = source_name(env)
-        store.save_cursor(cid, name, None)
-        # 고객 내보내기도 처음부터 (변환기가 새로 꺼낸 고객 속성 연령대·성별을 받게, 11/26)
-        store.save_cursor(cid, customers_source(name), None)
+        name = clear_cursors(store, env, cid)
         print(f"[sales {cid}] 판매 기록·고객 커서를 비움 ({name}): 다음 회차에 처음부터 다시 받음",
               flush=True)  # fmt: skip
         return 0
     finally:
         store.close()
+
+
+def recollect_later(env: Mapping[str, str], company: str, why: str) -> int:
+    """수집기가 돌고 있을 때(잠금 잡힘·메모리 모드): 요청만 남기고 끝낸다."""
+    cid = recollect_company(company)
+    if cid is None:
+        print(RECOLLECT_ONLY_OTHERS, flush=True)
+        return 2
+    path = request_recollect(env, cid)
+    wait = every_seconds(env, None)
+    print(f"[sales {cid}] {why}: 다시 받기 요청을 남김 ({path}) — 돌고 있는 수집기가 다음 회차"
+          f"(최대 {wait}초 뒤)에 커서를 비우고 처음부터 다시 받음. 지우는 기록 없음",
+          flush=True)  # fmt: skip
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -737,12 +810,16 @@ def main(argv: list[str] | None = None) -> int:
     from data_agent.sales_memory import NOTICE, memory_mode
 
     if memory_mode(env):  # 3-3 A안: 데이터 AI 안에서 받는다. 잠금·sales.db를 건드리지 않는다
+        if args.recollect:  # 메모리 수집 회차가 요청을 읽어 그 회사 커서를 비운다
+            return recollect_later(env, args.recollect, "메모리 모드")
         print(NOTICE, flush=True)
         return 0
     every = None if args.every is None else every_seconds(env, args.every or None)
     path = lock_path(env)
     lock = collector_lock.acquire(path, "sales", lambda line: print(line, flush=True))
     if lock is None:
+        if args.recollect:  # 돌고 있는 수집기를 멈추지 않고 다음 회차에 반영 (11/26)
+            return recollect_later(env, args.recollect, "수집기가 돌고 있음")
         if args.reset:
             print(
                 f"[sales] 잠금 {path}을 잡지 못해 아무것도 지우지 않음: 돌고 있는 sales_collect를 "
