@@ -18,6 +18,13 @@ DejaFix 관리자 계정(`DEJAFIX_ADMIN_*`)으로 넘긴다.
 이 설치의 것)을 쓴다(11/26: 고객사는 한 회사로 쓰고 그 회사 관리자가 화면에서 Zabbix를 넣는다).
 다른 회사 보관함의 DejaFix는 쓰지 않는다. 로그인 토큰(세션)도 회사마다 따로 둔다.
 둘 다 없으면 503·"연결 정보가 없어요"다.
+
+회사별 DejaFix(11/26 예진 님 방향): DejaFix는 AXcellent 한 벌에 든 인프라 에이전트라, 하나가
+회사마다 그 회사 관리자가 넣은 Zabbix를 보고 장애 기록도 회사별로 나눈다. 그래서 DejaFix로 가는
+모든 요청에 부르는 회사(`X-AX-Company`)를 싣고, DejaFix는 거른 회사를 `X-DejaFix-Company`로
+돌려준다. 같이 설치된 DejaFix가 그 머리를 돌려주지 않으면(회사별을 모르는 옛 버전) 그 DejaFix의
+데이터는 캣북스 것이므로, 캣북스가 아닌 회사에는 장애·현황을 넘기지 않고("Zabbix 연결 전")
+Zabbix 저장도 막는다(넣으면 캣북스 Zabbix를 덮는다). 회사 보관함의 DejaFix는 그 회사 것이라 그대로.
 """
 
 from __future__ import annotations
@@ -45,6 +52,13 @@ JSON = "application/json"
 # 화면에서 Zabbix 연결을 바꿀 때 DejaFix에 로그인하는 관리자 계정 (viewer 계정과 따로, 서버 .env)
 ADMIN_USER_ENV = "DEJAFIX_ADMIN_USERNAME"
 ADMIN_PASSWORD_ENV = "DEJAFIX_ADMIN_PASSWORD"
+# DejaFix로 보내는 부르는 회사, DejaFix가 돌려주는 "이 회사로 걸렀다" 머리 (회사별 DejaFix)
+COMPANY_OUT = company_connection.CALLER_COMPANY_HEADER
+COMPANY_ECHO = "X-DejaFix-Company"
+NOT_SCOPED = (
+    "이 회사의 Zabbix가 아직 연결되지 않았어요. 같이 설치된 DejaFix가 회사별 Zabbix를 지원하도록 "
+    "올라가면 회원·서버 관리 › DejaFix 연결에서 넣을 수 있어요"
+)
 
 
 def _error(status: int, code: str, message: str) -> Response:
@@ -55,8 +69,15 @@ def _error(status: int, code: str, message: str) -> Response:
 class DejaFixSession:
     """로그인 토큰을 한 번만 받아 두고, 만료(401)되면 다시 받는다."""
 
-    def __init__(self, client: httpx.AsyncClient, username: str | None, password: str | None):
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        username: str | None,
+        password: str | None,
+        company: str = "",
+    ):
         self._client = client
+        self._company = company
         self._username = username
         self._password = password
         self._token: str | None = None
@@ -99,7 +120,10 @@ class DejaFixSession:
         return (res.json().get("data") or {}).get("token")
 
     def _auth(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self._token}"} if self._token else {}
+        headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
+        if self._company:
+            headers[COMPANY_OUT] = self._company  # DejaFix가 이 회사 것만 돌려주게
+        return headers
 
     async def get(self, path: str, query: str) -> httpx.Response:
         return await self.send("GET", path, query)
@@ -156,6 +180,17 @@ def caller_company(request: Request) -> str | None:
     return canonical_company_id(header.strip()) or company_scope.CATBOOKS
 
 
+def company_scoped(company: str | None, from_vault: bool, res: httpx.Response) -> bool:
+    """이 응답을 그 회사에 넘겨도 되는가.
+
+    회사 보관함의 DejaFix는 그 회사 것, 캣북스는 같이 설치된 DejaFix의 원래 주인이라 그대로 된다.
+    그 밖의 회사는 DejaFix가 그 회사로 걸렀다고 `X-DejaFix-Company`로 돌려줄 때만 된다.
+    """
+    if from_vault or company in (None, "", company_scope.CATBOOKS):
+        return True
+    return res.headers.get(COMPANY_ECHO, "").strip() == company
+
+
 def _target(company: str | None = company_scope.CATBOOKS) -> tuple[Target, bool] | None:
     """부를 때마다 정한다: 그 회사 보관함 `dejafix` → 환경 변수(같이 설치된 DejaFix) → 없음(None).
     둘째 값: 보관함에서 왔는가."""
@@ -197,7 +232,7 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
         http = client or httpx.AsyncClient(
             base_url=url, timeout=10.0, follow_redirects=False, transport=transport
         )
-        fresh = DejaFixSession(http, user, password)
+        fresh = DejaFixSession(http, user, password, key)
         if held is not None and client is None:
             held[1].retire()  # 진행 중인 요청이 있으면 끝난 뒤에 닫는다
             # 이미 닫힌 세션(비밀번호를 쥔)은 들고 있지 않는다
@@ -262,23 +297,26 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
             )
         except httpx.HTTPError:
             return {"source": source, "reachable": False, "detail": "DejaFix에 연결할 수 없어요"}
+        if not company_scoped(company, from_vault, res):
+            # 같이 설치된 DejaFix가 회사별을 모른다: 이 회사 Zabbix는 아직 없다
+            return {"source": source, "reachable": None, "detail": NOT_SCOPED}
         if res.status_code != 200:
             return {"source": source, "reachable": False, "detail": f"HTTP {res.status_code}"}
         return {"source": source, "reachable": True, "detail": "응답해요"}
 
     admin_state: dict[str, tuple[Target, DejaFixSession]] = {}
 
-    def admin_session(target: Target) -> DejaFixSession:
-        """DejaFix 관리자 계정 세션(viewer 세션과 따로). 같이 설치된 DejaFix(캣북스)만 쓴다."""
-        held = admin_state.get(company_scope.CATBOOKS)
+    def admin_session(target: Target, company: str) -> DejaFixSession:
+        """DejaFix 관리자 계정 세션(viewer 세션과 따로). 같이 설치된 DejaFix만, 회사마다 따로."""
+        held = admin_state.get(company)
         if held is not None and held[0] == target:
             return held[1]
         http = client or httpx.AsyncClient(base_url=target[0], timeout=20.0, follow_redirects=False)
-        fresh = DejaFixSession(http, target[1], target[2])
+        fresh = DejaFixSession(http, target[1], target[2], company)
         if held is not None and client is None:
             held[1].retire()
             retired.append(held[1])
-        admin_state[company_scope.CATBOOKS] = (target, fresh)
+        admin_state[company] = (target, fresh)
         return fresh
 
     async def zabbix_settings(request: Request, method: str) -> Response:
@@ -329,10 +367,15 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
             ):
                 return _error(422, "VALIDATION_ERROR", "Zabbix 주소·토큰 형식이 맞지 않아요")
             body = {"url": url, "token": token, "verify_tls": verify}
+        key = company or company_scope.CATBOOKS
+        session = admin_session((target[0], user, password), key)
         try:
-            upstream = await admin_session((target[0], user, password)).send(
-                method, "/api/settings/zabbix", "", body
-            )
+            upstream = await session.send("GET", "/api/settings/zabbix")
+            if upstream.status_code != 404 and not company_scoped(company, False, upstream):
+                # 회사별을 모르는 DejaFix: 그 설정은 캣북스 Zabbix다(읽지도 덮지도 않는다)
+                return _error(409, "DEJAFIX_NO_COMPANY", NOT_SCOPED)
+            if method == "PUT" and upstream.status_code != 404:
+                upstream = await session.send(method, "/api/settings/zabbix", "", body)
         except httpx.HTTPError:
             return _error(502, "DEJAFIX_UNREACHABLE", "DejaFix 백엔드에 연결할 수 없습니다")
         if upstream.status_code == 404:
@@ -402,6 +445,9 @@ def create_app(client: httpx.AsyncClient | None = None) -> FastAPI:
             )
         except httpx.HTTPError:
             return _error(502, "DEJAFIX_UNREACHABLE", "DejaFix 백엔드에 연결할 수 없습니다")
+        if not company_scoped(company, from_vault, upstream):
+            # 같이 설치된 DejaFix가 회사별을 모른다: 그 장애는 캣북스 것이라 이 회사에 넘기지 않는다
+            return _error(503, "DEJAFIX_NOT_CONNECTED", NOT_SCOPED)
         return Response(
             content=upstream.content,
             status_code=upstream.status_code,
