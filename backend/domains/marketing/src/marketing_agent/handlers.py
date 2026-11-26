@@ -2219,6 +2219,11 @@ async def prepare_video_draft_from_plan_skill(request: AgentRequest) -> AgentRes
             )
         except Exception:  # noqa: BLE001 - 대본은 부가 기능이라 영상 준비를 막지 않는다
             _request_script.logger.exception("의뢰 대본을 붙이지 못함")
+        # 11/26 C: 스토리보드 그림 1장(약 1.5 크레딧)을 뒤에서 시작한다(기다리지 않음). 키프레임
+        # 모델이면 그리지 않는다. 실패해도 영상 준비·승인 흐름은 그대로(이유는 기록 render에)
+        _safe_render(
+            lambda: _render.start_prepared_board(STATE.media_ledger, request.meta, rid)
+        )
     return result
 
 

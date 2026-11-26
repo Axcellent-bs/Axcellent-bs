@@ -59,8 +59,14 @@ def test_reprepare_stops_the_old_record_and_starts_a_fresh_one(env: dict[str, An
     assert out["generate_media_input"][request_creative.INPUT_KEY] == new
     assert rr.superseded(old) and not rr.superseded(new)
     fresh = env["store"].get(new)["render"]
-    assert "keyframes" not in fresh and "board_image" not in fresh  # 키프레임·콘티 그림은 처음부터
-    assert env["gate"].calls == []  # 준비에서는 그리지 않는다(그림은 영상 제작 단계가 관문을 거쳐)
+    assert "keyframes" not in fresh  # 키프레임은 처음부터
+    # 11/26 C: 영상 초안 준비가 스토리보드 그림 1장을 관문을 거쳐 그린다 (예전·새 기록 한 장씩)
+    keys = [k for _a, _p, k in env["gate"].calls]
+    assert keys == [f"{B.CTX}:creative_render:{old}:board_image",
+                    f"{B.CTX}:creative_render:{new}:board_image"]  # fmt: skip
+    assert fresh["board_image"]["status"] == "done" and len(env["hf"].submits) == 2
+    env["gate"].calls.clear()
+    env["hf"].submits.clear()
 
     stopped = B._make(env, old)  # noqa: SLF001 - 예전 제작 단계가 늦게 돌아도
     assert stopped.status == TaskStatus.FAILED and stopped.outcome == rr.CHARACTER_CHANGED
@@ -69,11 +75,13 @@ def test_reprepare_stops_the_old_record_and_starts_a_fresh_one(env: dict[str, An
     with pytest.raises(rr.RenderError, match=rr.CHARACTER_CHANGED):
         B._run(lambda: rr.request_video(env["ledger"], B._meta(), old, "사람"))  # noqa: SLF001
 
-    held = B._make(env, new)  # noqa: SLF001 - 새 기록은 그림 관문·크레딧 예약을 다시 거친다
+    held = B._make(env, new)  # noqa: SLF001 - 새 기록은 준비 때 그린 그림을 그대로 쓴다
     assert held.outcome == request_creative.VIDEO_HELD
     actions = [a for a, _p, _k in env["gate"].calls]
-    assert actions == ["generate_media", "generate_creative_video"]
-    assert env["ledger"].month_usage(B._month(), "image") == 1  # noqa: SLF001
+    assert actions == ["generate_creative_video"]  # 같은 이야기라 그림을 다시 그리지 않는다
+    # 제작 단계는 그림 크레딧을 새로 예약하지 않는다 (준비 때 한 장씩은 서비스 장부에, 위 submits 2)
+    assert env["ledger"].month_usage(B._month(), "image") == 0  # noqa: SLF001
+    assert env["hf"].submits == []  # 그림을 다시 그리지 않고, 영상은 승인 대기
 
 
 def test_switching_back_reuses_the_first_record(env: dict[str, Any]) -> None:  # noqa: F811
@@ -93,6 +101,7 @@ def test_a_record_whose_video_was_requested_is_not_stopped(env: dict[str, Any]) 
 
 def test_keyframes_stop_drawing_once_the_record_is_stopped(env: dict[str, Any]) -> None:  # noqa: F811
     rid = _prepare_skill(B._brand(env))["creative_record_id"]  # noqa: SLF001
+    env["gate"].calls.clear()  # 11/26 C: 준비 때 그린 스토리보드 그림 1장은 빼고 본다
     render = env["store"].get_render(rid)
     render["keyframes"] = {"status": "pending", "frames": [{"index": 0, "status": "pending"}]}
     env["store"].set_render(rid, render)
