@@ -229,7 +229,10 @@ const mkp = MK.process;
 const mkStep = (i, media, cls = "") => `<li class="mk-step${cls}"><div class="mk-shot">${media}</div><h5>${i + 1}. ${esc(MK.steps[i].title)}</h5><p>${esc(MK.steps[i].body)}</p></li>`;
 const mkImg = (v) => `<img src="${esc(v.src)}" alt="${esc(v.alt)}" loading="lazy">`;
 const mkProcess = !(mkp && mkp.sheet && mkp.board && mkp.video) ? "" : `<div class="mk-process reveal"><header class="mk-process-h"><h4>${esc(MK.processTitle)}</h4><span>${esc(MK.processNote)}</span></header><ol class="mk-steps">${mkStep(0, mkImg(mkp.sheet))}<li class="mk-link" aria-hidden="true"><span>→</span></li>${mkStep(1, mkImg(mkp.board))}<li class="mk-link mk-approval"><em>${esc(MK.approval)}</em><span aria-hidden="true">→</span></li>${mkStep(2, `${mkVideo(mkp.video, MK.steps[2].title)}<span class="ai-mark">AI가 만든 영상</span>`, " mk-final")}</ol></div>`;
-const mkHtml = !mkItems.length ? "" : `<div class="mkvideos"><header class="vgroup-h reveal"><h3>${esc(MK.title)}</h3></header>${has(MK.lead) ? `<p class="mk-lead reveal">${esc(MK.lead)}</p>` : ""}<div class="posts-wrap mk-wrap"><div class="vposts mk-grid">${mkItems.map(mkCard).join("")}</div>${mkMore}</div>${mkProcess}</div>`;
+// 사람이 고른 영상은 app.js가 목록(MK.feed)을 읽어 카드를 만든다. 넣어 둔 영상이 없으면 읽기 전까지 칸 전체를 숨긴다
+const mkFeed = has(MK.feed) ? `<div class="mk-feed" data-feed="${esc(MK.feed)}" data-labels="${esc(JSON.stringify(MK.feedLabels))}" hidden></div>` : "";
+const mkStatic = !mkItems.length ? "" : `<div class="posts-wrap mk-wrap"><div class="vposts mk-grid">${mkItems.map(mkCard).join("")}</div>${mkMore}</div>`;
+const mkHtml = !mkItems.length && !mkFeed ? "" : `<div class="mkvideos"${mkItems.length ? "" : " hidden"}><header class="vgroup-h${mkItems.length ? " reveal" : ""}"><h3>${esc(MK.title)}</h3></header>${has(MK.lead) ? `<p class="mk-lead">${esc(MK.lead)}</p>` : ""}${mkFeed}${mkStatic}${mkProcess}</div>`;
 
 const showPosts = PS.items.length > 0 || mkItems.length > 0 || igGroups.length > 0 || cvGroups.length > 0 || PS.showEmpty === true;
 const posts = !showPosts ? "" : `
