@@ -162,3 +162,8 @@
 - **지금 입력이 비어도 돌아가는 단독 의뢰는 5개**(`sales_analysis`, `inquiry_overview`, `claim_stats`,
   `seller_settlement`, `closing_report`)다. 나머지 단독 의뢰는 입력 부족으로 부서가 거절한다. 18번(공통 입력
   채우기)과 19번(부서별 칸 연결)이 이 틈을 메운다.
+
+## 대화방 인프라 의뢰 (2026-11-26)
+
+- 읽기만 연다: `current_incidents`(지금 장애, DejaFix 현재 장애), `latest_deployments`(배포 상태), `diagnose_incident`(원인 진단, 원인 후보만). 모두 `infra` 부서 read 단계이고 승인 없이 돈다.
+- 롤백(`rollback_deployment`, B)·장애 해제(`release_fault`)·배포 실행은 대화방 의뢰로 열지 않았다. 의뢰 문장에서 서비스·버전을 안전하게 정할 길이 없고, 승인 뒤 바로 운영 롤백이 실행되는 길이 생긴다. 필요하면 별도 설계(사건 맥락 + 전용 승인 카드)가 먼저다.

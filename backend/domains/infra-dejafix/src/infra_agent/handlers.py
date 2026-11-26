@@ -50,6 +50,7 @@ from infra_agent.diagnosis import (
 from infra_agent.pr_suspects import enabled as pr_suspects_enabled
 from infra_agent.pr_suspects import is_pr_service
 from infra_agent.runtime import get_runtime
+from infra_agent.status_reads import HANDLERS as STATUS_HANDLERS
 
 ACTION = "rollback_deployment"
 
@@ -805,6 +806,7 @@ async def verify_recovery(request: AgentRequest) -> AgentResult:
 
 HANDLERS = {
     **DEPLOY_HANDLERS,
+    **STATUS_HANDLERS,
     "diagnose_incident": diagnose_incident,
     "rollback_deployment": rollback_deployment,
     "verify_recovery": verify_recovery,

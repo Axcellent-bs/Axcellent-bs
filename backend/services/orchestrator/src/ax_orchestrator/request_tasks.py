@@ -342,6 +342,37 @@ TASKS: tuple[TaskDef, ...] = (
         "draft_sns_post",
         fill="sns_topic",
     ),
+    # 11/26 인프라(이태윤 정리 글 3번): 총괄 대화방에서 읽기만 하는 인프라 일. 롤백·재시작 같은 상태
+    # 변경은 두지 않는다(롤백은 장애 대응 흐름의 안전 관문(B)에서만 한다)
+    _one(
+        "current_incidents",
+        "지금 장애 확인",
+        "지금 서버·사이트에 장애가 있는지 알려 달라는 의뢰(DejaFix가 보는 현재 장애를 읽는다).",
+        ("지금 장애 있어?", "서버 문제 생긴 거 있어요"),
+        "infra",
+        "current_incidents",
+        ref_key="ref",
+    ),
+    _one(
+        "deployment_status",
+        "배포 상태 확인",
+        "서비스별 지금 어떤 버전이 배포돼 있는지, 최근 배포가 어떤지 알려 달라는 의뢰.",
+        ("배포 상태 알려 주세요", "지금 어떤 버전이 배포돼 있어요"),
+        "infra",
+        "latest_deployments",
+        ref_key="ref",
+    ),
+    _one(
+        "incident_diagnosis",
+        "장애 원인 진단",
+        "장애가 났을 때 원인이 어떤 배포인지 진단해 달라는 의뢰"
+        "(원인 후보만 알려 주고 되돌리지는 않는다).",
+        ("장애 원인 진단해 주세요", "결제 장애 원인이 뭐예요"),
+        "infra",
+        "diagnose_incident",
+        fill="incident_component",
+        ref_key="status",
+    ),
     _one(
         "dev_status",
         "개발 진행 현황",

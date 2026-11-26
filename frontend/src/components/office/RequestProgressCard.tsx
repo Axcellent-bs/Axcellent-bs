@@ -12,8 +12,9 @@ import { apiBase, fromBackend, planningApi } from "@/lib/planning";
 import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestTitle } from "@/lib/requestHandoffs";
 import type { WorkRequestRow } from "@/lib/workRequests";
-import { closingOfRequest, hiddenRequestLine, madeVideo, needPlanRefetch, perfStep, PLAN_LOOKUP_MIN_MS, PLAN_RETRY_MAX, PLAN_RETRY_MS, planCard, planFound, planLookupDue, proposalOfRequest, requestActionError, requestEditError, reportIdOfRequest, resultStep, showRequestCard, stepRows, type PerfStepView, type PlanCardView, type PlanLookup } from "@/lib/requestCards";
+import { closingOfRequest, hiddenRequestLine, infraOfRequest, type InfraResult, madeVideo, needPlanRefetch, perfStep, PLAN_LOOKUP_MIN_MS, PLAN_RETRY_MAX, PLAN_RETRY_MS, planCard, planFound, planLookupDue, proposalOfRequest, requestActionError, requestEditError, reportIdOfRequest, resultStep, showRequestCard, stepRows, type PerfStepView, type PlanCardView, type PlanLookup } from "@/lib/requestCards";
 import { dataAi, type RequestVideoPerformance } from "@/lib/data";
+import { listLatestDeploys, type LatestDeploy } from "@/lib/toolConnections";
 import { finance, krw, type ClosingPeriod, type ClosingReport } from "@/lib/finance";
 import { planDocPath } from "@/lib/planDoc";
 import { planId } from "@/lib/format";
@@ -70,6 +71,36 @@ function ReportCell({ reportId }: { reportId: string }) {
     report_path: `/data/trend${reportHash(r.report_id)}`,
   });
   return <ProgressCard card={{ kind: "trend_report_progress", report_id: reportId }} onDone={finish} />;
+}
+
+// 인프라 의뢰 결과 (11/26 총괄 대화방). 총괄 단계는 짧은 번호만 남긴다: 장애 건수·진단 결과는 그 번호로,
+// 배포 상태는 도구 연결 화면과 같은 GET /api/dashboard/deployments/latest로 다시 읽는다(지어내지 않는다)
+function DeploysCell() {
+  const [rows, setRows] = useState<LatestDeploy[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    listLatestDeploys().then((r) => live && setRows(r), (e: unknown) => live && setError(e instanceof Error ? e.message : "배포 상태를 읽지 못했어요"));
+    return () => { live = false; };
+  }, []);
+  if (error) return <p className="mt-1 text-[13.5px] text-red-700">{error}</p>;
+  if (!rows) return <p className="mt-1 animate-pulse text-[13.5px] text-ink-500">배포 상태를 불러오는 중…</p>;
+  if (rows.length === 0) return <p className="mt-1 text-[13.5px] text-ink-700">배포 도구에서 받은 배포 기록이 아직 없어요.</p>;
+  return (
+    <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 rounded-lg border border-ink-100 bg-ink-50 px-2.5 py-2 text-[13.5px]" aria-label="서비스별 최근 배포">
+      {rows.map((d) => (
+        <div key={d.service} className="contents"><dt className="truncate text-ink-700">{d.service}</dt><dd className="text-right tabular-nums text-ink-900">{d.version} · {d.deployed_at.slice(0, 16).replace("T", " ")}</dd></div>
+      ))}
+    </dl>
+  );
+}
+function InfraCell({ result }: { result: InfraResult }) {
+  if (result.kind === "deploys") return <DeploysCell />;
+  const text =
+    result.kind === "incidents"
+      ? result.count === null ? "이 회사의 Zabbix가 아직 연결되지 않아 장애를 확인하지 못했어요." : result.count === 0 ? "지금 DejaFix에 올라온 장애가 없어요." : `지금 장애가 ${result.count}건 있어요. 장애 대응 탭에서 자세히 볼 수 있어요.`
+      : result.status === "suspected" ? "원인 후보로 의심되는 배포가 있어요. 장애 대응 탭에서 확인해 주세요. 되돌리기는 하지 않았어요." : "지금은 원인으로 볼 만한 배포를 찾지 못했어요.";
+  return <p className="mt-1 break-words rounded-lg border border-ink-100 bg-ink-50 px-2.5 py-2 text-[13.5px] text-ink-900" aria-label="인프라 확인 결과">{text}</p>;
 }
 
 // 재무 손익 정리 결과 (11/26). 총괄 단계는 번호("<기간>:<날짜>")만 남기고, 숫자는 재무 화면과 같은
@@ -380,6 +411,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
             {rows.map((s, i) => {
               const report = s.skill === "trend_report_create" ? reportIdOfRequest(row, s.stepId) : null;
           const closing = s.skill === "closing_report" ? closingOfRequest(row, s.stepId) : null;
+          const infraResult = s.dept === "infra" ? infraOfRequest(row, s.stepId) : null;
               const isInsight = s.skill === "receive_insight";
               const isCur = i === cur;
               const state = stepState(s, isCur);
@@ -419,6 +451,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                     )}
                     {report && <ReportCell reportId={report} />}
                 {closing && <ClosingCell period={closing.period} date={closing.date} />}
+                    {infraResult && <InfraCell result={infraResult} />}
                     {isInsight && plan && <PlanCell card={plan} plan={found?.fullPlan} />}
                     {/* 끝난 제작안: 주인공 · 의뢰 지시 N/N · 제작 검사 (사람 확인 중이면 그 단계 버튼 위에만) */}
                     {isInsight && found?.fullPlan && !humanDeciding && (
