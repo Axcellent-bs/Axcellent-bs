@@ -4,6 +4,8 @@ import { shortDateTime } from "@/lib/format";
 import { redrawBoardImage, thumbSrc, type CreativeRecord } from "@/lib/creativeRecords";
 import { boardBehindScript, boardMissing, nearestCount } from "@/lib/creativeScript";
 import { isSvgBoard } from "@/lib/storyboardSvg";
+import { noteColumns, panelNotes } from "@/lib/boardPanelNotes";
+import type { StoryboardResult } from "@/lib/storyboard";
 import { usesOriginalReference } from "@/lib/videoAsk";
 import { listRequestVideos } from "@/lib/requestVideos";
 import { VIDEO_NOT_FOUND_KO, canUploadToYoutube, durationKo, type RequestVideo } from "@/lib/requestVideoView";
@@ -72,6 +74,23 @@ function SheetStep({ ctx, rec }: { ctx: RecordRender; rec: CreativeRecord }) {
   );
 }
 
+/** 스토리보드 그림 밑 칸별 글 (그림에 글자를 넣지 않는다, 11/26 C). 칸 배치는 구도판과 같다 */
+function PanelNotes({ shots }: { shots: StoryboardResult["shots"] }) {
+  const notes = panelNotes(shots);
+  return (
+    <ol className="grid gap-2 text-xs" style={{ gridTemplateColumns: `repeat(${noteColumns(notes.length)}, minmax(0, 1fr))` }}>
+      {notes.map((n) => (
+        <li key={n.no} className="min-w-0 rounded-lg bg-ink-50 px-2 py-1.5">
+          <p className="font-medium tabular-nums text-ink-900">{n.no}{n.time && ` · ${n.time}`}</p>
+          {n.shot && <p className="text-ink-500">{n.shot}</p>}
+          <p className="break-words text-ink-700">{n.action}</p>
+          {n.caption && <p className="break-words text-ink-500">자막 “{n.caption}”</p>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function BoardStep({ ctx, rec }: { ctx: RecordRender; rec: CreativeRecord }) {
   const { render, keyframed, setRec, load } = ctx;
   // 가상 인물·그림 캐릭터와 키프레임 방식은 스토리보드 그림이 필요 없다. 만든 적이 없으면 빈 칸 대신 접어 둔다
@@ -83,6 +102,8 @@ function BoardStep({ ctx, rec }: { ctx: RecordRender; rec: CreativeRecord }) {
   const missing = boardMissing(rec);
   const hidePicture = missing && !render.board_image?.status;
   const view = board && <StoryboardView r={board} onRedraw={async () => { await redrawBoardImage(rec.record_id); await load(); }} />;
+  // 11/26 C: 스토리보드 그림이 있으면 그 그림을 위에(칸 밑에 시간·샷·동작·자막), AI 콘티는 "구도 참고"로 접어 아래에
+  const pictured = !!board && render.board_image?.status === "done";
   return (
     <>
       {rec.script && rec.story && <p className="text-sm text-ink-900"><span className="text-xs text-ink-500">줄거리 </span>{rec.story}</p>}
@@ -104,11 +125,17 @@ function BoardStep({ ctx, rec }: { ctx: RecordRender; rec: CreativeRecord }) {
           <RecordBoardFromScript first recordId={rec.record_id} story={rec.story ?? rec.script.title_ko} characterEn={rec.sheet.consistency_en}
             scenes={rec.script.scenes.length} onRecord={setRec} />
         )}
-        {needsPicture && !hidePicture && <div className="max-w-2xl"><BoardPicture ctx={ctx} /></div>}
+        {needsPicture && !hidePicture && (
+          <div className="max-w-2xl space-y-2">
+            <BoardPicture ctx={ctx} />
+            {pictured && board && <PanelNotes shots={board.shots} />}
+          </div>
+        )}
         <Keyframes ctx={ctx} />
         {missing ? null : !board ? <p className="text-sm text-ink-500">이 기록에는 스토리보드가 없어요. SNS·미디어에서 줄거리를 넣고 다시 만들면 붙어요.</p>
-          : drawn && !isSvgBoard(board) ? <Fold title={`칸 설명과 프롬프트 (${board.shots.length}칸)`}>{view}</Fold>
-            : view}
+          : pictured ? <Fold title={`구도 참고 (AI 콘티 ${board.shots.length}칸)`}>{view}</Fold>
+            : drawn && !isSvgBoard(board) ? <Fold title={`칸 설명과 프롬프트 (${board.shots.length}칸)`}>{view}</Fold>
+              : view}
         {!needsPicture && !hidePicture && <Fold title="스토리보드 그림 직접 올리기 (선택)"><div className="max-w-2xl"><BoardPicture ctx={ctx} /></div></Fold>}
       </div>
     </>

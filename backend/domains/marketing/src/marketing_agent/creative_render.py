@@ -664,8 +664,61 @@ def _story_sha(rec: dict[str, Any]) -> str:
     return hashlib.sha256(str(rec.get("storyboard_at") or "").encode()).hexdigest()[:12]
 
 
+# 11/26 C: 영상 초안 준비 때 스토리보드 그림 1장. 첫 참조 = 칸 SVG 구도판, 다음 = 캐릭터 시트(없으면
+# 원본)·추가 참조. 칸 아래 시간·샷·동작·자막 글은 그림에 넣지 않고 화면이 칸 밑에 얹는다
+BOARD_LAYOUT_EN = (
+    "Follow the panel layout, camera and pose of the first reference exactly; same character as "
+    "the sheet (face, glasses, hair, outfit, colors); fully colored illustrated backgrounds "
+    "matching each panel's place; no text in panels."
+)
+LAYOUT_FILE = "board_layout.png"
+LAYOUT_ASPECT = "16:9"  # 구도판(svg_raster.GRID_SIZE)과 같은 그림 비율
+
+
+def layout_board_png(rec: dict[str, Any], cid: str | None = None) -> bytes | None:
+    """스토리보드 칸 SVG를 칸 순서대로 한 장 격자 PNG로 (엔드카드 칸 = 어두운 빈 칸).
+
+    칸이 없거나 8칸을 넘거나 그릴 SVG가 하나도 없으면 None (그때는 지금처럼 시트 참조만)."""
+    from marketing_agent.media import svg_raster
+
+    shots = (rec.get("storyboard") or {}).get("shots") or []
+    if not 1 <= len(shots) <= svg_raster.MAX_GRID_PANELS:
+        return None
+    last = len(shots) - 1
+    panels: list[str | None] = [
+        None if (i == last and i > 0 and not s.get("has_character", True))
+        else str(s.get("svg") or "")
+        for i, s in enumerate(shots)
+    ]
+    if not any(panels):
+        return None
+    try:
+        return svg_raster.grid_png(panels, video_aspect(cid))
+    except svg_raster.RasterError as error:
+        logger.info("스토리보드 구도판을 그리지 못함: %s", error)
+        return None
+
+
+def start_prepared_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
+                         cid: str | None = None) -> None:  # fmt: skip
+    """영상 초안 준비(사람이 누른 단계)에서 스토리보드 그림을 한 번 시작한다 (기다리지 않음).
+
+    [다시 그리기]와 같은 길(`maybe_start_board(force=True)`) + 구도판 참조. 키프레임 모델이면
+    키프레임 쪽이라 그리지 않는다. 같은 이야기(story_sha)로 이미 돌거나 끝났으면 다시 안 그린다."""
+    rec = _creative.store().get(record_id)
+    if rec is None or not rec.get("storyboard") or superseded(record_id):
+        return
+    from marketing_agent import keyframes as _kf
+
+    cid = cid or request_company(meta)
+    if _kf.active(rec, route(cid), cid):
+        return
+    maybe_start_board(ledger, meta, record_id, cid, force=True, layout=True)
+
+
 def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
-                      cid: str | None = None, force: bool = False) -> None:  # fmt: skip
+                      cid: str | None = None, force: bool = False,
+                      layout: bool = False) -> None:  # fmt: skip
     """스토리보드가 붙었고 이미지 시트 그림이 있으면 스토리보드 그림을 만든다.
 
     회사: `cid` → 시트 그림을 만들 때 남긴 회사 → `request_company(meta)`.
@@ -711,6 +764,20 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
         _set(record_id, "board_image", status="failed", error="sheet_file_missing")
         return
     board_out = rec["storyboard"]
+    prompt = str(board_out.get("sheet_prompt_en") or "")
+    extra: list[bytes] | None = None
+    # 11/26 C: 회사 계정(MCP)이면 구도판을 첫 참조로, 시트(없으면 원본)·추가 참조를 다음 참조로
+    grid = layout_board_png(rec, cid) if layout and via == MCP else None
+    if grid is not None:
+        extra = [ref, *extra_reference_bytes(record_id, rec, cid)] if ref else None
+        ref = grid
+        prompt = f"{BOARD_LAYOUT_EN} {prompt}"
+        try:
+            folder = _dir(record_id, cid)
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / LAYOUT_FILE).write_bytes(grid)
+        except OSError:
+            logger.info("구도판 파일을 남기지 못함: %s", record_id)
     _creative.store().set_board_source(record_id, "higgsfield")
     _set(
         record_id,
@@ -727,12 +794,13 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
             meta,
             record_id,
             "board_image",
-            str(board_out.get("sheet_prompt_en") or ""),
+            prompt,
             str(board_out.get("negative_prompt_en") or ""),
             ref,
-            image_aspect(BOARD_ASPECT, cid),
+            image_aspect(LAYOUT_ASPECT if grid is not None else BOARD_ASPECT, cid),
             via,
             cid,
+            extra_refs=extra,
         )
     )
 
