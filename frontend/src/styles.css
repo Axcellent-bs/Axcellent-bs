@@ -77,6 +77,20 @@ body { @apply bg-canvas text-ink-900 antialiased; }
 
 .scroll-thin { scrollbar-width: thin; }
 
+/*
+  대화방 의뢰 진행 카드 (components/office/RequestProgressCard.tsx, 11/26 크게·한눈에).
+  카드 안에 같이 그리는 부품(보고서 완료 카드·의뢰 지시·제작 검사 기록·펼쳐 보기·이미지 시트)의 작은 글씨를 12.5px 이상으로,
+  버튼은 14px, "지금 할 일" 버튼(.req-now)은 15px 큰 버튼. 부품 파일은 다른 화면도 쓰므로 카드 안에서만 키운다
+*/
+.req-card .text-xs { font-size: 13.5px; line-height: 1.5; }
+.req-card .text-\[10\.5px\],
+.req-card .text-\[11px\],
+.req-card .text-\[11\.5px\],
+.req-card .text-\[12px\] { font-size: 12.5px; }
+.req-card .btn-card { font-size: 14px; }
+.req-card .req-now .btn-card { height: 2.5rem; padding-left: 1.125rem; padding-right: 1.125rem; font-size: 15px; font-weight: 700; }
+.req-card :is(button, a, summary):focus-visible { outline: 2px solid rgb(var(--brand-500)); outline-offset: 2px; }
+
 /* common-frontend 모양: 모서리 0 (화면들이 쓰는 rounded-* 클래스도 함께 각지게), 얇은 테두리 카드 */
 *, *::before, *::after { border-radius: 0 !important; }
 /*
