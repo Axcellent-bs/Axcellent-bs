@@ -487,6 +487,7 @@ async def run(every: int | None, env: Mapping[str, str], precompute_after: bool 
             print(result.line(), flush=True)
             await measure_videos(connector, env)  # 게시한 영상 성과: 지금 잴 시점만 (실패해도 계속)
             await measure_instagram_videos(env)  # 인스타 게시 영상: 계정마다 한 번 (실패해도 계속)
+            await collect_ads(env)  # 광고 성과: 회사·플랫폼마다 하루 1번 (실패해도 계속)
             await track_fresh(env)  # 새 숏츠 추적: 같은 형식 비교 기준 표본 (실패해도 계속)
             # 숏츠 표본의 빠진 게시 시각 채우기 (하루 상한, 미리 계산 바로 앞. 실패해도 계속)
             await shorts_backfill.run(env)
@@ -572,6 +573,29 @@ async def measure_instagram_videos(
         print(f"[video] 인스타 성과 시점 값 {saved}개" + (f", {'; '.join(problems)}" if problems
                                                     else ""), flush=True)  # fmt: skip
     return saved
+
+
+async def collect_ads(env: Mapping[str, str], now: datetime | None = None) -> int:
+    """회사 광고 성과 (메타·구글 애즈, 회사·플랫폼마다 `DATA_ADS_EVERY_HOURS`에 한 번). 저장한 수.
+    실패해도 수집은 계속한다. 토큰·주소는 찍지 않는다 (오류 코드만)."""
+    from data_agent.connectors.google_ads import GoogleAds
+    from data_agent.connectors.meta_ads import MetaAds
+    from data_agent.skills import ad_performance as ap
+
+    meta, google = MetaAds(env), GoogleAds(env)
+    if not meta.configured and not google.configured:
+        return 0  # 연결 대기 (화면에 필요한 것이 보인다)
+    store = ap.store_of(env)
+    try:
+        result = await ap.collect_due(store, env, meta=meta, google=google, now=now)
+    except Exception as error:  # 광고 성과가 실패해도 수집은 계속
+        print(f"[ads] 광고 성과 수집 실패 ({type(error).__name__})", flush=True)
+        return 0
+    finally:
+        store.close()
+    if result.saved or result.problems:
+        print(result.line(), flush=True)
+    return result.saved
 
 
 async def track_fresh(

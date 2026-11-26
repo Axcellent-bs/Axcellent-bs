@@ -428,6 +428,22 @@
       "handoff": false
     },
     {
+      "id": "ad_performance",
+      "description": "회사 광고 성과 (읽기만). 요청 company(기본 지금 회사)·days(기본 7)·platform(google|meta|all). 저장분만 읽는다(외부 호출 없음). 수집기가 하루 1번(DATA_ADS_EVERY_HOURS) 회사 설정 [ads] meta_ad_account_id·google_customer_id로 최근 7일 캠페인 값(비용·노출·도달·클릭·클릭률·조회·조회율·25/50/75/100% 시청·전환)과 연령·성별을 메타 Graph act_<id>/insights·구글 애즈 REST googleAds:search(GAQL 조회)로 읽어 저장한다. 값은 받은 그대로(구글 cost_micros ÷ 1e6만), 연령·성별 비중은 코드. 캠페인 이름에 등록 영상 id·캠페인 번호가 있으면 video_key, 못 이으면 비움. 계정 번호가 없으면 그 플랫폼은 건너뛰고, env가 없으면 unknown + 연결 대기 + 필요한 것(env 이름만). 광고 만들기·예산·켜기/끄기는 없다. LLM을 쓰지 않는다. 회사 상태를 바꾸지 않는다.",
+      "input_schema": "shared/contracts/src/ax_contracts/schemas/ad_performance.py#AdPerformanceRequest",
+      "output_schema": "shared/contracts/src/ax_contracts/schemas/ad_performance.py#AdPerformanceOutput",
+      "grade": "read",
+      "allowed_requesters": [
+        "planning",
+        "marketing",
+        "dashboard-api",
+        "orchestrator"
+      ],
+      "verifier": null,
+      "priority": "recommended",
+      "handoff": false
+    },
+    {
       "id": "campaign_result",
       "description": "성과 결과 1건 (campaign_id 기준). ① 연결(insight_id·proposal_id·campaign_id·측정 기간·schema_version) ② 영상 성과(video_performance 결과 그대로: 영상별 판정·목표 대비·시점별 조회·신호 4개) ③ 매출 효과(campaign_effect 계산 그대로, 귀속·상품·쿠폰·전체 매장 네 칸은 따로, 더하지 않음; 판매액 증분이 기준선 날들의 흔들림 범위 안이면 효과 확인 안 됨·위면 더 팔림·아래면 덜 팔림, 표본이 적으면 효과 확인 안 됨(표본 적음); 프로모션 링크·쿠폰 없는 영상은 측정 불가) ④ 성과 요인·개선 방향·한계 문구 ⑤ 알림(loss·data_gap). view로 부서별 묶음을 고른다(planning ①~⑤, marketing ① + 개선 방향만, finance ①③⑤). 조회와 매출을 합친 점수·수익·ROI·캠페인 자동 중단은 하지 않는다. LLM을 쓰지 않는다. 회사 상태를 바꾸지 않는다.",
       "input_schema": "shared/contracts/src/ax_contracts/schemas/data.py#CampaignResultRequest",
