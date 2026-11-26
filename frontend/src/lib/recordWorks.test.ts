@@ -4,7 +4,7 @@ import type { CreativeRecordSummary } from "./creativeRecords";
 import type { RequestVideo } from "./requestVideoView.ts";
 import type { RecordFacts } from "./recordWorks.ts";
 import {
-  PAGE_SIZE, dayLabel, defaultStep, groupByDay, hasPublishState, linkedRecordId, madePicture, mergeWorks, slotKind, pageCount, pageHref, pageItems, pageOf,
+  PAGE_SIZE, dayLabel, defaultStep, defaultSteps, groupByDay, hasPublishState, linkedRecordId, madePicture, mergeWorks, slotKind, pageCount, pageHref, pageItems, pageOf,
   renderStatuses, videoSlot, workHref, workStatus, workTitle,
 } from "./recordWorks.ts";
 
@@ -115,6 +115,20 @@ test("목록 칸: 만든 그림이 done이고 받았으면 그림, 실패·없�
   }
   // SVG 콘티만 있는 기록(board_image 없음)은 글자 칸
   assert.equal(slotKind({ render: { sheet_image: "done" } }, "board_image", got), "original");
+});
+
+test("처음 펼칠 단계들 (11/26): 영상 전이면 1·2를 같이", () => {
+  assert.deepEqual(defaultSteps({}, []), [1, 2]);
+  assert.deepEqual(defaultSteps({ script_scenes: 6 }, []), [1, 2]);
+  // 스토리보드만 있고 영상이 없으면 1·2 (전에는 3만 펼쳐 시트·대본이 접혔다)
+  assert.deepEqual(defaultSteps({ shot_count: 6, script_scenes: 6 }, []), [1, 2]);
+  assert.deepEqual(defaultSteps({ shot_count: 6, render: { sheet_image: "done", board_image: "done" } }, []), [1, 2]);
+  // 영상이 있으면 3
+  assert.deepEqual(defaultSteps({ shot_count: 6, render: { video: "done" } }, []), [3]);
+  assert.deepEqual(defaultSteps({ render: { final_video: "done" } }, []), [3]);
+  assert.deepEqual(defaultSteps(null, [video("d", "x")]), [3]);
+  // 올리기 중이면 4
+  assert.deepEqual(defaultSteps({ render: { video: "done", instagram: "awaiting_approval" } }, []), [4]);
 });
 
 test("올리기 초안이나 상태가 남아 있나", () => {

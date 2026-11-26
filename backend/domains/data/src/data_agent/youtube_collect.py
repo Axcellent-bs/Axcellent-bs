@@ -577,11 +577,13 @@ async def measure_instagram_videos(
 
 
 async def collect_insights(
-    env: Mapping[str, str], now: datetime | None = None, conn: YouTubeAnalytics | None = None
+    env: Mapping[str, str], now: datetime | None = None, conn: YouTubeAnalytics | None = None,
+    graph: object | None = None,
 ) -> int:
-    """video_performance 추적 목록의 영상 깊은 지표 (유튜브 Analytics·Reporting, 영상마다
-    `DATA_YT_ANALYTICS_EVERY_HOURS`에 한 번). 저장한 영상 수. 실패해도 수집은 계속한다.
+    """video_performance 추적 목록의 영상 깊은 지표 (유튜브 Analytics·Reporting, 인스타 우리 계정
+    인사이트. 영상마다 하루 한 번). 저장한 영상 수. 실패해도 수집은 계속한다.
     토큰·주소는 찍지 않는다 (오류 코드만)."""
+    from data_agent.connectors.instagram_graph import InstagramGraph
     from data_agent.skills import video_insights as vi
     from data_agent.skills import video_performance as vp
 
@@ -589,17 +591,26 @@ async def collect_insights(
     if str(path) != ":memory:" and not Path(path).is_file():
         return 0  # 등록된 영상이 없다
     videos, store = vp.VideoStore(path), vi.InsightStore(path)
+    saved = 0
     try:
-        result = await vi.collect_due(videos, store, conn or YouTubeAnalytics(env), env, now)
-    except Exception as error:  # 깊은 지표가 실패해도 수집은 계속
-        print(f"[insights] 깊은 지표 수집 실패 ({type(error).__name__})", flush=True)
-        return 0
+        for name, run in (
+            ("유튜브", lambda: vi.collect_due(videos, store, conn or YouTubeAnalytics(env), env,
+                                            now)),
+            ("인스타", lambda: vi.collect_instagram_due(videos, store, graph or InstagramGraph(env),
+                                                     env, now)),
+        ):  # fmt: skip
+            try:
+                result = await run()
+            except Exception as error:  # 깊은 지표가 실패해도 수집은 계속
+                print(f"[insights] {name} 깊은 지표 수집 실패 ({type(error).__name__})", flush=True)
+                continue
+            if result.saved or result.problems:
+                print(f"{result.line()} ({name})", flush=True)
+            saved += result.saved
     finally:
         videos.close()
         store.close()
-    if result.saved or result.problems:
-        print(result.line(), flush=True)
-    return result.saved
+    return saved
 
 
 async def track_fresh(

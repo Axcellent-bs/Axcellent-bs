@@ -178,6 +178,11 @@ test("승인 호출 오류는 본인 승인·이미 결정·권한을 가른다"
   assert.match(decideErrorKo(404, null), /찾을 수 없/);
 });
 
+test("서비스 이름 확인 오류(422)는 알아듣기 쉬운 문구로 보인다", () => {
+  assert.equal(decideErrorKo(422, "CONFIRM_MISMATCH"), "서비스 이름이 맞지 않아요. 다시 확인해 주세요.");
+  assert.match(decideErrorKo(422, "CONFIRM_NOT_APPLICABLE"), /서비스 이름 확인/);
+});
+
 test("승인 화면 링크는 건을 강조할 뿐 승인 정보를 담지 않는다", () => {
   assert.equal(approvalLink("rev_1"), "/marketing/campaign?review=rev_1");
   assert.equal(approvalLink(null), "/marketing/campaign");

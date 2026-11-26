@@ -42,7 +42,7 @@ export function ChatReviewDecision({ reviewId, what, onDone, confirmName, confir
     setStep("busy");
     setMessage(null);
     try {
-      await finance.decide(reviewId, decision, undefined, true, decidedAs ?? undefined);
+      await finance.decide(reviewId, decision, undefined, true, decidedAs ?? undefined, confirmName !== undefined && decision === "approved" ? typedName : undefined);
       setMessage({ ok: true, text: decision === "approved" ? doneText ?? `승인했어요. ${what}는 서버가 이어서 진행해요.` : "거절했어요. 진행하지 않아요." });
       load();
       onDone?.();
