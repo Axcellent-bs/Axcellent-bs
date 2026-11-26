@@ -301,29 +301,144 @@ def _usage_tokens(response: httpx.Response) -> tuple[int, int]:
         return 0, 0
 
 
-def _closed(node: Any) -> Any:
-    """객체마다 `additionalProperties: false`를 붙인다 (엄격 스키마 요구)."""
-    if isinstance(node, dict):
-        if node.get("type") == "object" or "properties" in node:
-            node.setdefault("additionalProperties", False)
-        for value in node.values():
-            _closed(value)
-    elif isinstance(node, list):
-        for value in node:
-            _closed(value)
-    return node
+# ---------------------------------------------------------------- Anthropic 엄격 스키마 (11/26)
+# 공식 문서(https://platform.claude.com/docs/en/build-with-claude/structured-outputs, 11/26 확인):
+# - 받는 것: 기본 타입·enum·const·anyOf·allOf·$ref/$defs·default·required·
+#   additionalProperties false·간단한 pattern·string format 10가지·minItems 0·1
+# - 받지 않는 것: minimum·maximum·multipleOf(숫자 제약), minLength·maxLength(글자 제약),
+#   minItems 0·1 밖·maxItems(배열 제약), 그 밖의 format → 지우고 description 끝에 옮긴다
+#   (SDK와 같은 방식). 답 검증은 원래 pydantic 모델로 한다
+# - 한도(요청 하나의 strict 스키마 전체): required에 없는 칸 24개, 유니온(anyOf·type 배열) 칸 16개.
+#   넘으면 400 "Schema is too complex for compilation" → 요청 전에 막는다
+# 11/26 콘티 포즈 스키마(required 없음, start·end 두 번)가 선택 칸 한도를 넘어 400이었다
+STRICT_OPTIONAL_MAX = 24
+STRICT_UNION_MAX = 16
+STRICT_FORMATS = frozenset({"date-time", "time", "date", "duration", "email", "hostname", "uri",
+                            "ipv4", "ipv6", "uuid"})  # fmt: skip
+_UNSUPPORTED = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "minLength",
+                "maxLength", "maxItems", "multipleOf")  # fmt: skip
+
+
+def _moved_note(node: dict[str, Any]) -> str:
+    """지운 제약을 설명 한 조각으로 ("(0~1)", "(최대 60자)")."""
+    parts = []
+    low = node.get("minimum", node.get("exclusiveMinimum"))
+    high = node.get("maximum", node.get("exclusiveMaximum"))
+    if low is not None or high is not None:
+        parts.append(f"{'' if low is None else low}~{'' if high is None else high}")
+    if "minLength" in node or "maxLength" in node:
+        parts.append(f"{node.get('minLength', 0)}~{node.get('maxLength', '')}자")
+    if "maxItems" in node or node.get("minItems", 0) not in (0, 1):
+        parts.append(f"{node.get('minItems', 0)}~{node.get('maxItems', '')}개")
+    if "multipleOf" in node:
+        parts.append(f"{node['multipleOf']}의 배수")
+    if _bad_format(node):
+        parts.append(f"형식 {node['format']}")
+    return f"({', '.join(parts)})" if parts else ""
+
+
+def _bad_format(node: dict[str, Any]) -> bool:
+    value = node.get("format")
+    return isinstance(value, str) and value not in STRICT_FORMATS
+
+
+_NAME_MAPS = ("properties", "$defs", "definitions")  # 이름 → 스키마 (이름은 키워드가 아니다)
+
+
+def _strict_node(node: Any) -> Any:
+    if isinstance(node, list):
+        return [_strict_node(v) for v in node]
+    if not isinstance(node, dict):
+        return node
+    out: dict[str, Any] = {}
+    for key, value in node.items():
+        if key in _NAME_MAPS and isinstance(value, dict):
+            out[key] = {name: _strict_node(v) for name, v in value.items()}
+        else:
+            out[key] = _strict_node(value)
+    note = _moved_note(node)
+    for key in _UNSUPPORTED:
+        if not isinstance(node.get(key), dict):
+            out.pop(key, None)
+    if isinstance(out.get("minItems"), int) and out["minItems"] not in (0, 1):
+        out.pop("minItems")
+    if _bad_format(out):
+        out.pop("format")
+    if note:
+        out["description"] = f"{out.get('description', '')} {note}".strip()
+    if out.get("type") == "object" or "properties" in out:
+        out["additionalProperties"] = False
+        if isinstance(out.get("properties"), dict):
+            out["required"] = list(out["properties"])
+    return out
+
+
+def strict_schema(json_schema: dict[str, Any]) -> dict[str, Any]:
+    """Anthropic strict 스키마 (복사본, 원본 dict는 그대로). 객체마다 additionalProperties false와
+    properties 전체를 required로 (OpenAI strict와 같은 방식. pydantic 기본값이 있어 답 검증은
+    그대로)."""
+    return _strict_node(json_schema)
+
+
+def strict_complexity(json_schema: dict[str, Any]) -> tuple[int, int]:
+    """(required에 없는 칸 수, 유니온 칸 수). `$ref`가 가리키는 정의는 쓰인 자리마다 센다."""
+    defs: dict[str, Any] = {}
+    for key in ("$defs", "definitions"):
+        if isinstance(json_schema.get(key), dict):
+            defs.update({f"#/{key}/{k}": v for k, v in json_schema[key].items()})
+    optional = unions = 0
+
+    def walk(node: Any, depth: int) -> None:
+        nonlocal optional, unions
+        if depth > 32:  # 재귀 스키마는 Anthropic이 받지 않는다 (여기서는 더 세지 않음)
+            return
+        if isinstance(node, list):
+            for v in node:
+                walk(v, depth)
+            return
+        if not isinstance(node, dict):
+            return
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref in defs:
+            walk(defs[ref], depth + 1)
+        props = node.get("properties")
+        if isinstance(props, dict):
+            required = set(node.get("required") or [])
+            for name, value in props.items():
+                optional += name not in required
+                if isinstance(value, dict) and ("anyOf" in value
+                                                or isinstance(value.get("type"), list)):
+                    unions += 1
+                walk(value, depth + 1)
+        for key in ("items", "anyOf", "allOf"):
+            if key in node:
+                walk(node[key], depth + 1)
+        if isinstance(node.get("additionalProperties"), dict):
+            walk(node["additionalProperties"], depth + 1)
+
+    walk({k: v for k, v in json_schema.items() if k not in ("$defs", "definitions")}, 0)
+    return optional, unions
 
 
 def response_payload(
     base_url: str, model: str | None, messages: list, name: str, json_schema: dict
 ) -> dict[str, Any]:
     """OpenAI 호환 요청 본문. Anthropic(Claude) 호환 주소는 스키마를 엄격하게(strict) 받고
-    `temperature`를 받지 않아서 그 둘만 맞춘다. 다른 주소(Gemini 등)는 예전 그대로다."""
+    `temperature`를 받지 않아서 그 둘만 맞춘다. 다른 주소(Gemini 등)는 예전 그대로다.
+
+    Anthropic 경로는 `strict_schema`로 바꾸고, 한도(선택 칸 24·유니온 16)를 넘으면 요청 전에
+    `LLMInputError`로 실패한다 (400을 받으러 가지 않는다)."""
     anthropic = "anthropic.com" in (base_url or "")
     schema_block: dict[str, Any] = {"name": name, "schema": json_schema}
     payload: dict[str, Any] = {"model": model, "messages": messages}
     if anthropic:
-        schema_block = {"name": name, "strict": True, "schema": _closed(json_schema)}
+        strict = strict_schema(json_schema)
+        optional, unions = strict_complexity(strict)
+        if optional > STRICT_OPTIONAL_MAX or unions > STRICT_UNION_MAX:
+            raise LLMInputError(
+                f"스키마가 Anthropic strict 한도를 넘음: optional {optional}, union {unions}"
+            )
+        schema_block = {"name": name, "strict": True, "schema": strict}
     else:
         payload["temperature"] = 0
     payload["response_format"] = {"type": "json_schema", "json_schema": schema_block}
