@@ -6,8 +6,12 @@ import { ago } from "@/lib/format";
 import { CATEGORY_KO, TRIAGE_REASON_KO, tenantName } from "@/lib/labels";
 import type { ConversationListItem } from "@/lib/types";
 import { useCompany } from "@/demo/company";
+import { sessionCompanyId } from "@/lib/humanSession";
 
 const LABEL_MAX = 40;
+
+/** 문의의 회사. 회사 칸이 없는 옛 줄은 서버가 로그인한 회사 것만 주므로 그 회사로 본다(캣북스 고정 값을 쓰지 않음) */
+const rowCompany = (c: ConversationListItem): string => c.tenant_id ?? sessionCompanyId() ?? "shop-demo";
 
 /**
  * 분류 필요: 로그·오류 코드로 원인을 알 수 없는 문의를 따로 모아 상담원이 분류 이름을 정한다.
@@ -39,7 +43,7 @@ export function TriagePanel({ onCount }: { onCount?: (needed: number) => void })
     const count = new Map<string, number>();
     for (const c of rows ?? []) {
       if (c.triage?.state !== view) continue;
-      const id = c.tenant_id ?? "shop-demo";
+      const id = rowCompany(c);
       count.set(id, (count.get(id) ?? 0) + 1);
     }
     return [...count.entries()];
@@ -48,7 +52,7 @@ export function TriagePanel({ onCount }: { onCount?: (needed: number) => void })
   const labelCounts = useMemo(() => {
     const count = new Map<string, number>();
     for (const c of rows ?? []) {
-      if (c.triage?.state === "done" && c.triage.label && (company === "all" || (c.tenant_id ?? "shop-demo") === company)) {
+      if (c.triage?.state === "done" && c.triage.label && (company === "all" || rowCompany(c) === company)) {
         count.set(c.triage.label, (count.get(c.triage.label) ?? 0) + 1);
       }
     }
@@ -65,7 +69,7 @@ export function TriagePanel({ onCount }: { onCount?: (needed: number) => void })
   }
 
   if (!rows) return <Loading error={error} />;
-  const shown = rows.filter((c) => c.triage?.state === view && (company === "all" || (c.tenant_id ?? "shop-demo") === company));
+  const shown = rows.filter((c) => c.triage?.state === view && (company === "all" || rowCompany(c) === company));
   const neededCount = rows.filter((c) => c.triage?.state === "needed").length;
   const doneCount = rows.filter((c) => c.triage?.state === "done").length;
 

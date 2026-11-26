@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ax_agent_template import events
+from ax_agent_template.company_jobs import for_each_company
 from ax_agent_template.events import subscribe
 from ax_agent_template.server import create_agent_app
 from ax_contracts.schemas import AgentCard
@@ -206,8 +207,13 @@ async def close_alert_loop(interval: float, first_delay: float = CLOSE_ALERT_FIR
     while True:
         await asyncio.sleep(delay)
         try:
-            for r in await run_close_alerts():
-                logger.info("월 마감 기한 지남 받은 요청: %s %s", r["status"], r["key"])
+            # 회사마다(캣북스 + 회사 연결이 켜진 회사) 그 회사 장부·체크리스트로 (회사 분리 11/26)
+            done = await for_each_company(lambda _cid: run_close_alerts(), "월 마감 기한 알림")
+            for cid, rows in done.items():
+                for r in rows:
+                    logger.info(
+                        "월 마감 기한 지남 받은 요청(%s): %s %s", cid, r["status"], r["key"]
+                    )
         except Exception:  # 다음 회차는 그대로 돈다
             logger.exception("월 마감 기한 지남 받은 요청 올리기 중 오류")
         delay = interval
@@ -248,8 +254,12 @@ async def daily_closing_loop(interval: float, first_delay: float = DAILY_CLOSING
         ).isoformat()
         await asyncio.sleep(delay)
         try:
-            stored = await run_and_store_daily_closing("auto")
-            logger.info("매일 결산 자동 실행: %s 기준", stored["date"])
+            # 회사마다 그 회사 장부로 결산해 그 회사 기록에 남긴다 (회사 분리 11/26)
+            done = await for_each_company(
+                lambda _cid: run_and_store_daily_closing("auto"), "매일 결산"
+            )
+            for cid, stored in done.items():
+                logger.info("매일 결산 자동 실행(%s): %s 기준", cid, stored["date"])
         except Exception:  # 다음 회차는 그대로 돈다
             logger.exception("매일 결산 자동 실행 중 오류")
         delay = interval

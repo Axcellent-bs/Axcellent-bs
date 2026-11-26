@@ -32,6 +32,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from ax_agent_template.company_jobs import for_each_company, meta_tenant_id
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
 from marketing_agent.briefs import BriefStore
 
@@ -89,6 +90,7 @@ def _request(proposal_id: str, now: datetime) -> AgentRequest:
         context_id=f"auto_brief_{proposal_id}",
         token="internal:marketing-auto",
         deadline=now + timedelta(seconds=CALL_DEADLINE_S),
+        tenant_id=meta_tenant_id(),  # 회사마다 돌 때 그 회사로(회사 분리 11/26)
     )
     return AgentRequest(
         meta=meta,
@@ -145,7 +147,12 @@ async def auto_handoff_loop(get_briefs: Callable[[], BriefStore], handoff: Hando
     while True:
         cfg = AutoHandoffConfig.from_env()  # 매 주기 다시 읽어 재시작 없이 끄고 켠다
         try:
-            await auto_handoff_once(get_briefs(), handoff, cfg)
+            # 회사마다(캣북스 + 회사 연결이 켜진 회사): 기획안 저장소가 그 회사 칸만 본다
+            # (회사 분리 11/26)
+            await for_each_company(
+                lambda _cid, cfg=cfg: auto_handoff_once(get_briefs(), handoff, cfg),
+                "기획안 자동 넘김",
+            )
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
