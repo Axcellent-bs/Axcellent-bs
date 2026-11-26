@@ -50,6 +50,11 @@ class TaskStep:
     # 그리고 이 단계가 앞 단계 번호를 받을 입력 칸 이름. 큰 결과는 부서 저장소에 두고 번호만 넘긴다
     ref_key: str | None = None
     takes_ref: str | None = None
+    # 11/26: `takes_ref`로 받을 앞 단계 번호가 없을 때(예: "최근 영상"이 하나도 없음) 보여 줄
+    # 안내문. 있으면 이 단계를 실패(사람 확인으로 넘김)가 아니라 건너뜀으로 닫고 의뢰를
+    # "모두 마쳤다"로 끝낸다(사람이 볼 문제가 아니라 고를 게 없을 뿐이라서). 없으면 기존처럼
+    # 일반 실패(NO_REF)로 처리한다
+    empty_ref_note: str | None = None
     # 부서가 요구하는 고정 입력(예: 긴 작업으로 받기 `caller`), 고객 문장을 넣을 입력 칸 이름
     fixed_input: tuple[tuple[str, Any], ...] = ()
     text_key: str | None = None
@@ -279,6 +284,8 @@ TASKS: tuple[TaskDef, ...] = (
                 after=("latest",),
                 takes_ref="post_draft_id",
                 ref_key="post_draft_id",
+                empty_ref_note="아직 유튜브에 새로 올릴 의뢰 영상이 없어요. 이미 다 올렸거나, "
+                "만든 의뢰 영상이 아직 없어요.",
             ),
             TaskStep(
                 "run",
@@ -318,6 +325,8 @@ TASKS: tuple[TaskDef, ...] = (
                 after=("latest",),
                 takes_ref="post_draft_id",
                 ref_key="post_draft_id",
+                empty_ref_note="아직 인스타에 새로 올릴 의뢰 영상이 없어요. 이미 다 올렸거나, "
+                "만든 의뢰 영상이 아직 없어요.",
             ),
             TaskStep(
                 "run",
@@ -493,6 +502,7 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "kind": s.kind,
             "ref_key": s.ref_key,
             "takes_ref": s.takes_ref,
+            "empty_ref_note": s.empty_ref_note,
             "fixed_input": dict(s.fixed_input),
             "text_key": s.text_key,
             "carries": s.carries,

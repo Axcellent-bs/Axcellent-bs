@@ -120,6 +120,7 @@ def test_plan_of_has_what_work_requests_needs() -> None:
         "kind": "agent",
         "ref_key": None,
         "takes_ref": None,
+        "empty_ref_note": None,
         "fixed_input": {},
         "text_key": "request_text",
         "carries": None,
@@ -187,3 +188,6 @@ def test_video_publish_tasks_find_latest_video_then_draft_then_request_with_huma
         assert task.needs_human_approval  # 등급 C라 needs_human_approval도 참이다
         assert not steps["run"].human_gate  # 다만 고객 문장이 아니라 앞 단계 번호만 받는 단계라
         # 총괄이 따로 먼저 묻지 않고(human_gate=False) 부서의 C 등급 관문에 승인을 맡긴다
+        # 11/26 후속(이태윤 님 리뷰): "최근" 영상이 하나도 없으면(이미 다 올렸거나 만든 게 없음)
+        # 초안 단계가 일반 실패(사람 확인)가 아니라 안내문과 함께 건너뜀으로 닫혀야 한다
+        assert steps["draft"].empty_ref_note
