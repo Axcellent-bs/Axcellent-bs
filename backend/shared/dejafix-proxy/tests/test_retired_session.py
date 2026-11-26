@@ -53,7 +53,8 @@ async def test_shutdown_closes_retired_session_still_in_flight(monkeypatch):
     caller = real_client(
         transport=httpx.ASGITransport(app=app),
         base_url="http://proxy",
-        headers={"Authorization": f"Bearer {AGENT_TOKEN}"},
+        # 회사 없이 부르면 연결 전이다(11/26). 에이전트는 부르는 회사를 싣는다
+        headers={"Authorization": f"Bearer {AGENT_TOKEN}", "X-AX-Company": "catbooks"},
     )
     monkeypatch.setattr(main.httpx, "AsyncClient", factory)
 

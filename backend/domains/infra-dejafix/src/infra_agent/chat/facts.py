@@ -17,6 +17,7 @@ from typing import Any
 
 import httpx
 
+from ax_agent_template import tool_connections
 from ax_agent_template.config import agent_url, is_mock
 from infra_agent import dejafix_watch
 from infra_agent.runtime import get_runtime
@@ -76,8 +77,13 @@ def _diagnoses() -> list[dict[str, Any]]:
 async def _incidents() -> list[dict[str, Any]]:
     if is_mock("infra"):
         return []
+    try:
+        # 지금 요청 회사의 사건만(11/26). 회사가 없으면 비운다(캣북스 사건으로 떨어지지 않게)
+        headers = tool_connections.company_agent_headers()
+    except RuntimeError:  # 회사 없음(DejafixNoCompany)·토큰 없음
+        return []
     async with httpx.AsyncClient(timeout=ORCHESTRATOR_SECONDS) as client:
-        response = await client.get(f"{agent_url('orchestrator')}/api/incidents")
+        response = await client.get(f"{agent_url('orchestrator')}/api/incidents", headers=headers)
     response.raise_for_status()
     rows = response.json().get("data") or []
     rows = sorted(
@@ -115,10 +121,15 @@ async def _incidents() -> list[dict[str, Any]]:
 
 
 async def _dejafix() -> dict[str, Any]:
-    url = dejafix_watch.base_url()
-    if url is None:
+    """지금 요청 회사의 DejaFix 장애. 회사가 없거나 그 회사 Zabbix가 연결 전이면 연결 전(다른 회사
+    것으로 떨어지지 않는다, 11/26)."""
+    try:
+        url = dejafix_watch.base_url()
+        if url is None:
+            return {"configured": False, "problems": []}
+        rows = await dejafix_watch.fetch_problems(url)
+    except (tool_connections.DejafixNoCompany, dejafix_watch.DejafixNotConnected):
         return {"configured": False, "problems": []}
-    rows = await dejafix_watch.fetch_problems(url)
     rows = sorted(rows, key=lambda r: str(r.get("started_at") or ""), reverse=True)
     return {
         "configured": True,

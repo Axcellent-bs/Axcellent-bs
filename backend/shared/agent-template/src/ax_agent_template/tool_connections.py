@@ -373,27 +373,67 @@ def find(kind: str, **config_match: Any) -> ToolConnection | None:
     return None
 
 
-def dejafix_proxy_url(env_name: str) -> str | None:
-    """DejaFix 장애를 읽을 주소. 환경 변수(`env_name`)가 있으면 그것, 없으면 보관함에 `dejafix`가
-    있을 때 dejafix-proxy 주소, 둘 다 없으면 None. 부를 때마다 다시 정한다(재시작 없이 반영)."""
+class DejafixNoCompany(RuntimeError):
+    """DejaFix를 어느 회사로 부를지 모른다(요청 밖이고 회사를 안 줌). 캣북스로 떨어지지 않는다."""
+
+
+def dejafix_company(company: str | None = None) -> str:
+    """DejaFix를 부를 회사(정식 ID): 준 값 → 지금 요청의 회사. 둘 다 없으면 `DejafixNoCompany`.
+
+    DejaFix 데이터는 그 회사 "회사 연결 설정"의 Zabbix를 거쳐야 한다(11/26 예진 님). 회사 없이
+    부르거나 캣북스로 떨어지는 길은 두지 않는다.
+    """
+    from ax_agent_template import company_scope
+    from ax_agent_template.companies import canonical_company_id
+
+    cid = canonical_company_id((company or company_scope.active() or "").strip())
+    if not cid:
+        raise DejafixNoCompany("DejaFix를 부를 회사가 정해지지 않았다")
+    return cid
+
+
+def dejafix_proxy_url(env_name: str, company: str | None = None) -> str | None:
+    """DejaFix 장애를 읽을 주소. 환경 변수(`env_name`)가 있으면 그것(dejafix-proxy가 회사를 가른다),
+    없으면 그 회사 보관함에 `dejafix`가 있을 때 dejafix-proxy 주소, 둘 다 없으면 None.
+    `company`를 주면 그 회사 보관함을 본다(없으면 지금 요청의 회사). 부를 때마다 다시 정한다."""
+    from ax_agent_template import company_scope
     from ax_agent_template.config import agent_url  # config가 이 모듈을 쓰게 되어도 순환하지 않게
 
     explicit = os.getenv(env_name, "").strip().rstrip("/")
     if explicit:
         return explicit
-    if find("dejafix") is not None:
+    if company is not None:
+        with company_scope.using(dejafix_company(company)):
+            found = find("dejafix")
+    else:
+        found = find("dejafix")
+    if found is not None:
         return agent_url("dejafix-proxy")
     return None
 
 
-def dejafix_proxy_headers() -> dict[str, str]:
-    """dejafix-proxy를 부를 때 붙이는 헤더: 이 에이전트의 토큰(`agent_token(get_agent_name())`).
+def company_agent_headers(company: str | None = None) -> dict[str, str]:
+    """다른 서비스(총괄 사건 목록 등)를 이 에이전트로 부를 때: 토큰 + 부르는 회사(`X-AX-Company`).
 
-    프록시는 토큰이 없거나 모르는 토큰이면 401로 막는다. 이름·토큰이 없으면 `RuntimeError`.
+    DejaFix에서 온 장애를 읽는 길이라 회사가 꼭 있어야 한다(없으면 `DejafixNoCompany`, 캣북스로
+    떨어지지 않는다). 이름·토큰이 없으면 `RuntimeError`."""
+    return dejafix_proxy_headers(company)
+
+
+def dejafix_proxy_headers(company: str | None = None) -> dict[str, str]:
+    """dejafix-proxy를 부를 때 붙이는 헤더: 이 에이전트의 토큰 + 부르는 회사(`X-AX-Company`).
+
+    회사는 준 값 → 지금 요청의 회사. 둘 다 없으면 `DejafixNoCompany`(프록시도 회사 없는 요청은
+    연결 전으로 본다). 이름·토큰이 없으면 `RuntimeError`.
     """
+    from ax_agent_template.company_connection import CALLER_COMPANY_HEADER
     from ax_agent_template.config import agent_token, get_agent_name
 
-    return {"Authorization": f"Bearer {agent_token(get_agent_name())}"}
+    cid = dejafix_company(company)
+    return {
+        "Authorization": f"Bearer {agent_token(get_agent_name())}",
+        CALLER_COMPANY_HEADER: cid,
+    }
 
 
 def _write(conns: list[ToolConnection]) -> None:

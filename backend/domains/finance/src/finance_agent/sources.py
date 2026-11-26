@@ -33,7 +33,7 @@ from typing import Any, Protocol
 import httpx
 from pydantic import ValidationError
 
-from ax_agent_template import call_agent
+from ax_agent_template import call_agent, company_scope, tool_connections
 from ax_agent_template.config import agent_url
 from ax_agent_template.services import route_target
 from ax_contracts.data_access.orchestrator_incidents import OrchestratorIncident
@@ -402,9 +402,9 @@ class LiveSources:
         # (사건, 구간) → 지금 데이터분석에 묻는 중인 요청의 결과
         self._impact_inflight: dict[tuple[str, str], asyncio.Future[Impact | None]] = {}
         self._headcount_cache: dict[str, tuple[float, TeamHeadcountOutput | None]] = {}
-        # 총괄 사건 목록: (받은 시각, 본문)과 지금 받는 중인 요청
-        self._incident_list: tuple[float, Any] | None = None
-        self._incident_list_inflight: asyncio.Future[Any] | None = None
+        # 총괄 사건 목록: 회사 → (받은 시각, 본문)과 지금 받는 중인 요청 (회사마다 따로, 11/26)
+        self._incident_list: dict[str, tuple[float, Any]] = {}
+        self._incident_list_inflight: dict[str, asyncio.Future[Any]] = {}
 
     async def book_issue_report(
         self, meta: RequestMeta, product_ids: list[str]
@@ -470,11 +470,13 @@ class LiveSources:
         """기억해 둔 그 달 인원을 버린다. 다음 조회는 인사에 다시 묻는다."""
         self._headcount_cache.pop(month, None)
 
-    async def _read_json(self, url: str, timeout: float) -> Any | None:
+    async def _read_json(
+        self, url: str, timeout: float, headers: dict[str, str] | None = None
+    ) -> Any | None:
         """읽기 전용 GET. 응답이 없거나 200이 아니거나 JSON이 아니면 None (fail-closed)."""
         client = self._http or httpx.AsyncClient()
         try:
-            response = await client.get(url, timeout=timeout)
+            response = await client.get(url, timeout=timeout, headers=headers)
         except httpx.HTTPError:
             return None
         finally:
@@ -491,20 +493,34 @@ class LiveSources:
         """총괄 사건 목록 본문. `INCIDENT_LIST_SECONDS` 동안 기억하고, 받는 중이면 같이 기다린다.
 
         못 받은 결과(None)는 기억하지 않는다(다음 요청이 다시 묻는다).
+
+        회사(11/26): 지금 요청 회사의 사건만 읽는다(에이전트 토큰 + `X-AX-Company`). 예전에는 회사를
+        싣지 않아 누비투어 화면도 총괄 기본 회사(캣북스) 사건으로 장애 비용을 셈했다. 화면 HTTP에서
+        회사가 비면 캣북스 세션이다(`SessionCompanyScope`는 캣북스 세션에 회사를 걸지 않는다).
+        토큰이 없으면 캣북스만 예전처럼 머리 없이 읽고, 다른 회사는 확인할 수 없음(None)이다.
+        기억도 회사마다 따로다.
         """
-        cached = self._incident_list
+        company = company_scope.scope_id(company_scope.active())
+        try:
+            headers: dict[str, str] | None = tool_connections.company_agent_headers(company)
+        except RuntimeError:
+            if company != company_scope.CATBOOKS:
+                return None  # 토큰 없이는 그 회사 사건만 골라 읽을 수 없다
+            headers = None
+        cached = self._incident_list.get(company)
         if cached and time.monotonic() - cached[0] < INCIDENT_LIST_SECONDS:
             return cached[1]
-        if self._incident_list_inflight is not None:
-            return await asyncio.shield(self._incident_list_inflight)
+        inflight = self._incident_list_inflight.get(company)
+        if inflight is not None:
+            return await asyncio.shield(inflight)
         fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
-        self._incident_list_inflight = fut
+        self._incident_list_inflight[company] = fut
         try:
             body = await self._read_json(
-                f"{agent_url('orchestrator')}/api/incidents", ORCHESTRATOR_CALL_SECONDS
+                f"{agent_url('orchestrator')}/api/incidents", ORCHESTRATOR_CALL_SECONDS, headers
             )
             if body is not None:
-                self._incident_list = (time.monotonic(), body)
+                self._incident_list[company] = (time.monotonic(), body)
             fut.set_result(body)
             return body
         except BaseException as exc:
@@ -512,7 +528,7 @@ class LiveSources:
             fut.exception()  # 같이 기다린 쪽이 없어도 "가져가지 않은 예외" 경고가 나지 않게
             raise
         finally:
-            self._incident_list_inflight = None
+            self._incident_list_inflight.pop(company, None)
 
     async def incident_window(self, context_id: str) -> dict[str, Any] | None:
         """총괄 사건 목록에서 이 사건의 구간·부품을 읽는다 (읽기 전용, 상태를 바꾸지 않음).

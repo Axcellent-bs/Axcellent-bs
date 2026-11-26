@@ -130,7 +130,7 @@ class DejaFixIncidentSource:
         self, dep: Deployment, window_from: datetime, window_to: datetime
     ) -> list[Signal]:
         try:
-            # dejafix-proxy는 호출자 토큰을 확인한다. 토큰이 없으면 부르지 않는다
+            # 프록시는 토큰·회사를 본다. 토큰·요청 회사가 없으면 부르지 않는다(캣북스로 안 떨어짐)
             headers = tool_connections.dejafix_proxy_headers()
         except RuntimeError as exc:
             raise SignalUnavailable(f"dejafix-proxy 토큰 없음: {exc}") from exc

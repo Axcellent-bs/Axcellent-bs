@@ -12,8 +12,8 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from ax_agent_template import events
-from ax_contracts.schemas import EventType
+from ax_agent_template import company_scope, events, tool_connections
+from ax_contracts.schemas import EventEnvelope, EventType
 from infra_agent import dejafix_watch
 from infra_agent.chat import facts
 
@@ -54,8 +54,10 @@ def _client(rows: list[dict], seen: list[str] | None = None) -> httpx.AsyncClien
 
 @pytest.fixture(autouse=True)
 def _reset():
+    """요청 회사는 캣북스(DejaFix는 회사 없이 부르지 않는다, 11/26). 회사 없는 길은 따로 본다."""
     dejafix_watch.reset_published()
-    yield
+    with company_scope.using(company_scope.CATBOOKS):
+        yield
     dejafix_watch.reset_published()
 
 
@@ -78,6 +80,7 @@ def test_fetch_sends_agent_token(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         auth.append(request.headers.get("authorization"))
+        auth.append(request.headers.get("x-ax-company"))
         return httpx.Response(200, json={"data": []})
 
     async def go():
@@ -85,7 +88,7 @@ def test_fetch_sends_agent_token(monkeypatch: pytest.MonkeyPatch) -> None:
             return await dejafix_watch.fetch_problems(URL, client)
 
     assert asyncio.run(go()) == []
-    assert auth == ["Bearer tok-infra"]
+    assert auth == ["Bearer tok-infra", "catbooks"]  # 요청 회사도 싣는다
 
 
 def test_tagged_problem_is_sent_to_orchestrator() -> None:
@@ -250,7 +253,7 @@ def test_run_forever_skips_round_without_url(caplog: pytest.LogCaptureFixture) -
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(dejafix_watch.asyncio, "sleep", fake_sleep)
             mp.setattr(dejafix_watch, "run_once", _forbidden(seen))
-            await dejafix_watch.run_forever(lambda: None, interval=7)
+            await dejafix_watch.run_forever(lambda _cid: None, interval=7)
 
     def _forbidden(calls: list[str]):
         async def boom(*args, **kwargs):
@@ -364,3 +367,118 @@ def test_detail_error_waits_for_next_round() -> None:
 def test_untagged_incident_never_gets_recovery() -> None:
     rounds, details = _rounds([[_incident(8)], [], []], _resolved_detail(8))
     assert all(r == [] for r in rounds) and details == []
+
+
+# ---------------------------------------------------------------- 회사별 (11/26)
+
+NUBI = "c-cf2f0d"
+
+
+def _company_client(per_company: dict[str, list[dict] | None], calls: list[str | None]):
+    """회사(`X-AX-Company`)마다 다른 목록. None이면 그 회사 Zabbix 연결 전(프록시 503)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        company = request.headers.get("X-AX-Company")
+        calls.append(company)
+        rows = per_company.get(company or "")
+        if rows is None:
+            return httpx.Response(
+                503, json={"error": {"code": "DEJAFIX_NOT_CONNECTED", "message": "연결 전"}}
+            )
+        return httpx.Response(200, json={"data": rows, "meta": {"next_cursor": None}})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def test_no_company_does_not_call_dejafix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """요청 밖이고 회사를 주지 않으면 부르지 않는다(캣북스로 떨어지지 않는다)."""
+    monkeypatch.setenv("INFRA_TOKEN", "tok-infra")
+    calls: list[str | None] = []
+
+    async def go():
+        async with _company_client({"catbooks": [_incident(1, tags=PAYMENT)]}, calls) as client:
+            token = company_scope._ACTIVE.set(None)  # 요청 밖(스스로 도는 루틴)
+            try:
+                with pytest.raises(tool_connections.DejafixNoCompany):
+                    await dejafix_watch.fetch_problems(URL, client)
+                with pytest.raises(tool_connections.DejafixNoCompany):
+                    await dejafix_watch.run_once(URL, NOW, client)
+            finally:
+                company_scope._ACTIVE.reset(token)
+
+    asyncio.run(go())
+    assert calls == []
+
+
+def test_each_company_is_read_with_its_own_company(monkeypatch: pytest.MonkeyPatch) -> None:
+    """회사마다 그 회사로 부르고, 그 회사 장애는 그 회사(tenant_id)로 총괄에 알린다."""
+    monkeypatch.setenv("INFRA_TOKEN", "tok-infra")
+    calls: list[str | None] = []
+    rows = {"catbooks": [_incident(1, tags=PAYMENT)], NUBI: [_incident(1, tags=PAYMENT)]}
+
+    async def go():
+        async with _company_client(rows, calls) as client:
+            cat = await dejafix_watch.run_once(URL, NOW, client, company="catbooks")
+            nubi = await dejafix_watch.run_once(URL, NOW, client, company=NUBI)
+            return cat, nubi
+
+    cat, nubi = asyncio.run(go())
+    assert calls == ["catbooks", NUBI]
+    assert [e.idempotency_key for e in cat] == ["infra.anomaly_detected:dejafix:1"]  # 예전 그대로
+    assert cat[0].tenant_id == EventEnvelope.model_fields["tenant_id"].default
+    assert [e.idempotency_key for e in nubi] == [f"infra.anomaly_detected:dejafix:{NUBI}:1"]
+    assert nubi[0].tenant_id == NUBI  # 같은 장애 id라도 회사가 다르면 따로 알린다
+
+
+def test_run_forever_skips_company_without_zabbix(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Zabbix 연결 전인 회사는 그 회사만 조용히 건너뛰고, 다른 회사는 읽는다."""
+    monkeypatch.setenv("INFRA_TOKEN", "tok-infra")
+    calls: list[str | None] = []
+    sent: list[str] = []
+    real_run_once = dejafix_watch.run_once
+
+    async def fake_sleep(_seconds: float) -> None:
+        raise asyncio.CancelledError
+
+    async def go():
+        async with _company_client({"catbooks": [_incident(1, tags=PAYMENT)]}, calls) as client:
+
+            async def run_once(url, now, client_=None, components=None, company=None):
+                out = await real_run_once(url, now, client, components=components, company=company)
+                sent.extend(e.idempotency_key for e in out)
+                return out
+
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr(dejafix_watch.asyncio, "sleep", fake_sleep)
+                mp.setattr(dejafix_watch, "run_once", run_once)
+                await dejafix_watch.run_forever(
+                    lambda _cid: URL, interval=7, companies=lambda: [NUBI, "catbooks"]
+                )
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(go())
+    assert calls == [NUBI, "catbooks"]
+    assert sent == ["infra.anomaly_detected:dejafix:1"]
+    assert not caplog.records  # 연결 전은 경고가 아니다
+
+
+def test_chat_facts_company_without_zabbix_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """대화 사실도 그 회사 것만: 연결 전이면 연결 전(캣북스 장애로 채우지 않는다)."""
+    monkeypatch.setenv("INFRA_TOKEN", "tok-infra")
+    monkeypatch.setenv("INFRA_DEJAFIX_URL", URL)
+    seen: list[str | None] = []
+
+    async def fake_fetch(url, client=None, company=None):
+        seen.append(company_scope.active())
+        raise dejafix_watch.DejafixNotConnected("연결 전")
+
+    monkeypatch.setattr(dejafix_watch, "fetch_problems", fake_fetch)
+    with company_scope.using(NUBI):
+        got = asyncio.run(facts.collect())["dejafix_problems"]
+    assert got == {"configured": False, "problems": []}
+    assert seen == [NUBI]

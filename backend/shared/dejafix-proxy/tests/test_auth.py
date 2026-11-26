@@ -43,7 +43,8 @@ def _app(up: Upstream):
 
 
 def _client(up: Upstream, token: str | None = AGENT_TOKEN) -> httpx.AsyncClient:
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    # 회사 없이 부르면 연결 전이다(11/26). 이 시험들은 경로·토큰을 보므로 회사를 싣는다
+    headers = {"Authorization": f"Bearer {token}", "X-AX-Company": "catbooks"} if token else {}
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=_app(up)), base_url="http://proxy", headers=headers
     )
@@ -65,7 +66,11 @@ async def _raw_get(up: Upstream, raw_path: bytes, token: str = AGENT_TOKEN) -> t
         "raw_path": path,
         "query_string": query,
         "root_path": "",
-        "headers": [(b"host", b"proxy"), (b"authorization", f"Bearer {token}".encode())],
+        "headers": [
+            (b"host", b"proxy"),
+            (b"authorization", f"Bearer {token}".encode()),
+            (b"x-ax-company", b"catbooks"),  # 회사 없이 부르면 연결 전이다(11/26)
+        ],
         "client": ("127.0.0.1", 1),
         "server": ("proxy", 80),
     }

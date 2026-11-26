@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from ax_agent_template import call_agent, pinned_http
+from ax_agent_template import call_agent, pinned_http, tool_connections
 from ax_agent_template.company_connection import shop_api_override
 from ax_agent_template.config import agent_token, agent_url, is_mock
 from ax_agent_template.config import shop_api_url as company_shop_api_url
@@ -153,8 +153,15 @@ async def orchestrator_opened_at(context_id: str) -> str | None:
     if is_mock("infra"):
         return None
     try:
+        # 그 회사 사건만(11/26). 회사·토큰이 없으면 부르지 않는다(캣북스 사건으로 떨어지지 않게)
+        headers = tool_connections.company_agent_headers()
+    except RuntimeError:
+        return None
+    try:
         async with httpx.AsyncClient(timeout=ORCHESTRATOR_TIMEOUT_SECONDS) as client:
-            response = await client.get(f"{agent_url('orchestrator')}/api/incidents")
+            response = await client.get(
+                f"{agent_url('orchestrator')}/api/incidents", headers=headers
+            )
         response.raise_for_status()
         rows = response.json().get("data") or []
     except (httpx.HTTPError, ValueError):
