@@ -45,6 +45,76 @@
       box.querySelectorAll("video").forEach(function (v) { if (v !== e.target) v.pause(); });
     }, true);
   });
+  // 사람이 골라 승인한 마케팅 영상(최대 3개): 목록을 읽어 카드를 만든다. 없거나 못 읽으면 칸은 그대로 숨는다.
+  // 글은 textContent로만 넣고, 파일 이름은 정해진 모양만 받는다
+  var FEED_FILE = /^pm-[0-9a-f]+-[0-9a-f]+(-sheet|-board)?\.(mp4|jpg|jpeg|png|webp)$/;
+  var el = function (tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text) node.textContent = text;
+    return node;
+  };
+  var feedCard = function (item, base, labels) {
+    var file = function (name) { return typeof name === "string" && FEED_FILE.test(name) ? base + name : null; };
+    var src = file(item.video);
+    if (!src || !item.title) return null;
+    var card = el("article", "vpost mk-card");
+    var media = el("div", "vpost-media");
+    var video = el("video");
+    var poster = file(item.poster);
+    video.controls = true;
+    video.setAttribute("playsinline", "");
+    video.setAttribute("aria-label", item.title);
+    video.preload = poster ? "none" : "metadata";
+    if (poster) video.poster = poster;
+    video.src = poster ? src : src + "#t=0.1";
+    media.appendChild(video);
+    media.appendChild(el("span", "ai-mark", labels.ai));
+    card.appendChild(media);
+    card.appendChild(el("h3", "", item.title));
+    var badges = el("p", "badges");
+    if (item.customer) badges.appendChild(el("span", "badge", item.customer));
+    if (item.seconds > 0) badges.appendChild(el("span", "mk-len", Math.round(item.seconds) + labels.seconds));
+    card.appendChild(badges);
+    var made = el("div", "mk-made");
+    ["sheet", "board"].forEach(function (key) {
+      var url = file(item[key]);
+      if (!url) return;
+      var link = el("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      var img = el("img");
+      img.src = url;
+      img.alt = item.title + " " + labels[key];
+      img.loading = "lazy";
+      link.appendChild(img);
+      link.appendChild(el("span", "", labels[key]));
+      made.appendChild(link);
+    });
+    if (made.children.length) card.appendChild(made);
+    return card;
+  };
+  document.querySelectorAll(".mk-feed").forEach(function (box) {
+    if (!window.fetch) return;
+    var url = box.getAttribute("data-feed");
+    var base = url.slice(0, url.lastIndexOf("/") + 1);
+    var labels = JSON.parse(box.getAttribute("data-labels"));
+    fetch(url, { cache: "no-cache" })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (body) {
+        var grid = el("div", "vposts mk-grid mk-three");
+        ((body && body.items) || []).slice(0, 3).forEach(function (item) {
+          var card = feedCard(item, base, labels);
+          if (card) grid.appendChild(card);
+        });
+        if (!grid.children.length) return;
+        box.appendChild(grid);
+        box.hidden = false;
+        box.parentElement.hidden = false;
+      })
+      .catch(function () {});
+  });
   // 지금 보고 있는 구역을 메뉴에 표시한다
   if (nav && "IntersectionObserver" in window) {
     var links = {};

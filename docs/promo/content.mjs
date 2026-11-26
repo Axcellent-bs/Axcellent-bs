@@ -244,6 +244,10 @@ export default {
       lead: "AXcellent 마케팅 AI가 만든 세로 영상입니다. 시연용 가상 고객사와 시연 환경 기준입니다.",
       itemsFirst: 4,
       items: [],
+      // 마케팅 AI 제작 기록에서 사람이 골라 승인한 영상 목록(최대 3개, 11/26). 서버가 이 주소에 목록과 파일을 쓴다.
+      // 목록이 없거나 비어 있으면 아무것도 안 보인다. 비우면("") 읽지 않는다
+      feed: "feed/videos.json",
+      feedLabels: { ai: "AI가 만든 영상", sheet: "캐릭터 시트", board: "스토리보드", seconds: "초" },
       process: null,
       processTitle: "이렇게 만들었어요",
       processNote: "대표 사례 하나",
