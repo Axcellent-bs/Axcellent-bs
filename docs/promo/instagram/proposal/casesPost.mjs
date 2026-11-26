@@ -13,7 +13,9 @@
 const KIND = { video: "▶ 릴스", carousel: "여러 장" };
 
 export function casesPost(p, { esc, has, metricsHtml }) {
-  const kind = KIND[p.type] ? `<span class="post-kind">${KIND[p.type]}</span>` : "";
+  // 대표 그림만 두는 릴스(type "image")도 원본 주소가 /reel/이면 릴스 표시를 붙인다
+  const label = KIND[p.type] || (String(p.permalink || "").includes("/reel/") ? KIND.video : "");
+  const kind = label ? `<span class="post-kind">${label}</span>` : "";
   const ai = p.aiGenerated ? `<span class="post-ai-on">AI가 만든 게시물</span>` : "";
   const img = `<img src="${esc(p.img)}" alt="${esc(p.alt || "")}" loading="lazy">${kind}${ai}`;
   const thumb = has(p.permalink)
