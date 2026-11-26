@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ax_agent_template import pose_render
 from ax_agent_template.company_ai import settings_for
-from ax_agent_template.llm import LLMClient, LLMFormatError
+from ax_agent_template.llm import LLMClient, LLMFormatError, LLMResponseError
 from ax_contracts.schemas.planning import KeyPose, VideoPlan
 
 log = logging.getLogger(__name__)
@@ -195,11 +195,38 @@ MODEL_ENV: Final = "PLANNING_SVG_LLM_MODEL"
 
 
 def pose_llm(llm: Any) -> Any:
-    """포즈를 받을 LLM. `PLANNING_SVG_LLM_MODEL`이 있으면 그 모델만 바꾼 기획 LLM."""
+    """포즈를 받을 LLM. `PLANNING_SVG_LLM_MODEL`이 있으면 그 모델만 바꾼 기획 LLM.
+
+    11/26 C: 포즈 출력(장면 × 첫·끝 포즈)이 커서 60초(LLMClient 기본 httpx 타임아웃)를 넘겨
+    `ReadTimeout`으로 끊겼다 → 이 호출만 httpx 타임아웃을 `TIMEOUT_SECONDS`로. 모델 env가 없을
+    때도 같은 기획 설정으로 새 클라이언트를 만든다(제작안 본 호출의 타임아웃은 그대로).
+    가짜 LLM(시험)은 그대로 쓴다."""
+    if llm is None:
+        return None
     model = os.getenv(MODEL_ENV, "").strip()
-    if llm is None or not model:
-        return llm
-    return LLMClient("planning", settings=replace(settings_for("planning"), model=model))
+    if model:
+        return LLMClient("planning", settings=replace(settings_for("planning"), model=model),
+                         timeout=TIMEOUT_SECONDS)  # fmt: skip
+    if type(llm) is LLMClient:
+        return LLMClient(llm.dept, settings=llm.settings, timeout=TIMEOUT_SECONDS)
+    return llm
+
+
+_CALL_FAILED = re.compile(r"호출 실패: ([A-Za-z][A-Za-z0-9_]*)")
+
+
+def failure_detail(exc: BaseException) -> str:
+    """계약 svg_detail: 예외 종류 이름. LLMResponseError면 HTTP 코드("LLMResponseError_429")나
+    httpx 예외 이름("LLMResponseError_ReadTimeout")을 붙인다 ([A-Za-z0-9_], 40자)."""
+    name = type(exc).__name__
+    if isinstance(exc, LLMResponseError):
+        status = getattr(exc, "status_code", None)
+        m = _CALL_FAILED.search(str(exc))
+        if isinstance(status, int):
+            name = f"{name}_{status}"
+        elif m:
+            name = f"{name}_{m.group(1)}"
+    return name[:40]
 
 
 def _cut(text: Any, n: int) -> str:
@@ -288,9 +315,9 @@ async def draw(
             TIMEOUT_SECONDS,
         )  # fmt: skip
     except Exception as exc:  # noqa: BLE001 - 포즈·SVG 없이 제작안 그대로
-        log.warning("마네킹 콘티 포즈 실패: %s %.1fs 0/%d장면", type(exc).__name__,
+        log.warning("마네킹 콘티 포즈 실패: %s %.1fs 0/%d장면", failure_detail(exc),
                     time.monotonic() - started, len(plan.scenes))  # fmt: skip
-        return _failed(plan, svg_reason_of(exc), type(exc).__name__)
+        return _failed(plan, svg_reason_of(exc), failure_detail(exc))
     out, changed = apply(plan, got, only)
     elapsed = time.monotonic() - started
     if not changed:
