@@ -409,7 +409,42 @@ async def finance_figures(
     return await finance_counts(asker, start, end)
 
 
-async def shop_counts(source: MetricSource, piece: tuple[date, date]) -> CompanyCounts:
+def _other_company(tenant_id: str | None) -> bool:
+    """캣북스가 아닌 회사인지 (캣북스는 지금처럼 카탈로그 지표로 센다)."""
+    from ax_agent_template import company_scope
+    from ax_agent_template.companies import canonical_company_id
+
+    if not tenant_id:
+        return False
+    return canonical_company_id(tenant_id) not in (None, company_scope.CATBOOKS)
+
+
+NO_PAYMENT_ATTEMPTS = "이 회사 사이트에서 결제 시도·실패 기록을 받지 않아 결제 성공률을 셀 수 없음"
+NO_SALES_YET = "이 회사 판매 기록을 아직 끝까지 받은 적이 없어 주문 수를 셀 수 없음"
+
+
+def sales_counts(tenant_id: str, start: datetime, end: datetime) -> CompanyCounts:
+    """그 회사 판매 기록으로 센 주문 수(접수, 상태 무관). 결제 시도·실패는 받지 않는 값(None).
+
+    판매 기록을 끝까지 받은 적이 없으면 0이 아니라 확인할 수 없음이다."""
+    from data_agent.handlers import get_sales_store
+
+    store = get_sales_store()
+    try:
+        if store.sync_state(tenant_id).last_synced_at is None:
+            return CompanyCounts(orders=None, attempts=None, failed=None, shop_reason=NO_SALES_YET)
+        created, _paid = store.order_counts(tenant_id, start, end)
+    except Exception as error:  # noqa: BLE001 - 보조 숫자라 이유를 남기고 화면은 연다
+        reason = f"판매 기록을 읽지 못함 ({type(error).__name__})"
+        return CompanyCounts(orders=None, attempts=None, failed=None, shop_reason=reason)
+    return CompanyCounts(
+        orders=float(created), attempts=None, failed=None, shop_reason=NO_PAYMENT_ATTEMPTS
+    )
+
+
+async def shop_counts(
+    source: MetricSource, piece: tuple[date, date], tenant_id: str | None = None
+) -> CompanyCounts:
     """한 구간의 거래량(캣북스: 주문 수)·거래 시도·실패 (커넥터의 5분 버킷 합).
 
     거래량은 카탈로그 `volume_metric`, 거래 시도는 커넥터 `transactions_volume`(주지 않으면 첫 비율
@@ -419,6 +454,12 @@ async def shop_counts(source: MetricSource, piece: tuple[date, date]) -> Company
     cat = catalog.current()
     conn = as_connector(source)
     rate = next((m for m in cat.metrics if m.denominator), None)
+    if (rate is None or rate.denominator is None) and _other_company(tenant_id):
+        # 결제 비율 지표가 없는 회사(사이트 변환기로 연결한 회사, 공통 카탈로그):
+        # 변환기는 5분 지표를 주지 않는다. 주문 수는 그 회사 판매 기록에서 세고,
+        # 결제 성공률은 사이트가 주지 않는 값이라 그 이유를 적는다
+        # (11/26 누비투어 데이터 홈 "확인할 수 없음")
+        return await asyncio.to_thread(sales_counts, tenant_id, start, end)
     if cat.volume_metric is None or rate is None or rate.denominator is None:
         reason = f"카탈로그에 거래량·비율 지표가 없어 {cat.name} 거래 수를 셀 수 없음"
         return CompanyCounts(orders=None, attempts=None, failed=None, shop_reason=reason)
@@ -456,7 +497,7 @@ async def live_counts(
     skip = skip_finance or set()
     runs = _runs([d for piece in pieces for d in _days(*piece)])
     read = await asyncio.gather(*(_logs(logs, run, tenant_id) for run in runs))
-    shops = await asyncio.gather(*(shop_counts(metrics, piece) for piece in pieces))
+    shops = await asyncio.gather(*(shop_counts(metrics, piece, tenant_id) for piece in pieces))
     finances = await asyncio.gather(
         *(_no_finance() if piece in skip else finance_counts(asker, *piece) for piece in pieces)
     )
