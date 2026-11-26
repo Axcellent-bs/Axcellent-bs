@@ -77,3 +77,14 @@ per_head_monthly = 100000
 # 11/23 새 서버의 게시 계정(MARKETING_IG_USER_ID가 가리키는 계정)을 Graph 읽기로 확인해 넣었다.
 [instagram]
 publish_username = "catbooks.lab"
+
+# 영상 성과 깊게 읽기 (11/26). 값은 사람이 넣는다. 비어 있으면 그 출처는 건너뛴다 (지어내지 않는다)
+# 유튜브 채널 id (UC로 시작). 위 youtube(키워드 파일)와 이름이 겹쳐 [youtube_channel]에 둔다
+[youtube_channel]
+channel_id = ""
+
+# 광고 계정 (읽기만). google_customer_id: 구글 애즈 고객 번호(숫자 10자리, - 없이),
+# meta_ad_account_id: 메타 광고 계정 번호(act_ 없이 숫자)
+[ads]
+google_customer_id = ""
+meta_ad_account_id = ""

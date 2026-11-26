@@ -42,6 +42,7 @@ CAT = {"AX_TENANT": "catbooks"}  # 캣북스를 고른 설치 (기본값은 없�
         TENANTS / "catbooks",
         TENANTS / "nubi",
         TENANTS / "studyon",
+        TENANTS / "axcellent",
         FAKE_TENANTS / "coldchain",
     ],
     ids=lambda p: p.name,
@@ -205,3 +206,49 @@ def test_studyon_uses_its_own_catalog_and_reads_through_the_site_adapter() -> No
         "refund_amount",
     }
     assert catalog.impact.customer_label == "수강생"
+
+
+def _raw(name: str) -> dict:
+    import tomllib
+
+    with (TENANTS / name / "tenant.toml").open("rb") as f:
+        return tomllib.load(f)
+
+
+def test_axcellent_is_our_own_company_without_a_shop() -> None:
+    """AXcellent(자사, 11/26): 자사 홍보 영상용. 쇼핑몰이 없어 틀 기본 카탈로그·커넥터 형식만
+    따른다."""
+    tenant = tenant_env.read_tenant(TENANTS / "axcellent")
+    assert tenant["name"] == "AXcellent" and tenant["catalog"] == "common"
+    assert Path(tenant["trends"]).is_file() and Path(tenant["youtube"]).is_file()
+    head = (TENANTS / "axcellent" / "tenant.toml").read_text(encoding="utf-8").splitlines()[0]
+    assert head.startswith("# 자사:")
+    raw = _raw("axcellent")
+    assert raw["profile"]["about"] == "회사 업무를 부서별 AI 에이전트가 나눠 맡는 AX 솔루션 회사"
+    assert raw["brand"] == {}  # 브랜드는 기본값
+    from ax_agent_template import tenant as tenants
+
+    tenants._cache.clear()  # noqa: SLF001
+    listed = {t["id"]: t["name"] for t in tenants.list_tenants()}
+    assert listed.get("axcellent") == "AXcellent"
+
+
+@pytest.mark.parametrize("name", ["catbooks", "nubi", "axcellent"])
+def test_channel_and_ad_account_slots_are_empty_until_a_person_fills_them(name: str) -> None:
+    """새 칸 (11/26): 값은 사람이 넣는다(지어내지 않는다). 키워드 파일 칸 youtube와 겹치지 않게
+    채널 id는 [youtube_channel]에 둔다."""
+    raw = _raw(name)
+    assert raw["youtube_channel"] == {"channel_id": ""}
+    assert raw["ads"] == {"google_customer_id": "", "meta_ad_account_id": ""}
+
+
+def test_an_empty_publish_username_skips_that_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """누비투어 [instagram] publish_username 자리는 빈 값: 인스타 성과는 건너뛴다
+    (None = 게시 계정 없음)."""
+    from data_agent.skills import instagram_video
+
+    nubi = (TENANTS / "nubi" / "tenant.toml").as_posix()
+    assert _raw("nubi")["instagram"] == {"publish_username": ""}
+    assert instagram_video.publish_username({"DATA_TENANT_CONFIG": nubi}) is None
+    cat = (TENANTS / "catbooks" / "tenant.toml").as_posix()
+    assert instagram_video.publish_username({"DATA_TENANT_CONFIG": cat}) == "catbooks.lab"

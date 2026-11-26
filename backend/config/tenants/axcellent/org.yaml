@@ -1,0 +1,23 @@
+# AXcellent(자사) 조직도: 업무 → 맡은 부서 (업무 요청 라우터, backend/README.md "업무 요청 라우터")
+#
+# 회사 설정 폴더(config/tenants/axcellent/)의 조직도다. 틀 기본값(config/frame/org.yaml)을 그대로 옮겼다.
+# 기본 명부(members)는 두지 않는다: 인원은 발령 기록·화면으로 채운다(예시 인원을 보여 주지 않는다).
+# 부서 이름은 이 파일에만 둔다. 코드에는 쓰지 않는다.
+
+assignments:
+  # 서비스 단위
+  orchestrator: {unit: 서비스운영}
+  planning: {unit: 기획팀}
+  dev: {unit: 개발팀}
+  incident: {unit: 서비스운영}
+  hosts: {unit: 서비스운영}
+  inquiry: {unit: 고객지원}
+  claims: {unit: 고객지원}
+  settlement: {unit: 고객지원}
+  reviews: {unit: 고객지원}
+  coupon: {unit: 마케팅}
+  finance: {unit: 재무/정산}
+  data: {unit: 데이터분석}
+  handover: {unit: 인사총무}
+  decisions: {unit: 인사총무}
+  org: {unit: 인사총무}
