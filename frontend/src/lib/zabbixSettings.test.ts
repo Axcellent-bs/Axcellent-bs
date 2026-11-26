@@ -38,3 +38,13 @@ test("토큰이 보호되지 않는 연결이면 경고", async () => {
   assert.equal(zabbixInsecure("https://zbx.example/api_jsonrpc.php", true), null);
   assert.equal(zabbixInsecure("", false), null);
 });
+
+test("옛 DejaFix(501 · DEJAFIX_TOO_OLD)일 때만 저장 폼을 숨긴다", async () => {
+  const { ZabbixCallError, zabbixUnsupported } = await import("./zabbixSettings.ts");
+  assert.equal(zabbixUnsupported(new ZabbixCallError("이 DejaFix는 아직 화면에서 Zabbix를 바꾸지 못해요", 501, "DEJAFIX_TOO_OLD")), true);
+  assert.equal(zabbixUnsupported(new ZabbixCallError("x", 501, null)), true);
+  assert.equal(zabbixUnsupported(new ZabbixCallError("x", 200, "DEJAFIX_TOO_OLD")), true);
+  for (const status of [401, 403, 409, 502]) assert.equal(zabbixUnsupported(new ZabbixCallError("x", status, null)), false);
+  assert.equal(zabbixUnsupported(new Error("DejaFix 서버에 연결할 수 없습니다.")), false);
+  assert.equal(zabbixUnsupported(undefined), false);
+});
