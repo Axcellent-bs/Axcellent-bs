@@ -549,13 +549,17 @@ def site_category_codes(
     판매 저장소에서 읽는다. 못 읽으면 빈 목록(다른 회사 값으로 채우지 않는다)."""
     if cfg is None or cfg.categories:
         return []
-    try:
-        if aggregate:
-            return rb.category_codes(tenant_id)
-        return store.category_codes(tenant_id)
-    except Exception:  # noqa: BLE001 - 선택지는 비워 두고 화면은 그대로 연다
-        logger.warning("[segment] 사이트 분류 목록 읽기 실패 (%s)", tenant_id, exc_info=True)
-        return []
+    codes: set[str] = set()
+    # 집계는 판매 기록에 분류 이름이 채워지기 전(변환기 #1882 전)에 만든 날이 있어
+    # 비어 있을 수 있다.
+    # 그 회사 판매 기록에 나온 분류도 같이 본다 (11/26 누비투어 "고를 분류·장르가 아직 없어요")
+    readers = [rb.category_codes, store.category_codes] if aggregate else [store.category_codes]
+    for read in readers:
+        try:
+            codes.update(read(tenant_id))
+        except Exception:  # noqa: BLE001 - 선택지는 비워 두고 화면은 그대로 연다
+            logger.warning("[segment] 사이트 분류 목록 읽기 실패 (%s)", tenant_id, exc_info=True)
+    return sorted(codes)
 
 
 # ---------------------------------------------------------------- segment_profile

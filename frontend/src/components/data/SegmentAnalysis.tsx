@@ -319,7 +319,8 @@ function Who({ options }: { options: OptionsView }) {
 // ---- 2-1) 함께 사는 장르·품목
 
 function Together({ options }: { options: OptionsView }) {
-  const [level, setLevel] = useState<BasketLevel>("genre");
+  // 장르 표가 없는 회사(사이트 변환기로 연결한 회사)는 상품 단위로 시작한다 (11/26)
+  const [level, setLevel] = useState<BasketLevel>(options.targets.some((t) => t.group === "장르") ? "genre" : "product");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [period, setPeriod] = useState<SegmentPeriod>((options.periods.find((p) => p.value === "90d") ?? options.periods[0])?.value as SegmentPeriod ?? "90d");
   const filters = useMemo(() => Object.fromEntries(Object.entries(draft).filter(([, v]) => v)), [draft]);

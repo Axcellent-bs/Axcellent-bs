@@ -74,3 +74,64 @@ label = "성별"
 [sales.attributes.values]
 female = "여성"
 male = "남성"
+
+# 고객 구성 지수(시장 커버)의 인구 통계 (연령대 × 성별, 11/26). 업종과 상관없는 공공 통계라 틀 기본값에 둔다.
+# 출처·코드는 catbooks.toml과 같다: 행정안전부 주민등록인구통계, KOSIS "행정구역(읍면동)별/5세별 주민등록인구"
+#   https://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=DT_1B04005N (코드 확인 2026-11-16 getMeta)
+# 사이트가 연령대·성별을 주지 않는 회사는 구매자 수가 없어 지수를 내지 않는다(다른 회사 값으로 채우지 않는다)
+[[sales.population]]
+attribute_keys = ["age_band", "gender"]
+source_id = "kosis"
+
+[sales.population.table_ref]
+org_id = "101"
+tbl_id = "DT_1B04005N"
+label = "행정안전부 주민등록인구통계(KOSIS)"  # 작성 행정안전부, 제공 KOSIS
+prd_se = "M"
+new_est_prd_cnt = 1
+obj_l1 = "00"
+obj_l2 = "ALL"
+itm_id = "ALL"
+dims = { age_band = "c2", gender = "itm" }
+
+[sales.population.table_ref.codes.age_band]
+10s = ["15", "20"]
+20s = ["25", "30"]
+30s = ["35", "40"]
+40s = ["45", "50"]
+50s_plus = ["55", "60", "65", "70", "75", "80", "85", "90", "95", "100", "105"]
+
+[sales.population.table_ref.codes.gender]
+female = "T4"
+male = "T3"
+
+# 이벤트 종류 (11/26, 업종 무관). 할인율·전환율은 그 회사 지난 캠페인이 없을 때만 쓰는 가정 값이다.
+# 근거: 공개된 업종별 값이 없어 캣북스 기본값(catbooks.toml)과 같은 값을 출발점으로 둔다(판단).
+# 그 회사 캠페인 성과가 쌓이면 지난 결과(past_results)가 이 가정을 대신한다.
+# 배송이 없는 업종(여행·교육)이 있어 무료 배송은 넣지 않는다
+[[sales.event_kinds]]
+code = "bundle_discount"
+label = "묶음 할인"
+discount_rate = 0.10  # 가정
+conversion_low = 0.02  # 가정
+conversion_high = 0.05  # 가정
+
+[[sales.event_kinds]]
+code = "genre_coupon"
+label = "분류 쿠폰"
+discount_rate = 0.15  # 가정
+conversion_low = 0.03  # 가정
+conversion_high = 0.07  # 가정
+
+# 화면의 자주 묻는 질문 칩 (연령대·성별만: 공통 속성)
+[[sales.quick_questions]]
+label = "20대 여성"
+filters = { age_band = "20s", gender = "female" }
+
+[[sales.quick_questions]]
+label = "30대 남성"
+filters = { age_band = "30s", gender = "male" }
+
+[[sales.quick_questions]]
+label = "40대 여성"
+filters = { age_band = "40s", gender = "female" }

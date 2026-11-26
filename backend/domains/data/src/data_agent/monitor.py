@@ -168,7 +168,20 @@ def days_to_snapshot(
             and saved.created_at.astimezone(SNAPSHOT_KST).date() < today
         ):
             todo.append((day, True))  # 확인할 수 없음이 있던 날: 다음 날 한 번만
+        elif _old_catalog_reason(saved.payload):
+            todo.append((day, True))  # 판매 기록으로 셀 수 있게 된 회사의 예전 줄 (11/26)
     return todo
+
+
+# 결제 비율 지표가 없는 회사(공통 카탈로그)는 11/26부터 주문 수를 판매 기록에서 센다.
+# 그 전에 "카탈로그 지표 없음"으로 저장한 날은 한 번 다시 만든다 (캣북스는 이 이유가 나오지 않는다)
+OLD_CATALOG_REASON = "카탈로그에 거래량·비율 지표가 없어"
+
+
+def _old_catalog_reason(payload: dict) -> bool:
+    company = payload.get("company") if isinstance(payload, dict) else None
+    reason = company.get("shop_reason") if isinstance(company, dict) else None
+    return isinstance(reason, str) and reason.startswith(OLD_CATALOG_REASON)
 
 
 async def snapshot_tick(
