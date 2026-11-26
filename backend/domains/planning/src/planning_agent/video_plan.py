@@ -633,6 +633,55 @@ def overlay_safe(
     ]
 
 
+# 11/26 D: 규칙 초안이 떨어져도 말이 되게 (운영 wr_bc24dee53e 누비투어: "원본 일러스트 캐릭터",
+# "'누비투어' 순간에", 2장면 자막이 콘셉트 문장 통째)
+RULE_HERO_KO = "주인공"
+THEME_FALLBACK = "요즘 관심사"
+RULE_CAPTION_MAX = 18
+
+
+def _ga(word: str) -> str:
+    """주격 조사: 받침이 있으면 "이", 없으면 "가" (주인공이 · 회사 캐릭터가)."""
+    last = word.strip()[-1:] if word.strip() else ""
+    if "가" <= last <= "힣":
+        return "이" if (ord(last) - 0xAC00) % 28 else "가"
+    return "가"
+
+
+def company_names() -> list[str]:
+    """비교용 회사 이름 (화면 이름·회사 설정 id, _fold, 두 글자 이상)."""
+    raw = [_company().get("name") or "", tenant.current() or ""]
+    return sorted({_fold(n) for n in raw if len(_fold(n)) >= 2})
+
+
+def _has_company(text: str, names: list[str]) -> bool:
+    folded = _fold(text)
+    return any(n in folded for n in names)
+
+
+def rule_theme(p: Proposal, names: list[str] | None = None) -> str:
+    """규칙 초안 주제. 회사 이름이 주제 자리에 오면 보고서 주제 후보(topic_of) → "요즘 관심사"."""
+    names = company_names() if names is None else names
+    theme = _theme(p)
+    if not _has_company(theme, names):
+        return theme
+    topic = " ".join(_CLEAN.sub(" ", str(topic_of(p)["topic"] or "")).split())[:40]
+    if topic and not _has_company(topic, names) and not prompt_problems(topic):
+        return topic
+    return THEME_FALLBACK
+
+
+def body_caption(text: str, concept: str, names: list[str], *, keep_concept: bool = False) -> str:
+    """본론 장면 자막: 한 줄 18자 안. 회사 이름이 있거나 콘셉트 문장과 같으면 비운다
+    (keep_concept: 훅 장면은 제목 자막을 그대로 둔다)."""
+    one = " ".join((text or "").split())
+    if not one or _has_company(one, names):
+        return ""
+    if not keep_concept and _fold(one) == _fold(concept):
+        return ""
+    return _short(one, RULE_CAPTION_MAX)
+
+
 def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     """재미 먼저, 브랜드는 끝에 (11/24 재현 님).
 
@@ -642,25 +691,38 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     caption: 화면엔 안 넣는다(회사 이름은 엔드카드로 얹는다). 마지막 장면 자막은 늘 비운다."""
     d = duration_of(p)
     b = cast(p)  # 11/26 회사 캐릭터를 골랐으면 그 캐릭터가 주인공
-    who, where, who_ko = b["character_en"], FREE_SETTING_EN, b["character_ko"]  # 배경 묶지 않음
-    theme = _theme(p)
+    who, where = b["character_en"], FREE_SETTING_EN  # 배경 묶지 않음
+    # 11/26 D: 회사 캐릭터를 안 골랐고 회사 설정 주인공도 기본값이면 화면 글은 "주인공" (기본
+    # "원본 일러스트 캐릭터"는 고른 것처럼 읽혔다, 운영 wr_bc24dee53e). 회사가 [brand]에 직접 정한
+    # 주인공(예: 누비투어 "원본 일러스트 여행자")은 그대로. 영어 묘사(who)는 지금 그대로
+    default_ko = tenant.BRAND_DEFAULTS["character_ko"]
+    who_ko = (RULE_HERO_KO if not cast_fields(p) and b["character_ko"] == default_ko
+              else b["character_ko"])  # fmt: skip
+    names = company_names()
+    theme = rule_theme(p, names)
     tone = TONE.get(p.angle or "", "warm and friendly")
     product = _CLEAN.sub(" ", p.products[0]).strip()[:40] if p.products else ""
     company = _company()["name"]
     prop = exposure == PROP and product
+    ideas = [
+        t
+        for t in (_short(idea_of(p), 200), subject_of(p))
+        if not starts_with_product(t, p.products)
+    ]
+    concept = _pick(*ideas, FUN_CONCEPT)
     beats = [
         (
             _pick(
-                f"첫 1초 반전: '{theme}' 순간에 {who_ko}가 깜짝 놀라 돌아본다",
+                f"첫 1초 반전: '{theme}' 순간에 {who_ko}{_ga(who_ko)} 깜짝 놀라 돌아본다",
                 OPEN_VISUAL.format(who_ko),
             ),
-            _pick(subject_of(p), ""),
+            body_caption(_pick(subject_of(p), ""), concept, names, keep_concept=True),
             f"Opening hook in {where}: {who} suddenly freezing, then doing a surprised double take "
             f"toward the camera in the very first second, {tone} mood, themed around {theme}",
         ),
         (
             _pick(f"대상이 좋아하는 소재 '{theme}'로 공감 가는 순간을 보여 준다", AGAIN_VISUAL),
-            _pick(_short(idea_of(p), 60), ""),
+            body_caption(_pick(idea_of(p), ""), concept, names),
             f"A relatable, funny everyday moment about {theme} acted out by {who} with playful "
             f"gestures in {where}, {tone} mood",
         ),
@@ -673,7 +735,7 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
         (
             "마무리: 채널 이름 엔드 카드"
             if exposure == END_CARD
-            else f"마무리: {who_ko}가 손을 흔들며 끝낸다",
+            else f"마무리: {who_ko}{_ga(who_ko)} 손을 흔들며 끝낸다",
             "",  # 회사 이름은 마케팅 코드가 마지막 2초 엔드카드로 얹는다
             "Simple calm plain background with soft light and empty space in the center and "
             "lower area"
@@ -689,12 +751,6 @@ def fun_rule_plan(p: Proposal, exposure: str = END_CARD) -> VideoPlan:
     ]
     scenes = overlay_safe(made, company)
     script = " → ".join(f"{s.start_s}~{s.end_s}초 {s.visual}" for s in scenes)
-    ideas = [
-        t
-        for t in (_short(idea_of(p), 200), subject_of(p))
-        if not starts_with_product(t, p.products)
-    ]
-    concept = _pick(*ideas, FUN_CONCEPT)
     return VideoPlan(
         concept=concept, duration_s=d, script=_short(script, 800), scenes=scenes,
         style=style(b, fixed_setting=False), negative=NEGATIVE, written_by="rule",
