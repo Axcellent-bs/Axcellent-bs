@@ -5077,4 +5077,118 @@ class TrendReportDoneCard(AxModel):
 DataChatCard = TrendRequestCard | TrendReportProgressCard | TrendReportDoneCard
 
 
+# ---------------------------------------------------------------- 영상 깊은 지표 (11/26)
+# 유튜브 분석(YouTube Analytics·Reporting API, 채널 주인 OAuth)과 인스타 인사이트(Graph API)를
+# 받은 그대로 저장한다. 비율·합계 계산은 코드(받은 값으로만), 반올림은 화면. 플랫폼이 값을 안 주면
+# (표본 부족) 비워 두고 이유를 적는다(0으로 채우지 않는다). 토큰 값은 어디에도 넣지 않는다.
+VideoInsightsSourceId = Literal[
+    "youtube_analytics", "youtube_reporting", "instagram_insights", "instagram_audience"
+]
+
+
+class VideoInsightsRequest(AxModel):
+    """video_url 또는 campaign_id(등록된 영상) 중 하나. list_all이면 그 회사 등록 영상 전부.
+
+    저장분만 읽는다(수집은 하루 1번 수집기)."""
+
+    video_url: str | None = Field(default=None, min_length=1, max_length=500)
+    campaign_id: str | None = Field(default=None, min_length=1, max_length=120)
+    list_all: bool = False
+
+    @model_validator(mode="after")
+    def _one_of(self) -> VideoInsightsRequest:
+        if not self.video_url and not self.campaign_id and not self.list_all:
+            raise ValueError("video_url 또는 campaign_id가 있어야 한다 (전부 보기는 list_all)")
+        return self
+
+
+class VideoInsightsWatch(AxModel):
+    """시청 값 (받은 그대로). 유튜브: Analytics API 영상별. 인스타: 미디어 인사이트."""
+
+    views: int | None = Field(default=None, ge=0)
+    avg_view_seconds: float | None = Field(default=None, ge=0)  # averageViewDuration · 릴스 평균
+    avg_view_percent: float | None = Field(default=None, ge=0)  # averageViewPercentage (%)
+    watch_minutes: float | None = Field(default=None, ge=0)  # estimatedMinutesWatched
+    likes: int | None = Field(default=None, ge=0)
+    shares: int | None = Field(default=None, ge=0)
+    subscribers_gained: int | None = Field(default=None, ge=0)
+    # 인스타 미디어 인사이트 (유튜브는 비움)
+    reach: int | None = Field(default=None, ge=0)
+    saved: int | None = Field(default=None, ge=0)
+    total_interactions: int | None = Field(default=None, ge=0)
+    source: str = Field(default="", max_length=40)  # youtube_analytics · youtube_reporting · …
+
+
+class VideoInsightsRetentionPoint(AxModel):
+    """유지 곡선 한 점: 영상 길이 비율(0~1)에서 그 순간 본 비율(audienceWatchRatio, 받은 그대로)."""
+
+    ratio: float = Field(ge=0, le=1)
+    watch_ratio: float = Field(ge=0)
+
+
+class VideoInsightsTraffic(AxModel):
+    """유입 경로 한 줄. share는 코드 계산(그 줄 조회 ÷ 유입 경로 조회 합계)."""
+
+    source: str = Field(min_length=1, max_length=60)  # insightTrafficSourceType 그대로
+    views: int = Field(ge=0)
+    share: float | None = Field(default=None, ge=0, le=1)
+    ad: bool = False  # ADVERTISING = 광고
+
+
+class VideoInsightsAudience(AxModel):
+    """시청층 한 칸 (연령대 × 성별). percent: viewerPercentage 그대로 · 인스타는 코드 비율(%)."""
+
+    age: str = Field(default="", max_length=20)  # age18-24 · 18-24 (받은 그대로)
+    gender: str = Field(default="", max_length=20)  # male · female · F · M · U
+    percent: float = Field(ge=0, le=100)
+
+
+class VideoInsightsReach(AxModel):
+    """노출·클릭률 (유튜브 Reporting channel_reach_basic_a1). 합계·가중 평균은 코드."""
+
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = Field(default=None, max_length=200)  # 예약 필요 · 리포트 기다리는 중
+    impressions: int | None = Field(default=None, ge=0)  # video_thumbnail_impressions 합계
+    # video_thumbnail_impressions_ctr를 노출로 가중 평균 (리포트 단위 그대로)
+    ctr: float | None = Field(default=None, ge=0)
+    period: str | None = Field(default=None, max_length=40)  # 리포트 날짜 "<from>~<to>"
+
+
+class VideoInsightsSource(AxModel):
+    """출처 연결 상태 한 줄 (화면 "출처 연결 상태" 표). 토큰 값·일부 글자 없음 (env 이름만)."""
+
+    source: VideoInsightsSourceId
+    status: Literal["connected", "waiting", "check"]  # 연결됨 · 연결 대기 · 권한·설정 확인
+    reason: str | None = Field(default=None, max_length=200)
+    needs: list[str] = Field(default_factory=list, max_length=8)  # 필요한 것 (env 이름·권한)
+
+
+class VideoInsightsOutput(AxModel):
+    """영상 하나의 깊은 지표 (list_all이면 videos에 영상마다 같은 모양, 위 칸은 비움)."""
+
+    schema_version: str = "video_insights.v1"
+    platform: VideoPlatform | None = None
+    video_key: str | None = Field(default=None, max_length=80)  # 플랫폼:영상 id (video_performance)
+    video_id: str | None = Field(default=None, max_length=80)
+    video_url: str | None = Field(default=None, max_length=500)
+    campaign_id: str | None = Field(default=None, max_length=120)
+    status: Literal["known", "unknown"] = "unknown"
+    reason: str | None = Field(default=None, max_length=200)
+    as_of: dt.date | None = None  # 데이터 기준 날짜 (그날까지의 값)
+    collected_at: UtcDatetime | None = None  # 저장한 시각
+    watch: VideoInsightsWatch | None = None
+    retention: list[VideoInsightsRetentionPoint] = Field(default_factory=list, max_length=20)
+    traffic: list[VideoInsightsTraffic] = Field(default_factory=list, max_length=30)
+    ad_share: float | None = Field(default=None, ge=0, le=1)  # 광고 유입 비율 (코드)
+    audience: list[VideoInsightsAudience] = Field(default_factory=list, max_length=60)
+    audience_basis: Literal["video", "account"] | None = None  # account = 계정 기준 (인스타)
+    audience_reason: str | None = Field(default=None, max_length=200)  # 표본 부족 등
+    reach: VideoInsightsReach | None = None
+    needs: list[VideoInsightsSource] = Field(default_factory=list, max_length=8)
+    facts: list[DataFact] = Field(default_factory=list)
+    summary: str = Field(default="", max_length=300)
+    videos: list[VideoInsightsOutput] = Field(default_factory=list)
+
+
 TrendInsight.model_rebuild()
+VideoInsightsOutput.model_rebuild()

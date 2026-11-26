@@ -49,6 +49,7 @@ def test_card_validates(card: AgentCard) -> None:
         "answer_planning_question",
         "campaign_effect",
         "video_performance",
+        "video_insights",
         "campaign_result",
         "receive_idea_report",
         "list_idea_reports",
