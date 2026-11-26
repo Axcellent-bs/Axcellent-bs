@@ -2334,11 +2334,29 @@ def _promo_done(request: AgentRequest, item: dict[str, Any]) -> AgentResult:
     )
 
 
+_PLATFORM_DONE_STATUS = {
+    # "이미 올림" 판정에 쓰는 상태(요청 중·완료). draft·실패·거절은 빼서 다시 고를 수 있게 둔다
+    "youtube": set(_youtube.PENDING) | {"done"},
+    "instagram": set(_instagram.PENDING) | {"done"},
+}
+
+
 async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
-    """의뢰 영상 목록. 유튜브 승인 대기는 관문을 다시 묻고, 항목마다 유튜브 상태를 붙인다."""
+    """의뢰 영상 목록. 유튜브 승인 대기는 관문을 다시 묻고, 항목마다 유튜브 상태를 붙인다.
+
+    `exclude_platform`("youtube"·"instagram")을 주면 그 플랫폼에 이미 올렸거나 요청(승인 대기)
+    중인 영상은 뺀다(11/26: 총괄 대화방이 "최근 1건"으로 골라 같은 영상을 또 올리기 요청하는 걸
+    막는다). 후보가 모자라지 않게 내부적으로는 더 넓게 가져온 뒤 거른다.
+    """
     await _request_youtube.refresh(request.meta, STATE.sns)
     await _instagram.refresh_requests(request.meta)
-    result = await request_video.list_request_videos(request, STATE.sns)
+    exclude_platform = (request.input or {}).get("exclude_platform")
+    wanted = int((request.input or {}).get("limit") or 20)
+    fetch_request = request
+    if exclude_platform:
+        wider_input = {**(request.input or {}), "limit": max(wanted * 5, 20)}
+        fetch_request = request.model_copy(update={"input": wider_input})
+    result = await request_video.list_request_videos(fetch_request, STATE.sns)
     if result.status != TaskStatus.COMPLETED or not result.output:
         return result
     # 썸네일 기능 전에 만든 영상: 후보가 없으면 한 번 만든다(ffmpeg 프레임, 크레딧 0)
@@ -2351,7 +2369,7 @@ async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
     if lacking:
         made, cover_errors = await asyncio.to_thread(_request_cover.backfill, STATE.sns, lacking)
         if made:
-            again = await request_video.list_request_videos(request, STATE.sns)
+            again = await request_video.list_request_videos(fetch_request, STATE.sns)
             if again.status == TaskStatus.COMPLETED and again.output:
                 result = again
     items = _request_youtube.attach_states(list((result.output or {}).get("items") or []))
@@ -2362,6 +2380,10 @@ async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
         )
         if not item.get("covers"):  # 후보를 만들지 못한 사유(화면에 보인다)
             item["covers_error"] = cover_errors.get(str(item.get("post_draft_id")))
+    if exclude_platform:
+        done = _PLATFORM_DONE_STATUS.get(exclude_platform, set())
+        items = [i for i in items if (i.get(exclude_platform) or {}).get("status") not in done]
+        items = items[:wanted]
     return result.model_copy(update={"output": result.output | {"items": items}})
 
 

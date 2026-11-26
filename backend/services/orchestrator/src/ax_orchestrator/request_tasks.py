@@ -265,7 +265,9 @@ TASKS: tuple[TaskDef, ...] = (
                 "list_request_videos",
                 "최근 의뢰 영상 찾기",
                 READ_GRADE,
-                fixed_input=(("limit", 1),),
+                # 11/26: 유튜브에 이미 올렸거나 승인 대기 중인 영상은 "최근"에서 뺀다
+                # (같은 영상을 또 올리기 요청하는 걸 막는다)
+                fixed_input=(("limit", 1), ("exclude_platform", "youtube")),
                 ref_key="items.0.post_draft_id",
             ),
             TaskStep(
@@ -303,7 +305,8 @@ TASKS: tuple[TaskDef, ...] = (
                 "list_request_videos",
                 "최근 의뢰 영상 찾기",
                 READ_GRADE,
-                fixed_input=(("limit", 1),),
+                # 11/26: 인스타에 이미 올렸거나 승인 대기 중인 영상은 "최근"에서 뺀다
+                fixed_input=(("limit", 1), ("exclude_platform", "instagram")),
                 ref_key="items.0.post_draft_id",
             ),
             TaskStep(

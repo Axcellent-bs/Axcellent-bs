@@ -147,10 +147,16 @@ def test_prompt_lists_every_task_name_and_says_to_not_follow_customer_text() -> 
 def test_video_publish_tasks_find_latest_video_then_draft_then_request_with_human_approval() -> (
     None
 ):
-    for name, draft_skill, request_skill in (
-        ("video_publish_youtube", "request_video_youtube_draft", "request_video_youtube_request"),
+    for name, platform, draft_skill, request_skill in (
+        (
+            "video_publish_youtube",
+            "youtube",
+            "request_video_youtube_draft",
+            "request_video_youtube_request",
+        ),
         (
             "video_publish_instagram",
+            "instagram",
             "request_video_instagram_draft",
             "request_video_instagram_request",
         ),
@@ -163,8 +169,9 @@ def test_video_publish_tasks_find_latest_video_then_draft_then_request_with_huma
             request_skill,
         ]
         assert all(s.dept == "marketing" for s in task.steps)
-        # 의뢰 번호는 고객이 모르니 최근 영상 1건을 찾아 쓴다 (campaign_performance와 같은 방식)
-        assert dict(steps["latest"].fixed_input) == {"limit": 1}
+        # 의뢰 번호는 고객이 모르니 최근 영상 1건을 찾아 쓴다 (campaign_performance와 같은 방식).
+        # 11/26: 그 플랫폼에 이미 올렸거나 승인 대기 중인 영상은 "최근"에서 뺀다(중복 요청 방지)
+        assert dict(steps["latest"].fixed_input) == {"limit": 1, "exclude_platform": platform}
         assert steps["latest"].ref_key == "items.0.post_draft_id"
         # 초안 단계는 최근 영상 번호를 받고, 다음(올리기) 단계로 그대로 넘긴다
         assert steps["draft"].after == ("latest",)
