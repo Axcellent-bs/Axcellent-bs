@@ -16,7 +16,22 @@ from typing import Protocol
 from archive_agent.config import Clock
 from archive_agent.store import Store
 from archive_agent.util import dumps, loads, similarity
+from ax_agent_template import company_scope
 from ax_contracts.schemas import Card
+
+
+def owned(tenant_id: str | None) -> bool:
+    """이 카드를 지금 요청 회사에 보여도 되는가.
+
+    저장소는 회사마다 파일이 따로라(#1773) 다른 회사 파일에는 그 회사 카드만 있다(예전 카드는
+    회사 칸이 기본값 `shop-demo`로 남았을 수 있어 칸으로 거르지 않는다). 캣북스 파일에는 분리 전
+    다른 회사 요청이 쓴 카드가 남아 있을 수 있어서, 캣북스 요청이면 칸이 캣북스인 것만 보인다.
+    요청 밖(스스로 도는 루틴)은 예전처럼 다 본다.
+    """
+    company = company_scope.active()
+    if company != company_scope.CATBOOKS:
+        return True
+    return company_scope.scope_id(tenant_id) == company_scope.CATBOOKS
 
 
 def card_state(card: Card) -> str:
@@ -92,14 +107,19 @@ class MockMemoryClient:
 
     async def get_card(self, card_id: str) -> Card | None:
         row = self._store.one("SELECT data FROM mock_cards WHERE card_id = ?", (card_id,))
-        return Card.model_validate(loads(row["data"])) if row else None
+        card = Card.model_validate(loads(row["data"])) if row else None
+        return card if card is not None and owned(card.tenant_id) else None
 
     async def list_cards(
         self, *, area: str | None = None, states: list[str] | None = None
     ) -> list[Card]:
         rows = self._store.all("SELECT data FROM mock_cards ORDER BY created_at, card_id")
         cards = [Card.model_validate(loads(r["data"])) for r in rows]
-        return [c for c in cards if _match(c, area, None, states)]
+        # 파일은 회사마다 따로지만(#1773), 그 전에 같은 파일에 쌓인 다른 회사 카드는 행으로도 거른다
+        return [
+            c for c in cards
+            if owned(c.tenant_id) and _match(c, area, None, states)
+        ]  # fmt: skip
 
     async def search_cards(
         self,

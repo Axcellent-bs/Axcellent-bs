@@ -10,8 +10,9 @@ from typing import Any
 from archive_agent.config import Clock
 from archive_agent.store import Store
 from archive_agent.util import dumps, loads
+from ax_agent_template import company_scope
 from ax_agent_template.logging import log_event
-from ax_contracts.schemas import TENANT_ID_DEFAULT
+from ax_contracts.schemas import TENANT_ID_ALIASES, TENANT_ID_DEFAULT
 
 
 class AuditLog:
@@ -24,8 +25,12 @@ class AuditLog:
         context_id: str,
         kind: str,
         payload: dict[str, Any] | None = None,
-        tenant_id: str = TENANT_ID_DEFAULT,
+        tenant_id: str | None = None,
     ) -> None:
+        # 회사를 안 넘긴 곳이 많아서 요청 회사로 채운다(캣북스·요청 밖은 예전 값 그대로)
+        if tenant_id is None:
+            active = company_scope.active()
+            tenant_id = active if active and active != company_scope.CATBOOKS else TENANT_ID_DEFAULT
         data = payload or {}
         self._store.execute(
             "INSERT INTO audit_logs(tenant_id, context_id, kind, payload, created_at)"
@@ -35,13 +40,17 @@ class AuditLog:
         log_event(context_id, tenant_id, kind, data)
 
     def list(self, context_id: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        where, args = _tenant_clause()
         if context_id:
             rows = self._store.all(
-                "SELECT * FROM audit_logs WHERE context_id = ? ORDER BY id LIMIT ?",
-                (context_id, limit),
+                f"SELECT * FROM audit_logs WHERE context_id = ?{where} ORDER BY id LIMIT ?",
+                (context_id, *args, limit),
             )
         else:
-            rows = self._store.all("SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?", (limit,))
+            rows = self._store.all(
+                f"SELECT * FROM audit_logs WHERE 1 = 1{where} ORDER BY id DESC LIMIT ?",
+                (*args, limit),
+            )
         for row in rows:
             row["payload"] = loads(row["payload"], {})
         return rows
@@ -51,11 +60,12 @@ class AuditLog:
 
     def contexts(self, limit: int = 50) -> list[dict[str, Any]]:
         """감사 기록이 있는 사건(`context_id`) 목록: 최근 기록이 있는 순서, 건수와 마지막 시각."""
+        where, args = _tenant_clause()
         return self._store.all(
             "SELECT context_id, COUNT(*) AS entries, MIN(created_at) AS first_at,"
-            " MAX(created_at) AS last_at FROM audit_logs GROUP BY context_id"
+            f" MAX(created_at) AS last_at FROM audit_logs WHERE 1 = 1{where} GROUP BY context_id"
             " ORDER BY MAX(id) DESC LIMIT ?",
-            (limit,),
+            (*args, limit),
         )
 
     def timeline(self, context_id: str) -> list[dict[str, Any]]:
@@ -65,3 +75,13 @@ class AuditLog:
             {"seq": n, "at": r["created_at"], "kind": r["kind"], "payload": r["payload"]}
             for n, r in enumerate(rows, start=1)
         ]
+
+
+def _tenant_clause() -> tuple[str, tuple[str, ...]]:
+    """캣북스 요청이면 캣북스 기록만(옛 이름 `shop-demo` 포함). 파일은 회사마다 따로지만(#1773) 분리
+    전에 캣북스 파일에 쌓인 다른 회사 기록을 거른다. 다른 회사·요청 밖은 거르지 않는다."""
+    company = company_scope.active()
+    if company != company_scope.CATBOOKS:  # 다른 회사 파일은 그 회사 기록만 있다(#1773)
+        return "", ()
+    names = (company, *(old for old, new in TENANT_ID_ALIASES.items() if new == company))
+    return f" AND tenant_id IN ({', '.join('?' for _ in names)})", names
