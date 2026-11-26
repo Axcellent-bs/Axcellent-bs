@@ -119,10 +119,13 @@ CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-aut
 | `pause-invalid` | 1 경고 | 정지 표시가 만료됐는데 남아 있거나 `until_epoch` 를 해석 못 함 | 재개 또는 파일 정리(게이트로) |
 | `backend-in-progress-stuck` | 2 심각 | `backend-in-progress` 가 남아 있는데 잠금이 풀렸거나 1500초 넘음(유예 120초). **사람 호출 전용, 자동 처리 안 함** | 사람이 되돌림 상태 확인 |
 | `long-wait` | 1 경고 | 같은 판정 `ci-pending`/`ci-hold` 가 `AX_WD_WAIT_S`(1800초) 이상 이어지고 대상 SHA·운영 HEAD 가 그대로. `backend-verdict` 는 매 주기 다시 써서 mtime 이 늘 새롭기 때문에, 판정이 바뀔 때만 남는 로그 줄의 시각으로 잰다 | CI 확인 |
+| `ci-off-stuck` | 1 경고(3배면 2) | `backend-verdict` 의 판정이 `ci-off` 로 `AX_WD_CIOFF_S`(600초) 이상 이어짐(`<sha> ci-off`, 로그 `backend: ci-off ...`). 백엔드 단계가 CI 확인용 토큰 파일(`/etc/ax-autodeploy/gh-readonly-token`)이 없거나 비어 있어 멈춘 상태. 정지 중에는 보지 않음. 자동 복구 없음 | 사람이 토큰 파일 존재·내용 확인(값은 출력·공유 금지) |
 | `lock-held-long` | 2 심각 | flock 이 잡혀 있고 `lock` mtime 이 `TimeoutStartSec`(1500초) 보다 오래됨 | 멈춘 실행 확인 |
 | `ok` | 0 | 위에 해당 없음 | 없음 |
 
 여러 개가 겹치면 심각도 큰 것을 대표로 하고 나머지는 같이 적는다.
+
+**토큰 파일이 없거나 비어 있을 때 백엔드와 프론트가 다르다.** 백엔드 단계(`ax-autodeploy` `ci-off` 판정)는 확인 없이 배포하지 않고 멈춘다(fail-closed). 그래서 `ci-off-stuck` 으로 알린다. 프론트 단계(`ci_check`)는 반대로 `CI_STATE="ci-check=off"` 로 두고 반환 0(통과)이라 CI 확인 없이 그대로 배포한다(fail-open). 프론트도 fail-closed 로 바꿀지는 이재헌이 정할 일로 남겨 두었고, 이 감시 스크립트는 프론트 동작을 바꾸지 않는다.
 
 ### 사용법
 
@@ -137,7 +140,7 @@ ax-autodeploy-watchdog --notify --heartbeat   # 위 + 정상일 때 하루 1회 
 
 알림 규칙: 상태가 바뀌면 바로 1회, 같은 이상 상태는 1시간(`AX_WD_REPEAT_S`)에 1회만 반복, 정상 복귀 때 복구 알림 1회, `--heartbeat` 는 정상이 이어질 때 하루 1회. 전송에 실패하면 기록을 갱신하지 않아 다음 주기에 다시 보낸다. 문구는 한국어, `[watchdog]` 접두. 웹훅 주소는 파일(`AX_WD_SLACK_HOOK`, 기본 `/etc/ax-autodeploy/slack-webhook`)에서만 읽고 어디에도 출력하지 않으며 curl 명령줄에도 싣지 않는다(표준 입력으로 전달).
 
-시험용 환경 변수: `AX_STATE_DIR AX_ENV_FILE AX_PAUSE_FILE AX_WD_NOW AX_WD_STALE_S AX_WD_WAIT_S AX_WD_SKIP_S AX_WD_LOG_FILE AX_WD_TIMER_STATE AX_WD_SERVICE_STATE AX_WD_SERVICE_RESULT AX_WD_LOCK_HELD AX_WD_SLACK_HOOK AX_WD_CURL AX_WD_NOTIFIED_FILE` 등(스크립트 머리 주석 참고). 단위 시험: `python -m unittest discover -s docs/ops/autodeploy/tests -p test_watchdog.py -v`.
+시험용 환경 변수: `AX_STATE_DIR AX_ENV_FILE AX_PAUSE_FILE AX_WD_NOW AX_WD_STALE_S AX_WD_WAIT_S AX_WD_CIOFF_S AX_WD_SKIP_S AX_WD_LOG_FILE AX_WD_TIMER_STATE AX_WD_SERVICE_STATE AX_WD_SERVICE_RESULT AX_WD_LOCK_HELD AX_WD_SLACK_HOOK AX_WD_CURL AX_WD_NOTIFIED_FILE` 등(스크립트 머리 주석 참고). 단위 시험: `python -m unittest discover -s docs/ops/autodeploy/tests -p test_watchdog.py -v`.
 
 ### 설치 (서버 책임자, sudo 필요)
 

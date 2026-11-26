@@ -16,6 +16,7 @@
 # 시험·설정용 환경 변수(모두 선택):
 #   AX_STATE_DIR(/var/lib/ax-autodeploy)  AX_ENV_FILE(/etc/ax-autodeploy/env)  AX_PAUSE_FILE(env 파일의 같은 키보다 우선)
 #   AX_WD_LOG_FILE(/var/log/ax-autodeploy.log)  AX_WD_NOW(현재 epoch)  AX_WD_STALE_S(1200)  AX_WD_WAIT_S(1800)
+#   AX_WD_CIOFF_S(600: backend-verdict 가 ci-off 로 이만큼 이어지면 경고, 3배면 심각)
 #   AX_WD_LOCK_MAX_S(1500)  AX_WD_SKIP_S(600)  AX_WD_INPROGRESS_GRACE_S(120)  AX_WD_REPEAT_S(3600)  AX_WD_HEARTBEAT_S(86400)
 #   AX_WD_TIMER_STATE(active|inactive|failed...)  AX_WD_SERVICE_STATE(ActiveState)  AX_WD_SERVICE_RESULT(Result)
 #   AX_WD_LOCK_HELD(1|0, flock 점유 여부를 주입)  AX_WD_SYSTEMCTL(systemctl)  AX_WD_TIMER_UNIT  AX_WD_SERVICE_UNIT
@@ -32,6 +33,7 @@ LOG_FILE="${AX_WD_LOG_FILE:-/var/log/ax-autodeploy.log}"
 NOW="${AX_WD_NOW:-$(date +%s)}"
 STALE_S="${AX_WD_STALE_S:-1200}"
 WAIT_S="${AX_WD_WAIT_S:-1800}"
+CIOFF_S="${AX_WD_CIOFF_S:-600}"                   # 백엔드 단계가 ci-off(토큰 파일 없음·비어 있음)로 멈춘 채 이만큼 이어지면 경고(3배면 심각)
 SKIP_S="${AX_WD_SKIP_S:-600}"                     # 같은 사유로 주기를 건너뛰는 상태가 이만큼 이어지면 경고(3배면 심각)
 LOCK_MAX_S="${AX_WD_LOCK_MAX_S:-1500}"            # ax-autodeploy.service 의 TimeoutStartSec
 INPROGRESS_GRACE_S="${AX_WD_INPROGRESS_GRACE_S:-120}"
@@ -180,14 +182,15 @@ if [[ -e "${INPROG_FILE}" ]]; then
   fi
 fi
 
-# ---- 6) 오래 이어지는 대기(ci-pending / ci-hold) ----------------------------------------------------
+# ---- 6) 오래 이어지는 대기(ci-pending / ci-hold) · ci-off 정지 ----------------------------------------------------
 # backend-verdict 는 매 주기 다시 써서 mtime 이 늘 새롭다. 대신 판정이 바뀔 때만 남는 로그 줄("backend: <판정> <운영8>..<대상8> ...")로 시작 시각을 본다.
 VERDICT_FILE="${STATE_DIR}/backend-verdict"
 WAIT_KEY=""; WAIT_AGE=""
 if [[ "${PAUSED}" != 1 && -r "${VERDICT_FILE}" ]]; then
   read -r v_sha v_key _ < "${VERDICT_FILE}" 2>/dev/null || true
   v_key="${v_key:-}"; v_key="${v_key%$'\r'}"; v_sha="${v_sha:-}"
-  if [[ ( "${v_key}" == ci-pending || "${v_key}" == ci-hold ) && "${v_sha}" =~ ^[0-9a-f]{40}$ && -r "${LOG_FILE}" ]]; then
+  # ci-off: 백엔드 단계가 CI 확인용 토큰 파일(/etc/ax-autodeploy/gh-readonly-token)이 없거나 비어 있어 확인 없이 배포하지 않고 멈춘 상태(fail-closed)
+  if [[ ( "${v_key}" == ci-pending || "${v_key}" == ci-hold || "${v_key}" == ci-off ) && "${v_sha}" =~ ^[0-9a-f]{40}$ && -r "${LOG_FILE}" ]]; then
     t8="${v_sha:0:8}"
     # 이 판정으로 바뀐 마지막 줄과, 그 뒤에 배포가 끝났는지(운영 HEAD 가 바뀐 흔적)를 같이 본다
     start_line="$(grep -aE "] backend: ${v_key} [0-9a-f]{8}\.\.${t8} " "${LOG_FILE}" 2>/dev/null | tail -n 1 || true)"
@@ -202,7 +205,12 @@ if [[ "${PAUSED}" != 1 && -r "${VERDICT_FILE}" ]]; then
       fi
       if [[ "${start_epoch}" =~ ^[0-9]+$ && ${after_deploy} == 0 ]]; then
         WAIT_KEY="${v_key}"; WAIT_AGE=$(( NOW - start_epoch )); (( WAIT_AGE >= 0 )) || WAIT_AGE=0
-        if (( WAIT_AGE >= WAIT_S )); then
+        if [[ "${v_key}" == ci-off ]]; then
+          if (( WAIT_AGE >= CIOFF_S )); then
+            sev=1; (( WAIT_AGE >= 3 * CIOFF_S )) && sev=2
+            add ci-off-stuck "${sev}" "백엔드 자동 배포가 CI 확인용 토큰 파일이 없거나 비어 있어서 $(human_age "${WAIT_AGE}") 째 멈췄다 (기준 ${CIOFF_S}초, 대상 ${t8}). 사람이 서버의 /etc/ax-autodeploy/gh-readonly-token 파일이 있고 내용이 비어 있지 않은지 확인해야 한다 (값은 출력·공유 금지, 자동 복구 안 함)"
+          fi
+        elif (( WAIT_AGE >= WAIT_S )); then
           add long-wait 1 "${v_key} 대기가 $(human_age "${WAIT_AGE}") 째다 (기준 ${WAIT_S}초, 대상 ${t8}, 운영 HEAD 그대로)"
         fi
       fi
