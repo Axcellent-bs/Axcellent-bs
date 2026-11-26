@@ -24,6 +24,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from ax_agent_template import pose_ladder
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import keyframes as _keyframes
@@ -36,6 +37,8 @@ TRIED_KEY = "board_svg_tried"
 SVG = "svg"
 LAYOUT = "layout"
 SKIPPED = "skipped"
+# 11/26 콘티 포즈 전체 시간 상한 하나 (기획 storyboard_svg.TIMEOUT_SECONDS와 같게, 뒤에서 돈다)
+TIMEOUT_SECONDS = 150.0
 
 
 PROMPT = f"""너는 애니메이션 스토리보드 콘티 작가다.
@@ -148,25 +151,38 @@ async def draw(
     except Exception as exc:  # noqa: BLE001 - LLM 설정을 못 읽어도 의뢰는 배치판으로 간다
         logger.warning("의뢰 마네킹 콘티: LLM 준비 실패 %s (%s)", record_id, type(exc).__name__)
         llm = None
-    if llm is not None and panels:
-        data = {
-            "character": _cut((rec.get("sheet") or {}).get("consistency_en"), 300) or "(없음)",
-            "panels": panels,
-        }
-        try:
-            read = await _ask(llm, data, context_id)
-        except Exception as exc:  # noqa: BLE001 - 시간 초과·형식 오류여도 흐름은 멈추지 않는다
-            logger.warning("의뢰 마네킹 콘티 실패: %s (%s)", record_id, type(exc).__name__)
-        else:
-            by_no = {p["no"]: p for p in panels}
-            starts = panel_starts(board)
-            for panel in read.panels:
-                if panel.no not in by_no or panel.no in svgs:
-                    continue
-                at, text = starts.get(panel.no), panel_text(by_no[panel.no])
-                clean = pose_board.pose_svg(panel.pose, f"{panel.no}번 칸", at, text)
-                if clean:
-                    svgs[panel.no] = clean
+    # 11/26 실패 사다리 (공용 pose_ladder, 기획 콘티와 같다): 1단 전 칸 한 번(성공하면 호출 1번
+    # 그대로) → 실패하면 2단 칸별 동시 → 모델 env의 400 _model이면 3단 기본 모델 → 4단 규칙 포즈
+    by_no = {p["no"]: p for p in panels}
+    ids = [p["no"] for p in panels if p["has_character"]]
+    data = {
+        "character": _cut((rec.get("sheet") or {}).get("consistency_en"), 300) or "(없음)",
+        "panels": panels,
+    }
+
+    async def whole(c: Any) -> dict[int, Any]:
+        read = await _ask(c, data, context_id)
+        return {p.no: p.pose for p in read.panels if p.no in by_no and p.pose is not None}
+
+    async def one(c: Any, no: int) -> Any:
+        read = await _ask(c, {**data, "panels": [by_no[no]]}, context_id)
+        return next((p.pose for p in read.panels if p.pose is not None), None)
+
+    res = await pose_ladder.ladder(ids, whole, one, llm, timeout=TIMEOUT_SECONDS,
+                                   where=f"의뢰 마네킹 콘티 {record_id}",
+                                   base_llm=pose_board.base_llm)  # fmt: skip
+    starts = panel_starts(board)
+    ruled = 0
+    for no in ids:
+        at, text = starts.get(no), panel_text(by_no[no])
+        clean = pose_board.pose_svg(res.got.get(no), f"{no}번 칸", at, text)
+        if not clean:
+            clean = pose_board.rule_svg(text, f"{no}번 칸", at)
+            ruled += bool(clean)
+        if clean:
+            svgs[no] = clean
+    if ruled:
+        logger.info("의뢰 마네킹 콘티: %s 규칙 포즈 %d칸 (호출 %d번)", record_id, ruled, res.calls)
     if svgs and end_no is not None:
         svgs[end_no] = pose_board.end_card_svg()
     store.set_board_svgs(record_id, svgs, TRIED_KEY)

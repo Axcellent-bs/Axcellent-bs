@@ -21,7 +21,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict
 
-from ax_agent_template import company_ai, pose_render
+from ax_agent_template import company_ai, pose_ladder, pose_render
 from ax_agent_template.llm import LLMClient
 from ax_agent_template.pose_render import PoseLLM
 from marketing_agent.svg_sanitize import sanitize_svg
@@ -97,12 +97,30 @@ def svg_llm() -> LLMClient | None:
     return LLMClient("marketing", settings)
 
 
+def base_llm() -> LLMClient | None:
+    """실패 사다리 3단(11/26): `MARKETING_SVG_LLM_MODEL`을 썼을 때만, env 없을 때와 같은 마케팅 기본
+    모델 클라이언트. env가 없으면 None (1·2단이 이미 기본 모델)."""
+    if not os.getenv(MODEL_ENV, "").strip():
+        return None
+    settings = company_ai.settings_for("marketing")
+    if not (settings.model and settings.base_url):
+        return None
+    return LLMClient("marketing", settings)
+
+
+def rule_svg(text: str, label: str, at_s: float | None = None) -> str:
+    """실패 사다리 4단(11/26): LLM 없이 칸 글 낱말로 정한 포즈의 마네킹 SVG (공용 `pose_ladder`)."""
+    return pose_svg(pose_ladder.rule_pose(text, label), label, at_s, text)
+
+
 __all__ = [
     "MODEL_ENV",
     "POSE_RULES",
     "BoardPoseRead",
     "PanelPose",
+    "base_llm",
     "end_card_svg",
+    "rule_svg",
     "is_end_card",
     "pose_svg",
     "svg_llm",

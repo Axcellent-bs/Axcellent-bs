@@ -60,10 +60,14 @@ def test_400_reason_goes_to_svg_detail_and_the_log(
     plan = vp.rule_plan(V._prop())  # noqa: SLF001
     with caplog.at_level(logging.WARNING):
         out, n = asyncio.run(sb.draw(_client(message), plan, "ctx", note="고객 의뢰 메모"))
-    assert n == 0 and out.svg_reason == "error" and out.svg_detail == detail
+    # 11/26 실패 사다리: 400이면 2단(장면별)도 실패 → 4단 규칙 포즈로 다 그린다. 갈래 코드는 로그에
+    # (예전 기대값: n 0·svg_reason "error"·svg_detail = 갈래 코드)
+    k = len(plan.scenes)
+    assert n == k and out.svg_reason == "" and out.svg_detail == f"rule_pose_{k}"
     assert len(detail) <= 40
     rows = [r.getMessage() for r in caplog.records if "마네킹 콘티 포즈 실패" in r.getMessage()]
-    assert len(rows) == 1 and detail in rows[0] and f"공급자 메시지: {message}" in rows[0]
+    assert "1단 전체" in rows[0] and "2단 장면별" in rows[1]
+    assert all(detail in r and f"공급자 메시지: {message}" in r for r in rows)
     assert sb.PROMPT[:40] not in caplog.text and "고객 의뢰 메모" not in caplog.text  # 요청 없음
 
 

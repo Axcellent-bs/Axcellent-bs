@@ -102,21 +102,24 @@ def test_draw_fills_start_and_end_svg_and_sends_only_scene_words() -> None:
     assert "자막·회사 이름" in sent  # 코드가 얹는 글은 그리지 않는다
 
 
-def test_draw_without_llm_or_on_failure_keeps_plan() -> None:
+def test_draw_without_llm_or_on_failure_uses_rule_poses() -> None:
+    """11/26 실패 사다리: LLM 없음·실패·포즈 없는 답이어도 4단 규칙 포즈로 다 그린다.
+
+    (예전 기대값: 장면 그대로 + svg_reason no_llm·"error KeyError"·rejected. 이유는 이제 로그)"""
     plan = _plan()
 
-    # 11/25 5-1: 장면은 그대로, 못 그린 이유만 svg_reason에 남긴다
-    def kept(llm: object) -> str:
+    def drawn_by_rule(llm: object) -> str:
         drawn, changed = asyncio.run(sb.draw(llm, plan, "ctx"))
-        assert changed == 0
-        assert drawn.model_copy(update={"svg_reason": "", "svg_detail": ""}) == plan
-        return f"{drawn.svg_reason} {drawn.svg_detail}".strip()
+        assert changed == len(plan.scenes) and drawn.svg_reason == ""
+        assert all(s.start_svg and s.end_svg for s in drawn.scenes)
+        assert [s.visual for s in drawn.scenes] == [s.visual for s in plan.scenes]  # 글은 그대로
+        return drawn.svg_detail
 
-    assert kept(None) == "no_llm"
-    broken = MockLLMClient(responses={})  # 응답 없음 = 실패
-    assert kept(broken) == "error KeyError"  # 가짜 LLM은 KeyError (11/26 U: svg_detail)
+    n = len(plan.scenes)
+    assert drawn_by_rule(None) == f"rule_pose_{n}"
+    assert drawn_by_rule(MockLLMClient(responses={})) == f"rule_pose_{n}"  # 응답 없음 = 실패
     junk = MockLLMClient(responses={sb._PoseOut: _pose_out(None)})  # 포즈 없는 답
-    assert kept(junk) == "rejected"  # 예외가 아니라 svg_detail 없음
+    assert drawn_by_rule(junk) == f"rule_pose_{n}"
 
 
 def test_write_draws_svg_after_the_plan() -> None:
@@ -173,9 +176,12 @@ def test_redraw_action_refuses_clearly() -> None:
     with pytest.raises(ActionError) as e:
         asyncio.run(svc.dispatch({"type": "redraw_storyboard", "proposal": "PROP-91", "scene": 9}))
     assert e.value.code == "INVALID_ACTION"
-    with pytest.raises(ActionError) as e:
-        asyncio.run(svc.dispatch({"type": "redraw_storyboard", "proposal": "PROP-91"}))
-    assert e.value.code == "SVG_FAILED"
+    # 11/26 실패 사다리: LLM이 실패해도 규칙 포즈로 다시 그린다 (예전 기대값: SVG_FAILED)
+    done = asyncio.run(svc.dispatch({"type": "redraw_storyboard", "proposal": "PROP-91"}))
+    assert done.changed
+    plan = svc.state.proposals[-1].video_plan
+    assert plan is not None and plan.svg_detail.startswith("rule_pose_")
+    assert all(s.start_svg and s.end_svg for s in plan.scenes)
     svc.state.proposals[-1].video_plan = None
     with pytest.raises(ActionError) as e:
         asyncio.run(svc.dispatch({"type": "redraw_storyboard", "proposal": "PROP-91"}))

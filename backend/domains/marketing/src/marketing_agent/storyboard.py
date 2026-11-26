@@ -310,7 +310,7 @@ def _pick(value: str, table: dict[str, tuple[str, str]], fallback: str) -> str:
 
 def build_output(
     read: StoryRead, character: str | None, style: str, count: int, end_card_hint: bool = False,
-    aspect: str | None = None, starts: dict[int, float] | None = None,
+    aspect: str | None = None, starts: dict[int, float] | None = None, rule_poses: bool = False,
 ) -> StoryboardPromptOutput:
     """LLM 장면으로 칸·구도·프롬프트를 조립한다. 샷 이름과 영어 구도 문장은 코드 표에서만 나온다.
 
@@ -345,7 +345,12 @@ def build_output(
         if not svg and not (end_card and no == len(loose)) and s.has_character:
             text = " ".join(x for x in (scene, _cut(s.composition_ko, 200)) if x)
             at = (starts or {}).get(no)
+            # 11/26 실패 사다리 4단(rule_poses, 스토리보드 다시 만들기): 포즈가 없거나 못 쓰면
+            # 칸 글 낱말로 규칙 포즈. 의뢰 흐름은 여기서 채우지 않는다
+            # (뒤에서 board_svg가 LLM 사다리로 그린다)
             svg = pose_board.pose_svg(s.pose, _cut(scene, 15), at, text) or None
+            if svg is None and rule_poses:
+                svg = pose_board.rule_svg(text, _cut(scene, 15), at) or None
         shots.append(
             StoryboardShot(
                 no=no,
@@ -545,7 +550,7 @@ async def make_storyboard(
         try:
             hint = bool(scenes) and pose_board.is_end_card(scenes[-1].get("visual_ko"))
             out = build_output(read, character, style, count, hint,
-                               starts=script_starts(scenes))  # fmt: skip
+                               starts=script_starts(scenes), rule_poses=True)  # fmt: skip
             if scenes:
                 renumbered = [{**s, "no": i} for i, s in enumerate(scenes, start=1)]
                 out = with_script(out, renumbered, cta)

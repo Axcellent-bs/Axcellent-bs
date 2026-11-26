@@ -107,22 +107,28 @@ def test_request_flow_asks_the_llm_once_and_fills_only_svg(env: dict[str, Any]) 
 
 def test_some_panels_svg_is_still_svg_and_others_stay_empty(env: dict[str, Any]) -> None:
     rid, _ = _prepared(env)
-    # 포즈가 온 칸만 그린다 (포즈 없음·모르는 번호는 빈 칸 = 배치판)
+    # 포즈가 온 칸은 LLM 포즈. 11/26 실패 사다리 4단: 포즈가 없는 칸은 규칙 포즈로 그린다
+    # (예전 기대값: 포즈 없음 칸은 빈 칸). 1단이 성공했으니 LLM 호출은 1번 그대로
     llm = _llm([{"no": 1, "pose": POSE}, {"no": 2, "pose": None}, {"no": 9, "pose": POSE}])
     assert _draw(rid, lambda: llm) == "svg"
     shots = env["store"].get(rid)["storyboard"]["shots"]
-    assert _is_mannequin(shots[0]["svg"]) and not shots[1].get("svg") and not shots[2].get("svg")
+    assert all(_is_mannequin(s["svg"]) for s in shots if s.get("has_character") is not False)
+    assert shots[0]["svg"] != shots[1]["svg"]  # 1칸은 LLM 포즈, 2칸은 규칙 포즈
+    assert len(llm.calls) == 1
 
 
-def test_no_llm_keeps_the_layout_and_the_flow(env: dict[str, Any]) -> None:
+def test_no_llm_still_draws_rule_poses_and_keeps_the_flow(env: dict[str, Any]) -> None:
     rid, before = _prepared(env)
-    assert _draw(rid, lambda: None) == "layout"
+    # 11/26 실패 사다리 4단 (예전 기대값: "layout", 배치판)
+    assert _draw(rid, lambda: None) == "svg"
     after = env["store"].get(rid)["storyboard"]
-    assert after["board_source"] == "layout"
+    assert after["board_source"] == "svg"
     assert [s["scene_ko"] for s in after["shots"]] == [s["scene_ko"] for s in before["shots"]]
+    assert all(_is_mannequin(s["svg"]) for s in after["shots"]
+               if s.get("has_character") is not False)  # fmt: skip
 
 
-def test_llm_failure_or_all_dropped_svg_is_layout(env: dict[str, Any]) -> None:
+def test_llm_failure_or_all_dropped_svg_uses_rule_poses(env: dict[str, Any]) -> None:
     class Broken(MockLLMClient):
         async def structured(self, *_a: Any, **_k: Any) -> Any:
             self.calls.append("x")
@@ -130,16 +136,23 @@ def test_llm_failure_or_all_dropped_svg_is_layout(env: dict[str, Any]) -> None:
 
     rid, _ = _prepared(env)
     broken = Broken()
-    assert _draw(rid, lambda: broken) == "layout"
-    assert len(broken.calls) == 1
-    assert env["store"].get(rid)["storyboard"]["board_source"] == "layout"
+    # 11/26 실패 사다리: 1단 실패 → 2단 칸별 동시(칸 수만큼) → 그래도 실패면 4단 규칙 포즈
+    # (예전 기대값: "layout", 호출 1번)
+    assert _draw(rid, lambda: broken) == "svg"
+    shots = env["store"].get(rid)["storyboard"]["shots"]
+    people = [s for s in shots if s.get("has_character") is not False
+              and not bs.pose_board.is_end_card(s.get("scene_ko"))]  # fmt: skip
+    assert len(broken.calls) == 1 + len(people)
+    assert env["store"].get(rid)["storyboard"]["board_source"] == "svg"
 
     rid2, _ = Q._prepare(Q._brand(env, note="다른 캐릭터"))  # noqa: SLF001
     assert rid2 and rid2 != rid
-    # LLM이 SVG만 그려 보내고 포즈가 없으면 납작한 SVG를 쓰지 않고 배치판
+    # LLM이 SVG만 그려 보내고 포즈가 없으면 납작한 SVG는 쓰지 않는다 → 규칙 포즈 마네킹
     dropped = _llm([{"no": n, "svg": _svg("납작")} for n in (1, 2, 3)])
-    assert _draw(rid2, lambda: dropped) == "layout"
-    assert not any(s.get("svg") for s in env["store"].get(rid2)["storyboard"]["shots"])
+    assert _draw(rid2, lambda: dropped) == "svg"
+    after = env["store"].get(rid2)["storyboard"]["shots"]
+    assert all("납작" not in (s.get("svg") or "") for s in after)
+    assert all(_is_mannequin(s["svg"]) for s in after if s.get("svg"))
 
 
 def test_prepare_skill_draws_svg_after_the_storyboard(
@@ -399,3 +412,44 @@ def test_redraw_without_a_storyboard_is_refused(mcp: dict[str, Any]) -> None:
 
 def test_redraw_skill_is_registered() -> None:
     assert handlers.HANDLERS["creative_board_redraw"] is handlers.creative_board_redraw
+
+
+# ---------------------------------------------------------------- 11/26 실패 사다리 (공용)
+
+
+class _Ladder(MockLLMClient):
+    """전 칸(여러 칸) 호출은 400, 칸 하나 호출은 포즈. bad: 칸 호출도 실패시킬 칸 번호."""
+
+    def __init__(self, bad: set[int] | None = None) -> None:
+        super().__init__(responses={})
+        self.bad = bad or set()
+        self.sizes: list[int] = []
+
+    async def structured(self, prompt: str, schema: Any, untrusted: Any = None, images: Any = None,
+                         context_id: Any = None) -> Any:  # fmt: skip
+        panels = (untrusted or {})["panels"]
+        self.sizes.append(len(panels))
+        if len(panels) > 1:
+            raise LLMResponseError("400", status_code=400,
+                                   provider_message="Schema is too complex for compilation")
+        no = panels[0]["no"]
+        if no in self.bad:
+            raise LLMResponseError("500", status_code=500)
+        return bs.BoardPoseRead.model_validate({"panels": [{"no": no, "pose": POSE}]})
+
+
+def test_request_board_uses_the_same_ladder_as_planning(env: dict[str, Any]) -> None:
+    rid, before = _prepared(env)
+    llm = _Ladder(bad={2})
+    assert _draw(rid, lambda: llm) == "svg"
+    people = [s["no"] for s in before["shots"] if s.get("has_character") is not False
+              and not bs.pose_board.is_end_card(s.get("scene_ko"))]  # fmt: skip
+    assert llm.sizes[0] == len(people) and sorted(llm.sizes[1:]) == [1] * len(people)  # 2단 동시
+    shots = {s["no"]: s for s in env["store"].get(rid)["storyboard"]["shots"]}
+    assert all(_is_mannequin(shots[no]["svg"]) for no in people)  # 실패한 2칸도 규칙 포즈
+    assert shots[people[0]]["svg"] != shots[2]["svg"]
+
+
+def test_rule_svg_is_a_mannequin_with_the_panel_label() -> None:
+    svg = bs.pose_board.rule_svg("주인공이 손을 흔들고 마무리", "3번 칸", 9.0)
+    assert _is_mannequin(svg) and "9초" in svg
