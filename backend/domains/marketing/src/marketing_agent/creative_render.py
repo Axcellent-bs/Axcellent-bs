@@ -341,6 +341,29 @@ def publish_video_part(rec: dict[str, Any] | None) -> str | None:
     return latest
 
 
+GENERATED_SOURCE = "higgsfield"  # 11/27 우리가 Higgsfield로 그린 시트 그림 (원본 표시를 지운다)
+
+
+def _sheet_flags(record_id: str, done: bool = False) -> dict[str, Any]:
+    """시트 그림 칸에 같이 넣을 출처 표시 (11/27 운영 CR-b8a5525dda58).
+
+    `_set`은 칸을 덮어쓰지 않고 합쳐서, 예전 기록(올린 원본이 시트 자리, source upload_original·
+    original true)에 시트를 그려도 그 표시가 남아 "원본 사진"으로 보였다. 그린 결과(done)는 늘
+    지운다. 시작·실패 때는 원본이 원본 칸에 있을 때만 지운다(원본이 시트 자리뿐이면 표시를 남겨
+    원본을 잃지 않게)."""
+    rec = _creative.store().get(record_id) or {}
+    item = (rec.get("render") or {}).get(ORIGINAL_PART) or {}
+    moved = item.get("status") == "done" and item.get("asset") in ORIGINAL_FILES
+    if done or moved or not legacy_original(rec):
+        return {"source": GENERATED_SOURCE, "original": False, "moved_from": None}
+    return {}
+
+
+def _part_flags(record_id: str, part: str, done: bool = False) -> dict[str, Any]:
+    """시트 그림 칸이면 `_sheet_flags`, 다른 칸(board_image 등)은 그대로(빈 dict)."""
+    return _sheet_flags(record_id, done) if part == "sheet_image" else {}
+
+
 def _set(record_id: str, part: str, **values: Any) -> dict[str, Any]:
     """기록의 render.<part>를 바꾼다(없던 칸은 만든다)."""
     store = _creative.store()
@@ -640,7 +663,8 @@ def start_sheet(
     if why:
         _set(record_id, "sheet_image", status="unavailable", error=why, route=via, company_id=cid)
         return
-    _set(record_id, "sheet_image", status="running", error=None, route=via, company_id=cid)
+    _set(record_id, "sheet_image", status="running", error=None, route=via, company_id=cid,
+         **_sheet_flags(record_id))  # fmt: skip
     prompt = str(sheet.get("prompt_en") or "")
     negative = str(sheet.get("negative_prompt_en") or "")
     _spawn(
@@ -821,7 +845,8 @@ async def _render_image(
     # 회사는 부른 쪽이 정한 값(뒤에서 돌 때 company_scope가 비어도 같은 회사). 없으면 예전 그대로
     cid = cid or request_company(meta)
     if not _settings.effective(cid).image_credits_ok:  # 11/25: 미리 보기·예약 전에 멈춘다
-        _set(record_id, part, status="blocked", error=IMAGE_CREDITS_DISABLED)
+        _set(record_id, part, status="blocked", error=IMAGE_CREDITS_DISABLED,
+             **_part_flags(record_id, part))  # fmt: skip
         if part == "sheet_image":
             maybe_start_board(ledger, meta, record_id, cid)
         return
@@ -834,13 +859,14 @@ async def _render_image(
             # 11/24: 미리 보기(예상 크레딧·잔액) 실패도 원인을 남긴다 (값 없이)
             logger.warning("%s", log_line(f"creative_render: Higgsfield {part} 미리 보기", error,
                                           record_id))  # fmt: skip
-            _set(record_id, part, status="blocked", error=_code(error))
+            _set(record_id, part, status="blocked", error=_code(error),
+                 **_part_flags(record_id, part))  # fmt: skip
             if part == "sheet_image":
                 maybe_start_board(ledger, meta, record_id, cid)
             return
     decision, seq, blocked = await _gate_image(ledger, meta, record_id, part, via, credits, cid)
     if blocked or decision is None or seq is None:
-        _set(record_id, part, status="blocked", error=blocked)
+        _set(record_id, part, status="blocked", error=blocked, **_part_flags(record_id, part))
         if part == "sheet_image":
             maybe_start_board(ledger, meta, record_id, cid)
         return
@@ -859,7 +885,8 @@ async def _render_image(
         _safe(lambda: ledger.mark_failed(seq, _now()))
         # 무제한이 안 되면 실패가 아니라 멈춤(크레딧으로 다시 시도하지 않는다, 11/24)
         stopped = code == _mcp.UNLIM_UNAVAILABLE
-        _set(record_id, part, status="blocked" if stopped else "failed", error=code)
+        _set(record_id, part, status="blocked" if stopped else "failed", error=code,
+             **_part_flags(record_id, part))  # fmt: skip
         if part == "sheet_image":
             maybe_start_board(ledger, meta, record_id, cid)
         return
@@ -882,6 +909,7 @@ async def _render_image(
         asset=FILES[part],
         sha256=sha,
         execution_id=decision.execution_id,
+        **_part_flags(record_id, part, done=True),
     )
     if part == "sheet_image":
         maybe_start_board(ledger, meta, record_id, cid)
@@ -1579,8 +1607,14 @@ def save_original(record_id: str, data: bytes, mime_type: str, cid: str | None =
 
 
 def legacy_original(rec: dict[str, Any]) -> bool:
-    """11/26 전 기록: 올린 원본이 시트 그림 자리에 있다 (시트 그림이 아니다)."""
+    """11/26 전 기록: 올린 원본이 시트 그림 자리에 있다 (시트 그림이 아니다).
+
+    11/27: 승인 관문을 지나 우리가 그린 그림(`execution_id`가 있음)은 원본 표시가 남아 있어도
+    시트다(운영 CR-b8a5525dda58: 합쳐 저장돼 upload_original 표시가 남았다. 다시 그리지 않고
+    바로잡는다)."""
     sheet = (rec.get("render") or {}).get("sheet_image") or {}
+    if sheet.get("execution_id"):
+        return False
     return sheet.get("status") == "done" and (
         sheet.get("source") == ORIGINAL_SOURCE or sheet.get("original") is True
     )
