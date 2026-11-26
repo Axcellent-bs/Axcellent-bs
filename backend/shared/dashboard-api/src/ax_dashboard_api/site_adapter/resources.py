@@ -168,8 +168,18 @@ def to_product(row: dict[str, Any], m: ResourceMap) -> dict[str, Any]:
         "name": get("name"),
         "price": None if price is None else int(price),
         "category_code": get("category_code"),
-        "active": bool(get("active")),
+        "active": _active(get("active")),
     }
+
+
+def _active(value: Any) -> bool:
+    """판매 중인지. 글자 칸은 값 표(`values.active`)로 바꾼 "true"·"false"만 믿는다.
+
+    표에 없는 새 상태 글자(첫 쪽에 없던 것)는 판매 중으로 보지 않는다(지어내지 않는다).
+    """
+    if isinstance(value, str):
+        return value == "true"
+    return bool(value)
 
 
 def categories_from(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
