@@ -55,7 +55,8 @@ function BackToBuiltin({ saved, admin, onChanged }: { saved: SavedDejafix; admin
   )
 }
 
-/** 같이 설치된 DejaFix가 보는 Zabbix (운영자·관리자만). 저장은 DejaFix가 연결을 확인한 뒤에만 된다 */
+/** 같이 설치된 DejaFix가 보는 Zabbix (운영자·관리자만). 저장은 DejaFix가 연결을 확인한 뒤에만 된다.
+ * 브라우저가 로그인 이메일·비밀번호를 주소·토큰 칸에 채우지 않게 autoComplete를 끈다(11/26 스터디온에서 채워짐) */
 function ZabbixConnect() {
   const [now, setNow] = useState<ZabbixSettings | null | undefined>(undefined)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -102,11 +103,11 @@ function ZabbixConnect() {
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="space-y-1 text-sm">
             <span className="text-ink-700">Zabbix API 주소</span>
-            <input className="field w-full font-mono" placeholder="https://zabbix.example.co.kr/api_jsonrpc.php" value={url} onChange={(e) => setUrl(e.target.value)} />
+            <input className="field w-full font-mono" name="zabbix-url" type="url" autoComplete="off" placeholder="https://zabbix.example.co.kr/api_jsonrpc.php" value={url} onChange={(e) => setUrl(e.target.value)} />
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-ink-700">읽기 전용 API 토큰</span>
-            <input className="field w-full font-mono" type="password" autoComplete="off" value={token}
+            <input className="field w-full font-mono" name="zabbix-api-token" type="password" autoComplete="new-password" value={token}
               placeholder={now?.token_set ? '저장된 토큰을 써요. 바꿀 때만 넣어요' : 'Zabbix 사용자 설정 › API 토큰'} onChange={(e) => setToken(e.target.value)} />
           </label>
         </div>
