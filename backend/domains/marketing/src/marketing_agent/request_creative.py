@@ -42,6 +42,7 @@ from ax_contracts.schemas.marketing_storyboard import MAX_CHARACTER_EN, MAX_STYL
 from marketing_agent import creative_records as _creative
 from marketing_agent import creative_render as _render
 from marketing_agent import keyframes as _keyframes
+from marketing_agent import pose_board as _pose_board
 from marketing_agent import storyboard as _storyboard
 from marketing_agent.character_sheet import VIRTUAL_STYLE_EN
 from marketing_agent.media.ledger import MediaLedger
@@ -125,6 +126,163 @@ def _copy_extra_refs(brand_id: str, record_id: str) -> None:
                                brand_id, name, record_id)  # fmt: skip
 
 
+# 11/26 B: 기획 포즈 샷(close·medium·full) → 스토리보드 샷 id
+POSE_SHOT = {"close": "close_up", "medium": "medium", "full": "full"}
+# camera_en 낱말 → 샷 id (긴 말부터 본다: extreme close-up이 close-up보다 먼저)
+CAMERA_SHOT = (
+    ("extreme close", "extreme_close_up"), ("extreme wide", "extreme_wide"),
+    ("establishing", "extreme_wide"), ("over the shoulder", "over_shoulder"),
+    ("over-the-shoulder", "over_shoulder"), ("over-shoulder", "over_shoulder"),
+    ("point of view", "pov"), ("pov", "pov"), ("insert", "detail"), ("detail", "detail"),
+    ("close", "close_up"), ("medium", "medium"), ("waist", "medium"), ("full", "full"),
+    ("wide", "wide"),
+)  # fmt: skip
+CAMERA_ANGLE = (
+    ("low angle", "low"), ("low-angle", "low"), ("high angle", "high"), ("high-angle", "high"),
+    ("top-down", "birds_eye"), ("top down", "birds_eye"), ("overhead", "birds_eye"),
+    ("bird", "birds_eye"), ("eye level", "eye_level"), ("eye-level", "eye_level"),
+)  # fmt: skip
+END_CARD_TEXT = "엔드카드 · 채널 이름"
+# 엔드카드 판정: 기획 #1947·#1956(plan_checks.end_card_scene)과 같은 낱말 규칙을 마케팅 안에 둔다
+# (도메인끼리 import 금지). "엔드카드" 낱말이 있거나 채널 이름·로고 말뿐이고 사람 낱말이 없다
+END_CARD_WORDS = ("엔드 카드", "엔드카드", "end card")
+END_CARD_MARKS = ("채널", "로고", "엔드카드", "엔드", "이름", "channel", "logo", "end", "card",
+                  "name")  # fmt: skip
+END_CARD_FILLER = (
+    "끝", "마지막", "넣", "나오", "나와", "보이", "보여", "표시", "띄우", "띄워", "해줘", "해주",
+    "하기", "하게", "주세요", "줘", "카드", "put", "show", "add", "at", "the",
+)  # fmt: skip
+END_CARD_PEOPLE = (
+    "주인공", "사람", "인물", "캐릭터", "마스코트", "손", "얼굴", "흔들", "웃", "고양이",
+    "person", "people", "character", "mascot", "hand", "wave", "waving", "smil",
+)  # fmt: skip
+_WORD = re.compile(r"[0-9A-Za-z가-힣]+")
+_JOSA = (
+    "에서는", "에서", "으로", "에게", "까지", "부터", "처럼", "이랑", "하고", "랑", "을", "를",
+    "이", "가", "은", "는", "에", "와", "과", "로", "도", "만", "의",
+)  # fmt: skip
+_STOP = frozenset(
+    {"그대로", "정확히", "반드시", "꼭", "마지막", "대사", "장면", "영상", "화면", "끝나면", "하는",
+     "있는", "모습", "느낌", "주세요", "해주세요", "합니다", "한다", "the", "and", "with"}
+)  # fmt: skip
+
+
+def _stem(word: str) -> str:
+    for j in _JOSA:
+        if word.endswith(j) and len(word) - len(j) >= 2:
+            return word[: -len(j)]
+    return word
+
+
+def _keywords(text: str) -> list[str]:
+    out: list[str] = []
+    for w in _WORD.findall(text or ""):
+        s = _stem(w.lower())
+        if len(s) >= 2 and s not in _STOP and s not in out:
+            out.append(s)
+    return out
+
+
+def end_card_scene(text: str) -> bool:
+    """장면 글이 엔드카드(채널 이름·로고뿐, 사람 없음)인가. 기획 `end_card_scene`과 같은 규칙."""
+    low = (text or "").lower()
+    if not low.strip() or any(w in low for w in END_CARD_PEOPLE):
+        return False
+    # 마케팅 콘티 엔드카드 말("채널 이름"·"채널명" 포함, `pose_board`)도 본다. 기획은 회사 이름을
+    # 알아 "누비투어 로고"를 이름뿐으로 보지만 여기는 회사 이름을 모른다
+    if any(w in low for w in END_CARD_WORDS) or _pose_board.is_end_card(low):
+        return True
+    words = _keywords(low)
+    marks = [w for w in words if any(w.startswith(m) for m in END_CARD_MARKS)]
+    rest = [w for w in words if w not in marks
+            and not any(w.startswith(f) for f in END_CARD_FILLER)]  # fmt: skip
+    return bool(marks) and not rest
+
+
+def _scene_text(s: Any) -> str:
+    return " ".join(str(getattr(s, k, "") or "") for k in ("visual", "start_frame"))
+
+
+def _val(obj: Any, key: str) -> Any:
+    """장면·포즈 값 (계약 모델이면 속성, 총괄이 넘긴 느슨한 값이면 dict)."""
+    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
+
+def _seconds(s: Any, key: str) -> float | None:
+    v = _val(s, key)
+    return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else None
+
+
+def _plan_shot_size(s: Any, i: int) -> str:
+    """샷 크기: 기획 포즈 샷 → camera_en 낱말 → 칸마다 돌려 쓰기."""
+    shot = _val(_val(s, "start_pose"), "shot") if _val(s, "start_pose") is not None else None
+    if shot in POSE_SHOT:
+        return POSE_SHOT[shot]
+    camera = str(getattr(s, "camera_en", "") or "").lower()
+    for word, size in CAMERA_SHOT:
+        if word in camera:
+            return size
+    return SHOT_CYCLE[i % len(SHOT_CYCLE)]
+
+
+def _plan_angle(s: Any) -> str:
+    camera = str(getattr(s, "camera_en", "") or "").lower()
+    return next((angle for word, angle in CAMERA_ANGLE if word in camera), "eye_level")
+
+
+def _plan_props(s: Any) -> str:
+    pose = _val(s, "start_pose")
+    if pose is None:
+        return ""
+    extra = _val(pose, "extra_props")
+    props = [p for p in [_val(pose, "prop"), *(extra if isinstance(extra, list) else [])]
+             if isinstance(p, str) and p]  # fmt: skip
+    return f"props: {', '.join(dict.fromkeys(str(p) for p in props))}" if props else ""
+
+
+def _plan_shot(s: Any, i: int, end_card: bool) -> Any:
+    """기획 장면 하나 → 스토리보드 칸 (LLM 없음)."""
+    visual = _cut(getattr(s, "visual", None) or s.prompt, 200)
+    place = _cut(getattr(s, "place_ko", ""), 20)
+    start = _cut(getattr(s, "start_frame", ""), 200)
+    if end_card:  # 엔드카드: 사람 없이 배경만 (글자는 ffmpeg 엔드카드가 얹는다)
+        return _storyboard.LooseShot(
+            scene_ko=END_CARD_TEXT, shot_size="full", angle="eye_level",
+            composition_ko=_cut(" · ".join(x for x in (place, start or visual) if x), 200)
+            or END_CARD_TEXT,
+            has_character=False, subject_en="a plain dark end card background, no people",
+        )  # fmt: skip
+    subject = ". ".join(
+        x.rstrip(". ")
+        for x in (_cut(getattr(s, "action_en", ""), 400), _cut(s.prompt, 800),
+                  _cut(getattr(s, "camera_en", ""), 120), _plan_props(s))
+        if x.strip(". ")
+    )  # fmt: skip
+    return _storyboard.LooseShot(
+        scene_ko=visual,
+        shot_size=_plan_shot_size(s, i),
+        angle=_plan_angle(s),
+        composition_ko=_cut(" · ".join(x for x in (place, start) if x), 200) or visual,
+        has_character=True,
+        subject_en=subject,
+        setting_en=" — ".join(x for x in (place, start) if x),
+        # 11/25: 기획이 그린 SVG 콘티(장면 첫 화면)가 있으면 칸 SVG로 그대로 쓴다
+        # (build_output이 다시 정리한다. 칸에 SVG가 있으면 board_svg는 LLM을 부르지 않는다)
+        svg=getattr(s, "start_svg", "") or "",
+    )
+
+
+def _plan_starts(scenes: list[Any]) -> dict[int, float] | None:
+    """칸 번호 → 시작 초 (마네킹 라벨). 빠졌거나 앞뒤가 맞지 않으면 None."""
+    starts = [_seconds(s, "start_s") for s in scenes]
+    if any(v is None for v in starts):
+        return None
+    ok = [float(v) for v in starts if v is not None]
+    if any(a >= b for a, b in zip(ok, ok[1:], strict=False)):
+        return None
+    return {i: v for i, v in enumerate(ok, start=1)}
+
+
 def plan_storyboard(plan: Any, sheet: dict[str, Any]) -> dict[str, Any] | None:
     """기획 제작안 장면으로 스토리보드(StoryboardPromptOutput 모양)를 코드로 만든다.
 
@@ -132,18 +290,11 @@ def plan_storyboard(plan: Any, sheet: dict[str, Any]) -> dict[str, Any] | None:
     scenes = [s for s in (getattr(plan, "scenes", None) or []) if _cut(s.prompt, 10)][:MAX_SCENES]
     if not scenes:
         return None
+    # 11/26 B: 기획 장면 칸(시간·장소·첫 화면·동작·카메라·자막·포즈)을 모두 쓴다. LLM 없음
+    last = len(scenes) - 1
+    ends = [i == last and i > 0 and end_card_scene(_scene_text(s)) for i, s in enumerate(scenes)]
     shots = [
-        _storyboard.LooseShot(
-            scene_ko=_cut(getattr(s, "visual", None) or s.prompt, 200),
-            shot_size=SHOT_CYCLE[i % len(SHOT_CYCLE)],
-            angle="eye_level",
-            composition_ko=_cut(getattr(s, "visual", None) or "", 200),
-            has_character=True,
-            subject_en=_cut(s.prompt, 300),
-            # 11/25: 기획이 그린 SVG 콘티(장면 첫 화면)가 있으면 칸 SVG로 그대로 쓴다
-            # (build_output이 다시 정리한다. 칸에 SVG가 있으면 board_svg는 LLM을 부르지 않는다)
-            svg=getattr(s, "start_svg", "") or "",
-        )
+        _plan_shot(s, i, ends[i])
         for i, s in enumerate(scenes)
     ]
     concept = _cut(plan.concept, 80) or "홍보 영상"
@@ -157,8 +308,17 @@ def plan_storyboard(plan: Any, sheet: dict[str, Any]) -> dict[str, Any] | None:
         style_en=_cut(style, MAX_STYLE_EN),
     )
     character = _cut(sheet.get("consistency_en"), MAX_CHARACTER_EN) or None
-    out = _storyboard.build_output(read, character, read.style_en, len(shots))
+    starts = _plan_starts(scenes)
+    out = _storyboard.build_output(
+        read, character, read.style_en, len(shots),
+        end_card_hint=ends[-1], starts=starts, detailed=True,
+    )  # fmt: skip
     board = out.model_dump(mode="json")
+    # 칸 시간·자막 = 기획 장면 시간·자막 (자막은 그림에 넣지 않고 칸 아래에 보인다)
+    for shot, s in zip(board["shots"], scenes, strict=False):
+        shot["start_s"] = _seconds(s, "start_s")
+        shot["end_s"] = _seconds(s, "end_s")
+        shot["caption_ko"] = _cut(getattr(s, "caption", ""), 60)
     duration = getattr(plan, "duration_s", None)
     # 영상 길이는 기획 제작안 길이 (상한은 서버 설정)
     if isinstance(duration, int) and duration > 0:
