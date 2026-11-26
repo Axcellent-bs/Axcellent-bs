@@ -782,6 +782,17 @@ class SalesStore:
             finally:
                 session.drop()
 
+    def category_codes(self, tenant_id: str) -> list[str]:
+        """그 고객사 판매 기록 줄에 나온 분류 code (빈 값 제외, 정렬). 분류 표 없는 회사용."""
+        with self.reading() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT category_code FROM sales_order_lines "
+                "WHERE tenant_id = ? AND category_code IS NOT NULL AND category_code != '' "
+                "ORDER BY category_code",
+                (tenant_id,),
+            ).fetchall()
+        return [r[0] for r in rows]
+
     def order_counts(self, tenant_id: str, start: datetime, end: datetime) -> tuple[int, int]:
         """기간 [start, end)에 접수한 주문 수(상태 무관)와 그중 결제 완료 주문 수."""
         params = self._window(tenant_id, start, end)

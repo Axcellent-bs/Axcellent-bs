@@ -275,6 +275,11 @@ def pick(row: dict[str, Any], expr: str) -> Any:
         return None
     value: Any = row
     for key in expr.split("."):
+        if isinstance(value, list) and key.isdigit():  # 목록 칸은 번호로 (예: travelers.0.gender)
+            if int(key) >= len(value):
+                raise MissingField(expr)
+            value = value[int(key)]
+            continue
         if not isinstance(value, dict) or key not in value:
             raise MissingField(expr)
         value = value[key]

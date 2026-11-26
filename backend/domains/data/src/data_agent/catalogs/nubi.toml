@@ -55,3 +55,24 @@ max_staleness_minutes = 30
 min_period_orders = 20
 min_group_size = 5
 active_days = 365
+
+# 고객 속성 (11/26). 사이트 변환기가 고객사 주문 원본에서 꺼내는 code와 같다
+# (dashboard-api `site_adapter/customer_attrs.py`: 성별 → female·male, 생년 → 연령대).
+# 사이트가 이 값을 주지 않으면 고객·시장 분석은 "이 회사 사이트에서 받은 고객 속성이 없어요"로 멈춘다
+# (다른 회사 값으로 채우지 않는다). 순서 = 화면 순서
+[[sales.attributes]]
+key = "age_band"
+label = "연령대"
+[sales.attributes.values]
+10s = "10대"
+20s = "20대"
+30s = "30대"
+40s = "40대"
+50s_plus = "50대 이상"
+
+[[sales.attributes]]
+key = "gender"
+label = "성별"
+[sales.attributes.values]
+female = "여성"
+male = "남성"

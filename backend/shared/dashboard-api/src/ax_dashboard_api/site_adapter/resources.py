@@ -321,9 +321,14 @@ def with_product_names(
 
 
 def customers_from(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """고객 내보내기 (`CustomerRow`). 가입 시각이 없는 사이트라 첫 주문 시각을 joined_at으로."""
+    """고객 내보내기 (`CustomerRow`). 가입 시각이 없는 사이트라 첫 주문 시각을 joined_at으로.
+
+    주문에 고객 속성(`attributes`, `customer_attrs`가 원본에서 꺼낸 것)이 있으면 가장 최근 주문의
+    값을 속성마다 쓴다. 없으면 빈 속성(지어내지 않는다).
+    """
     seen: dict[str, dict[str, Any]] = {}
-    for o in orders:
+    latest: dict[str, dict[str, str]] = {}
+    for o in sorted(orders, key=lambda o: o["updated_at"]):
         bid = o.get("buyer_id")
         if not bid:
             continue
@@ -332,4 +337,8 @@ def customers_from(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
         row["joined_at"] = min(row["joined_at"], o["created_at"])
         row["updated_at"] = max(row["updated_at"], o["updated_at"])
+        latest.setdefault(bid, {}).update(o.get("attributes") or {})
+    for bid, row in seen.items():
+        if latest.get(bid):
+            row["attributes"] = latest[bid]
     return sorted(seen.values(), key=lambda c: (c["updated_at"], c["buyer_id"]))

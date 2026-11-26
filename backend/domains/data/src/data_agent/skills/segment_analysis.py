@@ -85,6 +85,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import logging
 import re
 from collections import defaultdict
 from collections.abc import Callable, Sequence
@@ -157,6 +158,9 @@ QUERIES = [
     "sales_store.sales_customer_attributes",
 ]
 NO_CUSTOMERS = f"{INSUFFICIENT}: 저장된 고객 기록이 없음 (고객 내보내기를 아직 받지 않음)"
+# 고객은 있는데 속성(연령대·성별 등) 값이 한 명도 없음: 회사 사이트가 속성을 주지 않는다(11/26).
+# 다른 회사(캣북스) 값으로 채우지 않는다
+NO_ATTRIBUTES = f"{INSUFFICIENT}: 이 회사 사이트에서 받은 고객 속성이 없어요"
 EXTERNAL_LABEL: dict[str, str] = {
     "data4library": "도서관 정보나루 인기대출",
     "naver_shopping": "네이버 쇼핑인사이트 분야 연령 비중",
@@ -164,6 +168,8 @@ EXTERNAL_LABEL: dict[str, str] = {
 D4L_PARAMS = ("kdc", "from_age", "to_age", "gender")
 MAX_GENRE_CALLS = 2  # 장르(KDC) 조건을 더한 정보나루 호출 수 상한 (요청 하나당)
 POPULATION_MISSING = "인구 통계표 설정 필요"
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------- 기간·읽기·관문
@@ -207,8 +213,12 @@ def data_source(store: SalesStore, tenant_id: str) -> str | None:
     return FAKE_DATA if store.sync_state(tenant_id).source == FAKE_SOURCE else None
 
 
-def customer_reasons(store: SalesStore, tenant_id: str) -> list[str]:
-    """고객 기록 관문: 고객 내보내기 출처의 마지막 오류, 저장된 고객 0명."""
+def customer_reasons(
+    store: SalesStore, tenant_id: str, cfg: CatalogSales | None = None
+) -> list[str]:
+    """고객 기록 관문: 고객 내보내기 출처의 마지막 오류, 저장된 고객 0명.
+
+    `cfg`를 주면(속성으로 나누는 고객·시장 분석만) 속성 값 0개도 본다."""
     reasons: list[str] = []
     source = store.sync_state(tenant_id).source
     if source:
@@ -217,6 +227,8 @@ def customer_reasons(store: SalesStore, tenant_id: str) -> list[str]:
             reasons.append(f"{INSUFFICIENT}: {error}")
     if store.customer_count(tenant_id) == 0:
         reasons.append(NO_CUSTOMERS)
+    elif cfg is not None and cfg.attributes and not store.attribute_values(tenant_id):
+        reasons.append(NO_ATTRIBUTES)
     return reasons
 
 
@@ -227,13 +239,18 @@ def snapshot(
     cfg: CatalogSales | None,
     catalog_id: str,
     now: datetime,
+    by_attributes: bool = False,
 ) -> Snapshot:
     """관문을 먼저 본다. 고객 기록 관문(고객 없음·고객 내보내기 오류)에 걸리면 주문 집계를 하지
     않고 짧은 품질 보고(기간 안 주문 수 COUNT 하나·버린 행·마지막 수집)와 이유만 돌려준다.
     이유 순서는 예전과 같다(품질 관문 → 고객 기록 관문)."""
     w = segment_window(period, now)
     created, paid = store.order_counts(tenant_id, w.start, w.end)
-    early = customer_reasons(store, tenant_id) if cfg is not None else []
+    early = (
+        customer_reasons(store, tenant_id, cfg if by_attributes else None)
+        if cfg is not None
+        else []
+    )
     if early:
         report = quality_brief(store, tenant_id, w, created)
     else:
@@ -470,8 +487,16 @@ def evidence(basis: SalesBasis | None, now: datetime, extra: str = "") -> Eviden
 # ---------------------------------------------------------------- segment_options
 
 
-def options(cfg: CatalogSales | None, catalog_id: str, source: str | None) -> SegmentOptionsOutput:
-    """화면 선택지. 카탈로그 `[sales]`를 순서 그대로 내려 준다 (숫자 없음)."""
+def options(
+    cfg: CatalogSales | None,
+    catalog_id: str,
+    source: str | None,
+    site_categories: Sequence[str] = (),
+) -> SegmentOptionsOutput:
+    """화면 선택지. 카탈로그 `[sales]`를 순서 그대로 내려 준다 (숫자 없음).
+
+    분류 표가 없는 회사(사이트 변환기로 연결한 회사)는 판매 기록에 나온 사이트 분류 값을
+    그대로 이름으로 쓴다(`site_categories`, #1841과 같은 규칙: 누비투어 JP·스터디온 DEV)."""
     if cfg is None:
         return SegmentOptionsOutput(
             periods=list(SCREEN_PERIODS), data_source=source, catalog_id=catalog_id
@@ -487,7 +512,11 @@ def options(cfg: CatalogSales | None, catalog_id: str, source: str | None) -> Se
             for a in cfg.attributes
         ],
         genres=[OptionItem(code=c, label=n) for c, n in cfg.genres.items()],
-        categories=[OptionItem(code=c, label=n) for c, n in cfg.categories.items()],
+        categories=(
+            [OptionItem(code=c, label=n) for c, n in cfg.categories.items()]
+            if cfg.categories
+            else [OptionItem(code=c, label=c) for c in site_categories]
+        ),
         quick_questions=[
             OptionQuestion(label=q.label, filters=dict(q.filters)) for q in cfg.quick_questions
         ],
@@ -505,9 +534,28 @@ def read_options(
     store: SalesStore, tenant_id: str, cfg: CatalogSales | None, catalog_id: str
 ) -> SegmentOptionsOutput:
     found, name = rb.run_source(tenant_id)  # 3-2 ②: 집계 계산 기록의 출처 (원본을 열지 않는다)
+    codes = site_category_codes(store, tenant_id, cfg, aggregate=found)
     if found:
-        return options(cfg, catalog_id, FAKE_DATA if name == FAKE_SOURCE else None)
-    return options(cfg, catalog_id, data_source(store, tenant_id))
+        return options(cfg, catalog_id, FAKE_DATA if name == FAKE_SOURCE else None, codes)
+    return options(cfg, catalog_id, data_source(store, tenant_id), codes)
+
+
+def site_category_codes(
+    store: SalesStore, tenant_id: str, cfg: CatalogSales | None, aggregate: bool = False
+) -> list[str]:
+    """분류 표가 없는 회사의 선택지: 그 회사 판매 기록에 나온 분류 code (빈 값 제외, 정렬).
+
+    분류 표가 있으면(캣북스) 읽지 않는다. 집계 경로면 집계(`agg_sales_daily`)에서, 아니면
+    판매 저장소에서 읽는다. 못 읽으면 빈 목록(다른 회사 값으로 채우지 않는다)."""
+    if cfg is None or cfg.categories:
+        return []
+    try:
+        if aggregate:
+            return rb.category_codes(tenant_id)
+        return store.category_codes(tenant_id)
+    except Exception:  # noqa: BLE001 - 선택지는 비워 두고 화면은 그대로 연다
+        logger.warning("[segment] 사이트 분류 목록 읽기 실패 (%s)", tenant_id, exc_info=True)
+        return []
 
 
 # ---------------------------------------------------------------- segment_profile
@@ -535,7 +583,7 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
     now: datetime,
 ) -> SegmentProfileOutput:
     """대상(분류·장르·상품)을 산 구매자 vs 기간 전체 구매자의 속성 구성비."""
-    snap = snapshot(store, tenant_id, period, cfg, catalog_id, now)
+    snap = snapshot(store, tenant_id, period, cfg, catalog_id, now, by_attributes=True)
     titles: dict[str, str] = {}
     if target_kind == "product":
         w = snap.window
@@ -562,6 +610,8 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
         if not keys:
             problems.append("설정에 고객 속성(attributes)이 없음")
         known = {"category": cfg.categories, "genre": cfg.genres}.get(target_kind)
+        if target_kind == "category" and not cfg.categories:
+            known = None  # 분류 표 없는 회사: 사이트 분류 값 그대로(#1841)
         if known is not None and target_code not in known:
             problems.append(f"설정에 없는 {KIND_LABEL[target_kind]}: {target_code}")
     reasons = problems + snap.reasons
@@ -736,7 +786,7 @@ def favorites(  # noqa: PLR0913
     now: datetime,
 ) -> SegmentFavoritesOutput:
     """속성 묶음의 우리 쇼핑몰 안 순위 (바깥 출처는 `favorites_with_external`이 붙인다)."""
-    snap = snapshot(store, tenant_id, period, cfg, catalog_id, now)
+    snap = snapshot(store, tenant_id, period, cfg, catalog_id, now, by_attributes=True)
     common: dict[str, Any] = {
         "filters": dict(filters),
         "filter_label": filter_label(filters, cfg) if cfg else "",
@@ -1201,7 +1251,7 @@ def coverage_buyers(
     now: datetime,
 ) -> MarketCoverageOutput:
     """구매자 수만 채운 줄 (인구는 `coverage_with_population`이 붙인다)."""
-    snap = snapshot(store, tenant_id, "365d", cfg, catalog_id, now)
+    snap = snapshot(store, tenant_id, "365d", cfg, catalog_id, now, by_attributes=True)
     common: dict[str, Any] = {
         "attribute_keys": list(attribute_keys),
         "quality": snap.report,

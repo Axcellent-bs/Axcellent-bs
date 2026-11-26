@@ -37,7 +37,9 @@ def test_company_without_catalog_does_not_borrow_catbooks() -> None:
         assert cat.id != "catbooks"
         # 매출 분석은 공통 칸만 (11/25). 캣북스 장르·분류·회원 속성·서점 낱말은 없다
         assert cat.sales is not None and cat.sales.item_noun == "상품"
-        assert not cat.sales.genres and not cat.sales.categories and not cat.sales.attributes
+        assert not cat.sales.genres and not cat.sales.categories
+        # 속성은 공통 둘(연령대·성별)만, 값은 그 회사 사이트에서(11/26). 캣북스 직업 칸은 없다
+        assert [a.key for a in cat.sales.attributes] == ["age_band", "gender"]
         assert "배송비" not in cat.sales.revenue_definition
         assert cat.connector == "shop-api"
         assert {m.id for m in cat.metrics} == {
@@ -67,7 +69,8 @@ def test_site_companies_get_common_sales_section() -> None:
             cat = catalog.current()
             assert cat.id == cat_id
             assert cat.sales is not None and cat.sales.item_noun == "상품"  # 기본 품목 이름
-            assert not cat.sales.genres and not cat.sales.attributes
+            assert not cat.sales.genres
+            assert [a.key for a in cat.sales.attributes] == ["age_band", "gender"]  # 11/26
             assert "배송비" not in cat.sales.revenue_definition
     with company_scope.using("catbooks"):
         sales = catalog.current().sales
