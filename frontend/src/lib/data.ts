@@ -2,6 +2,7 @@ import { ApiError } from "./apiError";
 import { DATA_A2A_PLACEHOLDER, DATA_A2A_TOKEN, DATA_A2A_URL } from "./env";
 import { sessionCompanyId } from "./humanSession";
 import type { OrchIncident, OrchStep } from "./agentChat";
+import type { AdPerformance, PerfVideo, RegisterInput, VideoInsights } from "./videoDeep";
 
 // 데이터분석 AI 화면(/data)의 자료.
 // 1) 장애 사건: 총괄(orchestrator) 사건의 데이터 단계(impact·recovery·kpi) 결과를 그대로 읽는다.
@@ -2973,6 +2974,13 @@ export const dataAi = {
   /** 게시 영상 성과 전부 (성과 탭). 저장분만 읽고 새로 재지 않는다 (수집기가 1시간마다 잰다) */
   videoPerformance: () =>
     askData<VideoPerformanceListOutput>("video_performance", "영상 성과", { list_all: true }, TREND_DEADLINE_MS),
+  /** 영상 주소 등록 (성과 탭, 11/27 유튜브만). 쓰기라 같은 입력 묶기(askData)를 거치지 않고 누를 때마다 보낸다 */
+  videoRegister: (input: RegisterInput) =>
+    sendData<PerfVideo>("video_performance", "영상 주소 등록", { ...input }, DEADLINE_MS),
+  /** 등록 영상 전부의 깊은 지표 (유튜브 Analytics 저장분만 읽는다, 수집은 하루 1번) + 출처 연결 상태 */
+  videoInsights: () => askData<VideoInsights>("video_insights", "영상 깊은 지표", { list_all: true }, TREND_DEADLINE_MS),
+  /** 광고 성과 (구글애즈 읽기, 저장분만). 연결 대기면 platforms에 이유와 needs */
+  adPerformance: () => askData<AdPerformance>("ad_performance", "광고 성과", { platform: "google" }, DEADLINE_MS),
   /** 의뢰 영상 하나의 성과 (campaign_id = 의뢰 번호 wr_…). 등록 안 됐으면 status unknown + "등록된 영상이 없음" */
   requestVideoPerformance: (requestId: string) =>
     askData<RequestVideoPerformance>("video_performance", "의뢰 영상 성과", { campaign_id: requestId }, DEADLINE_MS),
