@@ -50,6 +50,11 @@ class TaskStep:
     # 그리고 이 단계가 앞 단계 번호를 받을 입력 칸 이름. 큰 결과는 부서 저장소에 두고 번호만 넘긴다
     ref_key: str | None = None
     takes_ref: str | None = None
+    # 11/26: `takes_ref`로 받을 앞 단계 번호가 없을 때(예: "최근 영상"이 하나도 없음) 보여 줄
+    # 안내문. 있으면 이 단계를 실패(사람 확인으로 넘김)가 아니라 건너뜀으로 닫고 의뢰를
+    # "모두 마쳤다"로 끝낸다(사람이 볼 문제가 아니라 고를 게 없을 뿐이라서). 없으면 기존처럼
+    # 일반 실패(NO_REF)로 처리한다
+    empty_ref_note: str | None = None
     # 부서가 요구하는 고정 입력(예: 긴 작업으로 받기 `caller`), 고객 문장을 넣을 입력 칸 이름
     fixed_input: tuple[tuple[str, Any], ...] = ()
     text_key: str | None = None
@@ -253,6 +258,91 @@ TASKS: tuple[TaskDef, ...] = (
         ),
         note="가장 최근 캠페인 기준",
     ),
+    # 올릴 영상 번호를 고객이 모르므로 마케팅 의뢰 영상 목록에서 가장 최근 것을 찾아 쓴다.
+    # 초안(제목·설명 또는 캡션·해시태그)은 없으면 AI가 만들고, 올리기는 등급 C라 늘 사람 승인이다
+    TaskDef(
+        "video_publish_youtube",
+        "의뢰 영상 유튜브에 올리기",
+        "가장 최근에 만든 의뢰 영상(AI 라벨 입힌 파일)을 유튜브에 올려 달라는 의뢰. "
+        "초안을 쓰고 사람 승인을 거쳐 올린다.",
+        ("이 영상 유튜브에 올려 주세요", "최근 만든 영상 유튜브에 올려 줘"),
+        (
+            TaskStep(
+                "latest",
+                "marketing",
+                "list_request_videos",
+                "최근 의뢰 영상 찾기",
+                READ_GRADE,
+                # 11/26: 유튜브에 이미 올렸거나 승인 대기 중인 영상은 "최근"에서 뺀다
+                # (같은 영상을 또 올리기 요청하는 걸 막는다)
+                fixed_input=(("limit", 1), ("exclude_platform", "youtube")),
+                ref_key="items.0.post_draft_id",
+            ),
+            TaskStep(
+                "draft",
+                "marketing",
+                "request_video_youtube_draft",
+                "유튜브 제목·설명 초안",
+                READ_GRADE,
+                after=("latest",),
+                takes_ref="post_draft_id",
+                ref_key="post_draft_id",
+                empty_ref_note="아직 유튜브에 새로 올릴 의뢰 영상이 없어요. 이미 다 올렸거나, "
+                "만든 의뢰 영상이 아직 없어요.",
+            ),
+            TaskStep(
+                "run",
+                "marketing",
+                "request_video_youtube_request",
+                "유튜브 올리기 요청",
+                HUMAN_GRADE,
+                after=("draft",),
+                takes_ref="post_draft_id",
+            ),
+        ),
+        note="가장 최근 의뢰 영상 기준",
+    ),
+    TaskDef(
+        "video_publish_instagram",
+        "의뢰 영상 인스타그램(릴스)에 올리기",
+        "가장 최근에 만든 의뢰 영상(AI 라벨 입힌 파일)을 인스타그램 릴스로 올려 달라는 의뢰. "
+        "초안을 쓰고 사람 승인을 거쳐 올린다.",
+        ("이 영상 인스타에 올려 주세요", "최근 만든 영상 릴스로 올려 줘"),
+        (
+            TaskStep(
+                "latest",
+                "marketing",
+                "list_request_videos",
+                "최근 의뢰 영상 찾기",
+                READ_GRADE,
+                # 11/26: 인스타에 이미 올렸거나 승인 대기 중인 영상은 "최근"에서 뺀다
+                fixed_input=(("limit", 1), ("exclude_platform", "instagram")),
+                ref_key="items.0.post_draft_id",
+            ),
+            TaskStep(
+                "draft",
+                "marketing",
+                "request_video_instagram_draft",
+                "인스타 캡션·해시태그 초안",
+                READ_GRADE,
+                after=("latest",),
+                takes_ref="post_draft_id",
+                ref_key="post_draft_id",
+                empty_ref_note="아직 인스타에 새로 올릴 의뢰 영상이 없어요. 이미 다 올렸거나, "
+                "만든 의뢰 영상이 아직 없어요.",
+            ),
+            TaskStep(
+                "run",
+                "marketing",
+                "request_video_instagram_request",
+                "인스타 릴스 올리기 요청",
+                HUMAN_GRADE,
+                after=("draft",),
+                takes_ref="post_draft_id",
+            ),
+        ),
+        note="가장 최근 의뢰 영상 기준",
+    ),
     _one(
         "sales_analysis",
         "매출 분석",
@@ -447,6 +537,7 @@ def plan_of(task: TaskDef) -> list[dict[str, Any]]:
             "kind": s.kind,
             "ref_key": s.ref_key,
             "takes_ref": s.takes_ref,
+            "empty_ref_note": s.empty_ref_note,
             "fixed_input": dict(s.fixed_input),
             "text_key": s.text_key,
             "carries": s.carries,

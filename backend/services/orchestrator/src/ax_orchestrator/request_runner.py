@@ -392,12 +392,15 @@ class RequestRunner:
         if carried is not None and spec.get("text_key"):  # 넘겨받은 값 + 고객 문장 칸 (11/23)
             payload = {**carried, spec["text_key"]: row["text"]}
         if payload is None:
+            # 11/26: 안내문(empty_ref_note)이 있는 단계는 "고를 게 없을 뿐"이라 사람 확인으로
+            # 넘기는 실패가 아니라 건너뜀으로 닫는다(예: 올릴 수 있는 의뢰 영상이 아직 없음)
+            note = spec.get("empty_ref_note")
             self._update(
                 rid,
                 step_id,
-                status="failed",
+                status="skipped" if note else "failed",
                 reason_code=NO_REF,
-                note="앞 단계의 결과 번호가 없어 시킬 수 없다",
+                note=note or "앞 단계의 결과 번호가 없어 시킬 수 없다",
                 started_at=stamp(),
                 finished_at=stamp(),
             )
@@ -992,6 +995,16 @@ class RequestRunner:
         elif any(v["reason_code"] == VIDEO_REJECTED for v in row["steps"].values()):
             self._requests.set_status(rid, "needs_human", VIDEO_REJECT_NOTE)
             self._tell(row, "영상 생성을 거절해서 담당자가 확인할 거예요.")
+        elif empty := next(
+            (
+                v["note"]
+                for v in row["steps"].values()
+                if v["status"] == "skipped" and v.get("reason_code") == NO_REF and v.get("note")
+            ),
+            None,
+        ):  # 11/26: 고를 게 없을 뿐(예: 올릴 수 있는 의뢰 영상이 아직 없음) — 사람 확인 아님
+            self._requests.set_status(rid, "done", empty)
+            self._tell(row, empty)
         elif any(s in NOT_OK for s in states):  # 사람이 거절했거나 앞 단계 때문에 건너뜀
             self._requests.set_status(rid, "failed", "사람이 거절했거나 앞 단계가 끝나지 못했다")
             self._tell(row, "의뢰를 진행하지 않기로 했어요.")
