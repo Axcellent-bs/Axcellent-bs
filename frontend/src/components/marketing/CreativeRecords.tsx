@@ -7,6 +7,7 @@ import { listRequestVideos, requestVideoCoverUrl } from "@/lib/requestVideos";
 import { durationKo, requestFilterOf, type RequestVideo } from "@/lib/requestVideoView";
 import { groupByDay, mergeWorks, pageCount, pageHref, pageItems, pageOf, videoSlot, workHref, workStatus, workTitle, type VideoCover, type Work } from "@/lib/recordWorks";
 import { RecordDetail, RequestDetail } from "./RecordDetail";
+import { promoChip, usePromoSite, type PromoStatus } from "@/lib/promoSite";
 import { StatusChip } from "./RecordSteps";
 
 // 마케팅 › 제작 기록 (/marketing/records). 목록 하나(2026-11-26, 탭 세 개를 없앴다):
@@ -57,9 +58,10 @@ function VideoSlotCell({ work }: { work: Work }) {
   );
 }
 
-function Row({ work, page }: { work: Work; page: number }) {
+function Row({ work, page, promo }: { work: Work; page: number; promo: PromoStatus | null }) {
   const facts = work.record;
   const when = new Date(work.at);
+  const promoted = promoChip(promo, [work.recordId, ...work.videos.map((v) => v.post_draft_id)]);
   return (
     <li>
       <Link to={workHref(work)} state={{ page }} className={`${COLUMNS} py-3 hover:bg-ink-50`}>
@@ -69,7 +71,10 @@ function Row({ work, page }: { work: Work; page: number }) {
             {Number.isFinite(when.getTime()) ? when.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : ""}
             {work.videos.length > 0 ? " · 총괄 의뢰" : ""}
           </span>
-          <StatusChip {...workStatus(facts, work.videos)} />
+          <span className="flex flex-wrap gap-1">
+            <StatusChip {...workStatus(facts, work.videos)} />
+            {promoted && <StatusChip {...promoted} />}
+          </span>
         </span>
         <SheetSlot record={work.record} />
         <BoardSlot record={work.record} />
@@ -117,6 +122,8 @@ function WorkList() {
   }, []);
 
   const works = records && videos ? mergeWorks(records, videos) : null;
+  // 읽을 때 서버가 승인 대기를 다시 확인한다. 못 읽으면 칩과 개수를 보이지 않는다
+  const promo = usePromoSite().status;
   const [params] = useSearchParams();
   const page = pageOf(params.get("page"), works?.length ?? 0);
   const count = pageCount(works?.length ?? 0);
@@ -129,7 +136,8 @@ function WorkList() {
           <h1 className="text-2xl font-bold tracking-tight">제작 기록</h1>
           <p className="mt-1 text-sm text-ink-500">이미지 시트부터 완성 영상까지 작업 한 건씩 보여 줘요. 올리기는 늘 사람 승인이고, 기록은 최근 200건까지 남아요.</p>
         </div>
-        <Link to="/marketing/sns" className="btn-ghost ml-auto text-xs">새로 만들기 ›</Link>
+        {promo?.available && <span className="ml-auto text-xs text-ink-500">홍보 사이트 {promo.used}/{promo.limit}개</span>}
+        <Link to="/marketing/sns" className={`btn-ghost text-xs ${promo?.available ? "" : "ml-auto"}`}>새로 만들기 ›</Link>
       </header>
       {errors.map((e) => <p key={e} className="text-sm text-accent" role="alert">{e}</p>)}
       <section className="card overflow-hidden" aria-label="제작 기록 목록">
@@ -147,7 +155,7 @@ function WorkList() {
                   <div key={group.day}>
                     <h2 className="bg-surface px-3 py-2 text-xs font-semibold text-ink-700 sm:px-4">{group.day}</h2>
                     <ul className="divide-y divide-ink-100" aria-label={`${group.day} 작업`}>
-                      {group.works.map((w) => <Row key={w.key} work={w} page={page} />)}
+                      {group.works.map((w) => <Row key={w.key} work={w} page={page} promo={promo} />)}
                     </ul>
                   </div>
                 ))}

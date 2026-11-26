@@ -127,6 +127,7 @@ from marketing_agent import higgsfield_status as _higgsfield_status
 from marketing_agent import instagram_post as _instagram
 from marketing_agent import keyframes as _keyframes
 from marketing_agent import plan_review as _plan_review
+from marketing_agent import promo_site as _promo
 from marketing_agent import render_settings as _render_settings
 from marketing_agent import request_creative as _request_creative
 from marketing_agent import request_script as _request_script
@@ -2269,6 +2270,70 @@ async def creative_keyframe_redraw(request: AgentRequest) -> AgentResult:
     )
 
 
+async def promo_site_status(request: AgentRequest) -> AgentResult:
+    """홍보 사이트에 올린 영상과 남은 자리(read). 승인 대기는 관문을 다시 묻는다."""
+    data = _parse(request, _promo.PromoSiteStatusInput)
+    if isinstance(data, AgentResult):
+        return data
+    await _promo.check_all(request.meta)
+    out = _promo.snapshot()
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output=out,
+        evidence=_evidence([request.skill], f"홍보 사이트 {out['used']}/{out['limit']}", []),
+    )
+
+
+async def promo_site_publish(request: AgentRequest) -> AgentResult:
+    """고른 영상을 홍보 사이트에 올리기를 사람 승인(C publish_promo_video)에 올린다."""
+    data = _parse(request, _promo.PromoSitePublishInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        item = await _promo.publish(
+            request.meta,
+            STATE.sns,
+            data.item_id,
+            data.title,
+            data.customer,
+            data.who,
+            data.rights_confirmed,
+        )
+    except _promo.PromoError as error:
+        return _promo_failed(request, error)
+    return _promo_done(request, item)
+
+
+async def promo_site_remove(request: AgentRequest) -> AgentResult:
+    """홍보 사이트에서 영상을 내린다(A unpublish_promo_video)."""
+    data = _parse(request, _promo.PromoSiteRemoveInput)
+    if isinstance(data, AgentResult):
+        return data
+    try:
+        item = await _promo.remove(request.meta, data.item_id, data.who)
+    except _promo.PromoError as error:
+        return _promo_failed(request, error)
+    return _promo_done(request, item)
+
+
+def _promo_failed(request: AgentRequest, error: _promo.PromoError) -> AgentResult:
+    return _result(request, TaskStatus.FAILED, outcome=error.code, output={"message": error.code})
+
+
+def _promo_done(request: AgentRequest, item: dict[str, Any]) -> AgentResult:
+    return _result(
+        request,
+        TaskStatus.COMPLETED,
+        output={"item": item},
+        evidence=_evidence(
+            [request.skill],
+            f"홍보 사이트 {item.get('item_id')}: {item.get('status')}",
+            [str(item.get("item_id"))],
+        ),
+    )
+
+
 async def list_request_videos_skill(request: AgentRequest) -> AgentResult:
     """의뢰 영상 목록. 유튜브 승인 대기는 관문을 다시 묻고, 항목마다 유튜브 상태를 붙인다."""
     await _request_youtube.refresh(request.meta, STATE.sns)
@@ -2885,6 +2950,9 @@ HANDLERS = {
     "prepare_brief_media": prepare_brief_media_skill,
     "choose_brief_audio": choose_brief_audio_skill,
     "prepare_brief_creative": prepare_brief_creative_skill,
+    "promo_site_status": promo_site_status,
+    "promo_site_publish": promo_site_publish,
+    "promo_site_remove": promo_site_remove,
     "request_brief_publish": request_brief_publish_skill,
     "prepare_outage_sns_media": prepare_outage_sns_media_skill,
     "request_outage_sns_publish": request_outage_sns_publish_skill,

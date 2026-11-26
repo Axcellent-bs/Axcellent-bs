@@ -58,6 +58,8 @@ ACTION_KO = {
     "generate_creative_thumbnails": "영상 썸네일 후보 만들기",
     "publish_youtube": "유튜브에 영상 올리기",
     "publish_instagram_video": "인스타그램에 릴스 올리기",
+    "publish_promo_video": "홍보 사이트에 영상 공개",
+    "unpublish_promo_video": "홍보 사이트에서 영상 내리기",
     "attach_creative_file": "제작 기록에 파일 올리기",
     "start_campaign": "캠페인 집행",
     "rollback_deployment": "배포 되돌리기",
