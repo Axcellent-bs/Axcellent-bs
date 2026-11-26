@@ -46,7 +46,7 @@ MEANINGS: dict[Resource, dict[str, str]] = {
         "name": "상품 이름",
         "price": "상품 가격",
         "category_code": "상품 분류(지역·과목 등)",
-        "active": "판매 중인지(참·거짓)",
+        "active": "판매 중인지(참·거짓, 또는 판매·공개 상태 글자)",
     },
 }
 

@@ -59,6 +59,11 @@ MAX_TOKEN = 1024
 SHOP_STATUSES = frozenset(
     {"pending_payment", "paid", "payment_failed", "cancelled", "shipped", "delivered"}
 )
+# 값 표마다 받을 수 있는 값: 주문 상태는 shop-api 상태, 판매 중은 참·거짓 글자
+VALUE_TARGETS: dict[str, frozenset[str]] = {
+    "status": SHOP_STATUSES,
+    "active": frozenset({propose.ACTIVE_TRUE, propose.ACTIVE_FALSE}),
+}
 HEADER_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-")
 
 
@@ -208,6 +213,7 @@ def _proposal(kind: Resource, path: str, rows: list[dict[str, Any]]) -> dict[str
             fields.pop(name, None)
         if not fields.get("paid_amount"):
             fields.pop("paid_amount", None)  # 줄 결제액 합계를 쓴다
+    active_table(kind, rows, out)
     if (
         kind == "orders"
         and fields.get("status")
@@ -215,6 +221,16 @@ def _proposal(kind: Resource, path: str, rows: list[dict[str, Any]]) -> dict[str
     ):
         out["values"] = {"status": propose.statuses(propose.status_values(rows, fields["status"]))}
     return out
+
+
+def active_table(kind: Resource, rows: list[dict[str, Any]], proposal: dict[str, Any]) -> None:
+    """상품 판매 중 칸이 글자 칸이면 값 표(글자 → "true"·"false")를 붙인다(제자리)."""
+    expr = proposal["fields"].get("active", "") if kind == "products" else ""
+    if not expr or ":" in expr:
+        return
+    table = propose.active_values(rows, expr)
+    if table is not None:
+        proposal.setdefault("values", {})["active"] = table
 
 
 @router.get("")
@@ -302,6 +318,8 @@ async def _auto(
                 raise _upstream_422(exc) from exc
             proposed[kind] = _proposal(kind, res.path, rows)
             ai[kind] = await ai_propose.fill(kind, rows, proposed[kind])
+            if "active" in ai[kind]["filled"]:  # AI가 판매 중 칸을 찾았으면 그 칸으로 다시
+                active_table(kind, rows, proposed[kind])
     except (LLMNotConfiguredError, LLMResponseError) as exc:
         raise _ai_error(exc) from exc
     for res in proposed.values():  # 끝내 못 찾은 칸은 저장하지 않고 이유로 알린다
@@ -391,7 +409,7 @@ def _complete(m: SiteMapping) -> None:
             f"{kind}.{name}={raw}"
             for name, table in res.values.items()
             for raw, to in table.items()
-            if to not in SHOP_STATUSES
+            if to not in VALUE_TARGETS.get(name, SHOP_STATUSES)
         ]
         need = list(propose.SYNONYMS[kind])
         if res.items is not None:

@@ -4,12 +4,12 @@ import { ApiError } from '@/lib/apiError'
 import { companyConnection, type ConnectionState } from '@/lib/companyConnection'
 import { HUMAN_TOKEN_SET } from '@/lib/env'
 import { ago } from '@/lib/format'
-import { siteAdapter, type SiteAdapterState, type SiteAutoResult, type SiteMapping, type SiteResource } from '@/lib/siteAdapter'
+import { siteAdapter, type SiteAdapterState, type SiteAutoResult, type SiteResource } from '@/lib/siteAdapter'
 import SiteWrites from './SiteWrites'
 
 // 다른 형식 API·플랫폼으로 만든 사이트 연결: 고객사 자기 API를 사이트 변환기로 잇는다(사이트 코드는 건드리지 않음).
 // 주소·키만 넣고 [알아서 연결]을 누르면 변환기가 목록 경로와 칸 짝을 규칙 + 회사 AI로 고르고,
-// 첫 쪽을 실제로 바꿔 본 뒤 저장한다. 사람이 짝을 적는 칸은 없다. 고른 짝은 아래에 읽기 전용으로 보인다.
+// 첫 쪽을 실제로 바꿔 본 뒤 저장한다. 사람이 짝을 적는 칸은 없다. 고른 짝(칸 이름·경로)은 고객사 화면에 보이지 않는다(11/26).
 // 연결하면 AI들의 판매 서버 주소가 변환기로 바뀐다. 사이트에 쓰는 일은 연결 뒤 "사이트 쓰기"(SiteWrites)에서
 // 동작마다 켜야 사이트로 가고, 그 전에는 사람 할 일로 넘어간다.
 const LABEL: Record<SiteResource, Record<string, string>> = {
@@ -21,7 +21,10 @@ const LABEL: Record<SiteResource, Record<string, string>> = {
   products: { product_id: '상품 번호', name: '상품 이름', price: '가격', category_code: '분류', active: '판매 중' },
 }
 const RES_NAME: Record<SiteResource, string> = { orders: '주문', products: '상품' }
-const STATUS_NAME: Record<string, string> = { pending_payment: '결제 전', paid: '결제됨', cancelled: '취소' }
+// 실패 이유의 칸 이름(`products.active`·`orders.status=hold`)을 화면 이름으로 바꾼다
+const readable = (reason: string) =>
+  reason.replace(/\b(orders|products)\.(?:items\.)?([a-z_]+)(=[^,\s]+)?/g, (all, r: SiteResource, f: string, v?: string) =>
+    LABEL[r]?.[f] ? `${RES_NAME[r]} ${LABEL[r][f]}${v ? ` 값 '${v.slice(1)}'` : ''}` : all)
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : '요청에 실패했습니다')
 
 export default function SiteAdapterConnect({ onState, tenant }: { onState?: (s: ConnectionState | 'error') => void; tenant?: string }) {
@@ -67,8 +70,6 @@ export default function SiteAdapterConnect({ onState, tenant }: { onState?: (s: 
   const canWrite = HUMAN_TOKEN_SET && state !== null
   const linked = state?.connection?.kind === 'adapter'
   const status = !state ? null : linked && state.connection?.enabled ? <StatusChip tone="ok">연결됨</StatusChip> : state.configured ? <StatusChip tone="off">꺼짐</StatusChip> : <StatusChip tone="wait">연결 전</StatusChip>
-  const shown: SiteMapping | null = result?.mapping ?? state?.mapping ?? null
-  const unplaced = result ? (Object.keys(RES_NAME) as SiteResource[]).flatMap((r) => (result.ai[r]?.unplaced ?? []).map((u) => ({ ...u, r }))) : []
 
   return (
     <section className="space-y-4">
@@ -120,45 +121,10 @@ export default function SiteAdapterConnect({ onState, tenant }: { onState?: (s: 
         </p>
       )}
       {result && !result.saved && (
-        <Notice tone="bad">연결하지 못했어요: {result.reason}. 사이트 API가 그 값을 주는지 확인한 뒤 다시 눌러 주세요.</Notice>
+        <Notice tone="bad">연결하지 못했어요: {readable(result.reason ?? '')}. 사이트 API가 그 값을 주는지 확인한 뒤 다시 눌러 주세요.</Notice>
       )}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
 
-      {shown && (
-        <div className="space-y-3 border-t border-ink-100 pt-4">
-          <h4 className="text-sm font-semibold text-ink-900">찾은 짝</h4>
-          {(Object.keys(RES_NAME) as SiteResource[]).map((r) => {
-            const res = shown.resources[r]
-            if (!res) return null
-            const filled = result?.ai[r]?.filled ?? {}
-            return (
-              <table key={r} className="w-full text-sm" aria-label={`${RES_NAME[r]} 칸 짝`}>
-                <caption className="pb-1 text-left text-xs text-ink-500">{RES_NAME[r]} · <span className="font-mono">{res.path}</span></caption>
-                <tbody>
-                  {Object.entries(res.fields).map(([name, expr]) => (
-                    <tr key={name} className="border-t border-ink-100">
-                      <td className="py-1.5 pr-2">{LABEL[r][name] ?? name}</td>
-                      <td className="py-1.5 pr-2 font-mono text-xs">{expr}</td>
-                      <td className="py-1.5 text-xs text-ink-500">{filled[name] ? <span title={filled[name].why}>AI가 찾음</span> : '규칙'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )
-          })}
-          {Object.keys(shown.resources.orders?.values?.status ?? {}).length > 0 && (
-            <p className="text-xs leading-5 text-ink-500">
-              주문 상태: {Object.entries(shown.resources.orders.values?.status ?? {}).map(([raw, to]) => `${raw} → ${STATUS_NAME[to] ?? '모름'}`).join(', ')}
-            </p>
-          )}
-          {unplaced.length > 0 && (
-            <div className="text-xs leading-5 text-ink-500">
-              <p>AXcellent 형식에 자리가 없어 읽지 않는 사이트 칸:</p>
-              <ul className="list-disc pl-5">{unplaced.map((u) => <li key={`${u.r}.${u.path}`}><span className="font-mono">{u.path}</span> — {u.meaning}</li>)}</ul>
-            </div>
-          )}
-        </div>
-      )}
       {linked && state?.configured && state.mapping && (
         <SiteWrites baseUrl={state.connection?.adapter?.base_url ?? ''} authHeader={state.mapping.auth_header}
           authScheme={state.mapping.auth_scheme} canWrite={canWrite} />

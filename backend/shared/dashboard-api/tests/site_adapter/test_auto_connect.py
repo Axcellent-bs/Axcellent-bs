@@ -337,3 +337,62 @@ def test_inquiry_statuses_rule() -> None:
         "closed": "answered",
         "hold": "",
     }
+
+
+# ---------------------------------------------------------------- 판매 상태 글자 (11/26, 스터디온)
+
+STUDYON_OPENAPI = {"paths": {"/api/v1/courses": {"get": {}}, "/api/v1/orders": {"get": {}}}}
+
+
+def _studyon_courses(nubi: Any) -> dict[str, Any]:
+    """누비투어 투어를 스터디온 강의 모양으로: 판매 여부가 참·거짓이 아니라 status 글자."""
+    rows = []
+    for n, row in enumerate(nubi("nubi_tours.json")["data"]):
+        rows.append(
+            {
+                "id": row["id"],
+                "code": row["code"],
+                "title": row["name"],
+                "category": row["region"],
+                "price": row["base_price"],
+                "status": "published" if n == 0 else "draft",
+            }
+        )
+    return {"data": rows, "next_cursor": None}
+
+
+def test_status_text_becomes_active_table(tmp_path, monkeypatch, nubi) -> None:
+    """판매 여부를 글자(status)로 주는 사이트도 규칙으로 판매 중 짝·값 표를 만든다(AI 없이)."""
+    _no_ai(monkeypatch)
+    bookings = nubi("nubi_bookings_p1.json")
+    pages = {
+        "/openapi.json": STUDYON_OPENAPI,
+        "/api/v1/courses": _studyon_courses(nubi),
+        "/api/v1/orders": bookings,
+    }
+    client = _client(tmp_path, monkeypatch, pages)
+    data = auto(client).json()["data"]
+    assert data["saved"] is True, data.get("reason")
+    products = data["mapping"]["resources"]["products"]
+    assert products["fields"]["active"] == "status"
+    assert products["values"]["active"] == {"published": "true", "draft": "false"}
+    up.clear_cache()
+    rows = client.get("/site-adapter/api/shop/products").json()["data"]
+    assert [r["active"] for r in rows] == [True, False]
+
+
+def test_active_rules_and_unknown_status_is_not_on_sale() -> None:
+    from ax_dashboard_api.site_adapter import propose, resources
+
+    rows = [{"s": v} for v in ("published", "unpublished", "in_review", "hidden", "hold")]
+    assert propose.active_values(rows, "s") == {
+        "published": "true",
+        "unpublished": "false",
+        "in_review": "false",
+        "hidden": "false",
+        "hold": "",
+    }
+    assert propose.active_values([{"s": True}], "s") is None  # 참·거짓 칸은 표 없음
+    # 표에 없던 새 상태 글자는 판매 중으로 보지 않는다
+    assert resources._active("archived_new") is False
+    assert resources._active("true") is True and resources._active(True) is True

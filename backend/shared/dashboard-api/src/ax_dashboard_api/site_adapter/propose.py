@@ -35,7 +35,9 @@ SYNONYMS: dict[Resource, dict[str, tuple[str, ...]]] = {
         "name": ("name", "title", "product_name"),
         "price": ("price", "base_price", "sale_price", "unit_price"),
         "category_code": ("category_code", "category", "category_id", "region", "type"),
-        "active": ("active", "is_active", "on_sale", "enabled", "visible", "published"),
+        # 판매 상태를 글자로 주는 사이트(스터디온 강의 `status`)는 맨 뒤 `status`로 잡고
+        # 값 표(`values.active`, 글자 → "true"·"false")로 바꾼다
+        "active": ("active", "is_active", "on_sale", "enabled", "visible", "published", "status"),
     },
 }
 # 찾았을 때만 넣는 칸
@@ -216,4 +218,60 @@ def inquiry_statuses(values: list[str]) -> dict[str, str]:
         out[value] = next(
             (to for words, to in INQUIRY_STATUS_RULES if any(w in low for w in words)), ""
         )
+    return out
+
+
+# ---------------------------------------------------------------- 판매 중 (11/26)
+
+ACTIVE_TRUE = "true"
+ACTIVE_FALSE = "false"
+# 상품 판매 상태 낱말 → 판매 중인지. 위에서부터 처음 맞는 것(부정 낱말 먼저)
+ACTIVE_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("unpublish", "inactive", "unavailable", "not_"), ACTIVE_FALSE),
+    (
+        (
+            "draft",
+            "review",
+            "reject",
+            "hidden",
+            "hide",
+            "close",
+            "stop",
+            "sold",
+            "end",
+            "archiv",
+            "delet",
+            "pause",
+            "suspend",
+            "pending",
+        ),
+        ACTIVE_FALSE,
+    ),
+    (
+        (
+            "publish",
+            "active",
+            "on_sale",
+            "onsale",
+            "open",
+            "visible",
+            "live",
+            "selling",
+            "available",
+            "approved",
+        ),
+        ACTIVE_TRUE,
+    ),
+)
+
+
+def active_values(rows: list[dict[str, Any]], path: str) -> dict[str, str] | None:
+    """판매 중 칸이 글자면 글자 → "true"·"false"(모르면 ""). 참·거짓·숫자 칸이면 None(표 없음)."""
+    seen = status_values(rows, path)
+    if not seen:
+        return None
+    out: dict[str, str] = {}
+    for value in seen:
+        low = value.lower()
+        out[value] = next((to for words, to in ACTIVE_RULES if any(w in low for w in words)), "")
     return out
