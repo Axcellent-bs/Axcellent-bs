@@ -1004,6 +1004,53 @@ def reject_detail(
     return reason
 
 
+# 11/26 B: 고칠 수 있는 거절은 규칙 초안 대신 다시 쓰기 1회(제작 검사와 같은 1회)에 문제 줄로.
+# 장면 수·지어낸 혜택 숫자는 고쳐도 다시 틀리기 쉬워 지금처럼 바로 규칙 초안
+FIXABLE_REJECTS = frozenset({"prompt_rule", "marketing_word", "real_name_in_scene",
+                             "concept_starts_with_product", "report_title_as_topic"})  # fmt: skip
+PROMPT_RULE_FIX = {
+    "text_request": "화면 속 글자·간판·자막을 그리라는 말을 뺀다 (글자 금지는 공통 금지에 있다)",
+    "real_person": "실존 인물·유명인을 빼고 원본 캐릭터로 쓴다",
+    "real_brand": "실제 브랜드 이름을 뺀다",
+    "url_or_number": "주소와 네 자리 이상 숫자를 뺀다",
+    "injection": "지시·명령 같은 말을 뺀다",
+}
+REJECT_FIX = {
+    "marketing_word": "concept·script에 광고 금칙어(성과 과장·인력 대체)가 있다: 그 말을 뺀다",
+    "real_name_in_scene": "장면 글·프롬프트에 주제 후보 실존 이름이 있다: 상황으로 바꿔 쓴다",
+    "concept_starts_with_product": "concept가 상품 이름으로 시작한다: 상황으로 시작한다",
+    "report_title_as_topic": "보고서 이름이 소재로 들어갔다: 보고서 이름을 빼고 주제로 쓴다",
+}
+REJECT_KIND = "text"  # 검사 기록 kind (계약 Literal 그대로, 글 규칙). 자세한 코드는 code 칸
+CODE_MAX = 24  # 계약 CheckProblem.code 길이
+
+
+def reject_code(detail: str) -> str:
+    """검사 기록 code 칸 (24자 안: 자세한 코드가 길면 앞 코드)."""
+    if len(detail) <= CODE_MAX:
+        return detail
+    return detail.split(":")[0][:CODE_MAX]
+
+
+def reject_problems(got: _PlanOut, detail: str) -> list[dict[str, Any]]:
+    """고칠 수 있는 거절 → 검사 기록 문제와 다시 쓰기 "고칠 점" 줄(fix). 고객 글·이름 없음."""
+    reason = detail.split(":")[0]
+    if reason not in FIXABLE_REJECTS:
+        return []
+    out: list[dict[str, Any]] = []
+    if reason == "prompt_rule":
+        for n, s in enumerate(got.scenes, start=1):
+            for code in prompt_problems(s.prompt)[:1]:
+                fix = PROMPT_RULE_FIX.get(code, "그 말을 뺀다")
+                out.append({"kind": REJECT_KIND, "scene": n,
+                            "code": reject_code(f"{reason}:{code}"),
+                            "detail_ko": f"금지 규칙 {reason}:{code}",
+                            "fix": f"장면 {n} prompt가 금지 규칙({code})에 걸렸다: {fix}"})
+        return out
+    return [{"kind": REJECT_KIND, "scene": None, "code": reject_code(reason),
+             "detail_ko": f"금지 규칙 {reason}", "fix": REJECT_FIX[reason]}]  # fmt: skip
+
+
 def _keyframes(i: int, s: _SceneOut) -> dict[str, str]:
     """장면 키프레임 네 칸. 한 칸이라도 prompt와 같은 금지에 걸리면 그 장면 네 칸을 모두 비운다
     (장면 prompt·visual·caption은 그대로). 로그는 장면 번호와 이유 코드만."""
@@ -1291,8 +1338,18 @@ async def _write_with(
         return _rule(p, promo, fallback_of(exc))
     # 11/26 코드 검사에 걸린 것이 있으면 그 목록을 붙여 한 번만 다시 쓴다 (LLM 호출 최대 2회)
     # 11/26 제작 검사 ✕·의뢰 지시 ✕를 한 목록으로 붙여 다시 쓴다 (G가 B와 같은 1회를 쓴다)
-    fixes = plan_fixes(p, got)
-    log_rows = [attempt_log(1, plan_problems(p, got))]
+    # 11/26 B: 고칠 수 있는 거절(금지 규칙 등)은 규칙 초안 대신 같은 1회 다시 쓰기에 문제 줄로.
+    # 장면 수·지어낸 혜택 숫자는 바로 규칙 초안 (다시 쓰지 않는다). 다시 쓴 답도 거절이면 규칙 초안
+    # (fallback_detail은 두 번째 답의 코드). LLM 호출은 그대로 최대 2번
+    detail1 = reject_detail(p, got, style_, purpose)
+    rejects = reject_problems(got, detail1)
+    if detail1 and not rejects:
+        fixes: list[str] = []
+    else:
+        fixes = [x["fix"] for x in rejects] + plan_fixes(p, got)
+        if rejects:
+            log.info("영상 제작안 금지 규칙 → 다시 쓰기 1회: %s %s", detail1, p.id)
+    log_rows = [attempt_log(1, rejects + plan_problems(p, got))]
     rewritten = False
     left = total - (time.monotonic() - started)
     if fixes and left < REWRITE_MIN_SECONDS:  # 시간이 모자라면 1차 답 (✕는 검사 기록에 남는다)
