@@ -216,7 +216,9 @@ def data_source(store: SalesStore, tenant_id: str) -> str | None:
 def customer_reasons(
     store: SalesStore, tenant_id: str, cfg: CatalogSales | None = None
 ) -> list[str]:
-    """고객 기록 관문: 고객 내보내기 출처의 마지막 오류, 저장된 고객 0명, 속성 값 0개."""
+    """고객 기록 관문: 고객 내보내기 출처의 마지막 오류, 저장된 고객 0명.
+
+    `cfg`를 주면(속성으로 나누는 고객·시장 분석만) 속성 값 0개도 본다."""
     reasons: list[str] = []
     source = store.sync_state(tenant_id).source
     if source:
@@ -237,13 +239,18 @@ def snapshot(
     cfg: CatalogSales | None,
     catalog_id: str,
     now: datetime,
+    by_attributes: bool = False,
 ) -> Snapshot:
     """관문을 먼저 본다. 고객 기록 관문(고객 없음·고객 내보내기 오류)에 걸리면 주문 집계를 하지
     않고 짧은 품질 보고(기간 안 주문 수 COUNT 하나·버린 행·마지막 수집)와 이유만 돌려준다.
     이유 순서는 예전과 같다(품질 관문 → 고객 기록 관문)."""
     w = segment_window(period, now)
     created, paid = store.order_counts(tenant_id, w.start, w.end)
-    early = customer_reasons(store, tenant_id, cfg) if cfg is not None else []
+    early = (
+        customer_reasons(store, tenant_id, cfg if by_attributes else None)
+        if cfg is not None
+        else []
+    )
     if early:
         report = quality_brief(store, tenant_id, w, created)
     else:
@@ -576,7 +583,7 @@ def profile(  # noqa: PLR0913 - 입력 칸을 그대로 받는다
     now: datetime,
 ) -> SegmentProfileOutput:
     """대상(분류·장르·상품)을 산 구매자 vs 기간 전체 구매자의 속성 구성비."""
-    snap = snapshot(store, tenant_id, period, cfg, catalog_id, now)
+    snap = snapshot(store, tenant_id, period, cfg, catalog_id, now, by_attributes=True)
     titles: dict[str, str] = {}
     if target_kind == "product":
         w = snap.window
@@ -779,7 +786,7 @@ def favorites(  # noqa: PLR0913
     now: datetime,
 ) -> SegmentFavoritesOutput:
     """속성 묶음의 우리 쇼핑몰 안 순위 (바깥 출처는 `favorites_with_external`이 붙인다)."""
-    snap = snapshot(store, tenant_id, period, cfg, catalog_id, now)
+    snap = snapshot(store, tenant_id, period, cfg, catalog_id, now, by_attributes=True)
     common: dict[str, Any] = {
         "filters": dict(filters),
         "filter_label": filter_label(filters, cfg) if cfg else "",
@@ -1244,7 +1251,7 @@ def coverage_buyers(
     now: datetime,
 ) -> MarketCoverageOutput:
     """구매자 수만 채운 줄 (인구는 `coverage_with_population`이 붙인다)."""
-    snap = snapshot(store, tenant_id, "365d", cfg, catalog_id, now)
+    snap = snapshot(store, tenant_id, "365d", cfg, catalog_id, now, by_attributes=True)
     common: dict[str, Any] = {
         "attribute_keys": list(attribute_keys),
         "quality": snap.report,
