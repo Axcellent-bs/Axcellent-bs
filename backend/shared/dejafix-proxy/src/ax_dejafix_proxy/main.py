@@ -14,9 +14,10 @@ DejaFix 관리자 계정(`DEJAFIX_ADMIN_*`)으로 넘긴다.
 
 회사(11/25, 로드맵 6단계): 부르는 회사의 연결만 쓴다. 회사는 로그인 세션 토큰의 `cid`, 에이전트
 토큰이면 `X-AX-Company` 머리글, 둘 다 없으면 캣북스(예전 그대로). 보관함은 그 회사 것을 읽고
-(`tool_connections`가 요청 회사 폴더를 본다), 환경변수 연결(같이 설치된 DejaFix)은 캣북스만 쓴다.
-로그인 토큰(세션)도 회사마다 따로 둔다. 연결이 없는 회사는 503·"연결 정보가 없어요"다
-(다른 회사 장애를 보여 주지 않는다).
+(`tool_connections`가 요청 회사 폴더를 본다). 보관함에 없으면 환경변수 연결(같이 설치된 DejaFix,
+이 설치의 것)을 쓴다(11/26: 고객사는 한 회사로 쓰고 그 회사 관리자가 화면에서 Zabbix를 넣는다).
+다른 회사 보관함의 DejaFix는 쓰지 않는다. 로그인 토큰(세션)도 회사마다 따로 둔다.
+둘 다 없으면 503·"연결 정보가 없어요"다.
 """
 
 from __future__ import annotations
@@ -156,7 +157,7 @@ def caller_company(request: Request) -> str | None:
 
 
 def _target(company: str | None = company_scope.CATBOOKS) -> tuple[Target, bool] | None:
-    """부를 때마다 정한다: 그 회사 보관함 `dejafix` → (캣북스만) 환경 변수 → 없음(None).
+    """부를 때마다 정한다: 그 회사 보관함 `dejafix` → 환경 변수(같이 설치된 DejaFix) → 없음(None).
     둘째 값: 보관함에서 왔는가."""
     if company is None:
         return None
@@ -168,8 +169,9 @@ def _target(company: str | None = company_scope.CATBOOKS) -> tuple[Target, bool]
         password = conn.secrets.get("password", "")
         if url and user and password:
             return (url, user, password), True
-    if company != company_scope.CATBOOKS:
-        return None  # 같이 설치된 DejaFix(환경 변수)는 캣북스 것이다
+    # 같이 설치된 DejaFix(환경 변수)는 이 설치의 것이다. 보관함에 자기 DejaFix가 없는 회사는
+    # 모두 이걸 쓴다(11/26 예진 님 결정: 고객사는 한 회사로 계속 쓰고, 관리자가 화면에서 넣은
+    # Zabbix를 이 DejaFix가 본다. 테스트로 회사를 바꿔 넣으면 나중 것이 앞 것을 덮는다)
     user = os.getenv("DEJAFIX_USERNAME", "")
     password = os.getenv("DEJAFIX_PASSWORD", "")
     if user and password:
