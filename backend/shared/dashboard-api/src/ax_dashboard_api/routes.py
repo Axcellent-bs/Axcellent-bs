@@ -1895,7 +1895,8 @@ async def marketing_brand_character_unmark(
 async def marketing_creative_asset(
     record_id: str = Path(pattern=r"^CR-[0-9a-f]{12}$"),
     part: str = Path(
-        pattern=r"^(sheet_image|board_image|video|final_video|overlay_video|motion_video|keyframe_[0-9])$"
+        pattern=r"^(sheet_image|board_image|video|final_video|overlay_video|motion_video|"
+        r"original_image|keyframe_[0-9])$"
     ),
 ) -> FileResponse:
     """제작 기록의 Higgsfield 결과 파일(시트 그림·스토리보드 그림·영상·키프레임 그림).

@@ -98,19 +98,26 @@ def test_real_photo_still_makes_the_sheet_image(env: dict[str, Any], monkeypatch
 
 
 @pytest.mark.parametrize("kind", ["virtual_human", "illustration"])
-def test_reference_kinds_keep_the_original_and_spend_no_credit(
+def test_reference_kinds_keep_the_original_and_draw_one_real_sheet(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
+    """11/26 A: 원본은 원본 칸에 그대로, 시트 그림은 일반 캐릭터처럼 Higgsfield로 1장.
+
+    (예전 기대값: 시트 그림을 만들지 않고 원본을 sheet.jpg(시트 자리)에, 관문·크레딧 0)"""
     # 그림(illustration)은 LLM도 그림으로 읽은 경우 (실사로 읽으면 아래 시험)
     out = _upload(env, monkeypatch, kind, confirmed=True, real_photo=kind == "virtual_human")
     assert out.status == TaskStatus.COMPLETED and out.output["kind"] == kind
     assert out.output["stylized_from_photo"] is False  # 그림체로 바꾸지 않는다
     rid = out.output["record_id"]
-    assert env["gate"].calls == [] and env["hf"].submits == []  # 시트 그림을 만들지 않는다
-    assert env["ledger"].month_usage(_month(), "image") == 0  # 크레딧 예약 없음
-    sheet = env["store"].get_render(rid)["sheet_image"]
-    assert sheet["status"] == "done" and sheet["source"] == rr.ORIGINAL_SOURCE
-    assert (env["dir"] / "creative" / rid / "sheet.jpg").read_bytes() == JPEG  # 원본 그대로
+    sheet_gates = [c for c in env["gate"].calls if c[1].get("scene_template_id")
+                   == "creative_sheet_image"]  # fmt: skip
+    assert len(sheet_gates) == 1 and len(env["gate"].calls) == 1  # 시트 그림 1장만
+    assert env["ledger"].month_usage(_month(), "image") == 1
+    render = env["store"].get_render(rid)
+    original = render["original_image"]
+    assert original["status"] == "done" and original["source"] == rr.ORIGINAL_SOURCE
+    assert (env["dir"] / "creative" / rid / "original.jpg").read_bytes() == JPEG  # 원본 그대로
+    assert render["sheet_image"].get("source") != rr.ORIGINAL_SOURCE  # 시트 자리는 시트 그림
     assert env["store"].get(rid)["sheet"]["kind"] == kind
 
 
@@ -275,8 +282,9 @@ def test_virtual_human_video_carries_the_mark(env: dict[str, Any], monkeypatch) 
     assert done.output["ai_virtual_human"] is True
     assert done.output["ai_disclosure"] == VIRTUAL_HUMAN_LABEL
     assert request_video.disclosure(done.output) == VIRTUAL_HUMAN_LABEL
-    # 그림 크레딧: 시트 0장 + 스토리보드 1장(지금처럼)
-    assert env["ledger"].month_usage(_month(), "image") == 1
+    # 그림 크레딧: 회사 캐릭터 시트 1장(11/26 A, 등록 때) + 스토리보드 1장(지금처럼)
+    # (예전 기대값: 1 = 시트 0장 + 스토리보드 1장)
+    assert env["ledger"].month_usage(_month(), "image") == 2
     # 캐릭터가 실제 사람 사진이면 표시하지 않는다
     assert request_video.disclosure({"ai_virtual_human": False}) is None
 

@@ -315,9 +315,8 @@ def _style(rec: dict[str, Any]) -> str:
 
 def _person_original(rec: dict[str, Any]) -> bool:
     """가상 인물·일러스트 원본을 참조로 쓸 수 있나(real_photo·캐릭터 없음이면 False)."""
-    sheet = (rec.get("render") or {}).get("sheet_image") or {}
-    original = sheet.get("source") == _render.ORIGINAL_SOURCE or sheet.get("original") is True
-    return _render.is_reference_kind(rec) and original and sheet.get("status") == "done"
+    # 11/26 A: 원본은 원본 칸(original_image), 예전 기록은 시트 그림 자리 (`original_part`)
+    return _render.is_reference_kind(rec) and _render.original_part(rec) is not None
 
 
 def prepare(record_id: str, cid: str | None) -> dict[str, Any]:
@@ -381,9 +380,10 @@ def _refs(
 ) -> list[bytes]:
     """그림 참조: [구도 PNG, 인물 원본, 추가 참조…] 순서(구도 먼저), 상한 `MAX_IMAGE_REFS`."""
     refs: list[bytes] = [layout] if layout else []
-    if _person_original(rec):
+    part = _render.original_part(rec)
+    if _person_original(rec) and part is not None:
         try:
-            refs.append(_render._ref_bytes(record_id, "sheet_image", cid, rec))  # noqa: SLF001
+            refs.append(_render._ref_bytes(record_id, part, cid, rec))  # noqa: SLF001
         except OSError:
             pass
         refs += _render.extra_reference_bytes(record_id, rec, cid)

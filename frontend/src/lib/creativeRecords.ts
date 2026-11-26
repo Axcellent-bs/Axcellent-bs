@@ -36,7 +36,8 @@ export interface CreativeRecordSummary {
   video_seconds?: number | null;
 }
 
-export type RenderPartKey = "sheet_image" | "board_image" | "video" | "final_video" | "motion_video";
+/** original_image: 11/26 가상 인물·일러스트가 올린 원본 (읽기 전용, 시트 그림과 따로) */
+export type RenderPartKey = "sheet_image" | "board_image" | "video" | "final_video" | "motion_video" | "original_image";
 export interface RenderPart {
   status?: string;
   error?: string | null;
@@ -45,8 +46,14 @@ export interface RenderPart {
   review_id?: string | null;
   request_id?: string;
   at?: string;
-  /** "upload"면 사람이 직접 올린 파일 */
+  /** "upload"면 사람이 직접 올린 파일, "upload_original"면 올린 원본(예전 기록은 시트 칸 자리) */
   source?: string;
+  /** 의뢰 기록 시트 칸이 회사 캐릭터 원본 복사본인가 (11/24) */
+  original?: boolean;
+  /** 11/26 회사 캐릭터에 시트가 아직 없어 원본만 복사해 왔다 */
+  sheet_missing?: boolean;
+  /** 복사해 온 회사 캐릭터 기록 번호 */
+  copied_from?: string | null;
   /** 올린 파일 이름 */
   label?: string | null;
   /** 올린 사람 */

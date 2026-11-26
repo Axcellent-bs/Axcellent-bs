@@ -163,8 +163,9 @@ export const canUpload = (hasFile: boolean, rightsChecked: boolean, busy = false
 export type UploadKind = "real_photo" | "virtual_human" | "illustration";
 export const KIND_OPTIONS: { kind: UploadKind; label: string; hint: string; isNew?: boolean }[] = [
   { kind: "real_photo", label: "실제 사람 사진", hint: "그림체 캐릭터로 바꿔서 써요(지금 방식). 실존 인물 얼굴을 광고에 쓰지 않기 위해서예요." },
-  { kind: "virtual_human", label: "AI로 만든 가상 인물", hint: "올린 이미지를 그대로 참조로 써요. 다시 그리지 않아요(그림 크레딧 0).", isNew: true },
-  { kind: "illustration", label: "그림·일러스트 캐릭터", hint: "그대로 써요." },
+  // 11/26 A: 원본은 영상 참조로 그대로, 등록할 때 캐릭터 시트(정면·옆·뒤·표정·색표)를 1장 그린다
+  { kind: "virtual_human", label: "AI로 만든 가상 인물", hint: "올린 이미지는 영상 참조로 그대로 쓰고, 캐릭터 시트(정면·옆·뒤·표정·색표)를 1장 그려요(약 1.5 크레딧).", isNew: true },
+  { kind: "illustration", label: "그림·일러스트 캐릭터", hint: "그대로 참조로 쓰고, 캐릭터 시트를 1장 그려요(약 1.5 크레딧)." },
 ];
 export const VIRTUAL_CONFIRM_LABEL = "실존 인물이 아닌 AI 가상 인물이고, 우리 회사가 쓸 권리가 있어요";
 export const VIRTUAL_NOTE = "영상·게시물에 \"AI 가상 인물\" 표시가 붙어요.";
