@@ -187,3 +187,28 @@ def test_recollect_clears_only_that_company_cursor_and_refills_lines(
         assert tally(store, STUDY, *_window())[0].orders == 3
     finally:
         store.close()
+
+
+def test_recollect_also_clears_that_company_customers_cursor(tmp_path) -> None:  # noqa: ANN001
+    """고객 내보내기 커서도 비운다(11/26): 변환기가 새로 꺼낸 고객 속성(연령대·성별)을 다시 받게.
+    캣북스 고객 커서는 그대로."""
+    from ax_agent_template import company_scope
+    from data_agent.sales_store import customers_source
+
+    env = {sc.DB_ENV: str(tmp_path / "sales.db")}
+    store = SalesStore(sc.db_path(env))
+    try:
+        with company_scope.using(STUDY):
+            name = sc.source_name(env)
+        store.save_cursor(STUDY, customers_source(name), "2026-11-25T00:00:00Z|u9")
+        store.save_cursor(TENANT_ID_DEFAULT, customers_source("shop-api"), "cat-cursor")
+    finally:
+        store.close()
+    assert sc.recollect(env, STUDY) == 0
+    store = SalesStore(sc.db_path(env))
+    try:
+        assert not store.sync_state(STUDY, customers_source(name)).cursor
+        cat = store.sync_state(TENANT_ID_DEFAULT, customers_source("shop-api"))
+        assert cat.cursor == "cat-cursor"
+    finally:
+        store.close()

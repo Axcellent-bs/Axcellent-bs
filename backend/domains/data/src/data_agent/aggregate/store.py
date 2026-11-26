@@ -529,6 +529,16 @@ class AggregateStore:
             (tenant_id, start.isoformat(), end.isoformat()),
         ).fetchall()
 
+    def category_codes(self, tenant_id: str) -> list[str]:
+        """일별 매출 집계에 나온 분류 code (그 회사만, 빈 값 제외, 정렬)."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT category_code FROM agg_sales_daily "
+            "WHERE tenant_id = ? AND category_code IS NOT NULL AND category_code != '' "
+            "ORDER BY category_code",
+            (tenant_id,),
+        ).fetchall()
+        return [r[0] for r in rows]
+
     def monthly_rows(self, tenant_id: str) -> list[sqlite3.Row]:
         return self._conn.execute(
             f"SELECT * FROM agg_sales_monthly WHERE tenant_id = ? ORDER BY month, {_SALES_KEY_SQL}",

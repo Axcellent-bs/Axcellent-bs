@@ -31,6 +31,7 @@ from ax_dashboard_api.envelope import ApiError
 from ax_dashboard_api.site_adapter import (
     bookkeeping,
     claims,
+    customer_attrs,
     inquiries,
     resources,
     series,
@@ -422,10 +423,15 @@ async def sales_export(limit: int | None = None, cursor: str | None = None) -> d
     )
 
 
+def _order_with_attrs(row: dict[str, Any], m: Any) -> dict[str, Any]:
+    """주문 모양 + 고객 속성(성별·연령대, `customer_attrs`)."""
+    return {**resources.to_order(row, m), "attributes": customer_attrs.attributes(row, m)}
+
+
 @router.get("/api/shop/customers-export")
 async def customers_export(limit: int | None = None, cursor: str | None = None) -> dict[str, Any]:
     """`ShopCustomersExportResult` 모양. 가입 시각이 없는 사이트라 첫 주문 시각을 쓴다."""
-    rows = resources.customers_from(await _rows("orders"))
+    rows = resources.customers_from(await _rows("orders", convert=_order_with_attrs))
     return _ok(_export("customers", rows, limit, cursor))
 
 

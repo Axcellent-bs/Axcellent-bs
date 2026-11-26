@@ -92,6 +92,15 @@ def run_source(tenant_id: str) -> tuple[bool, str | None]:
     return True, done[-1]["source_name"]
 
 
+def category_codes(tenant_id: str) -> list[str]:
+    """집계에 나온 그 회사 분류 code (분류 표 없는 회사의 고객·시장 분석 선택지, 11/26)."""
+    agg = AggregateStore(db_path())
+    try:
+        return agg.category_codes(tenant_id)
+    finally:
+        agg.close()
+
+
 def run_key(tenant_id: str) -> str:
     """판매 캐시 키 조각 (3-2 ⑧): 스위치가 켜졌으면 마지막으로 끝난 집계 계산 번호, 꺼졌으면 "".
     하루 계산이 새로 끝나면 키가 달라져 어제 스냅샷으로 낸 결과가 섞이지 않는다."""

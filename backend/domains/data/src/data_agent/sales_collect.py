@@ -670,7 +670,7 @@ def rebuild_summary(env: Mapping[str, str]) -> int:
 
 
 def recollect(env: Mapping[str, str], company: str) -> int:
-    """캣북스가 아닌 회사 하나의 판매 기록 커서만 비운다 (잠금은 부르는 쪽이 잡는다, 11/26).
+    """캣북스가 아닌 회사 하나의 판매 기록·고객 커서만 비운다 (잠금은 부르는 쪽이 잡는다, 11/26).
 
     지우는 기록은 없다. 다음 수집 회차가 그 회사 주문을 처음부터 다시 받아 같은 주문 번호 줄을
     덮어쓰고(예: 변환기가 새로 채운 상품 이름·분류), 다음 하루 집계가 다시 받은 날을 다시 센다.
@@ -686,7 +686,9 @@ def recollect(env: Mapping[str, str], company: str) -> int:
         with company_scope.using(cid):
             name = source_name(env)
         store.save_cursor(cid, name, None)
-        print(f"[sales {cid}] 판매 기록 커서를 비움 ({name}): 다음 회차에 처음부터 다시 받음",
+        # 고객 내보내기도 처음부터 (변환기가 새로 꺼낸 고객 속성 연령대·성별을 받게, 11/26)
+        store.save_cursor(cid, customers_source(name), None)
+        print(f"[sales {cid}] 판매 기록·고객 커서를 비움 ({name}): 다음 회차에 처음부터 다시 받음",
               flush=True)  # fmt: skip
         return 0
     finally:
