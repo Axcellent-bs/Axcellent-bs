@@ -129,6 +129,14 @@ export interface RequestRuleView { kind: RequestRuleKind; textKo: string; kept: 
 export const RULE_KIND: Record<RequestRuleKind, string> = {
   quote: '대사', ending: '마지막 장면', setting: '배경', prop: '소품', action: '동작', look: '외형',
 }
+/** 11/26 접힌 줄 개수 칩 (중립, ✓/✕·통과 낱말 없음): 의뢰 지시 "6개" · 제작 검사 "2번 검사"(검사 판 수). 없으면 '' */
+export function planChecksCount(v: Pick<VideoPlanView, 'requestRules' | 'checkLog'>, kind: 'rules' | 'checks'): string {
+  const n = kind === 'rules' ? (v.requestRules ?? []).length : (v.checkLog ?? []).length
+  if (!n) return ''
+  return kind === 'rules' ? `${n}개` : `${n}번 검사`
+}
+/** 접는 칸이 처음에 펼쳐져 있나: 기본 접힘, open 고정 인자(PDF·인쇄용)나 인쇄 중이면 펼침 */
+export const planChecksOpen = (open = false, printing = false): boolean => open || printing
 /** "의뢰 지시 3/3 지킴". 지시가 없으면 '' (줄을 그리지 않는다) */
 export function requestRulesChip(v: Pick<VideoPlanView, 'requestRules'>): string {
   const rules = v.requestRules ?? []
