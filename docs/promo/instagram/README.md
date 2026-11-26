@@ -65,7 +65,7 @@
 ## 새 게시물을 올린 날 하는 일
 
 1. 인스타에 게시한다(사람 승인 뒤).
-2. 사진·영상을 `assets/<고객사>/`에 넣는다(2MB·15MB 이하).
+2. 사진·영상을 `docs/promo/assets/instagram/<고객사>/`에 넣는다(2MB·15MB 이하). 자동 배포는 새 파일을 `docs/promo/assets/` 아래에서만 복사한다. `instagram.json`에는 `assets/instagram/<고객사>/…`로 적는다.
 3. `instagram.json`의 해당 고객사 `posts`에 항목을 추가한다(`example.json` 참고).
 4. `node docs/promo/instagram/check.mjs`로 검사해 오류가 없는지 본다.
 5. `node docs/promo/build.mjs`로 페이지를 다시 만들어 화면에서 확인하고 PR을 올린다.
