@@ -131,7 +131,9 @@ def test_prompt_follows_purpose_structure() -> None:
     asyncio.run(vp.write(llm, _prop(), "ctx"))
     sent = plan_call(llm)
     assert "재미 먼저, 브랜드는 끝에" in sent and "- 광고 목적:" not in sent
-    assert "offer_ko·cta_ko는 빈 문자열 (채널 콘텐츠)" in sent
+    # 11/26 K 바뀐 기대값: 끝 행동(cta_ko)은 4가지 목적 모두 쓴다
+    # (예전 "offer_ko·cta_ko는 빈 문자열")
+    assert vp.GOAL_CTA_RULE.strip() in sent and "offer_ko·cta_ko는 빈 문자열" not in sent
 
 
 def test_prompt_asks_for_keyframe_fields_and_rules() -> None:
@@ -157,12 +159,15 @@ def test_llm_keyframe_fields_are_kept() -> None:
         and s.camera_en == "Medium shot, slow push-in"
     )
     assert s.action_en.startswith("The cat slowly turns")
-    assert plan.offer_ko == "" and plan.cta_ko == ""
+    # 11/26 K 바뀐 기대값: LLM이 비운 끝 행동은 목적별 기본 문구 (예전 cta_ko == "")
+    assert plan.offer_ko == "" and plan.cta_ko == vp.GOAL_CTA[vp.FUN] and plan.goal == vp.FUN
 
 
-def test_channel_content_drops_offer_and_cta() -> None:
+def test_channel_content_drops_offer_but_keeps_cta() -> None:
+    """11/26 K 바뀐 기대값: 채널 콘텐츠도 끝 행동은 남긴다 (예전 이름
+    test_channel_content_drops_offer_and_cta, cta_ko == ""). 혜택은 지금처럼 버린다."""
     plan = asyncio.run(vp.write(_mock(_out(offer="혜택", cta="지금 보기")), _prop(), "ctx"))
-    assert plan.purpose == "channel_content" and plan.offer_ko == "" and plan.cta_ko == ""
+    assert plan.purpose == "channel_content" and plan.offer_ko == "" and plan.cta_ko == "지금 보기"
 
 
 def test_client_offer_keeps_offer_cta_and_two_second_hook() -> None:
@@ -279,7 +284,9 @@ def test_offer_with_invented_number_or_marketing_word_is_rejected() -> None:
 @pytest.mark.parametrize("promo", [PRODUCT, (vp.FUN_FIRST, vp.END_CARD)])
 def test_rule_plan_start_frame_is_visual_and_rest_empty(promo) -> None:
     plan = vp.rule_plan(_prop(), promo)
-    assert plan.purpose is None and plan.offer_ko == "" and plan.cta_ko == ""
+    # 11/26 K 바뀐 기대값: 규칙 초안도 목적과 끝 행동(기본 문구)을 채운다 (예전 cta_ko == "")
+    assert plan.purpose is None and plan.offer_ko == "" and plan.cta_ko == vp.GOAL_CTA[vp.FUN]
+    assert plan.goal == vp.FUN
     for s in plan.scenes:
         assert s.start_frame == s.visual
         assert (s.end_frame, s.action_en, s.camera_en) == ("", "", "")

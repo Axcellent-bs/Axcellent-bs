@@ -414,13 +414,112 @@ SOLUTION_WORDS = (
 
 
 def purpose_of(p: Proposal) -> str:
-    """제안 글로 고른 광고 목적. 같은 제안이면 같은 값 (LLM을 쓰지 않는다)."""
+    """제안 글로 고른 광고 목적. 같은 제안이면 같은 값 (LLM을 쓰지 않는다).
+
+    11/26 K: 영상 목적(goal_of)이 광고면 낱말이 없어도 광고 — AXcellent 자사면 solution_ad
+    (B2B 문제 → 해결 → 문의), 아니면 client_offer."""
     text = " ".join(x for x in (p.title, p.idea, p.insight, p.content_category or "") if x)
     if any(w in text for w in OFFER_WORDS):
         return CLIENT_OFFER
     if any(w in text for w in SOLUTION_WORDS):
         return SOLUTION_AD
+    if goal_of(p) == AD:
+        return SOLUTION_AD if own_company() else CLIENT_OFFER
     return CHANNEL_CONTENT
+
+
+# ---------------------------------------------------------------- 영상 목적 (11/26 K)
+# 재현 님 "홍보인지 재미인지 광고인지 모르겠다". 목적 4가지(계약 VideoPlan.goal). 코드가 정한다
+# (LLM 아님): 의뢰문 낱말 → 제안 글 낱말 → 데이터가 product로 정했으면 홍보 → 재미.
+# 낱말 순서 광고 > 정보 > 홍보 > 재미. 사람이 고른 목적(사람이 쓴 제작안의 goal)이 먼저
+FUN, INFO, PROMO, AD = "fun", "info", "promo", "ad"
+GOALS = (FUN, INFO, PROMO, AD)
+GOAL_WORDS = (
+    (AD, ("광고", "할인", "이벤트", "쿠폰", "세일", "특가", "솔루션 소개")),
+    (INFO, ("꿀팁", "팁", "추천", "방법", "하는 법", "하는법", "정리", "비교", "리스트")),
+    (PROMO, ("홍보", "알리기", "알리는", "소개", "신상", "런칭", "브랜드")),
+    (FUN, ("재밌", "재미있", "웃긴", "웃기", "밈", "챌린지")),
+)  # fmt: skip
+GOAL_KO = {FUN: "재미", INFO: "정보", PROMO: "홍보", AD: "광고"}
+OWN_COMPANY = "axcellent"  # 자사 (광고면 B2B 템플릿)
+# 끝 행동(cta_ko)은 4가지 모두 필수 (11/26 K). LLM이 비우면 목적별 기본 문구 (참여 조건 없이)
+GOAL_CTA = {
+    FUN: "다음 이야기도 채널에서 만나요",
+    INFO: "저장해 두고 필요할 때 다시 보기",
+    PROMO: "채널에서 더 많은 소식 보기",
+    AD: "지금 채널에서 자세히 보기",
+}
+
+
+def own_company() -> bool:
+    """지금 회사가 AXcellent 자사인가."""
+    return (tenant.current() or "") == OWN_COMPANY
+
+
+def goal_words(text: str) -> tuple[str, str] | None:
+    """(목적, 걸린 낱말). 없으면 None."""
+    for goal, words in GOAL_WORDS:
+        for w in words:
+            if w in (text or ""):
+                return goal, w
+    return None
+
+
+def goal_why(p: Proposal) -> tuple[str, str]:
+    """(목적, 왜) — 왜: "의뢰문 '홍보'"·"제안 글 '추천'"·"사람이 고름"·"낱말 없음" (화면 글)."""
+    old = p.video_plan
+    if old is not None and old.written_by == "human" and old.goal in GOALS:
+        return old.goal, "사람이 고름"
+    hit = goal_words(p.request_text or "")
+    if hit:
+        return hit[0], f"의뢰문 '{hit[1]}'"
+    text = " ".join(x for x in (p.title, p.idea, p.insight, p.content_category or "") if x)
+    hit = goal_words(text)
+    if hit:
+        return hit[0], f"제안 글 '{hit[1]}'"
+    if getattr(p, "promo_style", None) == PRODUCT:
+        return PROMO, "데이터가 상품 소개로 정함"
+    return FUN, "낱말 없음"
+
+
+def goal_of(p: Proposal) -> str:
+    return goal_why(p)[0]
+
+
+def goal_promo(p: Proposal) -> tuple[str, str]:
+    """목적 → 홍보 방향(promo_style, brand_exposure). 목적을 낱말로 정하지 않았으면 지금 규칙
+    (promo_of: 데이터·회사 설정). 재미 = fun_first·end_card, 정보 = product·caption,
+    홍보 = promo_style 지금 규칙·(prop 또는 정해 둔 caption), 광고 = 지금 규칙."""
+    goal, why = goal_why(p)
+    style_, exposure = promo_of(p)
+    # 의뢰문·사람이 정한 목적만 방향을 바꾼다. 제안 글 낱말(데이터·LLM이 쓴 글)은 목적 표시·
+    # 지시문 흐름·끝 행동에만 쓰고, 방향은 데이터·회사 설정(지금 규칙) 그대로
+    if not why.startswith(("의뢰문", "사람")) or goal == AD:
+        return style_, exposure
+    if goal == FUN:
+        return FUN_FIRST, END_CARD
+    if goal == INFO:
+        return PRODUCT, CAPTION
+    # 홍보: promo_style은 지금 규칙(데이터·회사 설정), 브랜드는 소품(또는 정해 둔 자막)으로
+    return style_, exposure if exposure in (PROP, CAPTION) else PROP
+
+
+def virtual_brand() -> bool:
+    """가상 브랜드인가 (회사 설정 `[brand] demo_notice` 시연 안내가 있는 회사, 예 캣북스)."""
+    return bool(str(tenant.brand_section().get("demo_notice") or "").strip())
+
+
+VIRTUAL_AD_WARNING = "가상 브랜드 · 혜택은 시뮬레이션"
+
+
+def finish(p: Proposal, plan: VideoPlan) -> VideoPlan:
+    """제작안에 목적(goal)과 끝 행동(cta_ko, 비면 목적별 기본 문구)을 채운다. 광고가 아닌데
+    LLM이 혜택(offer_ko)을 적었으면 비운다(지금 규칙)."""
+    goal = goal_of(p)
+    if plan.purpose in PURPOSE_DIRECTION:
+        goal = AD
+    cta = plan.cta_ko or GOAL_CTA[goal]
+    return plan.model_copy(update={"goal": goal, "cta_ko": cta[:40]})
 
 
 def fun_timings(duration: int, n: int) -> list[tuple[int, int]]:
@@ -557,9 +656,9 @@ def rule_plan(p: Proposal, promo: tuple[str, str] | None = None) -> VideoPlan:
     주인공·배경은 회사 [brand](tenant.brand()). 11/22 전에는 고양이 마스코트·책방 고정이었다.
     홍보 방향(promo, 없으면 promo_of)이 product면 상품을 본론에서 보여 주는 예전 흐름,
     아니면 재미 먼저(fun_rule_plan)."""
-    style_, exposure = promo or promo_of(p)
+    style_, exposure = promo or goal_promo(p)
     if style_ == FUN_FIRST:
-        return fun_rule_plan(p, exposure)
+        return finish(p, fun_rule_plan(p, exposure))
     d = duration_of(p)
     b = cast(p)  # 11/26 회사 캐릭터를 골랐으면 그 캐릭터가 주인공
     who, where, who_ko = b["character_en"], b["setting_en"], b["character_ko"]
@@ -603,11 +702,11 @@ def rule_plan(p: Proposal, promo: tuple[str, str] | None = None) -> VideoPlan:
     scenes = overlay_safe(made, _company()["name"])
     script = " → ".join(f"{s.start_s}~{s.end_s}초 {s.visual}" for s in scenes)
     concept = _pick(_short(idea_of(p), 200), subject_of(p), PLAIN_CONCEPT)
-    return VideoPlan(
+    return finish(p, VideoPlan(
         concept=concept, duration_s=d, script=_short(script, 800), scenes=scenes,
         style=style(b), negative=NEGATIVE, written_by="rule", media_hints=media_hints(p),
         **cast_fields(p),
-    )  # fmt: skip
+    ))  # fmt: skip
 
 
 FUN_CONCEPT = "대상이 좋아하는 소재로 첫 1초부터 웃기고 끝에 채널을 알리는 짧은 영상"
@@ -796,7 +895,7 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
   - 장면마다 place_ko·start_frame·end_frame·camera_en·action_en을 반드시 채운다 (비우지 않는다).
     place_ko는 사실대로, 같은 장소면 같은 말로 적는다
 - offer_ko: 혜택·이점 한 줄 (한국어, 60자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
-- cta_ko: 마지막 행동 문구 (한국어, 40자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
+- cta_ko: 마지막 행동 문구 (한국어, 40자 이내. 아래 목적 줄을 따른다)
 - category: 데이터 블록 categories(회사 상품 분류) 중 이 영상이 보여 주는 상품에 맞는 것 하나를
   그대로. 회사 전체·브랜드·채널 홍보처럼 특정 상품이 아니면 반드시 빈 문자열. 목록이 비었거나
   맞는 것이 없어도 빈 문자열 (목록에 없는 말을 만들지 않는다)
@@ -885,15 +984,39 @@ PURPOSE_DIRECTION = {
 }
 
 
-def direction(style_: str, exposure: str, purpose: str = CHANNEL_CONTENT) -> str:
+# 11/26 K 영상 목적별 장면 흐름 (광고는 PURPOSE_DIRECTION). 장면 수·시간 상한은 지금 규칙 그대로
+GOAL_DIRECTION = {
+    FUN: "- 영상 목적: 재미. 재밌는 릴스로 끝까지 보게 하고, 브랜드는 끝에 채널 이름만\n",
+    INFO: (
+        "- 영상 목적: 정보. 장면 흐름은 문제 제기(보는 사람이 겪는 고민) → 팁·추천 장면 2~3개 → "
+        "채널 이름\n"
+        "  - 팁·추천은 데이터 블록(facts·products·topic)에 있는 것만 쓴다. 근거에 없는 숫자·사실을 "
+        "지어내지 않는다\n"
+    ),
+    PROMO: (
+        "- 영상 목적: 홍보. 브랜드·상품을 장면 속 소품이나 자막으로 자연스럽게 보이고, 끝에 채널 "
+        "이름\n"
+    ),
+}
+GOAL_CTA_RULE = (
+    "- offer_ko는 빈 문자열. cta_ko는 꼭 쓴다: 영상을 본 사람이 할 행동 한 줄(채널에서 더 보기·"
+    "저장해 두기 같은 것, 한국어 40자 이내). 좋아요·팔로우·공유·댓글 낱말과 참여 조건은 쓰지 "
+    "않는다. 마지막 장면 caption은 빈 문자열(cta_ko는 코드가 마지막 2초 엔드카드로 얹는다)\n"
+)
+
+
+def direction(
+    style_: str, exposure: str, purpose: str = CHANNEL_CONTENT, goal: str = ""
+) -> str:
     """프롬프트의 홍보 방향 줄. 광고 목적이면 그 목적의 장면 흐름, 채널 콘텐츠면 지금 흐름
-    (product면 브랜드 노출 규칙을 붙이지 않는다)."""
+    (product면 브랜드 노출 규칙을 붙이지 않는다) + 영상 목적 흐름(11/26 K, goal)."""
     if purpose in PURPOSE_DIRECTION:
         return PURPOSE_DIRECTION[purpose]
     return (
         DIRECTION[style_]
         + (EXPOSURE[exposure] if style_ == FUN_FIRST else "")
-        + "- offer_ko·cta_ko는 빈 문자열 (채널 콘텐츠)\n"
+        + GOAL_DIRECTION.get(goal, "")
+        + GOAL_CTA_RULE
     )
 
 
@@ -1274,7 +1397,12 @@ def _checked(
             for i, ((start, end), s) in enumerate(zip(cuts, got.scenes, strict=True), start=1)
         ]
         keep = frozenset(plan_checks.quotes(rules))
-        scenes = overlay_safe(scenes, _company()["name"], got.cta_ko if ad else "", keep)
+        # 11/26 K: 끝 행동(cta_ko)은 4가지 목적 모두. 광고가 아니면 마케팅이 받지 않는 말·근거 없는
+        # 숫자가 든 문구는 버리고 목적별 기본 문구(finish)로 (제작안은 버리지 않는다)
+        cta = got.cta_ko
+        if not ad and (text_problems(cta) or invented_number(cta, known_text(p))):
+            cta = ""
+        scenes = overlay_safe(scenes, _company()["name"], cta or GOAL_CTA[goal_of(p)], keep)
         checked = [plan_checks.scene_of(s.n, s) for s in scenes]
         script = _short(got.script, 800)
         plan = VideoPlan(
@@ -1283,7 +1411,7 @@ def _checked(
             negative=NEGATIVE, written_by="llm",
             media_hints=media_hints(p, got.category), purpose=purpose,
             offer_ko=_short(got.offer_ko, 60) if ad else "",
-            cta_ko=_short(got.cta_ko, 40) if ad else "", **cast_fields(p),
+            cta_ko=_short(cta, 40), **cast_fields(p),
             request_rules=plan_checks.check_rules(rules, checked, script, _company()["name"]),
             **formatted,
         )  # fmt: skip
@@ -1376,9 +1504,9 @@ async def write(
 
     규칙 제작안이면 `fallback_reason`에 이유(no_llm·timeout·bad_format·rejected·error)를 남긴다.
     timeout: LLM 제한 시간(초). 사람이 기다리는 곳은 HUMAN_WAIT_SECONDS를 넘긴다."""
-    promo = promo or promo_of(p)
+    promo = promo or goal_promo(p)
     if llm is None:
-        return _rule(p, promo, "no_llm")
+        return finish(p, _rule(p, promo, "no_llm"))
     prompt, data, d, b, style_, purpose = _plan_prompt(p, promo)
     started = time.monotonic()
     total = total_seconds(timeout)
@@ -1390,8 +1518,8 @@ async def write(
             llm.structured(text, _PlanOut, untrusted=data, context_id=context_id), left
         )
 
-    return await _write_with(p, promo, ask, prompt, d, b, style_, purpose, started, llm,
-                             context_id, total)  # fmt: skip
+    return finish(p, await _write_with(p, promo, ask, prompt, d, b, style_, purpose, started,
+                                       llm, context_id, total))  # fmt: skip
 
 
 # 11/26 T (예진 님 리뷰 #1856·#1858): 다시 쓰기가 생겨 제작안 LLM이 최대 2번이다. 호출마다 제한
@@ -1453,7 +1581,8 @@ def _plan_prompt(
         angle=ANGLE_TEXT.get(p.angle or "", "정하지 않음"),
         character_ko=COMPANY_CHARACTER_KO if company else b["character_ko"],
         setting_rule=setting_rule(style_, b),
-        direction=direction(style_, exposure, purpose) + (CHARACTER_RULE if company else "")
+        direction=direction(style_, exposure, purpose, goal_of(p))
+        + (CHARACTER_RULE if company else "")
         + (REQUEST_RULE if p.request_text else "")
         + (plan_format.prompt_block(card) if card else ""),
     )  # fmt: skip
@@ -1599,7 +1728,7 @@ async def revise(
                                                      "check_log": log_rows}))  # fmt: skip
     if llm is None:
         raise ReviseRefused("no_llm")
-    promo = promo_of(p)
+    promo = goal_promo(p)
     prompt, data, d, b, style_, purpose = _plan_prompt(p, promo)
     fixes = "".join(f"- {marketing_fix(x)}\n" for x in problems)
     try:
@@ -1622,7 +1751,7 @@ async def revise(
         "version": from_version + 1, "check_log": log_rows,
         "adjustments": _adjustments(got) or old.adjustments,
     })  # fmt: skip
-    return fill_scene_detail(redraw(old, plan), got)
+    return finish(p, fill_scene_detail(redraw(old, plan), got))
 
 
 PURPOSE_LABEL = {
@@ -1654,12 +1783,46 @@ def character_line(v: VideoPlan) -> str:
     return " · ".join(x for x in (head, look) if x)
 
 
+# 11/26 K 목적 블록 (화면 lib/videoPlan.ts GOAL_INFO와 같은 문구, 재현 님 확정 표)
+GOAL_FLOW = {
+    FUN: "재밌는 릴스, 끝에 채널 이름만",
+    INFO: "문제 제기 → 팁·추천 2~3개 → 채널 이름",
+    PROMO: "브랜드·상품을 소품·자막으로 → 채널 이름",
+    AD: "혜택 → 쓰는 장면 → 행동 문구",
+}
+AD_B2B_FLOW = "문제 → 해결 → 문의 (B2B 템플릿)"
+GOAL_SUCCESS = {
+    FUN: "끝까지 본 비율·공유",
+    INFO: "저장·팔로우",
+    PROMO: "저장·팔로우",
+    AD: "클릭·구매",
+}
+AD_B2B_SUCCESS = "문의·데모"
+
+
+def goal_lines(v: VideoPlan) -> list[str]:
+    """기획서 맨 위 목적 줄 (goal이 없는 예전 제작안은 없음)."""
+    if v.goal not in GOALS:
+        return []
+    b2b = v.goal == AD and v.purpose == SOLUTION_AD
+    flow = AD_B2B_FLOW if b2b else GOAL_FLOW[v.goal]
+    success = AD_B2B_SUCCESS if b2b else GOAL_SUCCESS[v.goal]
+    out = [f"**영상 목적**: {GOAL_KO[v.goal]} · 흐름: {flow}"]
+    if v.cta_ko:
+        out.append(f"- 끝 행동: {v.cta_ko}")
+    out.append(f"- 성공 기준: {success}")
+    if v.goal == AD and virtual_brand():  # 만들기는 막지 않는다
+        out.append(f"- {VIRTUAL_AD_WARNING}")
+    return [*out, ""]
+
+
 def markdown(v: VideoPlan) -> str:
     """기획안(기획서) 본문에 붙이는 사람용 표."""
     who = {"llm": "AI 초안", "rule": "규칙 초안", "human": "사람"}[v.written_by]
     out = [
         f"## 영상 제작안 ({v.duration_s}초 · {v.aspect} · {who})",
         "",
+        *goal_lines(v),
         f"**콘셉트**: {v.concept}",
         "",
         f"**대본**: {v.script}",

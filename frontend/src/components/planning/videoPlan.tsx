@@ -9,7 +9,8 @@ import { Tag } from '@/components/planning-common/parts'
 import { CheckLog, RequestRules } from '@/components/planning/PlanChecks'
 import { usePrinting } from '@/lib/print'
 import { svgDataUri } from '@/lib/storyboardSvg'
-import { characterLine, formatChip, versionChip, sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoPurposeChip, videoSvgLine, type VideoPlanView } from '@/lib/videoPlan'
+import { characterLine, formatChip, versionChip, sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoSvgLine, type VideoPlanView } from '@/lib/videoPlan'
+import { goalBlock } from '@/lib/videoGoal'
 import { sceneRole, sceneShares } from '@/lib/videoStoryboard'
 import { orchestrator } from '@/lib/orchestrator'
 import { proposalOfRequest, requestActionError, stepRows } from '@/lib/requestCards'
@@ -29,15 +30,37 @@ export function Fold({ title, note, children, defaultOpen = false }: { title: st
 
 export interface StoryBasis { report: string | null; points: string[] }
 
-export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlanView; audience?: string | null; basis?: StoryBasis; children?: ReactNode }) {
+/** 11/26 K 시안 ⓪: 제작안 맨 위 "목적" 블록 — 목적 칩 4개(고른 것 표시) · 왜 · 흐름 · 끝 행동 · 성공 기준.
+ * 목적을 모르면(goal·purpose 없음) 그리지 않는다. 다른 목적으로 다시 쓰기는 아직 경로가 없어 버튼을 두지 않는다 */
+export function GoalBlock({ v, requestText }: { v: VideoPlanView; requestText?: string | null }) {
+  const b = goalBlock(v, requestText)
+  if (!b) return null
+  return (
+    <div className="sb-goal" aria-label="영상 목적">
+      <p className="sb-goal-head">
+        <b>목적 · {b.label}</b>
+        {b.chips.map((c) => (
+          <span key={c.goal} className={`chip sb-goal-chip${c.on ? ' sb-goal-on' : ''}`} aria-current={c.on ? 'true' : undefined}>{c.label}{c.on ? ' ✓' : ''}</span>
+        ))}
+      </p>
+      {b.why && <p className="sb-goal-row"><span>왜 {b.label}</span>{b.why}</p>}
+      <p className="sb-goal-row"><span>흐름</span>{b.flow}</p>
+      {b.cta && <p className="sb-goal-row"><span>끝 행동</span>“{b.cta}”</p>}
+      <p className="sb-goal-row"><span>성공 기준</span>{b.success}</p>
+    </div>
+  )
+}
+
+export function VideoStoryboard({ v, audience, basis, children, requestText }: { v: VideoPlanView; audience?: string | null; basis?: StoryBasis; children?: ReactNode; requestText?: string | null }) {
   const shares = sceneShares(v.scenes)
-  const purpose = videoPurposeChip(v)
   const why = videoFallbackLine(v)
   const svgWhy = videoSvgLine(v)
   const lead = characterLine(v)
+  const goal = goalBlock(v)
   return (
     <section className="pp-part sb" aria-label="영상 제작안">
-      <h3 className="pp-part-h">영상 제작안<Tag>{videoPlanChip(v)}</Tag>{versionChip(v) && <Tag>{versionChip(v)}</Tag>}{why && <span className="sb-fallback">{why}</span>}{purpose && <span className="chip sb-purpose" title="광고 목적">{purpose}</span>}</h3>
+      <h3 className="pp-part-h">영상 제작안<Tag>{videoPlanChip(v)}</Tag>{versionChip(v) && <Tag>{versionChip(v)}</Tag>}{why && <span className="sb-fallback">{why}</span>}</h3>
+      {goal ? <GoalBlock v={v} requestText={requestText} /> : null}
       <p className="sb-concept">{v.concept}</p>
       <dl className="sb-meta">
         <div><dt>길이</dt><dd>{v.durationS}초</dd></div>
@@ -48,7 +71,7 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
         {v.formatId && v.situationKo && <div className="sb-situation"><dt>상황</dt><dd>{v.situationKo}</dd></div>}
         {audience && <div><dt>대상</dt><dd>{audience}</dd></div>}
         {v.offerKo && <div><dt>혜택</dt><dd>{v.offerKo}</dd></div>}
-        {v.ctaKo && <div><dt>행동 문구</dt><dd>{v.ctaKo}</dd></div>}
+        {v.ctaKo && !goal && <div><dt>행동 문구</dt><dd>{v.ctaKo}</dd></div>}
         {basis && (basis.report || basis.points.length > 0) && (
           <div className="sb-basis"><dt>근거</dt><dd>{[basis.report ? `보고서 ${basis.report}` : null, ...basis.points].filter(Boolean).join(' · ')}</dd></div>
         )}

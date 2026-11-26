@@ -6,6 +6,7 @@ import { BrandCharacterAsk, useChosenCharacter } from "@/components/office/Brand
 import { TONE_CLASS, barCells, brandIdOf, creativeSpot, currentIndex, deptTag, futureLine, headPill, nowLine, peekText, shortLabel, stepState, toneOfCurrent, type CardTone } from "@/lib/requestCardView";
 import { thumbSrc } from "@/lib/creativeRecords";
 import { characterLine } from "@/lib/videoPlan";
+import { goalLine } from "@/lib/videoGoal";
 import { RequestCreative } from "@/components/office/RequestCreative";
 import { RequestPublish } from "@/components/office/RequestPublish";
 import { ChatReviewDecision } from "@/components/office/ChatReviewDecision";
@@ -505,6 +506,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                     {/* 끝난 제작안: 주인공 · 의뢰 지시 N/N · 제작 검사 (사람 확인 중이면 그 단계 버튼 위에만) */}
                     {isInsight && found?.fullPlan && !humanDeciding && (
                       <div className="space-y-1.5">
+                        {goalLine(found.fullPlan) && <p className="break-words text-[14px] text-ink-700">{goalLine(found.fullPlan)}</p>}
                         {lead && <p className="break-words text-[14px] text-emerald-800">✓ 주인공: {lead}</p>}
                         <RequestRules v={found.fullPlan} />
                         <CheckLog v={found.fullPlan} />
@@ -516,7 +518,10 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                     {spot === s.stepId && creative}
                     {/* 11/26 사람 확인: 제작안 검사 결과(의뢰 지시 ✓/✕)를 버튼 위에 */}
                     {deciding_ && s.skill === "human_check" && found?.fullPlan && (
-                      <div className="space-y-1.5"><RequestRules v={found.fullPlan} /><CheckLog v={found.fullPlan} /></div>
+                      <div className="space-y-1.5">
+                        {goalLine(found.fullPlan) && <p className="break-words text-[14px] text-ink-700">{goalLine(found.fullPlan)}</p>}
+                        <RequestRules v={found.fullPlan} /><CheckLog v={found.fullPlan} />
+                      </div>
                     )}
                     {deciding_ && s.notice && <p className="text-[13.5px] text-amber-800">{s.notice}</p>}
                     {deciding_ && unansweredNotice(row, s.stepId) && (
