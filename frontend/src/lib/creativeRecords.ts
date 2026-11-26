@@ -54,6 +54,8 @@ export interface RenderPart {
   sheet_missing?: boolean;
   /** 복사해 온 회사 캐릭터 기록 번호 */
   copied_from?: string | null;
+  /** 승인 관문 실행 번호 (우리가 그린 그림이면 있다, 11/27 시트/원본 구분에 씀) */
+  execution_id?: string | null;
   /** 올린 파일 이름 */
   label?: string | null;
   /** 올린 사람 */

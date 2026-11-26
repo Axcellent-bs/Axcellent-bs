@@ -15,6 +15,8 @@ export interface SheetPartLike {
   original?: boolean;
   sheet_missing?: boolean;
   copied_from?: string | null;
+  /** 승인 관문을 지나 우리가 그린 그림이면 있다 (제작 기록 상세 render 칸에 그대로 온다) */
+  execution_id?: string | null;
 }
 export interface SheetRenderLike {
   sheet_image?: SheetPartLike | null;
@@ -33,9 +35,11 @@ export interface SheetState {
 
 const done = (p?: SheetPartLike | null) => p?.status === "done";
 
-/** 예전 기록: 올린 원본이 시트 칸 자리에 있다 (시트가 아니다) */
+/** 예전 기록: 올린 원본이 시트 칸 자리에 있다 (시트가 아니다).
+ *  11/27: 우리가 그린 그림(execution_id가 있음)은 원본 표시가 남아 있어도 시트 (마케팅 legacy_original과 같은 규칙) */
 export const legacyOriginal = (render: SheetRenderLike) =>
-  done(render.sheet_image) && (render.sheet_image?.source === ORIGINAL_SOURCE || render.sheet_image?.original === true);
+  done(render.sheet_image) && !render.sheet_image?.execution_id
+  && (render.sheet_image?.source === ORIGINAL_SOURCE || render.sheet_image?.original === true);
 
 /** 기록 render로 시트 칸 상태. withButton: 캐릭터 기록(스토리보드 없는 회사 캐릭터·시트 단계)에서만 버튼 */
 export function sheetState(render: SheetRenderLike, kind: string | null | undefined, withButton = true): SheetState {
