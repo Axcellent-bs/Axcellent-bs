@@ -496,7 +496,8 @@ def options(
     """화면 선택지. 카탈로그 `[sales]`를 순서 그대로 내려 준다 (숫자 없음).
 
     분류 표가 없는 회사(사이트 변환기로 연결한 회사)는 판매 기록에 나온 사이트 분류 값을
-    그대로 이름으로 쓴다(`site_categories`, #1841과 같은 규칙: 누비투어 JP·스터디온 DEV)."""
+    코드로 쓰고, 이름은 `category_label`(그 회사 이름 표 `category_names` → 없으면 사이트 값 그대로,
+    #1841과 같은 규칙: 누비투어 japan → 일본, 표에 없는 값은 코드 그대로)."""
     if cfg is None:
         return SegmentOptionsOutput(
             periods=list(SCREEN_PERIODS), data_source=source, catalog_id=catalog_id
@@ -515,7 +516,7 @@ def options(
         categories=(
             [OptionItem(code=c, label=n) for c, n in cfg.categories.items()]
             if cfg.categories
-            else [OptionItem(code=c, label=c) for c in site_categories]
+            else [OptionItem(code=c, label=category_label(cfg, c)) for c in site_categories]
         ),
         quick_questions=[
             OptionQuestion(label=q.label, filters=dict(q.filters)) for q in cfg.quick_questions

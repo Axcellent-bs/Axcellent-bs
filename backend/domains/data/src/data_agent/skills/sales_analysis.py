@@ -54,11 +54,15 @@ def category_label(cfg: CatalogSales | None, code: str) -> str:
     """분류 이름.
 
     카탈로그에 분류 표가 없는 회사(사이트 변환기로 연결한 회사, 11/25)는 사이트가 준 분류 값
-    그대로(예: 누비투어 지역 JP, 스터디온 과목 DEV). 표가 있으면 표에 없는 값은 이름 없는 분류.
+    그대로(예: 누비투어 지역 JP, 스터디온 과목 DEV). 그 회사 이름 표(`category_names`, 11/26)에
+    있으면 그 이름(japan → 일본), 없으면 사이트 값 그대로. 분류 표(`categories`)가 있으면(캣북스)
+    표에 없는 값은 이름 없는 분류.
     """
     known = cfg.categories if cfg else {}
     if not known:
-        return code or NO_CATEGORY
+        if not code:
+            return NO_CATEGORY
+        return (cfg.category_names.get(code) if cfg else None) or code
     return known.get(code, NO_CATEGORY)
 
 

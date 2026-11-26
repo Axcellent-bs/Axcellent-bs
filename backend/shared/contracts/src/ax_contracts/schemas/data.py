@@ -564,6 +564,10 @@ class CatalogSales(AxModel):
         "매출 = 결제 완료 주문의 상품 금액 − 쿠폰 할인 − 포인트 사용 − 기간 안 환불 (배송비 제외)"
     )
     categories: dict[str, str] = Field(default_factory=dict)  # category_code → 화면 이름
+    # 사이트 변환기로 연결한 회사(11/26): 사이트 분류 값 → 화면 이름.
+    # `categories`와 달리 닫힌 목록이 아니다 — 여기 없는 사이트 값은 그대로 보인다(#1841).
+    # `categories`가 있으면 쓰지 않는다
+    category_names: dict[str, str] = Field(default_factory=dict)
     source_labels: dict[str, str] = Field(default_factory=dict)  # 유입 src_source → 화면 이름
     medium_labels: dict[str, str] = Field(default_factory=dict)  # 유입 src_medium → 화면 이름
     min_product_orders: int = Field(default=5, ge=1)  # 상품 증감 비교의 최소 표본 (주문 수)
