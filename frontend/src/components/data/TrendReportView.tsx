@@ -689,7 +689,7 @@ export function TrendReportBody({ report, onRebuild, readOnly = false }: { repor
       {/* 다음 단계: 이 보고서에서 뽑은 기획 인사이트 (인사이트 탭과 같은 카드). 영상 안쪽 분석은 아직 준비 중이라 한 줄로만 */}
       {finished && !readOnly && (
         <section className="space-y-1.5 print-hide" aria-label="다음 단계 · 기획 인사이트">
-          <ul><ReportInsightCard reportId={report.report_id} createdAt={report.created_at} sent={sent} onSent={setSent} /></ul>
+          <ul><ReportInsightCard reportId={report.report_id} createdAt={report.created_at} status={report.status} sent={sent} onSent={setSent} /></ul>
           <p className="flex flex-wrap items-center gap-2 text-xs text-ink-500">영상 안쪽 분석 · 유료 광고 — 담당자 업로드 <PreparingChip /></p>
         </section>
       )}
