@@ -1,8 +1,8 @@
 """마케팅 제작안 확인 → 기획에 A2A 고치기 요청 (11/26 마케팅↔기획 재협업).
 
-기획 자체 검사(인물 수·동작 수·소품 수)는 기획 안의 검사다. 영상 모델의 한계와 가진 참조 이미지는
-마케팅이 안다. 그래서 영상 초안 준비(`prepare_video_draft_from_plan`)가 제작안을 받으면 스토리보드·
-대본을 만들기 전에 마케팅 기준만 코드로 확인한다(LLM 아님, 기획 검사와 겹치지 않는다):
+기획 자체 검사(참조 없는 인물·동작 수·장소 전환)는 기획 안의 검사다. 영상 모델의 한계와 가진 참조
+이미지는 마케팅이 안다. 그래서 영상 초안 준비(`prepare_video_draft_from_plan`)가 제작안을 받으면
+스토리보드·대본을 만들기 전에 마케팅 기준만 코드로 확인한다(LLM 아님, 기획 검사와 겹치지 않는다):
 
 - duration: 장면 길이(end_s − start_s, 배속 전)가 영상 모델 최소(`MARKETING_PLAN_MIN_SCENE_S`, 기본
   2초) 미만. 엔드카드 장면과 첫 훅 장면(0초 시작, 2초 이하)은 보지 않는다
@@ -27,6 +27,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ax_agent_template import config as template_config
+from ax_agent_template import plan_rules
 from ax_agent_template.client import call_agent
 from ax_contracts.schemas import AgentRequest, AgentResult, TaskStatus
 from ax_contracts.schemas.planning import REVISE_VIDEO_PLAN_SKILL
@@ -45,14 +46,11 @@ MIN_SCENE_ENV, MIN_SCENE_S = "MARKETING_PLAN_MIN_SCENE_S", 2.0
 HOOK_MAX_S = 2.0
 TIMEOUT_ENV, TIMEOUT_S = "MARKETING_PLAN_REVISE_TIMEOUT_S", 180.0
 MAX_VERSION = 2  # 의뢰당 고치기 1회 (1판 → 2판)
-# 회사 캐릭터 말고 다른 사람을 뜻하는 낱말 / 배경 군중이라 괜찮은 낱말 / 넓은 샷 낱말
-OTHER_PERSON_WORDS = (
-    "친구", "동료", "다른 사람", "다른 인물", "손님", "점원", "직원", "상대", "파트너", "엄마",
-    "아빠", "아이가", "두 사람", "둘이", "셋이", "세 사람", "a friend", "friends", "another person",
-    "two people", "a man", "a boy", "a girl", "partner", "coworker", "customer",
-)  # fmt: skip
-CROWD_WORDS = ("군중", "관객", "행인", "배경", "멀리", "crowd", "audience", "background")
-WIDE_WORDS = ("wide", "full shot", "long shot", "establishing", "와이드", "전신", "멀리서")
+# 회사 캐릭터 말고 다른 사람을 뜻하는 낱말 / 배경 군중이라 괜찮은 낱말 / 넓은 샷 낱말.
+# 11/26 기획 제작 검사와 같은 기준이라 공용(ax_agent_template.plan_rules)으로 옮겼다 (같은 값)
+OTHER_PERSON_WORDS = plan_rules.OTHER_PERSON_WORDS
+CROWD_WORDS = plan_rules.CROWD_WORDS
+WIDE_WORDS = plan_rules.WIDE_WORDS
 
 Caller = Callable[[str, AgentRequest], Awaitable[AgentResult]]
 
@@ -67,11 +65,6 @@ def _env_float(name: str, default: float) -> float:
 
 def _num(v: Any) -> float | None:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
-
-
-def _has(text: str, words: tuple[str, ...]) -> bool:
-    low = (text or "").lower()
-    return any(w in low for w in words)
 
 
 def is_hook(i: int, scene: dict[str, Any]) -> bool:
@@ -98,8 +91,7 @@ def check(plan: dict[str, Any], has_character: bool) -> list[dict[str, Any]]:
             out.append({"kind": "duration", "scene": n, "detail_ko": detail})
         body = " ".join(str(s.get(k) or "") for k in ("visual", "start_frame", "end_frame"))
         camera = f"{s.get('camera_en') or ''} {visual}"
-        if (has_character and _has(body, OTHER_PERSON_WORDS) and not _has(body, CROWD_WORDS)
-                and not _has(camera, WIDE_WORDS)):  # fmt: skip
+        if has_character and plan_rules.close_other_person(body, camera):
             out.append({"kind": "refs", "scene": n,
                         "detail_ko": "회사 캐릭터 말고 다른 인물이 가까이 나와요 (참조 이미지는 "
                                      "회사 캐릭터 1명뿐)"})  # fmt: skip

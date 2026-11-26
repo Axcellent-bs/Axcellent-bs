@@ -81,6 +81,7 @@ export function VideoStoryboard({ v, audience, basis, children }: { v: VideoPlan
                 <div className="sb-card-top">{s.n} · {sceneRole(i, v.scenes.length)} · {sceneTime(s)}</div>
                 {s.beatKo && <span className={`sb-beat${s.beatPunch ? ' sb-beat-punch' : ''}`} title={s.beatPunch ? '펀치라인 비트' : '형식 비트'}>{s.beatKo}</span>}
                 <p className="sb-visual">{s.visual}</p>
+                {s.placeKo && <span className="sb-place" title="장면 장소">장소 · {s.placeKo}</span>}
                 {keyframe && <p className="sb-keyframe" title="첫 화면 → 끝 화면 · 동작 · 카메라">{keyframe}</p>}
                 {s.caption && <span className="sb-caption">자막: {s.caption}</span>}
               </div>

@@ -9,7 +9,8 @@
 - setting·prop·action·look: 장면 visual·start_frame·end_frame(look은 prompt도)에 핵심 낱말이 있나
   (낱말 절반 이상)
 
-제작 가능성(feasibility): 인물 수·장면 안 동작 수·소품 수 상한 (아래 G 칸).
+제작 가능성(feasibility): 참조 없는 인물(회사 캐릭터가 있으면 다른 인물이 가까이, 없으면 인물 수)·
+장면 안 동작 수·장소 전환 횟수 (아래 G 칸, 11/26 기준 고침).
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
+
+from ax_agent_template import plan_rules
 
 RULE_KINDS = ("quote", "ending", "setting", "prop", "action", "look")
 MAX_RULES = 6
@@ -238,13 +241,21 @@ def strip_quotes(text: str, rules: list[dict[str, Any]]) -> str:
 
 
 # ---------------------------------------------------------------- 제작 가능성 (G, 11/26)
-# AI 영상(Flash 15초 한 번 생성)이 잘 못 만드는 것: 한 화면 인물 3명 이상, 장면 안 여러 동작,
-# 손으로 다루는 소품 여럿. 영상을 다시 만들면 크레딧이 다시 나가니 영상 전에 기획이 거른다.
+# AI 영상(Flash 15초 한 번 생성)이 잘 못 만드는 것: 참조 없는 얼굴(영상 참조는 회사 캐릭터 1명뿐),
+# 장면 안 여러 동작, 장면마다 바뀌는 장소(한 번 생성이라 전환이 어색하거나 장소가 섞인다).
+# 영상을 다시 만들면 크레딧이 다시 나가니 영상 전에 기획이 거른다.
+# 11/26 기준 고침: 인물은 인원수가 아니라 "참조 없는 얼굴"(회사 캐릭터가 있으면 마케팅 확인 refs와
+# 같은 기준, ax_agent_template.plan_rules). 소품 개수는 근거가 없어 보지 않는다(배경 소품은 AI가 잘
+# 그린다). PROPS_MAX·env·LLM props 칸은 남긴다(소품 그리기에 쓸 수 있다)
 # 기준은 env(PLANNING_PLAN_*), 없으면 기본 상수
 PEOPLE_MAX_ENV, ACTIONS_MAX_ENV, PROPS_MAX_ENV = (
     "PLANNING_PLAN_PEOPLE_MAX", "PLANNING_PLAN_ACTIONS_MAX", "PLANNING_PLAN_PROPS_MAX",
 )  # fmt: skip
 PEOPLE_MAX, ACTIONS_MAX, PROPS_MAX = 2, 1, 2
+PLACE_CHANGES_MAX_ENV, PLACE_CHANGES_MAX = "PLANNING_PLAN_PLACE_CHANGES_MAX", 2
+# 문제 kind 안의 자세한 검사 이름 (계약 CheckProblem.code)
+CLOSE_PERSON, PLACE_CHANGE = "close_person", "place_change"
+CLOSE_PERSON_KO = "회사 캐릭터 말고 다른 인물이 가까이 나와요(참조 이미지는 회사 캐릭터 1명뿐)"
 # 장면 글에서 읽는 인물 수 (낱말 → 수). "여럿·무리·군중·친구들"은 3명 이상으로 본다
 PEOPLE_WORDS = (
     ("둘이서", 2), ("두 명", 2), ("두 사람", 2), ("셋이서", 3), ("세 명", 3), ("세 사람", 3),
@@ -294,46 +305,91 @@ def action_count(action_en: str, visual: str) -> tuple[int, str]:
     return 1, ""
 
 
-def feasibility(scenes: Sequence[Any]) -> list[dict[str, Any]]:
-    """제작 검사 문제 {kind, scene, detail_ko} (엔드카드 장면은 보지 않는다).
+def place_changes_max() -> int:
+    """장소 전환 상한 (엔드카드를 뺀 장면에서 장소가 바뀐 횟수)."""
+    return _limit(PLACE_CHANGES_MAX_ENV, PLACE_CHANGES_MAX)
 
-    scenes: LLM 장면(_SceneOut)처럼 visual·start_frame·end_frame·action_en·people·props를
-    가진 것."""
-    people_max, actions_max, props_max = limits()
+
+def place_key(text: str) -> str:
+    """장소 비교 값 (공백·문장부호 무시, 낱말 끝 조사 뗌, 소문자). "책상에서" = "책상"."""
+    return "".join(_stem(w.lower()) for w in _WORD.findall(text or ""))
+
+
+def _get(s: Any, k: str, default: Any = "") -> Any:
+    return s.get(k, default) if isinstance(s, dict) else getattr(s, k, default)
+
+
+def place_change(scenes: Sequence[Any]) -> dict[str, Any] | None:
+    """장소 전환이 상한을 넘으면 문제 하나 (scene = 처음 넘긴 장면), 아니면 None.
+
+    엔드카드 장면은 빼고 센다. 빈 place_ko는 앞 장면과 같은 장소로 본다."""
+    most = place_changes_max()
+    prev, changes, first = "", 0, None
+    path: list[str] = []
+    for n, s in enumerate(scenes, start=1):
+        if is_end_card(str(_get(s, "visual") or "")):
+            continue
+        raw = " ".join(str(_get(s, "place_ko") or "").split())
+        key = place_key(raw)
+        if not key or key == prev:
+            continue
+        if prev:
+            changes += 1
+            if changes > most and first is None:
+                first = n
+        prev = key
+        path.append(raw[:20])
+    if first is None:
+        return None
+    detail = (f"장소가 {changes}번 바뀌어요: {' → '.join(path)} "
+              f"(15초 한 번 생성이라 최대 {most}번)")  # fmt: skip
+    return {"kind": "actions", "code": PLACE_CHANGE, "scene": first, "detail_ko": detail[:160]}
+
+
+def feasibility(scenes: Sequence[Any], has_character: bool = False) -> list[dict[str, Any]]:
+    """제작 검사 문제 {kind, scene, detail_ko, code?} (엔드카드 장면은 보지 않는다).
+
+    scenes: LLM 장면(_SceneOut)처럼 visual·start_frame·end_frame·action_en·camera_en·people·
+    place_ko를 가진 것. has_character: 회사 캐릭터가 있는 제작안이면 인원수 대신 "다른 인물이
+    가까이 나오는지"(참조 없는 얼굴)를 본다. 없으면 인원수 상한(PEOPLE_MAX)만."""
+    people_max, actions_max, _ = limits()
     out: list[dict[str, Any]] = []
     for n, s in enumerate(scenes, start=1):
-
-        def get(k: str, default: Any = "", s: Any = s) -> Any:
-            return s.get(k, default) if isinstance(s, dict) else getattr(s, k, default)
-
-        visual = str(get("visual") or "")
+        visual = str(_get(s, "visual") or "")
         if is_end_card(visual):
             continue
-        text = " ".join(str(get(k) or "") for k in ("visual", "start_frame", "end_frame"))
-        said = get("people", 1)
+        text = " ".join(str(_get(s, k) or "") for k in ("visual", "start_frame", "end_frame"))
+        said = _get(s, "people", 1)
         said = said if isinstance(said, int) and not isinstance(said, bool) else 1
         people = max(said, people_in_text(text))
-        if people > people_max:
+        if has_character:
+            camera = f"{_get(s, 'camera_en') or ''} {visual}"
+            if plan_rules.close_other_person(text, camera, people):
+                out.append({"kind": "people", "code": CLOSE_PERSON, "scene": n,
+                            "detail_ko": CLOSE_PERSON_KO})  # fmt: skip
+        elif people > people_max:
             out.append({"kind": "people", "scene": n,
                         "detail_ko": f"인물 {people}명 (허용 {people_max}명)"})  # fmt: skip
-        count, joined = action_count(str(get("action_en") or ""), visual)
+        count, joined = action_count(str(_get(s, "action_en") or ""), visual)
         if count > actions_max:
             detail = f'동작 {count}개 "{joined}" (허용 {actions_max}개)'
             out.append({"kind": "actions", "scene": n, "detail_ko": detail})
-        props = [p for p in (get("props", None) or []) if str(p).strip()]
-        if len(props) > props_max:
-            out.append({"kind": "props", "scene": n,
-                        "detail_ko": f"소품 {len(props)}개 (허용 {props_max}개)"})  # fmt: skip
-    return out
+    moved = place_change(scenes)
+    return out + ([moved] if moved else [])
+
+
+FIX_TAIL = {
+    "people": "한 화면에 보이는 인물을 줄인다",
+    "actions": "그 장면 동작을 하나로 줄이거나 장면을 나눈다",
+    "props": "손으로 다루는 소품을 줄인다",
+    CLOSE_PERSON: "다른 인물을 빼거나 멀리·뒤에 둔다",
+    PLACE_CHANGE: "장소를 2곳 이하로 줄이거나 같은 장소 안에서 일어나게 한다",
+}
 
 
 def problem_fix(p: dict[str, Any]) -> str:
-    """제작 검사 문제의 "고칠 점" 한 줄."""
-    tail = {
-        "people": "한 화면에 보이는 인물을 줄인다",
-        "actions": "그 장면 동작을 하나로 줄이거나 장면을 나눈다",
-        "props": "손으로 다루는 소품을 줄인다",
-    }.get(p["kind"], "고친다")
+    """제작 검사 문제의 "고칠 점" 한 줄 (code가 있으면 code 문구)."""
+    tail = FIX_TAIL.get(p.get("code") or "", FIX_TAIL.get(p["kind"], "고친다"))
     return f"제작 검사 장면 {p['scene']}: {p['detail_ko']} → {tail}"
 
 
