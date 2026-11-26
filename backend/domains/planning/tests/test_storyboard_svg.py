@@ -108,14 +108,15 @@ def test_draw_without_llm_or_on_failure_keeps_plan() -> None:
     # 11/25 5-1: 장면은 그대로, 못 그린 이유만 svg_reason에 남긴다
     def kept(llm: object) -> str:
         drawn, changed = asyncio.run(sb.draw(llm, plan, "ctx"))
-        assert changed == 0 and drawn.model_copy(update={"svg_reason": ""}) == plan
-        return drawn.svg_reason
+        assert changed == 0
+        assert drawn.model_copy(update={"svg_reason": "", "svg_detail": ""}) == plan
+        return f"{drawn.svg_reason} {drawn.svg_detail}".strip()
 
     assert kept(None) == "no_llm"
     broken = MockLLMClient(responses={})  # 응답 없음 = 실패
-    assert kept(broken) == "error"  # 가짜 LLM은 KeyError
+    assert kept(broken) == "error KeyError"  # 가짜 LLM은 KeyError (11/26 U: svg_detail)
     junk = MockLLMClient(responses={sb._PoseOut: _pose_out(None)})  # 포즈 없는 답
-    assert kept(junk) == "rejected"
+    assert kept(junk) == "rejected"  # 예외가 아니라 svg_detail 없음
 
 
 def test_write_draws_svg_after_the_plan() -> None:

@@ -967,6 +967,20 @@ class VideoPlan(AxModel):
     format_id: str = Field(default="", max_length=8)
     format_name: str = Field(default="", max_length=40)  # 그 카드 이름 (화면 칩, 카드 파일 값)
     situation_ko: str = Field(default="", max_length=80)
+    # 아래는 예전 제작안은 없다 (11/26 U, 운영 wr_8244142e32 제안 40: "금지 규칙에 걸려"만 보이고
+    # 어느 규칙인지는 서버 로그에만 있었다). 값·이름 없이 코드만 (화면이 짧은 한국어로 바꾼다).
+    # fallback_detail: fallback_reason "rejected"의 기획 검사 코드 — scene_count·prompt_rule·
+    #   real_name_in_scene·marketing_word·invented_offer_number·concept_starts_with_product·
+    #   report_title_as_topic. prompt_rule이면 "prompt_rule:real_person"처럼 프롬프트 규칙 코드
+    #   (text_request·real_person·real_brand·url_or_number·injection)를 붙인다. 그 밖은 ""
+    fallback_detail: str = Field(default="", max_length=40, pattern=r"^[a-z_:]*$")
+    # svg_detail: 콘티 포즈 호출 실패(svg_reason timeout·bad_format·error)의 예외 종류 이름
+    #   (예: LLMResponseError). 없으면 ""
+    svg_detail: str = Field(default="", max_length=40, pattern=r"^[A-Za-z0-9_]*$")
+    # character_source_reason: 회사 캐릭터를 쓰지 못해 회사 브랜드로 쓴 이유. no_record_id = 의뢰에
+    #   고른 캐릭터 번호 없음, read_failed = 마케팅에서 못 읽음(꺼짐·시간 초과·실패),
+    #   gate_held = 읽기가 승인 관문에서 보류됨, no_look = 시트에 외형 글 없음. 회사 캐릭터면 ""
+    character_source_reason: Literal["", "no_record_id", "read_failed", "gate_held", "no_look"] = ""
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:
