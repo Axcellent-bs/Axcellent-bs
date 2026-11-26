@@ -95,6 +95,17 @@ export interface WorkStatus { text: string; tone: Tone }
 /** 상태를 정하는 데 필요한 기록 값. `render`는 칸마다 상태 글자 */
 export interface RecordFacts { render?: Record<string, string>; shot_count?: number; script_scenes?: number }
 
+/** 목록 칸에 그릴 만든 그림(11/26): render의 sheet_image·board_image가 "done"일 때만 읽는다.
+ *  AI 마네킹 SVG 콘티만 있으면 목록 응답에 그림이 없어 null(글자 칸 그대로) */
+export type MadePicturePart = "sheet_image" | "board_image";
+export const madePicture = (r: Pick<RecordFacts, "render"> | null, part: MadePicturePart): MadePicturePart | null =>
+  r?.render?.[part] === "done" ? part : null;
+
+/** 칸 종류: 만든 그림을 받았으면 그림, 없거나 받는 중이거나 실패면 지금 모양(원본 썸네일·글자) */
+export function slotKind(r: Pick<RecordFacts, "render"> | null, part: MadePicturePart, media: { src: string | null; failed: boolean }): "picture" | "original" {
+  return madePicture(r, part) && media.src && !media.failed ? "picture" : "original";
+}
+
 /** 기록의 render 객체 → 칸마다 상태 글자(목록 요약과 같은 모양) */
 export function renderStatuses(render: object | null | undefined): Record<string, string> {
   return Object.fromEntries(
