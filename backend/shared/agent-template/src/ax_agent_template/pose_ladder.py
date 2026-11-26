@@ -28,7 +28,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ax_agent_template.llm import LLMFormatError, LLMInputError, LLMResponseError
-from ax_agent_template.pose_render import ArmLLM, HeadLLM, PoseLLM
+from ax_agent_template.pose_render import ArmLLM, HeadLLM, PoseLLM, posture_from_text
 
 log = logging.getLogger("ax.pose_ladder")
 PROVIDER_LOG_MAX = 120  # 로그에 남기는 공급자 메시지 길이 (마케팅 character_sheet와 같다)
@@ -215,13 +215,16 @@ def rule_pose(text: str, label: str = "") -> PoseLLM:
         arm_r, prop = _arm(60, 110), "phone"
     elif _has(low, ("컵", "커피", "cup", "coffee")):
         arm_r, prop = _arm(40, 90), "cup"
-    if _has(low, ("앉", "sit", "seated")):
+    # 11/26 몸 자세: LLM 지시와 같은 낱말 표 (앉·소파·의자 → sit, 무릎 꿇 → kneel, 눕 → lie)
+    posture = posture_from_text(low)
+    if posture != "stand":
         step = 0.0
-        head = HeadLLM(yaw=head.yaw, pitch=max(head.pitch, 10))
+        if posture == "sit":
+            head = HeadLLM(yaw=head.yaw, pitch=max(head.pitch, 10))
     elif _has(low, ("걷", "뛰", "달리", "walk", "run")):
         step = 0.4
     return PoseLLM(shot=shot, yaw=yaw, head=head, arm_l=arm_l, arm_r=arm_r, step=step,
-                   prop=prop, label_ko=(label or t)[:10])  # fmt: skip
+                   posture=posture, prop=prop, label_ko=(label or t)[:10])  # fmt: skip
 
 
 def rule_detail(n: int) -> str:

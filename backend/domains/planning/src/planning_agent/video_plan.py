@@ -224,6 +224,11 @@ def look_problems(p: Proposal, scenes: list[tuple[int, str]]) -> list[tuple[int,
     return out
 
 
+def company_name() -> str:
+    """지금 회사 이름 (콘티 엔드카드 판정용, 없으면 빈 문자열)."""
+    return _company()["name"]
+
+
 def _company() -> dict[str, str]:
     """데이터 블록에 넣을 지금 회사 이름·업종·소개(회사 설정 값 그대로, 없으면 빈 문자열)."""
     name = tenant.current()
@@ -1529,6 +1534,7 @@ def marketing_fix(x: Any) -> str:
 def redraw(old: VideoPlan, new: VideoPlan) -> VideoPlan:
     """새 판 장면에 앞 판 포즈를 새 시각 라벨로 다시 그린다 (LLM 없이, 같은 번호 장면만)."""
     by_n = {s.n: s for s in old.scenes}
+    company = _company()["name"]
     scenes = []
     for s in new.scenes:
         prev = by_n.get(s.n)
@@ -1539,7 +1545,7 @@ def redraw(old: VideoPlan, new: VideoPlan) -> VideoPlan:
                 continue
             label = pose_render.time_label(pose.label_ko, at)
             timed = pose.model_copy(update={"label_ko": label[:30]})
-            svg = storyboard_svg.drawn(timed, new.aspect)
+            svg = storyboard_svg.scene_svg(timed, s, new.aspect, company)  # 11/26 방·엔드카드
             if svg:
                 update[f"{key}_pose"], update[f"{key}_svg"] = timed, svg
         scenes.append(s.model_copy(update=update) if update else s)
