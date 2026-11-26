@@ -1348,9 +1348,9 @@ async def _trend_report_company(brief: Any, request_text: str | None,
         labels: list[str] = []
         reasons: list[str] = []
         now = datetime.now(UTC)
-        from data_agent.sales_collect import TENANT_ENV
+        from data_agent.sales_collect import request_tenant
 
-        tenant = (env.get(TENANT_ENV) or TENANT_ID_DEFAULT).strip()  # 판매 수집기와 같은 회사 id
+        tenant = request_tenant(env)  # 판매 수집기와 같은 회사 id (다른 회사는 그 회사 id)
         for f in filters:
             got = await asyncio.to_thread(sales_reads.segment_favorites, get_sales_store(),
                                           tenant, f, "90d", 10, cat, now)  # fmt: skip

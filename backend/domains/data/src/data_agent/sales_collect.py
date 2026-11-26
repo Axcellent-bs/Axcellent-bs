@@ -420,11 +420,100 @@ def aggregate_daily(store: SalesStore, tenant: str, env: Mapping[str, str], now:
         print(f"[aggregate] 하루 계산을 시작하지 못함 {describe(error)}", flush=True)
 
 
+def watched_companies(env: Mapping[str, str]) -> list[str]:
+    """캣북스 말고 이번 회차에 판매 기록을 받을 회사: 회사 목록 중 회사 연결이 켜진 회사.
+
+    캣북스는 예전처럼 `DATA_SALES_TENANT_ID`(기본 shop-demo)로 따로 받는다.
+    목·가짜 출처(시험·데모)는 캣북스 하나만 받는다(가짜 출처는 회사 연결이 없다).
+    회사 연결은 감지기 회사별(#1749)과 같은 기준.
+    """
+    if _mock(env) or uses_fake(env):
+        return []
+    from ax_agent_template import company_connection, company_scope
+    from ax_agent_template.companies import company_ids
+
+    out: list[str] = []
+    try:
+        ids = company_ids()
+    except Exception as error:  # noqa: BLE001 - 회사 목록을 못 읽어도 캣북스 수집은 그대로
+        print(f"[sales] 회사 목록을 읽지 못함 {describe(error)}", flush=True)
+        return []
+    for raw in ids:
+        cid = company_scope.scope_id(raw)
+        if cid == company_scope.CATBOOKS or cid in out:
+            continue
+        try:
+            found = company_connection.read_connection(cid)
+        except Exception:  # noqa: BLE001 - 연결 파일이 깨진 회사는 이번 회차에서 뺀다
+            continue
+        if found is not None and found.enabled:
+            out.append(cid)
+    return out
+
+
+async def collect_company(  # noqa: PLR0913 - 저장소·회사·환경·시각·오류 줄·출처
+    store: SalesStore,
+    cid: str,
+    env: Mapping[str, str],
+    now: datetime,
+    streaks: dict[str, ErrorStreak],
+    source_factory: object | None = None,
+) -> RunResult:
+    """캣북스가 아닌 회사 하나의 판매 기록을 그 회사 연결로 받아 `tenant_id=회사 id`로 쌓고
+    하루 집계한다.
+
+    그 회사 범위(`company_scope.using`) 안에서 출처를 만들어 그 회사 연결·변환기 경로를 읽는다.
+    예외를 내지 않는다(한 회사 오류가 다른 회사 수집을 막지 않게)."""
+    from ax_agent_template import company_scope
+
+    make = source_factory or get_source
+    with company_scope.using(cid):
+        try:
+            source = make(env)  # type: ignore[operator]
+            name = source_name(env)
+        except Exception as error:  # noqa: BLE001 - 출처를 못 만들어도 다음 주기에 다시
+            result = RunResult(now.astimezone(UTC).replace(microsecond=0))
+            result.errors.append(f"판매 기록 출처를 만들 수 없음 {describe(error)}")
+        else:
+            result = await collect_once(source, store, tenant_id=cid, source_name=name)
+        streak = streaks.setdefault(cid, ErrorStreak())
+        for line in streak.lines(result):
+            print(line.replace("[sales]", f"[sales {cid}]", 1), flush=True)
+        aggregate_daily(store, cid, env, now)
+    return result
+
+
+async def collect_other_companies(
+    store: SalesStore,
+    env: Mapping[str, str],
+    now: datetime,
+    streaks: dict[str, ErrorStreak],
+    source_factory: object | None = None,
+) -> dict[str, RunResult]:
+    """연결된 다른 회사를 모두 한 번씩 (캣북스 뒤에). 한 회사가 실패해도 다음 회사는 돈다."""
+    out: dict[str, RunResult] = {}
+    for cid in watched_companies(env):
+        out[cid] = await collect_company(store, cid, env, now, streaks, source_factory)
+    return out
+
+
+def request_tenant(env: Mapping[str, str] = os.environ) -> str:
+    """지금 요청 회사의 판매 저장소 tenant: 캣북스면 `DATA_SALES_TENANT_ID`(수집기와 같은 값),
+    다른 회사면 그 회사 id(`collect_company`가 쓰는 값)."""
+    from ax_agent_template import company_scope
+
+    cid = company_scope.scope_id(company_scope.active())
+    if cid == company_scope.CATBOOKS:
+        return (env.get(TENANT_ENV) or TENANT_ID_DEFAULT).strip()
+    return cid
+
+
 async def run(every: int | None, env: Mapping[str, str]) -> int:
     store = SalesStore(db_path(env))
     tenant = (env.get(TENANT_ENV) or TENANT_ID_DEFAULT).strip()
     name = source_name(env)
     streak = ErrorStreak()
+    streaks: dict[str, ErrorStreak] = {}
     try:
         while True:
             try:
@@ -437,8 +526,12 @@ async def run(every: int | None, env: Mapping[str, str]) -> int:
             for line in streak.lines(result):
                 print(line, flush=True)
             aggregate_daily(store, tenant, env, datetime.now(UTC))
+            # 연결된 다른 회사(누비투어·스터디온 등)도 회사마다 받는다
+            # (11/26: 수집이 캣북스 하나뿐이라 다른 회사 매출 분석이 늘 비었다)
+            others = await collect_other_companies(store, env, datetime.now(UTC), streaks)
             if every is None:
-                return 1 if result.errors else 0
+                failed = result.errors or any(r.errors for r in others.values())
+                return 1 if failed else 0
             await asyncio.sleep(every)
     finally:
         store.close()
