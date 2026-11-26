@@ -24,8 +24,10 @@ test("RecordBoardFromScript: 다시 만들기 모드 문구·버튼은 그대로
 });
 
 test("RecordBoardFromScript: 두 모드 다 같은 startStoryboard 호출(story·shots=nearestCount(장면 수)·record_id)", () => {
-  assert.equal(start.match(/startStoryboard\(/g)?.length, 1);
-  assert.match(start, /startStoryboard\(\{ story, character_en: characterEn, shots: nearestCount\(scenes\), record_id: recordId \}\)/);
+  // 11/26: 기다리는 로직을 lib/storyboardWait.ts로 뺐다. 부르는 곳은 한 곳, 실제 길은 RECORD_BOARD_IO(start = startStoryboard)
+  assert.equal(start.match(/startBoardAndWait\(/g)?.length, 1);
+  assert.match(start, /startBoardAndWait\(\{ story, character_en: characterEn, shots: nearestCount\(scenes\), record_id: recordId \}, RECORD_BOARD_IO\)/);
+  assert.match(readFileSync(new URL("../../lib/storyboardIo.ts", import.meta.url), "utf8"), /start: startStoryboard,/);
 });
 
 test("BoardStep: 대본만 있는 기록(boardMissing)은 스토리보드 칸 맨 위에 처음 만들기, 옛 안내·빈 그림 칸은 숨김", () => {

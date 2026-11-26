@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import os
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -803,23 +804,35 @@ STORYBOARD_LLM: Any = None
 BACKGROUND_STORYBOARD_LLM_TIMEOUT_SEC = 240.0
 
 
+def long_storyboard_llm_factory(fallback: Callable[[], Any] | None = None) -> Any:
+    """응답 제한이 긴(BACKGROUND_STORYBOARD_LLM_TIMEOUT_SEC) 스토리보드 LLM을 만드는 함수.
+
+    background 판단은 하지 않는다. 11/26 1:1 대화의 시트+줄거리 스토리보드도 같이 쓴다
+    (기본 60초에 12칸이 끊겼다). 테스트의 STORYBOARD_LLM이 있으면 그것.
+    LLM 설정(env)이 없으면 fallback(대화가 받은 LLM)을, 없으면 None. 모델·주소는 env 그대로."""
+    from ax_agent_template.llm import LLMClient, LLMSettings
+
+    if STORYBOARD_LLM is not None:
+        return STORYBOARD_LLM
+
+    def long_llm() -> Any:
+        settings = LLMSettings.from_env("marketing")
+        if not (settings.model and settings.base_url):
+            return fallback() if fallback is not None else None
+        return LLMClient("marketing", settings, timeout=BACKGROUND_STORYBOARD_LLM_TIMEOUT_SEC)
+
+    return long_llm
+
+
 def storyboard_llm_factory(request: AgentRequest) -> Any:
     """스토리보드 LLM을 만드는 함수. 뒤에서 만들 때만 응답 제한을 늘린다(모델·주소는 env 그대로)."""
-    from ax_agent_template.llm import LLMClient, LLMSettings
     from marketing_agent.chat import default_llm
 
     if STORYBOARD_LLM is not None:
         return STORYBOARD_LLM
     if request.input.get("background") is not True:
         return default_llm
-
-    def long_llm() -> Any:
-        settings = LLMSettings.from_env("marketing")
-        if not (settings.model and settings.base_url):
-            return None
-        return LLMClient("marketing", settings, timeout=BACKGROUND_STORYBOARD_LLM_TIMEOUT_SEC)
-
-    return long_llm
+    return long_storyboard_llm_factory()
 
 
 async def storyboard_prompt(request: AgentRequest) -> AgentResult:

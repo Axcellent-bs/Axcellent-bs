@@ -130,3 +130,53 @@ def test_storyboard_refusal_is_reported(
     th = _say(_svc(FakeLLM(story="들판")), "들판 스토리보드", rid=rid)
     ai = th["messages"][-1]
     assert ai["kind"] == "error" and "장면을 다 만들지 못했다" in ai["text"]
+
+
+def test_chat_storyboard_uses_the_long_llm_and_waits_240s(
+    _env: cr.CreativeRecords, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """11/26 대화의 시트+줄거리 스토리보드는 긴 LLM(240초)을 쓰고 240초까지 기다린다.
+
+    대본·줄거리 읽기는 대화 LLM."""
+    from marketing_agent import chat as chat_mod
+
+    rid = _env.add_sheet(SHEET, None, None)
+    chat_llm = FakeLLM(story="가을 들판에서 소녀가 고양이를 만난다", shots=6)
+    board_llm = FakeLLM()
+    made: list[object] = []
+    real_factory = handlers.long_storyboard_llm_factory
+
+    def spy_factory(fallback: object = None) -> object:
+        made.append(fallback)
+        return real_factory(fallback=fallback)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(handlers, "long_storyboard_llm_factory", spy_factory)
+    # 테스트 덮어쓰기 길은 그대로
+    monkeypatch.setattr(handlers, "STORYBOARD_LLM", lambda: board_llm)
+    waits: list[float] = []
+    real_wait_for = asyncio.wait_for
+
+    async def spy_wait_for(aw: Any, timeout: float | None) -> Any:
+        waits.append(timeout or 0)
+        return await real_wait_for(aw, timeout)
+
+    monkeypatch.setattr(chat_mod.asyncio, "wait_for", spy_wait_for)
+    th = _say(_svc(chat_llm), "이 캐릭터로 가을 들판 스토리보드 만들어 줘", rid=rid)
+    assert th["messages"][-1]["card"]["has_storyboard"] is True
+    assert len(made) == 1 and callable(made[0])
+    # 스토리보드 칸은 긴 LLM이 쓰고, 대화 LLM은 줄거리 읽기만(StoryRead를 받지 않음)
+    assert sb.StoryRead in board_llm.asked and sb.StoryRead not in chat_llm.asked
+    assert chat_mod.STORYBOARD_TIMEOUT_SEC == 240 and 240 in waits
+
+
+def test_long_storyboard_llm_falls_back_to_the_chat_llm_without_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(handlers, "STORYBOARD_LLM", None)
+    monkeypatch.delenv("MARKETING_LLM_MODEL", raising=False)
+    monkeypatch.delenv("MARKETING_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    chat_llm = FakeLLM()
+    assert handlers.long_storyboard_llm_factory(fallback=lambda: chat_llm)() is chat_llm
+    assert handlers.long_storyboard_llm_factory()() is None

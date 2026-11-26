@@ -45,6 +45,21 @@ def test_screen_storyboard_keeps_the_default_llm(llm_env: None) -> None:
     assert handlers.storyboard_llm_factory(_request({"background": "yes"})) is default_llm
 
 
+def test_long_factory_always_gives_the_long_timeout(llm_env: None) -> None:
+    """11/26 background 판단 없이 긴 LLM을 주는 함수(대화 스토리보드가 쓴다).
+
+    env가 있으면 fallback보다 env."""
+    llm = handlers.long_storyboard_llm_factory(fallback=lambda: "chat")()
+    assert llm is not None and llm != "chat"
+    assert llm.timeout == handlers.BACKGROUND_STORYBOARD_LLM_TIMEOUT_SEC == 240.0
+
+
+def test_test_llm_wins_in_the_long_factory(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = object()
+    monkeypatch.setattr(handlers, "STORYBOARD_LLM", lambda: fake)
+    assert handlers.long_storyboard_llm_factory(fallback=lambda: None)() is fake
+
+
 def test_test_llm_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = object()
     monkeypatch.setattr(handlers, "STORYBOARD_LLM", lambda: fake)

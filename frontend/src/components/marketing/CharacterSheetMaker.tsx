@@ -9,6 +9,8 @@ import { StoryboardView } from "./StoryboardMaker";
 import { ScriptPanel } from "./ScriptPanel";
 import { DEFAULT_SCRIPT_SECONDS, SCRIPT_SECONDS, type CreativeScript, type ScriptSeconds } from "@/lib/creativeScript";
 import { writeScript } from "@/lib/creativeScriptApi";
+import { RECORD_BOARD_IO } from "@/lib/storyboardIo";
+import { BOARD_BUSY_KO, BOARD_LEAVE_KO, startBoardAndWait } from "@/lib/storyboardWait";
 
 // 마케팅 › SNS·미디어 › 이미지 시트 · 스토리보드 만들기.
 // 캐릭터 이미지와 줄거리를 넣고 한 번 누르면 ① 이미지 시트(캐릭터 시트) 프롬프트를 만들고, 줄거리가 있으면
@@ -93,9 +95,14 @@ export function CharacterSheetMaker() {
     }
   };
 
+  // 기록이 있으면 뒤에서 만들고(background) 기록에 붙을 때까지 기다린다(11/26, 60초 끊김 없이). 기록이 없으면 붙일 곳이 없어 기다려서 받기
   const drawBoard = async (sheet: CharacterSheetResult) => {
     setStep("board");
-    setBoard(await makeStoryboard({ story, shots, character_en: sheet.consistency_en, record_id: sheet.record_id }));
+    const body = { story, shots, character_en: sheet.consistency_en };
+    if (sheet.record_id) {
+      const rec = await startBoardAndWait({ ...body, record_id: sheet.record_id }, RECORD_BOARD_IO);
+      setBoard(rec.storyboard ?? null);
+    } else setBoard(await makeStoryboard(body));
     setBoardRev((n) => n + 1);
     setScriptChanged(false);
   };
@@ -186,7 +193,7 @@ export function CharacterSheetMaker() {
                 <button key={n} type="button" aria-pressed={seconds === n} onClick={() => setSeconds(n)} className={seconds === n ? "btn-primary text-xs" : "btn-ghost text-xs"}>{n}초</button>
               ))}
             </fieldset>
-            <button type="button" className="btn-primary ml-auto" disabled={!picked || busy} onClick={() => void make()}>{busy ? "만드는 중…" : label}</button>
+            <button type="button" className="btn-primary ml-auto" disabled={!picked || busy} onClick={() => void make()}>{step === "board" ? BOARD_BUSY_KO : busy ? "만드는 중…" : label}</button>
           </div>
         </div>
       </div>
@@ -199,6 +206,7 @@ export function CharacterSheetMaker() {
             {hasStory && <li className={`chip ${step === "board" ? "bg-brand-50 text-brand-700" : "bg-ink-50 text-ink-500"}`}>3. 스토리보드 {step === "board" ? "만드는 중" : "대기"}</li>}
           </ol>
         )}
+        {step === "board" && result?.record_id && <p className="text-xs text-ink-500">{BOARD_LEAVE_KO}</p>}
         {error && <p className="text-sm text-accent" role="alert">{error}</p>}
         {result && (
           <details open={!board && !script}>
