@@ -88,14 +88,22 @@ def run_daily(  # noqa: PLR0913 - 두 저장소·회사·카탈로그·시각
     now: datetime,
     run_id: str | None = None,
     input_name: AggInput = "sales_db",
+    *,
+    rebuild: bool = False,
 ) -> AggRun | None:
     """하루 계산. 이미 그 기준일로 끝났으면 None(돌지 않음).
 
     `input_name`: 원본이 `sales.db`면 sales_db, 데이터 AI 메모리 저장소(3-3 A안)면
-    company_server."""
+    company_server.
+
+    `rebuild`: 그 회사 판매 기록을 처음부터 다시 받은 뒤(`--recollect`, 11/26) 첫 주문 날부터
+    모든 날을 다시 만든다. 오늘 이미 계산했어도 돈다. 다시 받기 전에 만든 일별 행(예: 분류가
+    빈 줄로 센 "이름 없는 분류")이 다음 날 계산까지 화면에 남지 않게."""
     as_of = kst_day(now) - timedelta(days=1)
     done_as_of, since = last_success(agg, tenant_id)
-    if done_as_of is not None and done_as_of >= as_of:
+    if rebuild:
+        since = None  # 처음처럼 첫 주문 날부터 전부
+    elif done_as_of is not None and done_as_of >= as_of:
         return None
     run = AggRun(
         run_id=run_id or f"agg_{uuid.uuid4().hex[:12]}", tenant_id=tenant_id, as_of=as_of,
