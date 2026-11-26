@@ -18,8 +18,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ax_agent_template import company_connection, company_scope
 from ax_agent_template import companies as company_list
+from ax_agent_template import company_connection, company_scope
 from ax_contracts.data_access.shop_sales import SalesOrderLine, SalesOrderRow
 from ax_contracts.schemas.common import TENANT_ID_DEFAULT
 from data_agent import sales_collect as sc
@@ -45,8 +45,9 @@ def _orders(prefix: str, n: int, price: int) -> list[SalesOrderRow]:
         line = SalesOrderLine(product_id=f"{prefix}-p{i % 3}", category_code="x", title="t", qty=1,
                               unit_price=price, coupon_share=0, points_share=0)  # fmt: skip
         out.append(SalesOrderRow(
-            order_id=f"{prefix}-o{i}", buyer_id=f"{prefix}-b{i % 4}", status="paid", created_at=when,
-            updated_at=when, items_amount=price, payment_status="succeeded", lines=[line],
+            order_id=f"{prefix}-o{i}", buyer_id=f"{prefix}-b{i % 4}", status="paid",
+            created_at=when, updated_at=when, items_amount=price, payment_status="succeeded",
+            lines=[line],
         ))  # fmt: skip
     return out
 
@@ -78,8 +79,9 @@ def _window() -> tuple[datetime, datetime]:
 def _catbooks_store() -> SalesStore:
     store = SalesStore(":memory:")
     src = sc.MockSalesSource(_orders("cat", 6, 20000))
-    got = asyncio.run(sc.collect_once(src, store, tenant_id=TENANT_ID_DEFAULT, source_name="shop-api",
-                                      now=NOW))  # fmt: skip
+    got = asyncio.run(
+        sc.collect_once(src, store, tenant_id=TENANT_ID_DEFAULT, source_name="shop-api", now=NOW)
+    )
     assert got.errors == []
     return store
 

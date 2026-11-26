@@ -423,8 +423,9 @@ def aggregate_daily(store: SalesStore, tenant: str, env: Mapping[str, str], now:
 def watched_companies(env: Mapping[str, str]) -> list[str]:
     """캣북스 말고 이번 회차에 판매 기록을 받을 회사: 회사 목록 중 회사 연결이 켜진 회사.
 
-    캣북스는 예전처럼 `DATA_SALES_TENANT_ID`(기본 shop-demo)로 따로 받는다. 목·가짜 출처(시험·데모)는
-    캣북스 하나만 받는다(가짜 출처는 회사 연결이 없다). 회사 연결은 감지기 회사별(#1749)과 같은 기준.
+    캣북스는 예전처럼 `DATA_SALES_TENANT_ID`(기본 shop-demo)로 따로 받는다.
+    목·가짜 출처(시험·데모)는 캣북스 하나만 받는다(가짜 출처는 회사 연결이 없다).
+    회사 연결은 감지기 회사별(#1749)과 같은 기준.
     """
     if _mock(env) or uses_fake(env):
         return []
@@ -458,7 +459,8 @@ async def collect_company(  # noqa: PLR0913 - 저장소·회사·환경·시각�
     streaks: dict[str, ErrorStreak],
     source_factory: object | None = None,
 ) -> RunResult:
-    """캣북스가 아닌 회사 하나의 판매 기록을 그 회사 연결로 받아 `tenant_id=회사 id`로 쌓고 하루 집계.
+    """캣북스가 아닌 회사 하나의 판매 기록을 그 회사 연결로 받아 `tenant_id=회사 id`로 쌓고
+    하루 집계한다.
 
     그 회사 범위(`company_scope.using`) 안에서 출처를 만들어 그 회사 연결·변환기 경로를 읽는다.
     예외를 내지 않는다(한 회사 오류가 다른 회사 수집을 막지 않게)."""
@@ -524,8 +526,8 @@ async def run(every: int | None, env: Mapping[str, str]) -> int:
             for line in streak.lines(result):
                 print(line, flush=True)
             aggregate_daily(store, tenant, env, datetime.now(UTC))
-            # 연결된 다른 회사(누비투어·스터디온 등)도 회사마다 받는다(11/26: 수집이 캣북스 하나뿐이라
-            # 다른 회사 매출 분석이 늘 비었다)
+            # 연결된 다른 회사(누비투어·스터디온 등)도 회사마다 받는다
+            # (11/26: 수집이 캣북스 하나뿐이라 다른 회사 매출 분석이 늘 비었다)
             others = await collect_other_companies(store, env, datetime.now(UTC), streaks)
             if every is None:
                 failed = result.errors or any(r.errors for r in others.values())
