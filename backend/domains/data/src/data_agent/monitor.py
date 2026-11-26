@@ -157,6 +157,7 @@ def days_to_snapshot(
     if local.time() < SNAPSHOT_AFTER:
         days = days[1:]  # 어제는 00:30이 지나야 만든다
     have = store.get_many(tenant_id, days)
+    other = _other_company(tenant_id)
     todo: list[tuple[date, bool]] = []
     for day in days:
         saved = have.get(day)
@@ -170,7 +171,40 @@ def days_to_snapshot(
             todo.append((day, True))  # 확인할 수 없음이 있던 날: 다음 날 한 번만
         elif _old_catalog_reason(saved.payload):
             todo.append((day, True))  # 판매 기록으로 셀 수 있게 된 회사의 예전 줄 (11/26)
+        elif (
+            other
+            and _transient_finance(saved.payload)
+            and now - saved.created_at >= FINANCE_RETRY_AFTER
+        ):
+            # 캣북스가 아닌 회사에서 재무가 그때 장부를 못 읽었거나 답하지 못한 날:
+            # 다음 날까지 기다리지 않고 다시 묻는다(캣북스는 예전처럼 다음 날 한 번)
+            todo.append((day, True))
     return todo
+
+
+def _other_company(tenant_id: str) -> bool:
+    """캣북스(옛 이름 shop-demo 포함)가 아닌 회사인지."""
+    from ax_agent_template import company_scope
+    from ax_agent_template.companies import canonical_company_id
+
+    return canonical_company_id(tenant_id) not in (None, company_scope.CATBOOKS)
+
+
+# 재무가 그 순간 장부를 못 모은(재시작 직후·사이트 변환기 첫 읽기 등) 이유. 자료가 없다는 확정이
+# 아니라서 하루를 통째로 "확인할 수 없음"으로 두지 않고 `FINANCE_RETRY_AFTER`마다 다시 묻는다(11/26
+# 누비투어 데이터 홈 총거래액). "UTC 날짜가 아직 끝나지 않음"·"재무 서비스 꺼짐"은 넣지 않는다
+TRANSIENT_FINANCE_REASONS = (
+    "재무 장부에 ",
+    "재무 closing_report 호출 실패",
+    "재무 closing_report 응답 ",
+)
+FINANCE_RETRY_AFTER = timedelta(minutes=30)
+
+
+def _transient_finance(payload: dict) -> bool:
+    company = payload.get("company") if isinstance(payload, dict) else None
+    reason = company.get("finance_reason") if isinstance(company, dict) else None
+    return isinstance(reason, str) and reason.startswith(TRANSIENT_FINANCE_REASONS)
 
 
 # 결제 비율 지표가 없는 회사(공통 카탈로그)는 11/26부터 주문 수를 판매 기록에서 센다.
