@@ -222,3 +222,144 @@ def test_decided_as_self_approval_is_403_over_http(client, act, gate, monkeypatc
     )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "SELF_APPROVAL"
+
+
+# ------------------------------------------------- 서비스 이름 확인 `confirm` (롤백 설계 3-b)
+def _service_hold(act, key: str, who: str | None = "support-ai", service: str | None = "payment"):
+    params: dict[str, Any] = {"period": "w", "requested_by": who}
+    if service is not None:
+        params["service"] = service
+    return act("confirm_settlement", "support", key, **params)
+
+
+def _decide(client, review_id: str, **body: Any):
+    return client.post(
+        f"/api/safety/reviews/{review_id}/decision",
+        json={"decision": "approved", **body},
+        headers={"Authorization": "Bearer human:byunghwan"},
+    )
+
+
+def _pending_unchanged(gate, review_id: str, audit_count: int) -> None:
+    assert gate.store.get_review(review_id).status == "pending"
+    assert len(gate.store.list_audit()) == audit_count
+
+
+def test_confirm_omitted_behaves_as_before(client, act, gate) -> None:
+    import asyncio
+
+    held = asyncio.run(gate.execute(_service_hold(act, "c0")))
+    response = _decide(client, held.review_id)
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "approved"
+
+
+def test_confirm_match_approves_and_is_not_logged(client, act, gate) -> None:
+    import asyncio
+
+    held = asyncio.run(gate.execute(_service_hold(act, "c1")))
+    response = _decide(client, held.review_id, confirm="  payment ")
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "approved"
+    assert "payment" not in str(gate.store.list_audit()[-1].detail)
+
+
+@pytest.mark.parametrize("typed", ["Payment", "payments", "", "   "])
+def test_confirm_mismatch_is_422_and_changes_nothing(client, act, gate, typed) -> None:
+    import asyncio
+
+    held = asyncio.run(gate.execute(_service_hold(act, "c2")))
+    before = len(gate.store.list_audit())
+    response = _decide(client, held.review_id, confirm=typed)
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "CONFIRM_MISMATCH"
+    _pending_unchanged(gate, held.review_id, before)
+    assert gate.store.get_execution(held.execution_id).decision.status == "held"
+    assert (
+        _decide(client, held.review_id, confirm="payment").status_code == 200
+    )  # 그 뒤 맞으면 통과
+
+
+def test_confirm_on_hold_without_service_is_not_applicable(client, act, gate) -> None:
+    import asyncio
+
+    held = asyncio.run(gate.execute(_service_hold(act, "c3", service=None)))
+    before = len(gate.store.list_audit())
+    response = _decide(client, held.review_id, confirm="payment")
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "CONFIRM_NOT_APPLICABLE"
+    _pending_unchanged(gate, held.review_id, before)
+
+
+def test_confirm_is_ignored_on_rejection(client, act, gate) -> None:
+    import asyncio
+
+    held = asyncio.run(gate.execute(_service_hold(act, "c4")))
+    response = client.post(
+        f"/api/safety/reviews/{held.review_id}/decision",
+        json={"decision": "rejected", "confirm": "틀린이름"},
+        headers={"Authorization": "Bearer human:byunghwan"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "rejected"
+
+
+def test_confirm_too_long_or_unknown_field_is_422(client, act, gate) -> None:
+    import asyncio
+
+    held = asyncio.run(gate.execute(_service_hold(act, "c5")))
+    assert _decide(client, held.review_id, confirm="a" * 65).status_code == 422
+    assert _decide(client, held.review_id, other="x").status_code == 422
+    assert gate.store.get_review(held.review_id).status == "pending"
+
+
+def test_already_decided_is_409_even_with_wrong_confirm(client, act, gate) -> None:
+    import asyncio
+
+    held = asyncio.run(gate.execute(_service_hold(act, "c6")))
+    assert _decide(client, held.review_id, confirm="payment").status_code == 200
+    response = _decide(client, held.review_id, confirm="틀림")
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "ALREADY_DECIDED"
+
+
+def test_expired_is_409_even_with_wrong_confirm(client, act, gate, clock) -> None:
+    import asyncio
+
+    held = asyncio.run(gate.execute(_service_hold(act, "c7")))
+    clock.advance(24 * 3600 + 1)
+    response = _decide(client, held.review_id, confirm="틀림")
+    assert response.status_code == 409
+
+
+def test_self_approval_stays_403_with_matching_or_wrong_confirm(client, act, gate) -> None:
+    import asyncio
+
+    held = asyncio.run(gate.execute(_service_hold(act, "c8", who="byunghwan")))
+    for typed in ("payment", "틀림"):
+        response = _decide(client, held.review_id, confirm=typed)
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "SELF_APPROVAL"
+    assert gate.store.get_review(held.review_id).status == "pending"
+
+
+def test_other_company_review_is_404_before_confirm(client, act, gate, monkeypatch) -> None:
+    import asyncio
+
+    from ax_agent_template import human_auth
+
+    held = asyncio.run(gate.execute(_service_hold(act, "c9")))
+    monkeypatch.delenv("AGENT_TEMPLATE_MOCK")
+    monkeypatch.setenv(human_auth.SESSION_SECRET_ENV, "s" * 40)
+    nubi = human_auth.issue_session(
+        account_id="acc-n", name="누비관리", role="admin", company_id="nubi", company_role="admin"
+    )[0]
+    before = len(gate.store.list_audit())
+    for typed in ("payment", "틀림"):
+        response = client.post(
+            f"/api/safety/reviews/{held.review_id}/decision",
+            json={"decision": "approved", "confirm": typed},
+            headers={"Authorization": f"Bearer {nubi}"},
+        )
+        assert response.status_code == 404
+    _pending_unchanged(gate, held.review_id, before)
