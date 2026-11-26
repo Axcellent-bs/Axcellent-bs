@@ -1132,15 +1132,17 @@ def _safe_render(fn: Any) -> None:
 
 
 def _save_original(request: AgentRequest, record_id: str) -> None:
-    """올린 원본(화면이 줄인 JPEG)을 그 회사 기록 폴더에 시트 그림으로 둔다.
+    """올린 원본(화면이 줄인 JPEG)을 그 회사 기록 폴더의 원본 칸(`original_image`)에 둔다.
 
+    11/26 A: 시트 그림 자리가 아니다(시트 그림은 Higgsfield로 따로 만든다).
     실패해도 결과는 그대로."""
     try:
         image = _character_sheet.decode_image(request.untrusted.get("image"))
         _render.save_original(record_id, image.data, image.mime_type)
     except Exception:  # noqa: BLE001 - 기록은 부가 기능이라 결과를 막지 않는다
         _creative.logger.exception("제작 기록: 올린 원본을 저장하지 못함")
-        _render._set(record_id, "sheet_image", status="failed", error="original_not_saved")  # noqa: SLF001
+        _render._set(record_id, _render.ORIGINAL_PART, status="failed",  # noqa: SLF001
+                     error="original_not_saved")  # fmt: skip
 
 
 def _save_extras(record_id: str, extras: list[Any]) -> None:
@@ -1554,9 +1556,12 @@ async def character_sheet_prompt(request: AgentRequest) -> AgentResult:
         )
     out = out.model_copy(update={"record_id": _record_sheet(out, request.untrusted)})
     if out.record_id and out.kind in REFERENCE_KINDS:  # 그림인데 실사면 real_photo로 바뀐다
-        # 11/24 가상 인물·일러스트: 시트 그림을 만들지 않고(크레딧 0) 올린 원본을 시트 그림 자리에
-        _save_original(request, out.record_id)
-        _save_extras(out.record_id, extras)
+        # 11/26 A: 가상 인물·일러스트도 진짜 캐릭터 시트(정면·옆·뒤·표정·색표, 약 1.5 크레딧).
+        # 원본은 원본 칸에(영상 참조는 지금처럼 원본), 시트 그림 참조는 원본 + 추가 참조
+        rid = out.record_id
+        _save_original(request, rid)
+        _save_extras(rid, extras)
+        _safe_render(lambda: _render.start_reference_sheet(STATE.media_ledger, request.meta, rid))
     elif out.record_id:  # Higgsfield로 이미지 시트 그림(키·모델이 없으면 기록에 이유만)
         _start_sheet_render(request, out)
     return _result(
@@ -2228,6 +2233,22 @@ async def creative_board_redraw(request: AgentRequest) -> AgentResult:
     rec = _creative.store().get(data.record_id)
     if rec is None:
         return _not_found(request)
+    if not rec.get("storyboard") and _render.is_reference_kind(rec):
+        # 11/26 A: 회사 캐릭터 카드·제작 기록 1단계 [캐릭터 시트 만들기 · 약 1.5 크레딧]
+        # (같은 길, 새 API 없음). 예전 기록이면 원본을 원본 칸으로 옮기고(파일은 지우지 않음)
+        # 원본 + 추가 참조로 시트 그림을 만든다. 관문·크레딧 예약은 지금 시트 그림 규칙 그대로
+        rid = data.record_id
+        item: dict[str, Any] = {}
+
+        def sheet() -> None:
+            item.update(_render.start_reference_sheet(STATE.media_ledger, request.meta, rid))
+
+        _safe_render(sheet)
+        out = CreativeRecordAttachOutput(record_id=rid, part="sheet_image", item=item)
+        return _result(request, TaskStatus.COMPLETED, output=out.model_dump(mode="json"),
+                       evidence=_evidence([request.skill],
+                                          f"캐릭터 시트 만들기 {rid}: {item.get('status')}",
+                                          [rid]))  # fmt: skip
     if not rec.get("storyboard"):
         return _result(
             request,

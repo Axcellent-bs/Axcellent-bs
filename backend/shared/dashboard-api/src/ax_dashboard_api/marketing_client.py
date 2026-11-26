@@ -969,11 +969,14 @@ CREATIVE_FILES = {
     "final_video": ("final.mp4", "video/mp4"),
     "overlay_video": ("overlay.mp4", "video/mp4"),  # 자막·엔드카드를 얹은 영상(읽기 전용)
     "motion_video": ("motion.mp4", "video/mp4"),  # 11/25 모션 참조 영상(사람이 올림)
+    # 11/26 가상 인물·일러스트가 올린 원본 (마케팅 render.original_image, 읽기 전용)
+    "original_image": ("original.jpg", "image/jpeg"),
 }
 # 사람이 올린 PNG 그림은 PNG 그대로 둔다
 CREATIVE_ALT_FILES = {
     "sheet_image": ("sheet.png", "image/png"),
     "board_image": ("board.png", "image/png"),
+    "original_image": ("original.png", "image/png"),
 }
 UPLOAD_MAX_BYTES = {"image": 20 * 1024 * 1024, "video": 200 * 1024 * 1024}
 UPLOAD_BASE = {
