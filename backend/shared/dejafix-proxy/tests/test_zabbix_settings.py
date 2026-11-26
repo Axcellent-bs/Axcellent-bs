@@ -177,12 +177,25 @@ async def test_company_vault_dejafix_is_409() -> None:
     assert dfx.calls == []
 
 
-async def test_company_without_dejafix_is_503() -> None:
+async def test_company_without_dejafix_is_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    """같이 설치된 DejaFix(환경 변수)도 보관함 DejaFix도 없으면 503."""
+    monkeypatch.delenv("DEJAFIX_USERNAME")
+    monkeypatch.delenv("DEJAFIX_PASSWORD")
     dfx = DejaFix()
     async with _client(dfx, _session(company="nubi-tour")) as c:
         res = await c.get("/settings/zabbix")
     assert res.status_code == 503
     assert res.json()["error"]["code"] == "DEJAFIX_NOT_CONNECTED"
+
+
+async def test_any_company_admin_sets_zabbix_on_the_builtin_dejafix() -> None:
+    """캣북스가 아닌 회사 관리자도 같이 설치된 DejaFix에 자기 Zabbix를 넣는다 (11/26 결정)."""
+    dfx = DejaFix()
+    async with _client(dfx, _session(company="nubi-tour")) as c:
+        saved = await c.put("/settings/zabbix", json=BODY)
+    assert saved.status_code == 200
+    assert dfx.logins == ["dfx-admin"]
+    assert ZBX_TOKEN not in saved.text
 
 
 @pytest.mark.parametrize(

@@ -94,14 +94,21 @@ async def test_other_company_does_not_use_catbooks_vault() -> None:
     assert rec.logins == [] and rec.reads == 0  # 캣북스 DejaFix에 로그인조차 하지 않는다
 
 
-async def test_other_company_does_not_use_builtin_env(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_any_company_uses_the_builtin_dejafix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """같이 설치된 DejaFix는 이 설치의 것: 자기 보관함에 DejaFix가 없는 회사도 쓴다 (11/26 결정).
+
+    그래서 그 회사 관리자도 화면에서 Zabbix를 넣을 수 있다. 다른 회사 보관함은 여전히 안 쓴다
+    (`test_other_company_does_not_use_catbooks_vault`).
+    """
     monkeypatch.setenv("DEJAFIX_USERNAME", "builtin")
     monkeypatch.setenv("DEJAFIX_PASSWORD", "pw-builtin")
     rec = Recorder()
     async with _client(rec, _session(NUBI)) as c:
         res = await c.get("/api/incidents")
-    assert res.status_code == 503
-    assert rec.logins == []
+        status = (await c.get("/status")).json()
+    assert res.status_code == 200
+    assert status["source"] == "builtin"
+    assert rec.logins == ["builtin"]
 
 
 async def test_each_company_uses_its_own_vault_and_login() -> None:
