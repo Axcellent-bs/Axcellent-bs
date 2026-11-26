@@ -143,3 +143,47 @@ def test_memory_mode_collects_other_companies_too() -> None:
     assert tally(store, TENANT_ID_DEFAULT, *_window())[0].orders == 2
     assert tally(store, NUBI, *_window())[0].orders == 5
     assert tally(store, STUDY, *_window())[0].orders == 3
+
+
+def test_recollect_clears_only_that_company_cursor_and_refills_lines(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
+) -> None:
+    """`--recollect 회사 id` (11/26): 그 회사 커서만 비워 다음 회차에 처음부터 다시 받는다.
+
+    이름·분류 없이 쌓인 줄이 다시 받은 값(변환기가 상품 목록으로 채운 값)으로 덮인다.
+    지우는 기록 없음.
+    """
+    env = {sc.DB_ENV: str(tmp_path / "sales.db")}
+    bare = [r.model_copy(update={"lines": [ln.model_copy(update={"title": None,
+            "category_code": None}) for ln in r.lines]}) for r in ROWS[STUDY]]  # fmt: skip
+    store = SalesStore(sc.db_path(env))
+    try:
+        cat = sc.MockSalesSource(_orders("cat", 2, 20000))
+        asyncio.run(sc.collect_once(cat, store, tenant_id=TENANT_ID_DEFAULT,
+                                    source_name="shop-api", now=NOW))  # fmt: skip
+        asyncio.run(sc.collect_company(store, STUDY, env, NOW, {},
+                                       lambda e: sc.MockSalesSource(bare)))  # fmt: skip
+        cat_cursor = store.sync_state(TENANT_ID_DEFAULT, "shop-api").cursor
+        assert store.sync_state(STUDY).cursor
+    finally:
+        store.close()
+
+    assert sc.recollect(env, "catbooks") == 2
+    assert sc.recollect(env, STUDY) == 0
+
+    store = SalesStore(sc.db_path(env))
+    try:
+        assert store.sync_state(TENANT_ID_DEFAULT, "shop-api").cursor == cat_cursor  # 캣북스 그대로
+        assert not store.sync_state(STUDY).cursor
+        asyncio.run(sc.collect_company(store, STUDY, env, NOW, {}, _factory()))
+        with store.reading() as conn:
+            got = conn.execute(
+                "SELECT COUNT(*), SUM(title IS NULL), SUM(category_code IS NULL) "
+                "FROM sales_order_lines WHERE tenant_id = ?",
+                (STUDY,),
+            ).fetchone()
+        assert tuple(got) == (3, 0, 0)  # 줄 수 그대로, 이름·분류 채워짐
+        assert tally(store, STUDY, *_window())[0].orders == 3
+    finally:
+        store.close()
