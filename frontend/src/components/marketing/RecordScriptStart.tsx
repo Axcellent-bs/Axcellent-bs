@@ -54,11 +54,13 @@ export function RecordScriptWrite({ recordId, story, scenes, onWritten }: {
   );
 }
 
-export function RecordBoardFromScript({ recordId, story, characterEn, scenes, onRecord }: {
+export function RecordBoardFromScript({ recordId, story, characterEn, scenes, first = false, onRecord }: {
   recordId: string;
   story: string;
   characterEn?: string;
   scenes: number;
+  /** 스토리보드가 아직 없는 기록 (11/26): "처음 만들기" 문구·버튼. 아니면 "다시 만들기" */
+  first?: boolean;
   /** 새 스토리보드가 붙은 기록 */
   onRecord: (rec: CreativeRecord) => void;
 }) {
@@ -91,6 +93,13 @@ export function RecordBoardFromScript({ recordId, story, characterEn, scenes, on
       setBusy(false);
     }
   };
+  if (first) return (
+    <div className="flex flex-wrap items-center gap-2" role="group" aria-label="스토리보드 처음 만들기">
+      <p className="text-sm text-ink-700">대본 {scenes}장면으로 스토리보드를 만들 수 있어요 · AI 콘티 · 그림 크레딧 0</p>
+      <button type="button" className="btn-primary ml-auto text-xs" disabled={busy || !story.trim()} onClick={() => void remake()}>{busy ? "스토리보드 만드는 중… (1~3분)" : "대본으로 스토리보드 만들기"}</button>
+      {error && <p className="w-full text-xs text-accent" role="alert">{error}</p>}
+    </div>
+  );
   return (
     <div className="flex flex-wrap items-center gap-2">
       <p className="text-xs text-ink-500">지금 스토리보드는 대본을 따르지 않아요. 영상은 스토리보드 장면으로 만들어져요.</p>
