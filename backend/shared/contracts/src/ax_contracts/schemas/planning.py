@@ -864,6 +864,9 @@ class VideoScene(AxModel):
     # (예: 기대·현실·펀치 리액션)과 그 비트가 펀치라인 비트인지 (화면 강조, 카드 값)
     beat_ko: str = Field(default="", max_length=20)
     beat_punch: bool = False
+    # 아래는 예전 제작안은 없다 (빈 문자열, 11/26). 그 장면의 장소 (짧은 한국어: 책상·무대·지하철).
+    # 기획 제작 검사가 장소 전환 횟수를 센다(Flash는 15초를 한 번에 만들어 장소가 자주 바뀌면 어색)
+    place_ko: str = Field(default="", max_length=20)
 
     @model_validator(mode="after")
     def _ends_after_start(self) -> VideoScene:
@@ -892,6 +895,10 @@ class CheckProblem(AxModel):
     kind: Literal["people", "actions", "props", "request_rule", "duration", "refs", "text"]
     scene: int | None = None
     detail_ko: str = Field(min_length=1, max_length=160)
+    # 아래는 예전 기록은 없다 (빈 문자열). kind 안의 자세한 검사 이름 (11/26, kind 값은 그대로):
+    # close_person = 회사 캐릭터 말고 다른 인물이 가까이(kind people), place_change = 장소 전환이
+    # 많음(kind actions). 화면은 값이 있으면 이름(참조 없는 인물·장소 전환)을 문제 줄 앞에 보인다
+    code: str = Field(default="", max_length=24)
 
 
 class CheckAttempt(AxModel):

@@ -95,10 +95,9 @@ def test_two_actions_in_one_scene_fail() -> None:
     assert pc.feasibility([_scene(1, visual="마이크를 들고 노래한다")]) == []  # 들고 ≠ 하고
 
 
-def test_three_props_fail_and_end_card_scenes_are_not_checked() -> None:
-    assert pc.feasibility([_scene(1, props=["마이크", "꽃다발", "가방"])])[0]["detail_ko"] == (
-        "소품 3개 (허용 2개)"
-    )
+def test_props_are_not_counted_and_end_card_scenes_are_not_checked() -> None:
+    # 11/26 기준 고침: 소품 개수는 근거가 없어 보지 않는다 (예전: "소품 3개 (허용 2개)" ✕)
+    assert pc.feasibility([_scene(1, props=["마이크", "꽃다발", "가방"])]) == []
     card = _scene(4, visual="채널 이름 엔드 카드", people=5, props=["a", "b", "c"])
     assert pc.feasibility([_scene(1), card]) == []
 

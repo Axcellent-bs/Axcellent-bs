@@ -268,6 +268,30 @@ test("제작 검사 기록 (계약 check_log·adjustments): 1차 ✕ → 2차 �
   assert.match(read("../components/office/RequestProgressCard.tsx"), /<CheckLog v=\{found\.fullPlan\} \/>/);
 });
 
+test("제작 검사 기준 고침 (11/26 계약 CheckProblem.code·VideoScene.place_ko): 이름 앞에 · 모르는 code 버림 · 예전 기록 그대로", () => {
+  const v = toVideoPlan({ ...RAW,
+    scenes: RAW.scenes.map((s, i) => ({ ...s, place_ko: ["책상", "무대", "", " "][i] ?? "" })),
+    check_log: [{ attempt: 1, by: "planning", passed: false, problems: [
+      { kind: "people", scene: 2, detail_ko: "회사 캐릭터 말고 다른 인물이 가까이 나와요(참조 이미지는 회사 캐릭터 1명뿐)", code: "close_person" },
+      { kind: "actions", scene: 4, detail_ko: "장소가 3번 바뀌어요: 책상 → 무대 → 거리 → 지하철 (15초 한 번 생성이라 최대 2번)", code: "place_change" },
+      { kind: "people", scene: 3, detail_ko: "인물 3명 (허용 2명)", code: "toString" },
+      { kind: "people", scene: 1, detail_ko: "인물 3명 (허용 2명)" },
+    ] }],
+  });
+  assert.ok(v && v.checkLog);
+  assert.deepEqual(v.checkLog[0].problems.map(checkProblemLine), [
+    "참조 없는 인물 · 장면 2 · 회사 캐릭터 말고 다른 인물이 가까이 나와요(참조 이미지는 회사 캐릭터 1명뿐)",
+    "장소 전환 · 장면 4 · 장소가 3번 바뀌어요: 책상 → 무대 → 거리 → 지하철 (15초 한 번 생성이라 최대 2번)",
+    "장면 3 · 인물 3명 (허용 2명)",
+    "장면 1 · 인물 3명 (허용 2명)",
+  ]);
+  assert.equal("code" in v.checkLog[0].problems[3], false); // 예전 기록(code 없음)은 지금 줄 그대로
+  assert.deepEqual(v.scenes.map((s) => s.placeKo), ["책상", "무대", undefined, undefined]);
+  assert.equal("placeKo" in toVideoPlan(RAW)!.scenes[0], false);
+  const card = readFileSync(new URL("../components/planning/videoPlan.tsx", import.meta.url), "utf8");
+  assert.match(card, /\{s\.placeKo && <span className="sb-place"/);
+});
+
 test("제작안 판 칩 (계약 version): 2판(마케팅 요청으로 고침) · 1판·예전 제작안은 칩 없음", () => {
   const log = [{ attempt: 1, by: "marketing", passed: false, problems: [] }, { attempt: 2, by: "planning", passed: true, problems: [] }];
   const v2 = toVideoPlan({ ...RAW, version: 2, check_log: log })!;

@@ -19,6 +19,7 @@ export interface VideoSceneView {
   endSvg?: string // 장면 끝 화면 구도
   beatKo?: string // 11/26 형식 카드 비트 이름 (계약 VideoScene.beat_ko). 형식이 없으면 칸 없음
   beatPunch?: boolean // 그 비트가 펀치라인 비트 (화면 강조)
+  placeKo?: string // 11/26 그 장면의 장소 (계약 VideoScene.place_ko). 비면 칸 없음
 }
 
 /** 광고 목적 (계약 VideoPlan.purpose). 없으면 칩을 그리지 않는다 */
@@ -61,15 +62,21 @@ export interface VideoPlanView {
 }
 
 export type CheckKind = 'people' | 'actions' | 'props' | 'request_rule' | 'duration' | 'refs' | 'text'
-export interface CheckProblemView { kind: CheckKind; scene: number | null; detailKo: string }
+/** kind 안의 자세한 검사 이름 (11/26 계약 CheckProblem.code). 모르는 값은 버린다(칸 없음 = 지금 줄) */
+export type CheckCode = 'close_person' | 'place_change'
+export const CHECK_CODE: Record<CheckCode, string> = { close_person: '참조 없는 인물', place_change: '장소 전환' }
+export interface CheckProblemView { kind: CheckKind; scene: number | null; detailKo: string; code?: CheckCode }
 export interface CheckAttemptView { attempt: number; by: 'planning' | 'marketing'; passed: boolean; problems: CheckProblemView[] }
 export interface PlanAdjustmentView { ruleTextKo: string; changedToKo: string; whyKo: string }
 const CHECK_KINDS = new Set<string>(['people', 'actions', 'props', 'request_rule', 'duration', 'refs', 'text'])
 const CHECK_BY: Record<CheckAttemptView['by'], string> = { planning: '기획 검사', marketing: '마케팅 확인' }
 /** 검사 한 줄 제목 "1차 초안 · 기획 검사 · 통과 못 함" */
 export const checkAttemptTitle = (a: CheckAttemptView) => `${a.attempt}차 초안 · ${CHECK_BY[a.by]} · ${a.passed ? '통과' : '통과 못 함'}`
-/** 문제 한 줄 "장면 2 · 인물 3명 (허용 2명)" */
-export const checkProblemLine = (p: CheckProblemView) => (p.scene ? `장면 ${p.scene} · ${p.detailKo}` : p.detailKo)
+/** 문제 한 줄 "장면 2 · 인물 3명 (허용 2명)". code가 있으면 앞에 이름 "장소 전환 · 장면 4 · …" */
+export const checkProblemLine = (p: CheckProblemView) => {
+  const line = p.scene ? `장면 ${p.scene} · ${p.detailKo}` : p.detailKo
+  return p.code ? `${CHECK_CODE[p.code]} · ${line}` : line
+}
 /** 검사 칩: 다시 써서 통과 / 검사 통과 / 확인 필요. 기록이 없으면 '' */
 export function checkChip(v: Pick<VideoPlanView, 'checkLog'>): string {
   const log = v.checkLog ?? []
@@ -101,7 +108,8 @@ function toCheckLog(raw: unknown): CheckAttemptView[] {
       const kind = q ? str(q.kind) : ''
       const detailKo = q ? str(pick(q, 'detailKo', 'detail_ko')) : ''
       if (!q || !CHECK_KINDS.has(kind) || !detailKo) return []
-      return [{ kind: kind as CheckKind, scene: int(q.scene), detailKo }]
+      const code = str(q.code)
+      return [{ kind: kind as CheckKind, scene: int(q.scene), detailKo, ...(Object.prototype.hasOwnProperty.call(CHECK_CODE, code) ? { code: code as CheckCode } : {}) }]
     })
     return [{ attempt, by: by as CheckAttemptView['by'], passed: o.passed === true, problems }]
   })
@@ -239,7 +247,8 @@ function toScene(raw: unknown): VideoSceneView | null {
   const kept = Object.fromEntries(Object.entries(frames).filter(([, v]) => v)) as Partial<typeof frames>
   const beatKo = str(pick(o, 'beatKo', 'beat_ko'))
   const beat = beatKo ? { beatKo, ...(pick(o, 'beatPunch', 'beat_punch') === true ? { beatPunch: true } : {}) } : {}
-  return { n, startS, endS, visual, caption: str(o.caption), prompt, ...kept, ...beat }
+  const placeKo = str(pick(o, 'placeKo', 'place_ko'))
+  return { n, startS, endS, visual, caption: str(o.caption), prompt, ...kept, ...beat, ...(placeKo ? { placeKo } : {}) }
 }
 
 /** 장면 키프레임 한 줄 "첫 화면 → 끝 화면 · 동작 · 카메라". 끝 화면·동작·카메라가 다 비면 null

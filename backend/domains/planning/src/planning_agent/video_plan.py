@@ -710,7 +710,9 @@ PROMPT = """너는 고객사 사내 기획 담당 AI다. 고객사 이름·업�
   - camera_en: 샷 크기와 카메라 움직임 (영어, 120자 이내. 예: medium shot, slow push-in)
   - people: 화면에 보이는 인물·캐릭터 수 (정수, 주인공 포함)
   - props: 손으로 다루거나 꼭 보이는 소품 (짧은 한국어 목록, 없으면 빈 목록)
+  - place_ko: 그 장면의 장소 (짧은 한국어, 예: 책상·무대·지하철)
   - 장면마다 people·props를 사실대로 적는다 (규칙에 맞추려고 줄여 적지 않는다)
+  - 장면마다 place_ko를 사실대로, 같은 장소면 같은 말로 적는다
 - offer_ko: 혜택·이점 한 줄 (한국어, 60자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
 - cta_ko: 마지막 행동 문구 (한국어, 40자 이내. 광고 목적 줄이 시키지 않으면 빈 문자열)
 - category: 데이터 블록 categories(회사 상품 분류) 중 이 영상이 보여 주는 상품에 맞는 것 하나를
@@ -825,6 +827,8 @@ class _SceneOut(BaseModel):
     # 11/26 제작 검사 칸 (사실대로). 화면에 보이는 인물 수(회사 캐릭터 포함)·꼭 보이는 소품
     people: int = 1
     props: list[str] = Field(default_factory=list)
+    # 11/26 그 장면의 장소 (짧게: 책상·무대·지하철). 제작 검사가 장소 전환 횟수를 센다
+    place_ko: str = ""
     # 11/26 형식 카드에서 이 장면이 맡은 비트 이름 (형식을 안 쓰면 빈 문자열)
     beat_ko: str = ""
 
@@ -1082,6 +1086,7 @@ def _checked(
                 caption=_short(s.caption, 60),
                 prompt=_short(s.prompt, 800),
                 **_keyframes(i, s),
+                place_ko=_short(s.place_ko, 20),
                 **({"beat_ko": _short(s.beat_ko, 20),
                     "beat_punch": card is not None and i - 1 < len(card.beats)
                     and card.beats[i - 1].punch} if formatted else {}),  # fmt: skip
@@ -1131,7 +1136,7 @@ FEASIBILITY_FIRST = (
 def plan_problems(p: Proposal, got: _PlanOut) -> list[dict[str, Any]]:
     """검사 기록에 남는 문제 (제작 검사 + 못 지킨 의뢰 지시). 의뢰 지시는 B와 같은 검사 결과."""
     checked = plan_checks.check_rules(_rules(p, got), _check_scenes(got), got.script)
-    out = plan_checks.feasibility(got.scenes)
+    out = plan_checks.feasibility(got.scenes, has_character=bool(cast_fields(p)))
     return out + [{**plan_checks.rule_problem(r), "rule": r} for r in checked if not r["kept"]]
 
 
@@ -1139,7 +1144,7 @@ def plan_fixes(p: Proposal, got: _PlanOut) -> list[str]:
     """LLM 제작안을 버리지는 않지만 한 번 다시 쓰게 할 문제 (사람이 읽는 한 줄씩, 값은 코드 글).
 
     11/26: 회사 캐릭터 설명에 없는 외형 낱말(고양이 귀 등)이 장면 visual·prompt에 나온 장면,
-    제작 검사(인물·동작·소품), 못 지킨 의뢰 지시, script 시간 구간 수."""
+    제작 검사(참조 없는 인물·동작·장소 전환), 못 지킨 의뢰 지시, script 시간 구간 수."""
     texts = [(i, f"{s.visual} {s.prompt}") for i, s in enumerate(got.scenes, start=1)]
     out = [
         f"장면 {n}: 회사 캐릭터에 없는 외형 '{w}'을 빼고 main_character 외형 그대로 쓴다"
@@ -1155,8 +1160,9 @@ def plan_fixes(p: Proposal, got: _PlanOut) -> list[str]:
 
 
 def attempt_log(n: int, problems: list[dict[str, Any]], by: str = "planning") -> CheckAttempt:
-    """검사 한 번 → 계약 CheckAttempt (문제의 kind·scene·detail_ko만)."""
-    rows = [CheckProblem(kind=x["kind"], scene=x.get("scene"), detail_ko=x["detail_ko"][:160])
+    """검사 한 번 → 계약 CheckAttempt (문제의 kind·scene·detail_ko·code만)."""
+    rows = [CheckProblem(kind=x["kind"], scene=x.get("scene"), detail_ko=x["detail_ko"][:160],
+                         code=str(x.get("code") or "")[:24])
             for x in problems][:20]  # fmt: skip
     return CheckAttempt(attempt=n, by=by, passed=not rows, problems=rows)  # type: ignore[arg-type]
 
@@ -1388,8 +1394,9 @@ async def revise(
     if old is None:
         raise ReviseRefused("no_llm")
     kinds = {getattr(x, "kind", "") for x in problems}
-    asked = attempt_log(from_version, [{"kind": x.kind, "scene": x.scene, "detail_ko": x.detail_ko}
-                                       for x in problems], by="marketing")  # fmt: skip
+    sent = [{"kind": x.kind, "scene": x.scene, "detail_ko": x.detail_ko, "code": x.code}
+            for x in problems]  # fmt: skip
+    asked = attempt_log(from_version, sent, by="marketing")
     if kinds == {"duration"}:  # 장면 시간은 코드가 정하니 LLM 없이 고르게 다시 나눈다
         timed = retime(old)
         rows = [{**plan_checks.rule_problem(r.model_dump()), "rule": r.model_dump()}
