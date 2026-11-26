@@ -7,6 +7,7 @@ import asyncio
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -58,10 +59,13 @@ def _req(skill: str, data: dict) -> AgentRequest:
 
 
 def test_send_returns_answering_then_answer_arrives_with_infra_facts() -> None:
+    from ax_agent_template import company_scope
+
     async def run() -> None:
         llm = FakeLLM()
         svc = _service(llm)
-        th = svc.send("yejin", None, "최근 배포 알려 줘")
+        with company_scope.using("catbooks"):  # 요청 회사 칸의 배포만 사실에 넣는다
+            th = svc.send("yejin", None, "최근 배포 알려 줘")
         assert th["id"] == "infrachat-1" and th["status"] == "answering"
         await svc.wait_idle()
         done = svc.get("yejin", th["id"])
@@ -226,7 +230,10 @@ def test_facts_keep_going_when_one_part_fails(monkeypatch: pytest.MonkeyPatch) -
         raise RuntimeError("shop down")
 
     monkeypatch.setattr(facts, "_shop", boom)
-    got = asyncio.run(facts.collect())
+    from ax_agent_template import company_scope
+
+    with company_scope.using("catbooks"):
+        got = asyncio.run(facts.collect())
     assert "shop_payment_server" in got["unavailable"] and "shop_payment_server" not in got
     assert got["recent_deployments"]
 
@@ -293,3 +300,184 @@ def test_chat_threads_are_seen_only_by_their_company() -> None:
         assert [t["id"] for t in store.list_all()] == [cat["id"]]
         assert store.get(nubi["id"]) is None
     assert {t["id"] for t in store.list_all()} == {cat["id"], nubi["id"]}  # 요청 밖
+
+
+# --- 사람이 확정한 원인 (dashboard-api 읽기 창구) ---
+
+_REAL_CLIENT = httpx.AsyncClient
+
+
+def _problems(*ids) -> dict:
+    return {
+        "configured": True,
+        "count": len(ids),
+        "problems": [{"incident_id": i, "title": f"장애 {i}", "component": "payment"} for i in ids],
+    }
+
+
+def _wire(monkeypatch: pytest.MonkeyPatch, store: dict, problems: dict, seen: list) -> None:
+    """회사별 확정 원인 저장소를 흉내 낸 dashboard-api. `store[회사][번호] = 확정 원인 줄`."""
+    monkeypatch.setenv("INFRA_TOKEN", "tok-infra")
+    monkeypatch.setattr(facts, "is_mock", lambda *_a, **_k: False)
+
+    async def fake_dejafix() -> dict:
+        return problems
+
+    async def no_incidents() -> list:
+        return []
+
+    monkeypatch.setattr(facts, "_dejafix", fake_dejafix)
+    monkeypatch.setattr(facts, "_incidents", no_incidents)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, dict(request.url.params), dict(request.headers)))
+        company = request.headers.get("X-AX-Company", "")
+        ids = [i for i in request.url.params["ids"].split(",")]
+        rows = {i: store.get(company, {}).get(int(i)) for i in ids}
+        return httpx.Response(200, json={"data": {k: v for k, v in rows.items() if v}})
+
+    monkeypatch.setattr(
+        facts.httpx,
+        "AsyncClient",
+        lambda **kw: _REAL_CLIENT(transport=httpx.MockTransport(handler), **kw),
+    )
+
+
+ROW = {
+    "text": "결제 서버 메모리 누수",
+    "saved_by": "재현",
+    "saved_at": "2026-11-26T01:00:00+00:00",
+    "from_rank": 2,
+}
+
+
+def test_facts_attach_human_confirmed_cause_and_null_when_none(monkeypatch) -> None:
+    from ax_agent_template import company_scope
+
+    seen: list = []
+    store = {"catbooks": {7: ROW}, "nubi-tour": {7: {**ROW, "text": "다른 회사 원인"}, 8: ROW}}
+    _wire(monkeypatch, store, _problems(7, 9), seen)
+    with company_scope.using("catbooks"):
+        got = asyncio.run(facts.collect())
+    by_id = {p["incident_id"]: p for p in got["dejafix_problems"]["problems"]}
+    assert by_id[7]["confirmed_cause"] == ROW  # 사람이 확정한 원인 그대로
+    assert by_id[9]["confirmed_cause"] is None  # 없으면 null, 지어내지 않는다
+    assert "confirmed_causes" not in got["unavailable"]
+    path, params, headers = seen[0]
+    assert path == "/api/dashboard/incident-causes" and params == {"ids": "7,9"}
+    assert headers["x-ax-company"] == "catbooks" and headers["authorization"] == "Bearer tok-infra"
+    assert "다른 회사" not in str(got)  # 다른 회사 것이 안 섞인다
+
+
+def test_facts_confirmed_cause_is_scoped_to_the_requesting_company(monkeypatch) -> None:
+    from ax_agent_template import company_scope
+
+    store = {"catbooks": {7: ROW}, "nubi-tour": {7: {**ROW, "text": "누비 원인"}}}
+    _wire(monkeypatch, store, _problems(7), [])
+    with company_scope.using("nubi-tour"):
+        got = asyncio.run(facts.collect())
+    assert got["dejafix_problems"]["problems"][0]["confirmed_cause"]["text"] == "누비 원인"
+
+
+def test_facts_confirmed_cause_text_is_capped(monkeypatch) -> None:
+    from ax_agent_template import company_scope
+
+    _wire(monkeypatch, {"catbooks": {7: {**ROW, "text": "가" * 2000}}}, _problems(7), [])
+    with company_scope.using("catbooks"):
+        got = asyncio.run(facts.collect())
+    assert len(got["dejafix_problems"]["problems"][0]["confirmed_cause"]["text"]) == (
+        facts.CAUSE_CHARS
+    )
+
+
+def test_facts_keep_going_when_confirmed_causes_cannot_be_read(monkeypatch) -> None:
+    from ax_agent_template import company_scope
+
+    seen: list = []
+    _wire(monkeypatch, {}, _problems(7), seen)
+
+    def down(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": {"code": "X"}})
+
+    monkeypatch.setattr(
+        facts.httpx,
+        "AsyncClient",
+        lambda **kw: _REAL_CLIENT(transport=httpx.MockTransport(down), **kw),
+    )
+    with company_scope.using("catbooks"):
+        got = asyncio.run(facts.collect())
+    assert "confirmed_causes" in got["unavailable"]
+    assert "confirmed_cause" not in got["dejafix_problems"]["problems"][0]  # 없다고 하지 않는다
+    assert got["recent_deployments"] and got["dejafix_problems"]["problems"][0]["incident_id"] == 7
+
+
+def test_facts_without_company_or_problems_do_not_call_dashboard(monkeypatch) -> None:
+    from ax_agent_template import company_scope
+
+    seen: list = []
+    _wire(monkeypatch, {"catbooks": {7: ROW}}, _problems(), seen)  # 장애 없음
+    with company_scope.using("catbooks"):
+        got = asyncio.run(facts.collect())
+    assert seen == [] and "confirmed_causes" not in got["unavailable"]
+
+    _wire(
+        monkeypatch, {"catbooks": {7: ROW}}, _problems(7), seen
+    )  # 회사 없음: 읽지 못함으로 남긴다
+    token = company_scope._ACTIVE.set(None)
+    try:
+        got = asyncio.run(facts.collect())
+    finally:
+        company_scope._ACTIVE.reset(token)
+    assert seen == [] and "confirmed_causes" in got["unavailable"]
+    assert "confirmed_cause" not in got["dejafix_problems"]["problems"][0]
+
+
+def test_prompt_separates_human_confirmed_cause_from_ai_candidates() -> None:
+    from infra_agent.chat.turn import SYSTEM_PROMPT
+
+    assert "confirmed_cause" in SYSTEM_PROMPT and "사람이 확정한 원인" in SYSTEM_PROMPT
+    assert "섞지 말고" in SYSTEM_PROMPT and "지어내지 않는다" in SYSTEM_PROMPT
+
+
+def _diag(minutes: int = 0):
+    from ax_contracts.schemas import DiagnoseIncidentOutput
+    from infra_agent.diagnosis import Diagnosis
+
+    return Diagnosis(
+        output=DiagnoseIncidentOutput(status="undetermined", suspects=[]),
+        candidates=(),
+        diagnosed_at=datetime(2026, 11, 9, 6, minutes, tzinfo=UTC),
+        window_from=None,
+    )
+
+
+def test_facts_diagnoses_are_only_the_requesting_companys() -> None:
+    from ax_agent_template import company_scope
+    from infra_agent.runtime import get_runtime
+
+    rt = get_runtime()
+    with company_scope.using("nubi-tour"):
+        rt.save_diagnosis("ctx-nubi", _diag(1))
+    with company_scope.using("catbooks"):
+        rt.save_diagnosis("ctx-cat", _diag(2))
+    with company_scope.using("catbooks"):
+        got = asyncio.run(facts.collect())
+    assert [d["context_id"] for d in got["recent_diagnoses"]] == ["ctx-cat"]
+    with company_scope.using("nubi-tour"):
+        got = asyncio.run(facts.collect())
+    assert [d["context_id"] for d in got["recent_diagnoses"]] == ["ctx-nubi"]
+
+
+def test_facts_without_company_see_no_diagnoses_and_no_catbooks_deployments() -> None:
+    from ax_agent_template import company_scope
+    from infra_agent.runtime import get_runtime
+
+    with company_scope.using("catbooks"):
+        get_runtime().save_diagnosis("ctx-cat", _diag(2))
+        assert asyncio.run(facts.collect())["recent_deployments"]
+    token = company_scope._ACTIVE.set(None)
+    try:
+        got = asyncio.run(facts.collect())
+    finally:
+        company_scope._ACTIVE.reset(token)
+    assert got["recent_diagnoses"] == [] and got["recent_deployments"] == []

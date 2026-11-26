@@ -19,6 +19,13 @@
 - 장애 번호가 DejaFix에 있는지는 여기서 확인하지 않는다(화면은 DejaFix 상세를 읽은 뒤에만 저장
   칸을 보인다). 없는 번호로 저장해도 그 회사 기록에만 남는다
 
+읽기 전용 창구(11/26): 인프라 AI의 1:1 대화가 사람이 확정한 원인을 알도록
+`GET /api/dashboard/incident-causes?ids=1,2` (`machine_router`). 사람 토큰이 아니라 **인프라
+에이전트 토큰**(`AX_AGENT_TOKENS`의 `infra`)만 받고(사람·다른 에이전트는 403), 회사는
+`X-AX-Company` 머리글로 받는다(없거나 규칙에 안 맞으면 400, 캣북스로 떨어지지 않는다).
+지금 확정 원인(`text`·`from_rank`·`saved_by`·`saved_at`)만 주고 history·계정 ID는 주지 않는다.
+쓰기 경로는 없다. 사람 토큰 라우터(`router`)는 그대로다.
+
 저장은 SQLite 파일 하나다. 위치는 `AX_INCIDENT_CAUSES_DB`이고, 비어 있으면 프로세스 메모리
 (`:memory:`)에 둔다(다시 켜면 사라진다). run_all.sh는 `.data/incident_causes.db`로 정한다.
 """
@@ -31,12 +38,15 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Path
+from fastapi import APIRouter, Depends, Header, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from ax_agent_template.companies import canonical_company_id
+from ax_agent_template.company_connection import CALLER_COMPANY_HEADER
 from ax_agent_template.company_scope import scope_id
+from ax_agent_template.server import verify_token
 from ax_dashboard_api import accounts
-from ax_dashboard_api.auth import require_human
+from ax_dashboard_api.auth import bearer, require_human
 from ax_dashboard_api.envelope import ApiError, ok, session_company
 
 DB_ENV = "AX_INCIDENT_CAUSES_DB"
@@ -44,8 +54,13 @@ TEXT_MAX = 1000
 RANK_MAX = 20
 HISTORY_MAX = 20
 INCIDENT_ID_MAX = 2**31 - 1
+IDS_MAX = 20
+READER_AGENTS = frozenset({"infra"})  # 읽기 창구를 쓸 수 있는 에이전트
 
 router = APIRouter(prefix="/api/dashboard/incidents", dependencies=[Depends(require_human)])
+
+# 에이전트가 읽는 창구: 사람 토큰 대신 에이전트 토큰(auth.MACHINE_ROUTES)
+machine_router = APIRouter(prefix="/api/dashboard/incident-causes")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS incident_causes (
@@ -94,6 +109,19 @@ class IncidentCauseStore:
             "confirmed": _public(current) if current else None,
             "history": [_public(r) | {"replaced_at": r["replaced_at"]} for r in history],
         }
+
+    def confirmed_many(self, tenant: str, incident_ids: list[int]) -> dict[int, dict[str, Any]]:
+        """그 회사의 지금 확정 원인만(없는 번호는 빠진다)."""
+        if not incident_ids:
+            return {}
+        marks = ",".join("?" for _ in incident_ids)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM incident_causes WHERE tenant_id = ? AND replaced_at IS NULL"
+                f" AND incident_id IN ({marks})",
+                (tenant, *incident_ids),
+            ).fetchall()
+        return {r["incident_id"]: _public(r) for r in rows}
 
     def save(
         self,
@@ -185,3 +213,46 @@ def save_incident_cause(
         now=_now(),
     )
     return ok(store.state(tenant, incident_id))
+
+
+def _reader_company(authorization: str | None, company_header: str | None) -> str:
+    """에이전트 토큰(허용된 이름만)과 호출 회사를 확인해 정식 회사 id를 돌려준다."""
+    token = bearer(authorization)
+    if not token:
+        raise ApiError(
+            401, "AUTH_REQUIRED", "에이전트 토큰이 필요하다 (Authorization: Bearer 토큰)"
+        )
+    try:
+        agent = verify_token(token)
+    except PermissionError:
+        raise ApiError(403, "AGENT_TOKEN_INVALID", "에이전트 토큰을 검증할 수 없다") from None
+    if agent not in READER_AGENTS:
+        raise ApiError(403, "AGENT_NOT_ALLOWED", "이 에이전트는 확정 원인을 읽을 수 없다")
+    company = canonical_company_id((company_header or "").strip())
+    if not company:
+        raise ApiError(400, "COMPANY_REQUIRED", f"{CALLER_COMPANY_HEADER} 머리글이 필요하다")
+    return scope_id(company)
+
+
+@machine_router.get("")
+def read_incident_causes(
+    ids: str = Query(max_length=200),
+    authorization: str | None = Header(None),
+    company: str | None = Header(None, alias=CALLER_COMPANY_HEADER),
+) -> dict[str, Any]:
+    """읽기 전용. `ids`는 쉼표로 구분한 장애 번호(최대 20개). 확정 원인이 있는 번호만 준다."""
+    tenant = _reader_company(authorization, company)
+    wanted: list[int] = []
+    try:
+        for part in ids.split(","):
+            n = int(part.strip())
+            if not 1 <= n <= INCIDENT_ID_MAX:
+                raise ValueError
+            if n not in wanted:
+                wanted.append(n)
+    except ValueError:
+        raise ApiError(422, "IDS_INVALID", "ids는 쉼표로 구분한 장애 번호여야 한다") from None
+    if len(wanted) > IDS_MAX:
+        raise ApiError(422, "IDS_TOO_MANY", f"한 번에 {IDS_MAX}개까지 읽을 수 있다")
+    found = get_store().confirmed_many(tenant, wanted)
+    return ok({str(i): found[i] for i in wanted if i in found})

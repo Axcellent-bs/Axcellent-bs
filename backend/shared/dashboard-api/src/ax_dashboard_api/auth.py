@@ -56,6 +56,8 @@ MACHINE_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("POST", "/api/dashboard/handoffs"),  # 에이전트 토큰 (handoffs.intake)
         ("POST", "/api/dashboard/events"),  # 회사 키 (shop_events)
+        # 인프라 에이전트 토큰, 읽기 전용 (incident_causes.machine_router)
+        ("GET", "/api/dashboard/incident-causes"),
         # MCP 서버 에이전트 토큰 (personal_mcp.check_router)
         ("POST", "/api/dashboard/me/ai-connection/mcp/check"),
         # 개인 MCP 연결 토큰 `axm_` (mcp_gateway.router, 전 직원 MCP 창구)

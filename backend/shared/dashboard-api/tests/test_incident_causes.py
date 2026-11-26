@@ -158,3 +158,83 @@ def test_saved_file_survives_restart(client: TestClient, tmp_path: Path, monkeyp
     incident_causes.reset_store()  # 다시 켠 것처럼
     got = client.get(URL.format(7), headers=who).json()["data"]["confirmed"]
     assert got["text"] == "파일에 남는 원인"
+
+
+# --- 인프라 AI가 읽는 창구 (읽기 전용, 에이전트 토큰) ---
+
+READ = "/api/dashboard/incident-causes"
+
+
+def _infra(company: str | None = "catbooks", token: str = "mock:infra") -> dict[str, str]:
+    headers = {"authorization": f"Bearer {token}"}
+    if company is not None:
+        headers["X-AX-Company"] = company
+    return headers
+
+
+def _save(
+    client: TestClient, company: str, incident_id: int, text: str, name: str = "재현"
+) -> None:
+    res = client.post(URL.format(incident_id), json={"text": text}, headers=_session(company, name))
+    assert res.status_code == 200, res.text
+
+
+def test_infra_agent_reads_only_current_confirmed_causes_of_its_company(client: TestClient) -> None:
+    _save(client, "catbooks", 7, "첫 원인")
+    _save(client, "catbooks", 7, "고친 원인", name="태윤")
+    _save(client, "nubitour", 7, "다른 회사 원인")
+    _save(client, "nubitour", 8, "다른 회사만 있음")
+    res = client.get(READ, params={"ids": "7,8,9"}, headers=_infra("catbooks"))
+    assert res.status_code == 200, res.text
+    data = res.json()["data"]
+    assert set(data) == {"7"}  # 8은 다른 회사, 9는 없음
+    assert data["7"]["text"] == "고친 원인" and data["7"]["saved_by"] == "태윤"
+    assert set(data["7"]) == {"text", "from_rank", "saved_by", "saved_at"}  # history·계정 ID 없음
+    other = client.get(READ, params={"ids": "7,8"}, headers=_infra("nubitour")).json()["data"]
+    assert {k: v["text"] for k, v in other.items()} == {
+        "7": "다른 회사 원인",
+        "8": "다른 회사만 있음",
+    }
+
+
+@pytest.mark.parametrize(
+    ("headers", "status"),
+    [
+        ({}, 401),
+        ({"authorization": "Bearer mock:finance", "X-AX-Company": "catbooks"}, 403),
+        ({"authorization": "Bearer nope", "X-AX-Company": "catbooks"}, 403),
+        (_infra(None), 400),  # 회사 머리글 없음: 캣북스로 떨어지지 않는다
+        (_infra("Bad Company!"), 400),
+    ],
+)
+def test_read_window_refuses_wrong_caller_or_missing_company(
+    client: TestClient, headers: dict[str, str], status: int
+) -> None:
+    _save(client, "catbooks", 7, "원인")
+    res = client.get(READ, params={"ids": "7"}, headers=headers)
+    assert res.status_code == status, res.text
+
+
+def test_read_window_refuses_human_tokens(client: TestClient) -> None:
+    headers = _session("catbooks") | {"X-AX-Company": "catbooks"}
+    assert client.get(READ, params={"ids": "7"}, headers=headers).status_code == 403
+    shared = {"authorization": "Bearer human:jaehun", "X-AX-Company": "catbooks"}
+    assert client.get(READ, params={"ids": "7"}, headers=shared).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "ids", ["", "a", "0", "1,,2", "-3", ",".join(str(i) for i in range(1, 22))]
+)
+def test_read_window_checks_ids(client: TestClient, ids: str) -> None:
+    res = client.get(READ, params={"ids": ids}, headers=_infra())
+    assert res.status_code == 422, res.text
+
+
+def test_read_window_cannot_write_and_human_route_still_needs_a_human(client: TestClient) -> None:
+    for method in ("post", "put", "delete", "patch"):
+        res = getattr(client, method)(READ, headers=_infra())
+        assert res.status_code in (404, 405), (method, res.status_code)
+    agent_on_human = client.get(URL.format(7), headers=_infra())  # 사람 라우터는 약해지지 않았다
+    assert agent_on_human.status_code == 403
+    assert client.post(URL.format(7), json={"text": "x"}, headers=_infra()).status_code == 403
+    assert client.get(URL.format(7)).status_code == 401

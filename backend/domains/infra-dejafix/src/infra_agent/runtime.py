@@ -86,6 +86,8 @@ class Runtime:
     # 사건이 열린 시각 (총괄 사건 기록). 롤백 요청에 incident_opened_at이 없을 때 채운다
     incident_opened_at: Callable[[str], Awaitable[str | None]] = orchestrator_opened_at
     diagnoses: dict[str, Diagnosis] = field(default_factory=dict)  # context_id → 마지막 진단
+    # context_id → 진단을 저장한 요청의 회사 칸(`save_diagnosis`가 적는다). 없으면 캣북스
+    diagnosis_scopes: dict[str, str] = field(default_factory=dict)
     dev: DevClient = field(default_factory=lambda: default_dev())
     # context_id → (service, version) → 원인 PR. 진단이 넣고 되돌리기가 읽는다
     pr_suspects: dict[str, dict[tuple[str, str], PrSuspect]] = field(default_factory=dict)
@@ -112,6 +114,40 @@ class Runtime:
         if found is None:
             found = self.company_histories[key] = company_history(key)
         return found
+
+    def read_history(self) -> DeploymentHistory:
+        """읽기 전용 새 읽기(배포 목록·대화 사실)가 쓰는 이력: 요청 회사 칸만.
+
+        요청 회사가 없으면(`company_scope.active()`가 None) 캣북스 이력으로 떨어지지 않고
+        빈 이력을 준다. 캣북스 기본값이 필요한 쓰기·롤백 경로는 `history_for()`를 그대로 쓴다."""
+        if company_scope.active() is None:
+            return DeploymentHistory([], connected=set)
+        return self.history_for()
+
+    def save_diagnosis(self, context_id: str, diag: Diagnosis) -> None:
+        """진단을 저장하면서 지금 요청의 회사 칸을 같이 적는다(회사 없음은 캣북스 칸)."""
+        self.diagnoses[context_id] = diag
+        self.diagnosis_scopes[context_id] = company_scope.scope_id(company_scope.active())
+
+    def _diagnosis_scope(self, context_id: str) -> str:
+        return self.diagnosis_scopes.get(context_id, company_scope.CATBOOKS)
+
+    def diagnosis_of(self, context_id: str) -> Diagnosis | None:
+        """그 사건의 진단. 다른 회사 요청이 저장한 진단은 없는 것으로 본다."""
+        diag = self.diagnoses.get(context_id)
+        if diag is None:
+            return None
+        if self._diagnosis_scope(context_id) != company_scope.scope_id(company_scope.active()):
+            return None
+        return diag
+
+    def diagnoses_in_scope(self) -> dict[str, Diagnosis]:
+        """지금 요청 회사의 진단만(읽기용). 요청 회사가 없으면 아무것도 보지 못한다."""
+        active = company_scope.active()
+        if active is None:
+            return {}
+        mine = company_scope.scope_id(active)
+        return {k: v for k, v in self.diagnoses.items() if self._diagnosis_scope(k) == mine}
 
     def executed_rollbacks(self, context_id: str) -> int:
         return sum(

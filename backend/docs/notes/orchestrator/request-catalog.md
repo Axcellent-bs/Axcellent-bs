@@ -202,3 +202,26 @@
   표시(새 입력 칸 + API)를 총괄에 같이 보내야 하는데, 이건 화면 쪽 일이 같이 필요해 범위를 넘는다.
   지금은 `exclude_platform`로 중복만 막고, 다른 영상이 섞이는 위험은 등급 C의 총괄 사전 승인(사람이
   올리기 전에 어떤 영상인지 보고 거를 수 있다)에 맡긴다.
+
+### 2026-11-26 재후속: 이태윤 님 PR #1920 리뷰 반영
+
+- **"최근" 영상이 0건일 때 안내문**: `latest` 단계가 결과 번호를 못 구하면(모두 걸러짐) `draft` 단계가
+  일반 실패(NO_REF, 사람 확인)로 떨어지던 걸, `TaskStep.empty_ref_note`를 추가해 안내문과 함께
+  건너뜀으로 닫고 의뢰를 "다 마쳤다"(`done`)로 끝내게 했다(`request_tasks.py`·`request_runner.py`).
+  대화방엔 "아직 유튜브(인스타)에 새로 올릴 의뢰 영상이 없어요..."로 보인다. 다른 `takes_ref` 쓰는
+  일은 `empty_ref_note`가 기본 `None`이라 그대로 일반 실패다.
+- **backfill 범위 축소**: `list_request_videos_skill`(handlers.py)의 썸네일 ffmpeg 보충을, 넓게 가져온
+  전체(최대 20건)가 아니라 `exclude_platform` 거르고 남긴 건(실제로 돌려줄 건)에만 돌리게 순서를
+  바꿨다.
+- **승인 카드 확인(요청받음)**: 의뢰 번호(`report.summary` 텍스트)·만든 시각(`Review.created_at`)은
+  카드에 보이지만, 썸네일은 **의도만 있고 실제로는 저장이 안 된다** —
+  `request_video_youtube.py`가 `cover_media_id`/`cover_token`을 params에 실어도
+  `ax_safety.gate._hold()`가 Review 저장 시 `summary`만 뽑고 나머진 버린다. 이슈
+  [#1927](https://github.com/Axcellent-bs/Axcellent-bs/issues/1927)로 만들어 뒀다.
+- **못 함(1번, 위 문단)**은 이슈 [#1926](https://github.com/Axcellent-bs/Axcellent-bs/issues/1926)으로
+  만들었다 — `origin_request_id`를 성과 측정·재제작에도 쓸 공통 칸으로 설계.
+
+## 대화방 인프라 의뢰 (2026-11-26)
+
+- 읽기만 연다: `current_incidents`(지금 장애, DejaFix 현재 장애), `latest_deployments`(배포 상태), `diagnose_incident`(원인 진단, 원인 후보만). 모두 `infra` 부서 read 단계이고 승인 없이 돈다.
+- 롤백(`rollback_deployment`, B)·장애 해제(`release_fault`)·배포 실행은 대화방 의뢰로 열지 않았다. 의뢰 문장에서 서비스·버전을 안전하게 정할 길이 없고, 승인 뒤 바로 운영 롤백이 실행되는 길이 생긴다. 필요하면 별도 설계(사건 맥락 + 전용 승인 카드)가 먼저다.

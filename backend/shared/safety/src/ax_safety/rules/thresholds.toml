@@ -13,7 +13,7 @@
 # - param·paths_within·paths_avoid·paths_named: 금액이 아닌 규칙(아래 각 규칙 주석 참고)
 # op: ">=", ">", "<=", "<". when은 params가 이 값일 때만 규칙을 적용한다.
 
-version = 12
+version = 13
 
 # B 교차검증 응답 마감(초). 넘으면 실행하지 않고 C 보류
 verify_timeout_seconds = 30
@@ -27,10 +27,16 @@ review_timeout_seconds = 600
 # v12(2026-11-26): 제작 기록 영상·썸네일 승인은 1시간. 영상은 콘티·키프레임을 보고 정해서 10분이면 놓친다
 # (11/25 16:49 generate_creative_video가 기한 안에 결정이 없어 자동 취소). 키프레임·시트 그림은
 # generate_media(B, 사람 결정 아님)라 여기 없다
+# v13(2026-11-26): 게시 승인(유튜브·인스타 릴스·홍보 영상·SNS)도 1시간. 대화방 의뢰 카드에서 올리기를 요청하면
+# 다른 계정이 승인해야 해서 10분이면 그냥 만료된다
 [review_timeout_by_action]
 confirm_settlement = 86400
 generate_creative_video = 3600
 generate_creative_thumbnails = 3600
+publish_youtube = 3600
+publish_instagram_video = 3600
+publish_promo_video = 3600
+publish_sns = 3600
 
 [[rules]]
 key = "coupon_total"

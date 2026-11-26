@@ -148,6 +148,41 @@ export function stepRows(r: Pick<WorkRequestRow, "plan" | "steps">): StepRow[] {
 
 // ---- 보고서·기획 제안 잇기
 
+/** 재무 closing_report 단계가 끝났으면 그 결산 기간 (result_ref "<day|week|month>:<YYYY-MM-DD>", 11/26). 아니면 null */
+export function closingOfRequest(r: Pick<WorkRequestRow, "plan" | "steps">, stepId?: string): { period: "day" | "week" | "month"; date: string } | null {
+  for (const p of r.plan) {
+    if (p.skill !== "closing_report" || (stepId && p.step_id !== stepId)) continue;
+    const s = r.steps[p.step_id];
+    const m = s?.status === "completed" ? /^(day|week|month):(\d{4}-\d{2}-\d{2})$/.exec(s.result_ref ?? "") : null;
+    if (m) return { period: m[1] as "day" | "week" | "month", date: m[2] };
+  }
+  return null;
+}
+
+/** 인프라 의뢰(11/26 총괄 대화방): 끝난 단계의 결과 번호를 읽는다. incidents:<N|unknown> · deploys:<N> · 진단 status. 모르는 모양이면 null */
+export type InfraResult =
+  | { kind: "incidents"; count: number | null }
+  | { kind: "deploys"; count: number }
+  | { kind: "diagnosis"; status: "suspected" | "undetermined" };
+export function infraOfRequest(r: Pick<WorkRequestRow, "plan" | "steps">, stepId?: string): InfraResult | null {
+  for (const p of r.plan) {
+    if (p.dept !== "infra" || (stepId && p.step_id !== stepId)) continue;
+    const s = r.steps[p.step_id];
+    if (s?.status !== "completed") continue;
+    const ref = s.result_ref ?? "";
+    if (p.skill === "current_incidents") {
+      const m = /^incidents:(\d+|unknown)$/.exec(ref);
+      if (m) return { kind: "incidents", count: m[1] === "unknown" ? null : Number(m[1]) };
+    } else if (p.skill === "latest_deployments") {
+      const m = /^deploys:(\d+)$/.exec(ref);
+      if (m) return { kind: "deploys", count: Number(m[1]) };
+    } else if (p.skill === "diagnose_incident" && (ref === "suspected" || ref === "undetermined")) {
+      return { kind: "diagnosis", status: ref };
+    }
+  }
+  return null;
+}
+
 /** 데이터 trend_report_create 단계의 보고서 id (result_ref가 tr_…일 때만) */
 export function reportIdOfRequest(r: Pick<WorkRequestRow, "plan" | "steps">, stepId?: string): string | null {
   for (const p of r.plan) {

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from ax_agent_template.services import BY_ID, route_target
-from ax_orchestrator import request_tasks
+from ax_orchestrator import request_runner, request_tasks
 from ax_orchestrator.request_classifier import build_prompt
 from ax_orchestrator.request_tasks import BY_NAME, TASKS
 
@@ -191,3 +191,10 @@ def test_video_publish_tasks_find_latest_video_then_draft_then_request_with_huma
         # 11/26 후속(이태윤 님 리뷰): "최근" 영상이 하나도 없으면(이미 다 올렸거나 만든 게 없음)
         # 초안 단계가 일반 실패(사람 확인)가 아니라 안내문과 함께 건너뜀으로 닫혀야 한다
         assert steps["draft"].empty_ref_note
+
+
+def test_closing_report_keeps_the_period_number_for_the_chat_card() -> None:
+    """11/26 손익 정리는 결과 번호("<기간>:<날짜>")를 남겨 대화방 카드가 숫자를 다시 읽게 한다."""
+    step = BY_NAME["closing_report"].steps[0]
+    assert (step.dept, step.skill, step.ref_key) == ("finance", "closing_report", "ref")
+    assert request_runner.REF_PATTERN.fullmatch("month:2026-11-01")

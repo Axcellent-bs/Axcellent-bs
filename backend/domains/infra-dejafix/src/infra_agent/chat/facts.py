@@ -5,6 +5,8 @@
 - 최근 진단 결과 (이 서버가 기억하는 사건별 마지막 진단: 원인 후보·확신도)
 - 최근 장애 사건과 그 안의 인프라 단계 (총괄 `GET /api/incidents`, 읽기 전용)
 - DejaFix 현재 장애 (Zabbix 알람, 주소가 없으면 `configured: false`; 환경변수 또는 보관함 연결)
+- 사람이 확정한 원인 (장애 상세에서 사람이 적어 저장한 것: DejaFix 현재 장애마다 `confirmed_cause`,
+  없으면 null. dashboard-api 읽기 전용 창구를 인프라 토큰으로 부른다. 원인 후보·진단과 다르다)
 
 숫자·상태는 코드가 모으고 LLM은 풀어 쓸 뿐이다. 하나를 못 읽어도 나머지는 넣고,
 못 읽은 이름은 `unavailable`에 남긴다(모르는 값을 채워 넣지 않는다).
@@ -28,6 +30,9 @@ RECENT = 8
 ORCHESTRATOR_SECONDS = 5.0
 INFRA_STEPS = ("diagnose", "rollback", "recovery")
 NOTE_CHARS = 160
+CAUSE_CHARS = 500
+CAUSES_MAX = 20  # dashboard-api 창구의 한 번 상한
+CAUSES_PATH = "/api/dashboard/incident-causes"
 
 
 def _iso(value: Any) -> str | None:
@@ -35,7 +40,7 @@ def _iso(value: Any) -> str | None:
 
 
 def _deployments() -> list[dict[str, Any]]:
-    history = get_runtime().history_for()
+    history = get_runtime().read_history()  # 요청 회사 칸만(회사 없으면 빈 이력)
     rows = sorted(history.deployments, key=lambda d: d.deployed_at, reverse=True)[:RECENT]
     return [
         {
@@ -56,7 +61,9 @@ async def _shop() -> dict[str, Any]:
 
 
 def _diagnoses() -> list[dict[str, Any]]:
-    rows = sorted(get_runtime().diagnoses.items(), key=lambda kv: kv[1].diagnosed_at, reverse=True)
+    rows = sorted(
+        get_runtime().diagnoses_in_scope().items(), key=lambda kv: kv[1].diagnosed_at, reverse=True
+    )
     out = []
     for context_id, diag in rows[:RECENT]:
         o = diag.output
@@ -136,6 +143,7 @@ async def _dejafix() -> dict[str, Any]:
         "count": len(rows),
         "problems": [
             {
+                "incident_id": r.get("id"),
                 "title": str(r.get("title") or "")[:NOTE_CHARS],
                 "host": (r.get("host") or {}).get("name"),
                 "severity": (r.get("severity") or {}).get("label"),
@@ -146,6 +154,46 @@ async def _dejafix() -> dict[str, Any]:
             for r in rows[:RECENT]
         ],
     }
+
+
+def _incident_number(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+
+
+async def _confirmed_causes(problems: list[dict[str, Any]]) -> None:
+    """DejaFix 현재 장애마다 사람이 확정한 원인을 `confirmed_cause`로 붙인다(없으면 None).
+
+    지금 요청 회사 것만 읽는다(`X-AX-Company`, 서버가 회사별로 가른다). 읽지 못하면 예외를 그대로
+    올려 `unavailable`에 남기고, 이때는 `confirmed_cause` 칸을 붙이지 않는다
+    (없다고 말하지 않는다)."""
+    numbers = [n for p in problems if (n := _incident_number(p.get("incident_id"))) is not None]
+    numbers = list(dict.fromkeys(numbers))[:CAUSES_MAX]
+    if not numbers or is_mock("infra"):
+        return
+    headers = tool_connections.company_agent_headers()  # 회사 없음·토큰 없음이면 예외
+    async with httpx.AsyncClient(timeout=ORCHESTRATOR_SECONDS) as client:
+        response = await client.get(
+            f"{agent_url('dashboard-api')}{CAUSES_PATH}",
+            params={"ids": ",".join(str(n) for n in numbers)},
+            headers=headers,
+        )
+    response.raise_for_status()
+    found = response.json().get("data") or {}
+    for p in problems:
+        n = _incident_number(p.get("incident_id"))
+        if n is None or n not in numbers:
+            continue
+        row = found.get(str(n))
+        p["confirmed_cause"] = (
+            {
+                "text": str(row.get("text") or "")[:CAUSE_CHARS],
+                "saved_by": row.get("saved_by"),
+                "saved_at": row.get("saved_at"),
+                "from_rank": row.get("from_rank"),
+            }
+            if isinstance(row, dict) and row.get("text")
+            else None
+        )
 
 
 async def collect() -> dict[str, Any]:
@@ -167,4 +215,11 @@ async def collect() -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             logger.warning("인프라 대화 사실 %s를 읽지 못했다", name, exc_info=True)
             out["unavailable"].append(name)
+    dejafix = out.get("dejafix_problems")
+    if isinstance(dejafix, dict) and dejafix.get("problems"):
+        try:
+            await _confirmed_causes(dejafix["problems"])
+        except Exception:  # noqa: BLE001 - 못 읽어도 나머지 사실은 그대로 넣는다
+            logger.warning("인프라 대화 사실 confirmed_causes를 읽지 못했다", exc_info=True)
+            out["unavailable"].append("confirmed_causes")
     return out

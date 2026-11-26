@@ -55,5 +55,16 @@ def test_closing_report_defaults_and_confirmation() -> None:
     }
     out = _ask("closing_report", {"period": "month"})["output"]
     assert (out["date"], out["status"], out["confirmed_by"]) == ("2026-10-01", "confirmed", "태윤")
+    assert out["ref"] == "month:2026-10-01"  # 11/26 대화방 카드가 이 번호로 같은 결산을 다시 읽는다
     bad = _ask("closing_report", {"period": "year"})
     assert (bad["status"], bad["outcome"]) == ("failed", "invalid_input")
+
+
+def test_closing_report_ref_matches_the_period_and_date() -> None:
+    """11/26 총괄 의뢰 단계가 남길 번호: "<기간>:<기준 날짜>".
+
+    대시보드 같은 기간 읽기와 날짜가 같다."""
+    out = _ask("closing_report", {"period": "day", "date": "2026-10-22"}, token="mock:data")[
+        "output"
+    ]
+    assert out["ref"] == f"day:{out['date']}" == "day:2026-10-22"
