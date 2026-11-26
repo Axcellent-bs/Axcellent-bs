@@ -579,7 +579,8 @@
       "output_schema": "agents/marketing/src/marketing_agent/request_video.py#RequestVideoList",
       "grade": "read",
       "allowed_requesters": [
-        "dashboard-api"
+        "dashboard-api",
+        "orchestrator"
       ],
       "verifier": null,
       "priority": "optional"
@@ -591,7 +592,8 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoYoutubeOutput",
       "grade": "read",
       "allowed_requesters": [
-        "dashboard-api"
+        "dashboard-api",
+        "orchestrator"
       ],
       "verifier": null,
       "priority": "optional"
@@ -603,7 +605,8 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoYoutubeOutput",
       "grade": "C",
       "allowed_requesters": [
-        "dashboard-api"
+        "dashboard-api",
+        "orchestrator"
       ],
       "verifier": null,
       "priority": "optional"
@@ -1081,7 +1084,8 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoInstagramOutput",
       "grade": "read",
       "allowed_requesters": [
-        "dashboard-api"
+        "dashboard-api",
+        "orchestrator"
       ],
       "verifier": null,
       "priority": "optional"
@@ -1093,7 +1097,8 @@
       "output_schema": "shared/contracts/src/ax_contracts/schemas/marketing_creative.py#RequestVideoInstagramOutput",
       "grade": "C",
       "allowed_requesters": [
-        "dashboard-api"
+        "dashboard-api",
+        "orchestrator"
       ],
       "verifier": null,
       "priority": "optional"

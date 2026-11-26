@@ -162,3 +162,21 @@
 - **지금 입력이 비어도 돌아가는 단독 의뢰는 5개**(`sales_analysis`, `inquiry_overview`, `claim_stats`,
   `seller_settlement`, `closing_report`)다. 나머지 단독 의뢰는 입력 부족으로 부서가 거절한다. 18번(공통 입력
   채우기)과 19번(부서별 칸 연결)이 이 틈을 메운다.
+
+## 2026-11-26 갱신: 의뢰 영상 유튜브·인스타 올리기
+
+위 "상태를 바꾸므로 승인이 필요한 일" 표의 마케팅 행이 낡았다(11/20 조사 당시 "인스타에 올려
+주세요" 예시로 적힌 `publish_sns`는 실제로는 SNS 글(텍스트) 게시지, 의뢰로 만든 영상을 유튜브·
+인스타에 올리는 일과는 다르다 — 그 일은 당시 총괄이 부를 수 있는 의뢰 목록에 아예 없었다).
+
+`video_publish_youtube`·`video_publish_instagram` 두 일을 추가해 이 틈을 메웠다:
+
+- 최근 의뢰 영상 찾기(`list_request_videos`, 읽기) → 제목·설명 또는 캡션·해시태그 초안
+  (`request_video_youtube_draft`/`request_video_instagram_draft`, 읽기, 초안 없으면 AI가 만든다) →
+  올리기 요청(`request_video_youtube_request`/`request_video_instagram_request`, 등급 C, 항상 사람 승인)
+- 의뢰 번호는 고객이 모르므로 `campaign_performance`와 같은 방식으로 마케팅 의뢰 영상 목록에서
+  가장 최근 것을 찾아 쓴다("latest" 단계, `limit=1`)
+- 다섯 skill 모두 카드(`allowed_requesters`)에 `dashboard-api`만 있어 총괄이 못 불렀다.
+  `domains/marketing/agent-card.json`·`services/coupon/agent-card.json` 둘 다에 `orchestrator`를 추가했다
+  (총괄이 실제로 부르는 카드는 `services/coupon/agent-card.json`이고, `domains/marketing/`쪽은 참고용이라
+  테스트가 둘을 맞춰 본다 — `test_brief_creative.py`·`test_youtube_stats.py` 패턴)
