@@ -25,6 +25,7 @@ import { fadedChip } from "@/lib/keywordTrendView";
 
 // 감지 탭이 아닌 하위 탭·인스타 칩 칸은 처음 열 때 받는다. 첫 화면(감지)은 이 코드 없이 먼저 그린다 (11/25 Lighthouse)
 const CampaignEffect = lazy(() => import("@/components/data/CampaignEffect").then((m) => ({ default: m.CampaignEffect })));
+const VideoDeep = lazy(() => import("@/components/data/VideoDeep").then((m) => ({ default: m.VideoDeep })));
 const VideoPerformance = lazy(() => import("@/components/data/VideoPerformance").then((m) => ({ default: m.VideoPerformance })));
 const PromoConcepts = lazy(() => import("@/components/data/PromoConcepts").then((m) => ({ default: m.PromoConcepts })));
 const InsightBrief = lazy(() => import("@/components/data/InsightBrief").then((m) => ({ default: m.InsightBrief })));
@@ -392,7 +393,9 @@ export function TrendScan({ dataUp = null, company = null }: { dataUp?: boolean 
               <PlanningHandoff load={planning.load} onRetry={planning.reload} />
             ) : (
               // 성과 (11/26): 마케팅에 넘어간 캠페인 목록 + [측정](위) → 게시 영상 성과(아래). 측정 결과가 하위 탭을 오가도 남게 숨기기만 한다
+              // 11/27: 맨 위 "영상 성과"(유튜브 깊은 지표, AXcellent만) → 캠페인 목록 → 게시 영상 성과
               <div className="flex flex-col gap-4">
+                <VideoDeep proposals={planningAll ?? []} />
                 <CampaignEffect onProbe={setCampaignProbe} campaigns={campaigns} videos={videos} effects={effects} onEffect={onEffect} />
                 <VideoPerformance onVideos={setVideos} />
               </div>
