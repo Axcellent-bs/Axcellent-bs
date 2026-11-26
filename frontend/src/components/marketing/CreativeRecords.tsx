@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useAuthedMedia } from "@/lib/authedMedia";
-import { RECORD_ID, listCreativeRecords, thumbSrc, type CreativeRecordSummary } from "@/lib/creativeRecords";
+import { RECORD_ID, assetUrl, listCreativeRecords, thumbSrc, type CreativeRecordSummary } from "@/lib/creativeRecords";
 import { thumbUrl } from "@/lib/creativeThumbnails";
 import { listRequestVideos, requestVideoCoverUrl } from "@/lib/requestVideos";
 import { durationKo, requestFilterOf, type RequestVideo } from "@/lib/requestVideoView";
-import { groupByDay, mergeWorks, pageCount, pageHref, pageItems, pageOf, videoSlot, workHref, workStatus, workTitle, type VideoCover, type Work } from "@/lib/recordWorks";
+import { groupByDay, madePicture, mergeWorks, pageCount, pageHref, pageItems, pageOf, slotKind, videoSlot, workHref, workStatus, workTitle, type MadePicturePart, type VideoCover, type Work } from "@/lib/recordWorks";
 import { RecordDetail, RequestDetail } from "./RecordDetail";
 import { promoChip, usePromoSite, type PromoStatus } from "@/lib/promoSite";
 import { StatusChip } from "./RecordSteps";
@@ -24,14 +24,32 @@ function Empty({ label }: { label: string }) {
   return <span className={`${SLOT} border border-dashed border-ink-300 text-ink-500`}>{label}</span>;
 }
 
+/** 만든 그림(시트·콘티)을 사람 토큰으로 읽는다. 지금 페이지에 그린 줄만 부르므로 요청 수는 보이는 칸 수 이하 */
+function useMadePicture(record: CreativeRecordSummary | null, part: MadePicturePart) {
+  const made = record && madePicture(record, part);
+  const media = useAuthedMedia(made && record ? assetUrl(record.record_id, made, null) : null);
+  return slotKind(record, part, media) === "picture" ? media.src : null;
+}
+
 function SheetSlot({ record }: { record: CreativeRecordSummary | null }) {
+  const made = useMadePicture(record, "sheet_image");
   if (!record) return <Empty label="없음" />;
-  const src = thumbSrc(record.thumbnail_base64);
-  return <span className={FILLED}>{src ? <img src={src} alt="이미지 시트" className="h-full w-full object-cover" /> : "시트"}</span>;
+  const src = made ?? thumbSrc(record.thumbnail_base64);
+  return <span className={FILLED}>{src ? <img src={src} alt={made ? "만든 이미지 시트" : "이미지 시트"} className="h-full w-full object-cover" /> : "시트"}</span>;
 }
 
 function BoardSlot({ record }: { record: CreativeRecordSummary | null }) {
+  const made = useMadePicture(record, "board_image");
   if (!record) return <Empty label="없음" />;
+  if (made) {
+    const tag = record.shot_count ? `콘티 ${record.shot_count}칸` : record.script_scenes ? `대본 ${record.script_scenes}장면` : "콘티";
+    return (
+      <span className={`${FILLED} relative`}>
+        <img src={made} alt="스토리보드 그림" className="absolute inset-0 h-full w-full object-cover" />
+        <span className="relative mt-auto mb-1 rounded bg-black/60 px-1 text-white">{tag}</span>
+      </span>
+    );
+  }
   if (!record.shot_count && !record.script_scenes) return <Empty label="아직 없음" />;
   return (
     <span className={FILLED}>

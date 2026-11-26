@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { CreativeRecordSummary } from "./creativeRecords";
 import type { RequestVideo } from "./requestVideoView.ts";
+import type { RecordFacts } from "./recordWorks.ts";
 import {
-  PAGE_SIZE, dayLabel, defaultStep, groupByDay, hasPublishState, linkedRecordId, mergeWorks, pageCount, pageHref, pageItems, pageOf,
+  PAGE_SIZE, dayLabel, defaultStep, groupByDay, hasPublishState, linkedRecordId, madePicture, mergeWorks, slotKind, pageCount, pageHref, pageItems, pageOf,
   renderStatuses, videoSlot, workHref, workStatus, workTitle,
 } from "./recordWorks.ts";
 
@@ -93,6 +94,27 @@ test("처음 펼칠 단계는 하나", () => {
   assert.equal(defaultStep({ render: { video: "done" } }, []), 3);
   assert.equal(defaultStep({ render: { video: "done", instagram: "awaiting_approval" } }, []), 4);
   assert.equal(defaultStep(null, [video("d", "x")]), 3);
+});
+
+test("목록 칸: 만든 그림이 done이고 받았으면 그림, 실패·없음·받는 중이면 원래 칸 (11/26)", () => {
+  const got = { src: "blob:x", failed: false };
+  const done = { render: { sheet_image: "done", board_image: "done" } };
+  assert.equal(madePicture(done, "sheet_image"), "sheet_image");
+  assert.equal(madePicture(done, "board_image"), "board_image");
+  assert.equal(slotKind(done, "sheet_image", got), "picture");
+  assert.equal(slotKind(done, "board_image", got), "picture");
+  // 읽기 실패 → 원래 칸
+  assert.equal(slotKind(done, "board_image", { src: null, failed: true }), "original");
+  // 받는 중 → 원래 칸
+  assert.equal(slotKind(done, "sheet_image", { src: null, failed: false }), "original");
+  // 그림이 없거나 done이 아니면 읽지도 않는다
+  const none: (RecordFacts | null)[] = [null, {}, { render: {} }, { render: { board_image: "running" } }, { render: { board_image: "failed" } }];
+  for (const r of none) {
+    assert.equal(madePicture(r, "board_image"), null);
+    assert.equal(slotKind(r, "board_image", got), "original");
+  }
+  // SVG 콘티만 있는 기록(board_image 없음)은 글자 칸
+  assert.equal(slotKind({ render: { sheet_image: "done" } }, "board_image", got), "original");
 });
 
 test("올리기 초안이나 상태가 남아 있나", () => {
