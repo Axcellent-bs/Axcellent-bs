@@ -126,7 +126,7 @@ class CreativeRecordAttachInput(AxModel):
 
     record_id: str = Field(pattern=RECORD_ID_PATTERN)
     part: str = Field(pattern=r"^(sheet_image|board_image|video|final_video|motion_video)$")
-    asset: str = Field(pattern=r"^(sheet|board|video|final)\.(jpg|png|mp4)$")
+    asset: str = Field(pattern=r"^(sheet|board|video|final|motion)\.(jpg|png|mp4)$")
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     size_bytes: int = Field(ge=1)
     label: str | None = Field(default=None, max_length=120)  # 올린 파일 이름

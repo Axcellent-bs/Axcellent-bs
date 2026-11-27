@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import uuid
@@ -20,6 +21,8 @@ from ax_agent_template import config
 from ax_agent_template.client import call_agent
 from ax_contracts.schemas import AgentRequest, AgentResult, RequestMeta, TaskStatus
 from ax_dashboard_api.envelope import ApiError, tenant_meta
+
+logger = logging.getLogger(__name__)
 
 AGENT_NAME = "dashboard-api"
 TARGET = "marketing"
@@ -903,6 +906,13 @@ async def _creative_read(
         status, code = VIDEO_REFUSALS[result.outcome]
         message = str((result.output or {}).get("message") or result.outcome)
         raise ApiError(status, code, message)
+    logger.warning(
+        "creative read failed: skill=%s status=%s outcome=%s output=%.300s",
+        skill,
+        result.status,
+        result.outcome,
+        str(result.output),
+    )
     raise ApiError(502, "UPSTREAM_FAILED", f"마케팅이 요청을 처리하지 못했다 ({result.outcome})")
 
 
