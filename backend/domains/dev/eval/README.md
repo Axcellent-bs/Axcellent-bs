@@ -220,3 +220,53 @@ uv run python domains/dev/eval/model_compare_repo_routing_report.py haiku sonnet
 - 이 세션(클라우드 샌드박스)에는 키가 없어 가짜 LLM으로 세 경로(정답을 정확히 고르는 답·
   후보 밖 id를 내는 답·항상 오류인 답)를 검증했다 — 뒤 두 경로 모두 규칙으로 정확히 돌아감을
   확인했다. 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
+
+## 대화 답 정확도 LLM 모델 비교 (예진 제안, #소통 2026-11-27 15:46, 개발 5순위)
+
+"바꿀 파일·완료 기준, CI 원인 파일·줄 맞힌 비율"(같은 질문 묶음) 평가. production 함수
+`dev_chat.turn()`(한 번 보내고 답까지 기다리는 경로 — `_reply`·`_ask_llm`·`pr_ci`·
+`SYSTEM_PROMPT`는 그대로)을 돌린다. 평가 데이터가 없어 새로 만들었다.
+
+- `reply_accuracy_cases.json`: 합성 케이스 8건, 두 갈래
+  - `files_done`(4건): 개발팀원이 할 일을 한 번에 또렷이 말한 메시지. 목 형상관리
+    (MockVcsAdapter)에 정답 파일과 미끼 파일을 같이 넣어 대화의 파일 목록에 보이게 하고,
+    `dev_chat`이 세운 계획의 `plan.paths`(바꿀 파일)·`plan.done`(완료 기준)이 정답과
+    맞는지 본다. 1~2개 파일을 함께 고쳐야 하는 사례(`d02`·`d04`)도 넣었다.
+  - `ci_cause`(4건): `adapter.seed()`로 PR 번호를 만들고 `adapter.set_logs()`로 실제
+    타입체크·린트·테스트 실패 형식의 로그를 넣은 뒤, `pr={"number": n}`으로 그 PR을
+    가리켜 "CI 왜 실패했어?"를 묻는다. 답 글에 정답 파일 이름·줄 번호가 둘 다 있는지 본다.
+    한 로그에 서로 다른 파일의 오류가 두 개 있는 사례(`c04`)도 넣어 실제 원인을 짚는지 본다.
+- `reply_accuracy_eval.py`: 작업당 서비스를 새로 띄우고 `dev_chat.turn()`을 한 번 부른다.
+  새로 만든 건 합성 케이스와 채점 함수뿐, 대화 흐름·프롬프트·CI 데이터 조립은 전부
+  production 그대로.
+  - 실행: `cd backend && uv run python domains/dev/eval/reply_accuracy_eval.py`
+  - 모델은 `DEV_LLM_MODEL` → 없으면 `LLM_MODEL`
+  - 지표: `files_done_accuracy`(바꿀 파일·완료 기준 둘 다 맞힘, `paths_accuracy`·
+    `done_accuracy`는 따로)·`ci_cause_accuracy`(원인 파일·줄 둘 다 맞힘, `ci_file_accuracy`·
+    `ci_line_accuracy`는 따로)
+- 모델 비교: `model_compare_reply_accuracy.py <라벨>` →
+  `results/model_compare/reply_accuracy_<라벨>.json`,
+  `model_compare_reply_accuracy_report.py <라벨1> <라벨2> ...`로 비교표
+
+```bash
+cd backend
+DEV_LLM_MODEL=claude-haiku-5-5 uv run python domains/dev/eval/model_compare_reply_accuracy.py haiku
+DEV_LLM_MODEL=claude-sonnet-5-5 uv run python domains/dev/eval/model_compare_reply_accuracy.py sonnet
+uv run python domains/dev/eval/model_compare_reply_accuracy_report.py haiku sonnet
+```
+
+**한계**
+- 골든셋이 합성·소규모다(8건, files_done 4 · ci_cause 4). 실제 대화 기록으로 바꾸면 더
+  믿을 만하다.
+- 정답(바꿀 파일·완료 기준 낱말, CI 원인 파일·줄)은 이 평가를 만들며 사람이 미리 적어 둔
+  것이다.
+- 채점은 평가 전용 근사치다: `plan.paths`에 정답 경로가 정확한 문자열로 있는지, `plan.done`
+  글에 정답 낱말이 부분 문자열로 있는지, 답 글에 정답 파일 이름·줄 번호가 부분 문자열로
+  있는지만 본다 — 완료 기준을 다른 말로 똑같이 설명했거나 파일·줄을 맞혔지만 원인 설명
+  자체가 틀렸을 때를 가려내지 못한다.
+- `files_done`은 "진행해" 이전, 첫 계획 턴만 본다 — 되묻기(`action: ask`)가 와서 계획이
+  아직 안 섰으면 `has_plan: false`로 틀린 것으로 센다 (실제로는 되묻는 것이 맞는 사례일
+  수도 있다).
+- 이 세션(클라우드 샌드박스)에는 키가 없어 가짜 LLM 두 개(정답을 정확히 답하는 것·항상
+  모르겠다고 답하는 것)로 검증했다 — 8/8과 0/8로 채점 함수가 맞게 가르는 것을 확인했다.
+  실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
