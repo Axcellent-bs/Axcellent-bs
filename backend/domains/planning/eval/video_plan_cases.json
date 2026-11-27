@@ -1,0 +1,184 @@
+{
+  "_주의": "합성 데이터. 예진 제안(#소통 2026-11-27 15:46) 2순위 \"영상 제작안\" 모델 비교용 제안(Proposal) 10건. 일부는 일부러 실존 이름 후보·숫자 근거를 넣어 금칙어·지어낸 숫자·실명 검사가 실제로 걸릴 조건을 만든다.",
+  "cases": [
+    {
+      "id": "v01",
+      "title": "가을 밤 10분 독서 숏츠",
+      "skill": "trend_history",
+      "insight": "독서 검색이 11월에 오른다",
+      "idea": "고양이 점원이 밤 10분 독서를 권하는 숏츠",
+      "why": "독서 검색이 평균의 1.6배",
+      "products": [
+        "밤의 도서관"
+      ],
+      "format": "숏폼 30초",
+      "content_category": "브이로그",
+      "angle": "with_product",
+      "facts": []
+    },
+    {
+      "id": "v02",
+      "title": "출근길 커피 한 잔 루틴",
+      "skill": "trend_history",
+      "insight": "아침 커피 콘텐츠 조회수가 늘었다",
+      "idea": "바쁜 아침 5분 커피 루틴 숏츠",
+      "why": "출근 시간대 시청이 평소의 2배",
+      "products": [
+        "드립백 세트"
+      ],
+      "format": "숏폼 20초",
+      "content_category": "일상",
+      "angle": "ride_trend",
+      "facts": []
+    },
+    {
+      "id": "v03",
+      "title": "겨울 동화책 트렌드 분석: 겨울 동화책",
+      "skill": "trend_report_insight",
+      "insight": "겨울 동화책 검색이 늘었다",
+      "idea": "크리스마스 분위기 동화책 추천 숏츠",
+      "why": "12월 검색이 평균의 1.8배",
+      "products": [
+        "겨울 동화 모음"
+      ],
+      "format": "숏폼 15초",
+      "content_category": "추천",
+      "angle": "own_trend",
+      "facts": []
+    },
+    {
+      "id": "v04",
+      "title": "아이돌 커버댄스 챌린지 유행",
+      "skill": "trend_history",
+      "insight": "커버댄스 챌린지 영상이 늘었다",
+      "idea": "서점 점원 캐릭터가 챌린지에 맞춰 책을 추천하는 숏츠",
+      "why": "챌린지 해시태그 조회수가 평균의 3배",
+      "products": [
+        "베스트셀러 모음"
+      ],
+      "format": "숏폼 15초",
+      "content_category": "챌린지",
+      "angle": "ride_trend",
+      "facts": [
+        {
+          "label": "주제 '아이돌 K' 후보 지민 (유튜브 언급 다수)",
+          "value": "120건",
+          "source": "trend_history"
+        }
+      ]
+    },
+    {
+      "id": "v05",
+      "title": "연말 할인 이벤트 홍보",
+      "skill": "marketing_offer",
+      "insight": "연말 장바구니 이탈률이 높다",
+      "idea": "20% 할인 쿠폰을 강조하는 숏츠",
+      "why": "장바구니 이탈 고객 대상 할인 전환율 개선",
+      "products": [
+        "전 상품"
+      ],
+      "format": "숏폼 15초",
+      "content_category": "프로모션",
+      "angle": "with_product",
+      "facts": [
+        {
+          "label": "쿠폰 할인율",
+          "value": "20%",
+          "source": "marketing_offer"
+        },
+        {
+          "label": "유효기간",
+          "value": "7일",
+          "source": "marketing_offer"
+        }
+      ]
+    },
+    {
+      "id": "v06",
+      "title": "신간 추리소설 입고 소식",
+      "skill": "trend_history",
+      "insight": "추리소설 장르 검색이 늘었다",
+      "idea": "신간 추리소설 3권을 빠르게 소개하는 숏츠",
+      "why": "장르 검색이 지난달 대비 1.4배",
+      "products": [
+        "신간 추리소설 세트"
+      ],
+      "format": "숏폼 30초",
+      "content_category": "신간 소개",
+      "angle": "own_trend",
+      "facts": []
+    },
+    {
+      "id": "v07",
+      "title": "육아서 베스트셀러 모음",
+      "skill": "trend_history",
+      "insight": "육아서 조회수가 주말에 오른다",
+      "idea": "초보 부모를 위한 육아서 3권 추천",
+      "why": "주말 육아서 조회수가 평일의 2.2배",
+      "products": [
+        "초보 부모 육아서 세트"
+      ],
+      "format": "숏폼 20초",
+      "content_category": "추천",
+      "angle": "with_product",
+      "facts": []
+    },
+    {
+      "id": "v08",
+      "title": "독립서점 협업 에세이 시리즈",
+      "skill": "marketing_offer",
+      "insight": "독립서점 협업 에세이 반응이 좋다",
+      "idea": "협업 에세이 작가 인터뷰 느낌 숏츠",
+      "why": "협업 시리즈 리뷰 평점이 4.8점",
+      "products": [
+        "협업 에세이 시리즈"
+      ],
+      "format": "숏폼 30초",
+      "content_category": "인터뷰",
+      "angle": "own_trend",
+      "facts": [
+        {
+          "label": "평균 리뷰 평점",
+          "value": "4.8",
+          "source": "marketing_offer"
+        }
+      ]
+    },
+    {
+      "id": "v09",
+      "title": "다이어리·플래너 신학기 특가 트렌드 분석: 다이어리 플래너",
+      "skill": "trend_report_insight",
+      "insight": "신학기 다이어리 검색이 늘었다",
+      "idea": "신학기 플래너 꾸미기 숏츠",
+      "why": "2월 다이어리 검색이 평균의 2배",
+      "products": [
+        "신학기 플래너 세트"
+      ],
+      "format": "숏폼 15초",
+      "content_category": "꾸미기",
+      "angle": "ride_trend",
+      "facts": []
+    },
+    {
+      "id": "v10",
+      "title": "유명 배우 인터뷰 북토크 화제",
+      "skill": "trend_history",
+      "insight": "배우 북토크 영상 조회수가 급증했다",
+      "idea": "서점 캐릭터가 비슷한 북토크 콘셉트로 책을 소개하는 숏츠",
+      "why": "북토크 해시태그 조회수가 평균의 4배",
+      "products": [
+        "에세이 베스트셀러"
+      ],
+      "format": "숏폼 20초",
+      "content_category": "북토크",
+      "angle": "ride_trend",
+      "facts": [
+        {
+          "label": "주제 '배우 북토크' 후보 이서준 (뉴스 보도 다수)",
+          "value": "80건",
+          "source": "trend_history"
+        }
+      ]
+    }
+  ]
+}
