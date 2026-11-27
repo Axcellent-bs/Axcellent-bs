@@ -23,6 +23,8 @@
 
 nginx 변경, 서비스 재시작, 롤백, 배포 잠금은 권한자만 합니다. 이런 일이 필요하면 책임자가 아니라 **권한자**에게 요청합니다.
 
+평소 배포는 자동입니다. 운영 서버는 dev에 머지된 화면·홍보 파일과 백엔드를 자동 배포가 올리고(백엔드는 11/24부터, CI 통과·배포 메모 확인 뒤), 배포 전후 공지를 팀 채널에 남깁니다(`docs/ops/autodeploy/README.md`). 위의 `deploy-bundle`과 권한자의 `restart-backend`는 자동 배포가 막혔거나 멈춰 있을 때 쓰는 수동 경로입니다.
+
 ### 개인 계정 받는 법 (한 번만)
 
 서버 책임자에게 두 가지를 보냅니다. 계정은 책임자가 서버에 만듭니다. 비밀번호는 없습니다(키로만 접속).
@@ -116,6 +118,15 @@ ssh axgate deploy-bundle <SHA> --announced pr=<PR번호>
 | `nginx-approve-location <이름> <확인값>` | 다른 권한자의 제안을 **승인·적용** |
 | `restart-backend <SHA> --ack-data-loss` | 서비스 재시작 |
 | `rollback-bundle <SHA>` | 번들을 그 배포 직전으로 되돌림 |
+
+정책의 계정 줄에 따로 적힌 권한자만 쓰는 명령도 있습니다(내 계정에 있는지는 `help`로 봅니다).
+
+| 명령 | 하는 일 |
+| --- | --- |
+| `rollback-code <SHA>` | 서버 코드(레포 HEAD)를 그 배포 직전으로 되돌림. 재시작은 따로 `restart-backend` |
+| `uv-sync <SHA>` | 의존성 맞추기(`uv.lock`·`pyproject.toml`이 바뀐 커밋을 배포한 뒤, 재시작 전) |
+| `autodeploy-pause <사유> [재개시각]` / `autodeploy-resume` | 자동 배포 잠깐 멈추기·다시 켜기(아래) |
+| `gateway-allow-propose <skill>` / `gateway-allow-approve <skill> <확인값>` | 게이트웨이 허용 목록에 읽기 등급 skill 추가(제안 → 다른 권한자 승인) |
 
 ### 시연 전 배포 멈추기
 

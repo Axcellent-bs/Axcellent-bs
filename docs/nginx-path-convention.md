@@ -1,6 +1,6 @@
 # 새 쓰기 경로와 nginx 허용 목록
 
-운영 서버(251)는 앞단 nginx가 허용한 경로만 백엔드로 넘긴다. 새 쓰기(POST·PUT·PATCH·DELETE) 경로를 만들었는데 허용 목록에 없으면 화면에서 403이 난다.
+운영 서버는 앞단 nginx가 허용한 경로만 백엔드로 넘긴다(옛 251·232 서버는 이관으로 정지했고, 지금은 새 운영 서버 한 곳이다). 새 쓰기(POST·PUT·PATCH·DELETE) 경로를 만들었는데 허용 목록에 없으면 화면에서 403이 난다.
 
 ## 화면에서 보이는 모습
 
@@ -29,10 +29,11 @@
    - 인증 방식: 아래 "확인 방법"으로 정한다. 사람 토큰 / 공개(읽기 전용) / 별도 토큰 중 하나.
    - 타임아웃: 오래 걸리는 작업(미디어 생성 등)은 기본값보다 길게 요청한다.
 3. 읽기용(GET·HEAD) 경로, 허용 접두 밖 경로는 게이트로 못 연다. 요청 양식의 "책임자에게" 칸으로 요청한다.
+4. 서버 안에서만 부르는 서비스의 접두는 nginx에 열지 않는다. 예: 변환기(site-adapter)는 서버 안 호출 전용이라 `/site-adapter` 접두를 열지 않고(#1634 승인 전제), 화면이 필요한 동작은 dashboard-api 경로(`/dashboard-api/api/dashboard/site-adapter/...`)로만 연다. 이런 접두를 열어 달라는 요청은 서버 책임자가 먼저 되묻는다.
 
 ## 경로가 어떤 인증 방식인지 확인하는 방법
 
 1. 프론트 호출을 찾는다: `frontend/src/lib/*.ts`에서 `fetch` 호출의 주소를 본다(dashboard-api 호출은 모두 `dashboardAuth()`로 사람 토큰을 붙인다). 기본 주소 상수는 `frontend/src/lib/env.ts`.
 2. 그 경로를 받는 라우트를 찾는다: `backend/shared/dashboard-api/src/ax_dashboard_api/`에서 경로 문자열을 검색한다.
-3. 인증은 `auth.py`의 `require_human`이 정한다. `/api/dashboard/*`는 GET을 포함해 모든 요청에 사람 토큰(`Authorization: Bearer`)이 필요하다. 토큰 없이 열린 것은 `auth.py`의 `PUBLIC_ROUTES`(상태 확인과 로그인 전 화면이 읽는 `/auth/status`·`/auth/login`·`/auth/company`)뿐이다. 로그인 전에는 세션이 없어 화면이 자리표시자 토큰을 보낼 수 있으므로, 이 공개 경로는 서버가 토큰을 보지 않는다. 화면은 `frontend/src/lib/env.ts`의 `dashboardAuth()`로 GET에도 토큰을 붙인다.
+3. 인증은 `auth.py`의 `require_human`이 정한다. `/api/dashboard/*`는 GET을 포함해 모든 요청에 사람 토큰(`Authorization: Bearer`)이 필요하다. 사람 토큰 없이 받는 것은 `auth.py`에 적힌 두 목록뿐이다: `PUBLIC_ROUTES`(상태 확인, 로그인 전 화면이 읽는 `/auth/status`·`/auth/login`·`/auth/company`, 외부 서비스가 돌려보내는 마케팅 연결 콜백(서명한 state로 회사를 확인))와 `MACHINE_ROUTES`(사람이 아니라 서버가 부르는 경로. 사람 토큰 대신 에이전트 토큰·회사 키 등 각자의 토큰을 본다). 새 경로를 이 목록에 넣어야 하면 인증 방식을 요청 글에 그렇게 적는다. 로그인 전에는 세션이 없어 화면이 자리표시자 토큰을 보낼 수 있으므로, 이 공개 경로는 서버가 토큰을 보지 않는다. 화면은 `frontend/src/lib/env.ts`의 `dashboardAuth()`로 GET에도 토큰을 붙인다.
 4. 다른 서비스(대화 창구·기획·재무 등)로 직접 가는 경로는 그 서비스의 라우트 파일에서 같은 방식으로 확인한다.

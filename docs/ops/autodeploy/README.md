@@ -5,6 +5,16 @@
 - 스크립트: `ax-autodeploy` (서버에 `/usr/local/sbin/ax-autodeploy`, root:root 755, 실행은 ubuntu)
 - 유닛: 서버에 이미 있는 `ax-autodeploy.service`(oneshot) / `ax-autodeploy.timer`(부팅 3분 뒤, 이전 실행 끝나고 90초마다). 이 폴더는 유닛을 바꾸지 않는다.
 
+### 지금 운영 상태 (2026-11-27 서버에서 읽기 전용으로 확인)
+
+- 옛 서버(232·251)는 이관으로 정지했고, 자동 배포는 새 운영 서버 한 곳에서만 돈다.
+- 서버의 `/usr/local/sbin/ax-autodeploy`·`ax-autodeploy-watchdog` 는 dev `56cd5e8f` 의 이 폴더 파일과 sha256 이 같다(11/26 #1932 까지 반영).
+- **백엔드 단계는 켜져 있다**: `/etc/ax-autodeploy/env` 에 `AX_BACKEND_STAGE=on`, `AX_PAUSE_FILE`, `AX_BACKEND_QUIET_SEC`, `AX_BACKEND_MIN_GAP_SEC` 가 있다(아래 "백엔드 단계"의 기본값 `off` 는 스크립트 기본값이다).
+- 주기: 유닛 원본은 90초지만 서버는 drop-in `ax-autodeploy.timer.d/cycle.conf` 로 **60초**(`OnUnitInactiveSec=60s`)다.
+- 정지 감시: `ax-autodeploy-watchdog.timer`(5분)가 설치돼 돌고 있다.
+- 토큰·웹훅 파일: `/etc/ax-autodeploy/gh-readonly-token`, `slack-webhook` 둘 다 `root:ubuntu 640`(폴더는 `root:ubuntu 750`). 스크립트가 `ubuntu` 로 돌며 읽어야 해서 600 이 아니다.
+- 화면 배포 스크립트 `/opt/axcellent/deploy.sh` 에는 api-app 직접 호출 조각(`docs/ops/deploy/README.md`)이 설치돼 있다.
+
 ## 매 주기 순서
 
 1. `flock` 으로 중복 실행 방지(이미 돌고 있으면 `busy` 로 건너뜀)
@@ -42,7 +52,7 @@ echo <배포된 커밋 40자> > /var/lib/ax-autodeploy/last-deployed-ref
 sudo systemctl enable --now ax-autodeploy.timer
 ```
 
-CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-autodeploy/gh-readonly-token`(600)에 둔다. 없거나 비어 있으면 화면·백엔드 모두 배포하지 않는다(`ci-check=off`, 백엔드는 `ci-off`).
+CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read, 백엔드 단계를 쓰면 Pull requests: read 도)을 `/etc/ax-autodeploy/gh-readonly-token`(`root:ubuntu 640`, 실행 계정 ubuntu 가 읽는다)에 둔다. 없거나 비어 있으면 화면·백엔드 모두 배포하지 않는다(`ci-check=off`, 백엔드는 `ci-off`).
 
 ## 정지
 
@@ -58,7 +68,7 @@ CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-aut
 
 ## 시험
 
-`--dry-run` 은 상태·화면을 바꾸지 않고(fetch 만) 대상 커밋, 변경 영역, CI 상태, 정지 연결을 출력한다. 시험용 환경 변수: `AX_STATE_DIR AX_SRC AX_DEPLOY_SH AX_WEB_ROOT_90 AX_WEB_ROOT_91 AX_URL_90 AX_URL_91 AX_PROMO_ROOT AX_URL_PROMO(off 가능) AX_LOG_FILE AX_BUILD_LOG AX_SUDO AX_PAUSE_FILE AX_GATE_BIN`.
+`--dry-run` 은 상태·화면을 바꾸지 않고(fetch 만) 대상 커밋, 변경 영역, CI 상태, 정지 연결을 출력한다. 시험용 환경 변수: `AX_STATE_DIR AX_SRC AX_DEPLOY_SH AX_WEB_ROOT_90 AX_WEB_ROOT_91 AX_URL_90 AX_URL_91 AX_PROMO_ROOT AX_URL_PROMO(off 가능) AX_LOG_FILE AX_BUILD_LOG AX_SUDO AX_PAUSE_FILE AX_GATE_BIN`. `/etc/ax-autodeploy/env`(root 소유)에서 읽는 키는 `AX_PAUSE_FILE AX_MAX_FILES AX_BACKEND_STAGE AX_ALLOW_HOURS AX_MEMO_REQUIRED_SINCE AX_BACKEND_*_SEC` 뿐이고, 그 밖의 값은 환경 변수로만 바꾼다.
 
 ## 백엔드 단계 (off / dry-run / on)
 
@@ -80,10 +90,12 @@ CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-aut
 | 5 | 배포 메모: 라벨 `manual-deploy` 또는 `## 배포 메모` 가 있고 "없음"이 아니면 보류. 섹션 없음은 `AX_MEMO_REQUIRED_SINCE`(YYYY-MM-DD) 이후 머지된 PR 만 보류 | `AX_MEMO_LABEL`, `AX_MEMO_REQUIRED_SINCE` |
 | 6 | 롤백: 실패하면 `rollback-bundle` → `rollback-code` → `restart-backend <직전 SHA>`(설계 5절). 1회 실패한 SHA 는 새 커밋이 올 때까지 건너뜀 | |
 | 7 | 범위에 `backend/uv.lock`·`pyproject.toml` 변경이 있으면 `deploy-bundle` 뒤에 `uv-sync` 삽입(롤백 때는 직전 SHA 로 `uv-sync`) | |
-| 8 | 배포 전 Slack Incoming Webhook 공지(`/etc/ax-autodeploy/slack-webhook`), 공지 실패면 배포 중단. 끝·실패·롤백·보류·미루기 공지. SHA 별 중복 방지 | `AX_SLACK_WEBHOOK_FILE` |
+| 8 | 배포 전 Slack Incoming Webhook 공지(`/etc/ax-autodeploy/slack-webhook`, `root:ubuntu 640`), 공지 실패면 배포 중단. 끝·실패·롤백·보류·미루기 공지. SHA 별 중복 방지 | `AX_SLACK_WEBHOOK_FILE` |
 | 9 | 정지 표시(`AX_PAUSE_FILE`)가 있으면 모든 배포 중단. `on` 에서 `AX_PAUSE_FILE` 가 비어 있거나 판정 헬퍼가 없으면 멈춘 것으로 본다 | `AX_PAUSE_FILE`, `AX_GATE_BIN` |
 | 10 | 읽기 전용 토큰 `/etc/ax-autodeploy/gh-readonly-token` 이 없으면 `ci-off` 로 보류 | `AX_CI_TOKEN_FILE` |
 | 11 | 동시 실행 방지(flock). 프론트·홍보 단계는 기존 동작 그대로 | |
+
+green 선택(11/25~26, #1910 에 같이 들어감): dev 최신 커밋(tip)의 CI 가 끝나지 않았어도(푸시가 잦아 취소되는 경우) 운영 HEAD..tip 의 first-parent 커밋을 새것부터 최대 `AX_BACKEND_GREEN_SCAN`(기본 15)개 훑어, 필수 체크가 통과한 가장 최신 커밋을 배포 대상으로 쓴다. 운영 HEAD 의 후손만 고르고, tip 이 실패면 더 옛 커밋으로 내려가지 않고 `ci-fail` 이다. 고른 커밋까지 `backend/` 변경이 없으면 할 일 없이 tip 의 CI 를 기다린다. 로그 `green-select: tip=… → target=…`, 기록 `backend-green-select`.
 
 게이트 호출 형식: `sudo -n -u axautodeploy env SSH_ORIGINAL_COMMAND="<동작> <SHA> --announced" /usr/local/sbin/ax-gate axautodeploy`(`AX_GATE_SUDO`, `AX_GATE_EXEC`, 동작당 제한 시간 `AX_GATE_TIMEOUT` 420초). 게이트가 끝 코드 4(잠금·사용 중)로 첫 단계를 거부하면 실패가 아니라 이번 주기 건너뜀이다. 배포가 끝나면 `deploy-bundle` 이 프론트도 다시 빌드하므로 그 주기의 프론트 단계는 건너뛰고 기준 ref 만 갱신한다.
 
@@ -93,9 +105,9 @@ CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-aut
 
 총괄 `GET /api/busy`(인증 없음, 건수만)는 `{"data":{"in_flight":N,"waiting_async":N,"running":N,"held":N,"waiting_human":N,"video_in_flight":N,"checked_at":"..."},"meta":{}}` 를 준다. 이 모양은 **현재 파서에 맞지 않는다**(최상위에 위 키가 없고 `data` 안에 있어 `count` 도 없으므로 0건으로 읽는다). 그래서 지금은 `AX_BUSY_URLS` 에 넣어도 미룸 판단이 되지 않으니 넣지 않는다. 후속 단계에서 자동 배포 스크립트가 `data.in_flight`(필요하면 `held`·`waiting_human` 포함 여부는 정책으로)를 읽도록 고친다. 마케팅 안의 영상 생성 중 건수(메모리·장부)는 이 응답에 아직 없다(후속 단계).
 
-판정 순서: 이전 배포 흔적(`backend-in-progress`)·정지 표시 연결·배포 금지 잠금(`/etc/ax-gate/deploy.lock`) → 운영 트리 HEAD..dev 최신에 `backend/` 변경 → 이전 실패 SHA(`backend-skipped-ref`) → CI → 범위 안 커밋의 PR 라벨·`## 배포 메모`(PR 을 못 찾으면 보류) → 허용 시각 → 조용한 구간 → 최소 간격 → 대기 건 → (on) 공지 → 게이트. API 실패·해석 실패는 `skip-cycle`(이번 주기 건너뜀, 상태 기록 없음). 상태 파일(`/var/lib/ax-autodeploy/`): `backend-verdict`, `backend-notified`, `backend-last-restart`, `backend-in-progress`(되돌림까지 실패하면 `halted ...` 로 남고 사람이 확인해 지울 때까지 아무것도 안 한다), `backend-skipped-ref`, `backend-defer-since`.
+판정 순서: 이전 배포 흔적(`backend-in-progress`)·정지 표시 연결·배포 금지 잠금(`/etc/ax-gate/deploy.lock`) → 운영 트리 HEAD..dev 최신에 `backend/` 변경 → 이전 실패 SHA(`backend-skipped-ref`) → CI → 범위 안 커밋의 PR 라벨·`## 배포 메모`(PR 을 못 찾으면 보류) → 허용 시각 → 조용한 구간 → 최소 간격 → 대기 건 → (on) 공지 → 게이트. API 실패·해석 실패는 `skip-cycle`(이번 주기 건너뜀, 상태 기록 없음). 상태 파일(`/var/lib/ax-autodeploy/`): `backend-verdict`, `backend-notified`, `backend-last-restart`, `backend-in-progress`(되돌림까지 실패하면 `halted ...` 로 남고 사람이 확인해 지울 때까지 아무것도 안 한다), `backend-skipped-ref`, `backend-defer-since`, `backend-green-select`(`<tip> <고른 커밋>`, 바뀔 때만 로그).
 
-서버에 필요한 것(서버 작업은 사람이): 게이트 0.5.0 + `axautodeploy` 계정(권한 6개: `status deploy-bundle restart-backend rollback-bundle rollback-code uv-sync`, `docs/ops/ssh-gate/INSTALL.md`), `/etc/ax-autodeploy/gh-readonly-token`(Checks·Pull requests 읽기), `/etc/ax-autodeploy/slack-webhook`(root 600), `/etc/ax-autodeploy/env` 에 `AX_BACKEND_STAGE=on`·`AX_PAUSE_FILE=<게이트 정책 pause_file>`, `ax-gate-autodeploy-paused`.
+서버에 필요한 것(서버 작업은 사람이): 게이트 0.5.0 이상 + `axautodeploy` 계정(권한 6개: `status deploy-bundle restart-backend rollback-bundle rollback-code uv-sync`, `docs/ops/ssh-gate/INSTALL.md` 2-1절), `/etc/ax-autodeploy/gh-readonly-token`(Checks·Pull requests 읽기), `/etc/ax-autodeploy/slack-webhook`(`root:ubuntu 640`), `/etc/ax-autodeploy/env` 에 `AX_BACKEND_STAGE=on`·`AX_PAUSE_FILE=<게이트 정책 pause_file>`, `ax-gate-autodeploy-paused`.
 
 시험: `python -m unittest discover -s docs/ops/autodeploy/tests -v` (임시 git 저장소, 가짜 게이트·가짜 GitHub API·가짜 Slack 웹훅을 쓴다. 서버·네트워크 불필요).
 
@@ -104,7 +116,7 @@ CI 확인을 켜려면 읽기 전용 GitHub 토큰(Checks: read)을 `/etc/ax-aut
 `ax-autodeploy` 가 멈췄는데 아무도 모르는 일을 막는 감시 스크립트. **읽기만 하고 슬랙으로 알린다. 복구 동작은 아직 없다**(`--recover` 는 "아직 구현 안 됨, 알림 전용"으로 거절). 쓰는 파일은 알림 기록 `/var/lib/ax-autodeploy/watchdog-notified` 하나뿐(`--notify` 때만).
 
 - 스크립트: `ax-autodeploy-watchdog` (서버 `/usr/local/sbin/ax-autodeploy-watchdog`, root:root 755, 실행은 ubuntu)
-- 유닛 예시: `ax-autodeploy-watchdog.service`, `ax-autodeploy-watchdog.timer`(5분 주기)
+- 유닛 예시: `ax-autodeploy-watchdog.service`, `ax-autodeploy-watchdog.timer`(5분 주기). 운영 서버에 이 두 유닛 그대로 설치돼 있다(11/27 확인)
 - 읽는 것: `/var/lib/ax-autodeploy/`(`last-run` mtime, `backend-verdict`, `backend-in-progress`, `lock`), `/etc/ax-autodeploy/env` 의 `AX_PAUSE_FILE` 과 그 정지 표시 파일, `/var/log/ax-autodeploy.log`, `systemctl is-active/show`(조회만)
 
 ### 정지 유형

@@ -54,6 +54,23 @@ id <계정>                      # 그룹이 <계정>, axgate 뿐인지 확인. 
 - 로그인 셸은 `/bin/bash`로 둔다. `nologin`으로 하면 안 된다. sshd는 강제 명령(`command=`)도 그 계정의 로그인 셸로 실행하기 때문에, nologin이면 게이트 자체가 실행되지 않는다. 셸을 못 쓰게 막는 것은 5단계의 `restrict`·`command=`·Match 블록이 한다.
 - `axgate` 그룹에는 게이트를 쓸 사람의 개인 계정만 넣는다. 기존 관리자 계정은 넣지 않는다.
 
+### 2-1. 자동 배포 전용 계정(선택, 백엔드 자동 배포를 켤 때)
+
+백엔드 자동 배포(`docs/ops/autodeploy/README.md`의 "백엔드 단계")는 사람 계정이 아니라 전용 계정으로 게이트를 부른다. 운영 서버에는 이 계정이 만들어져 있다(2026-11-27 확인: 로그인 셸 없음, `axgate` 그룹).
+
+```bash
+# 예시(일반 형태). 로그인 셸이 없는 계정을 만들고 게이트 그룹에 넣으면 된다
+sudo useradd --shell /usr/sbin/nologin <자동 배포 계정>
+sudo usermod -aG axgate <자동 배포 계정>
+sudo passwd -l <자동 배포 계정>
+```
+
+- 이 계정은 SSH로 들어오지 않는다. 키 파일(`/etc/ssh/ax-gate/<계정>`)을 만들지 않고 방화벽·`from=`도 필요 없다. 그래서 사람 계정과 달리 로그인 셸을 `nologin`으로 둔다(강제 명령을 sshd가 실행할 일이 없다).
+- 자동 배포 스크립트를 돌리는 계정이 `sudo -n -u <자동 배포 계정> env SSH_ORIGINAL_COMMAND="<동작> <SHA> --announced" /usr/local/sbin/ax-gate <자동 배포 계정>`으로 앞단을 부른다. 앞단은 `id -un`으로 신원을 확인하고, 뒷단 호출은 4단계의 그룹 한 줄(`%axgate`)을 그대로 쓴다. 스크립트를 돌리는 계정에 이 `sudo -u` 호출 권한이 있어야 한다.
+- 정책 `[permissions]`의 그 계정 줄에 자동 배포가 쓰는 동작만 적는다: `status`, `deploy-bundle`, `restart-backend`, `rollback-bundle`, `rollback-code`, `uv-sync`. `rollback-code`·`uv-sync`는 `_default`에 둘 수 없으니 이 줄에 직접 적고, `[uv_sync]` 구역도 채운다(11절).
+- `--announced`는 자동 배포 스크립트가 배포 전 공지를 실제로 보낸 뒤에 붙인다(공지가 실패하면 배포하지 않는다).
+- 빼기: 그룹에서 빼고(`gpasswd -d`) 정책 줄을 지운다. 자동 배포 쪽은 백엔드 단계를 `off`로 돌린다.
+
 ## 3. 폴더와 감사 로그
 
 ```bash
@@ -224,7 +241,9 @@ sudo install -d -o root -g root -m 755 <게이트 상태 폴더>
    max_hours = 12
    ```
 4. 정지·재개를 쓸 권한자 계정의 `[permissions]` 줄에 `"autodeploy-pause", "autodeploy-resume"`을 더한다. `_default`에는 넣지 않는다(넣으면 게이트가 모든 요청을 거부한다).
-5. 서버의 자동 배포 스크립트(이 레포에 없다) 맨 앞에 아래 세 줄을 넣는다. 자동 배포가 타이머·크론 중 무엇으로 돌든 스크립트가 하나면 한 곳이다.
+5. 자동 배포 쪽을 연결한다.
+   - 이 레포의 자동 배포 스크립트(`docs/ops/autodeploy/ax-autodeploy`, 11/23 머지)를 쓰는 서버: 스크립트를 고치지 않고 `/etc/ax-autodeploy/env`(root 소유, 그룹·기타 쓰기 없음)에 `AX_PAUSE_FILE=<게이트 상태 폴더>/autodeploy.pause` 한 줄을 적는다. 스크립트가 매 주기 맨 앞에서 1)의 판정 스크립트를 부른다. `ax-autodeploy --dry-run`의 `게이트 정지 연결` 줄로 확인한다. 운영 서버는 이 방식으로 연결돼 있다.
+   - 그 밖의 자동 배포 스크립트를 쓰는 서버: 스크립트 맨 앞에 아래 세 줄을 넣는다. 자동 배포가 타이머·크론 중 무엇으로 돌든 스크립트가 하나면 한 곳이다.
    ```bash
    if /usr/local/sbin/ax-gate-autodeploy-paused <게이트 상태 폴더>/autodeploy.pause; then
      exit 0   # 멈춰 있다. 이번 주기는 배포하지 않는다
@@ -232,7 +251,7 @@ sudo install -d -o root -g root -m 755 <게이트 상태 폴더>
    ```
 6. 확인: `autodeploy-pause test` → `status`에 "자동 배포: 정지 중" → 자동 배포를 한 주기 돌려(또는 스크립트를 손으로 실행해) 건너뛰는지 본다 → `autodeploy-resume` → 다음 주기에 다시 도는지 본다.
 
-연결(5번)을 하기 전에는 정지 동작이 파일만 쓰고 자동 배포는 그대로 돈다. 끄기: 5번의 세 줄을 지우고 정책의 구역과 권한을 지운다.
+연결(5번)을 하기 전에는 정지 동작이 파일만 쓰고 자동 배포는 그대로 돈다. 끄기: 5번의 연결(`AX_PAUSE_FILE` 줄 또는 세 줄)을 지우고 정책의 구역과 권한을 지운다. 단, 백엔드 자동 배포가 `on`이면 `AX_PAUSE_FILE`이 비었을 때 멈춘 것으로 보므로 백엔드 단계를 먼저 `off`로 돌린다.
 
 `[restart] deploy_first`는 기본 false다. true로 바꾸면 `restart-backend`가 서버 코드가 뒤처져 있을 때 번들 배포를 먼저 한다(`README.md`의 "재시작과 서버 코드가 어긋날 때"). 켜는 것은 서버 책임자의 결정이다.
 
@@ -332,6 +351,8 @@ for u in <계정 목록>; do sudo gpasswd -d "$u" axgate; sudo usermod -L -e 1 "
 sudo groupdel axgate
 # 4) 방화벽을 6단계에서 떠 둔 사본으로 되돌린다(검사 → 적용 → 확인)
 sudo rm /usr/local/sbin/ax-gate /usr/local/sbin/ax-gate-location-check
+sudo rm -f /usr/local/sbin/ax-gate-gateway-allow-check /usr/local/sbin/ax-gate-autodeploy-paused   # 7-0·7-1 을 설치했다면
+# 자동 배포가 정지 판정 스크립트·자동 배포 계정을 쓰고 있으면(7-1, 2-1) 먼저 자동 배포의 백엔드 단계를 off 로 돌리고 연결을 지운다
 sudo rm -r /etc/ax-gate                                  # 정책과 남아 있는 잠금 파일
 # 감사 로그와 승인 기록은 지우지 않고 남긴다: /var/log/ax-gate, /var/lib/ax-gate
 # 계정은 만료만 하고 지우지 않는다(감사 로그의 이름이 남도록)
