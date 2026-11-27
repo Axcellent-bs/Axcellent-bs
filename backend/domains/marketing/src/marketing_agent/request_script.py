@@ -74,13 +74,57 @@ def _visual(s: Any) -> str:
     return _cut(getattr(s, "visual", None) or getattr(s, "prompt", ""), MAX_SCRIPT_VISUAL)
 
 
+def _sec(s: Any, key: str) -> float | None:
+    """장면의 시각(초). 계약 모델 속성·느슨한 dict·추가 칸(model_extra) 어느 쪽이든."""
+    if isinstance(s, dict):
+        v = s.get(key)
+    else:
+        v = getattr(s, key, None)
+        if v is None:
+            v = (getattr(s, "model_extra", None) or {}).get(key)
+    if isinstance(v, bool) or not isinstance(v, int | float):
+        return None
+    return float(v)
+
+
+def plan_times(plan: Any) -> list[tuple[float, float]] | None:
+    """기획 장면 시간 (11/27 운영 PROP-44: 기획 0~2/2~7/7~12/12~15초인데 대본·칸은 고르게 나눈
+    0~4/4~7.5…였다). 모든 장면에 start_s·end_s가 있고 0초부터 앞뒤로 맞으면 그 값, 아니면 None
+    (그때는 지금처럼 고르게 나눈다)."""
+    out: list[tuple[float, float]] = []
+    at = 0.0
+    for s in _plan_scenes(plan)[:MAX_SCRIPT_SCENES]:
+        a, b = _sec(s, "start_s"), _sec(s, "end_s")
+        if a is None or b is None or b <= a or abs(a - at) > 1e-6 or b > 600:
+            return None
+        out.append((a, b))
+        at = b
+    return out or None
+
+
+def _times_fixed(script: CreativeScript, times: list[tuple[float, float]],
+                 base: CreativeScript) -> CreativeScript:  # fmt: skip
+    """대본 장면 수·시간을 기획 장면에 맞춘다: 많으면 자르고, 모자라면 기획 장면(빈 대사)으로
+    채우고, 시간은 기획 값 그대로 (LLM에게 맡기지 않는다)."""
+    rows = list(script.scenes[: len(times)])
+    rows += [base.scenes[i] for i in range(len(rows), len(times))]
+    fixed = [s.model_copy(update={"no": i, "start_s": a, "end_s": b})
+             for i, (s, (a, b)) in enumerate(zip(rows, times, strict=True), start=1)]  # fmt: skip
+    return script.model_copy(update={"scenes": fixed, "total_seconds": base.total_seconds})
+
+
 def plan_script(plan: Any) -> CreativeScript | None:
-    """기획 장면으로 만든 대본(화면·자막·시간, 대사 없음). 장면이 없으면 None."""
+    """기획 장면으로 만든 대본(화면·자막·시간, 대사 없음). 장면이 없으면 None.
+
+    11/27: 기획 장면 시간이 있으면 그 시간, 없으면 지금처럼 고르게 나눈다."""
     scenes = _plan_scenes(plan)[:MAX_SCRIPT_SCENES]
     if not scenes:
         return None
     seconds = max(1, int(getattr(plan, "duration_s", 0) or 15))
-    times = _script.split_times([1.0] * len(scenes), seconds)
+    fixed = plan_times(plan)
+    if fixed:
+        seconds = max(seconds, int(-(-fixed[-1][1] // 1)))  # 끝 장면이 넘으면 올림
+    times = fixed or _script.split_times([1.0] * len(scenes), seconds)
     rows = [
         ScriptScene(
             no=i,
@@ -185,6 +229,7 @@ async def write_request_script(
         return None
     script = base
     real = (character or {}).get("kind") == "virtual_human"
+    times = plan_times(plan)
     try:
         written = await _script.write_script(
             request_story(plan, request_text, real),
@@ -193,9 +238,13 @@ async def write_request_script(
             character,
             llm_factory,
             context_id,
+            times=times,
         )
-        # 고정 규칙 대본은 줄거리(의뢰문) 문장을 대사로 옮기므로 쓰지 않는다
-        if written.source == "llm" and len(written.scenes) == len(base.scenes):
+        # 고정 규칙 대본은 줄거리(의뢰문) 문장을 대사로 옮기므로 쓰지 않는다.
+        # 11/27: 기획 시간이 있으면 장면 수가 달라도 기획 수에 맞춰 쓴다(시간은 기획 값)
+        if written.source == "llm" and times:
+            script = _times_fixed(written, times, base)
+        elif written.source == "llm" and len(written.scenes) == len(base.scenes):
             script = written
     except _script.ScriptRefused:
         pass
@@ -218,6 +267,11 @@ def board_with_script(board: dict[str, Any], script: CreativeScript) -> dict[str
         return board
     scenes = [s.model_dump(mode="json") for s in script.scenes]
     merged = _storyboard.with_script(out, scenes, script.cta_ko).model_dump(mode="json")
+    # 11/27: 칸에 기획 시간이 있으면(#1958 B) 시간은 칸 값을 둔다 (대사·말하는 사람·자막만 붙인다)
+    before = out.shots
+    if all(s.start_s is not None and s.end_s is not None for s in before):
+        for shot, old in zip(merged["shots"], before, strict=True):
+            shot["start_s"], shot["end_s"] = old.start_s, old.end_s
     if script.source == "llm":
         # 작가가 의뢰 연출을 반영해 쓴 화면을 칸 장면으로 쓴다(영상 프롬프트가 칸 장면을 쓴다)
         for shot, scene in zip(merged["shots"], script.scenes, strict=True):
