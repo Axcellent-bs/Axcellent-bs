@@ -1,0 +1,119 @@
+{
+  "cases": [
+    {
+      "id": "p01", "split": "dev",
+      "body": "두 사람이 마주 보고 카페에서 대화", "camera": "미디엄 샷",
+      "label": "block", "note": "회사 캐릭터 말고 다른 인물(두 사람)이 가까이 나옴"
+    },
+    {
+      "id": "p02", "split": "dev",
+      "body": "주인공과 친구가 함께 웃고 있다", "camera": "클로즈업",
+      "label": "block", "note": "친구가 가까이 나옴"
+    },
+    {
+      "id": "p03", "split": "dev",
+      "body": "친구와 마주 보고 대화, 배경은 카페", "camera": "미디엄 샷",
+      "label": "block", "note": "11/26에 고친 바로 그 사례(바른 배경 뜻 '카페'와 군중 낱말 '배경'을 더는 혼동하지 않는다) — 바뀐 뒤 지금은 맞게 막음"
+    },
+    {
+      "id": "p04", "split": "dev",
+      "body": "주인공과 동료가 회의실에서 이야기한다", "camera": "미디엄 샷",
+      "label": "block", "note": "동료가 가까이 나옴"
+    },
+    {
+      "id": "p05", "split": "holdout",
+      "body": "매장 점원이 주인공에게 인사한다", "camera": "클로즈업",
+      "label": "block", "note": "점원이 가까이 나옴"
+    },
+    {
+      "id": "p06", "split": "dev",
+      "body": "친구가 멀리 보인다", "camera": "미디엄 샷",
+      "label": "pass", "note": "친구가 있지만 '멀리'(배경 군중 낱말)라 괜찮음"
+    },
+    {
+      "id": "p07", "split": "dev",
+      "body": "주인공 혼자 창밖을 바라본다", "camera": "클로즈업",
+      "label": "pass", "note": "다른 인물 없음"
+    },
+    {
+      "id": "p08", "split": "dev",
+      "body": "주인공이 커피를 마신다", "camera": "미디엄 샷",
+      "label": "pass", "note": "다른 인물 없음"
+    },
+    {
+      "id": "p09", "split": "holdout",
+      "body": "행인들 사이로 주인공이 걸어간다", "camera": "와이드 샷",
+      "label": "pass", "note": "'행인'은 배경 군중 낱말, 다른 인물을 뜻하는 낱말은 없음"
+    },
+    {
+      "id": "p10", "split": "dev",
+      "body": "군중 속에서 주인공이 손을 흔든다", "camera": "미디엄 샷",
+      "label": "pass", "note": "'군중'은 배경 군중 낱말, 다른 인물을 뜻하는 낱말은 없음"
+    },
+    {
+      "id": "p11", "split": "dev",
+      "body": "주인공이 전신으로 걷는 모습, 친구도 함께 보인다", "camera": "전신",
+      "label": "pass", "note": "친구가 있지만 '전신'(넓은 샷 낱말)이라 괜찮음"
+    },
+    {
+      "id": "p12", "split": "holdout",
+      "body": "지나가는 사람이 뒤편에 작게 보인다", "camera": "미디엄 샷",
+      "label": "pass", "note": "다른 인물을 뜻하는 낱말과 정확히 겹치지 않음"
+    },
+    {
+      "id": "p13", "split": "dev",
+      "body": "선생님이 다가와 손을 잡아준다", "camera": "클로즈업",
+      "label": "block", "note": "놓침: '선생님'은 OTHER_PERSON_WORDS에 없어 지금 규칙은 놓친다"
+    },
+    {
+      "id": "p14", "split": "holdout",
+      "body": "할머니가 반갑게 웃는다", "camera": "미디엄 샷",
+      "label": "block", "note": "놓침: '할머니'는 OTHER_PERSON_WORDS에 없어 지금 규칙은 놓친다"
+    },
+    {
+      "id": "p15", "split": "dev",
+      "body": "언니가 옆에서 거든다", "camera": "클로즈업",
+      "label": "block", "note": "놓침: '언니'는 OTHER_PERSON_WORDS에 없어 지금 규칙은 놓친다"
+    },
+    {
+      "id": "p16", "split": "holdout",
+      "body": "이웃이 문 앞에서 반갑게 맞이한다", "camera": "클로즈업",
+      "label": "block", "note": "놓침: '이웃'은 OTHER_PERSON_WORDS에 없어 지금 규칙은 놓친다"
+    },
+    {
+      "id": "p17", "split": "dev",
+      "body": "다른 사람들과 함께 먼 곳에서 뛰논다", "camera": "미디엄 샷",
+      "label": "pass", "note": "오탐: '먼 곳'은 CROWD_WORDS의 '멀리'와 다른 낱말이라 지금 규칙은 막는다(반대 방향 오류)"
+    },
+    {
+      "id": "p18", "split": "holdout",
+      "body": "주인공과 아이가 손을 잡고 걷는다", "camera": "클로즈업",
+      "label": "block", "note": "'아이가'가 가까이 나옴"
+    },
+    {
+      "id": "p19", "split": "dev",
+      "body": "두 사람이 멀리서 걷는 모습", "camera": "와이드 샷",
+      "label": "pass", "note": "'두 사람'이 있지만 '멀리'와 '와이드' 둘 다 있어 괜찮음"
+    },
+    {
+      "id": "p20", "split": "holdout",
+      "body": "파트너가 바로 옆에서 바라본다", "camera": "클로즈업",
+      "label": "block", "note": "파트너가 가까이 나옴"
+    },
+    {
+      "id": "p21", "split": "dev",
+      "body": "주인공 옆에 반려견이 앉아 있다", "camera": "미디엄 샷",
+      "label": "pass", "note": "사람이 아니라 다른 인물을 뜻하는 낱말과 겹치지 않음"
+    },
+    {
+      "id": "p22", "split": "dev",
+      "body": "a friend stands close to the subject", "camera": "medium shot",
+      "label": "block", "note": "영문 'a friend'가 가까이 나옴"
+    },
+    {
+      "id": "p23", "split": "holdout",
+      "body": "a crowd watches from far away", "camera": "wide shot",
+      "label": "pass", "note": "다른 인물을 뜻하는 낱말과 겹치지 않음"
+    }
+  ]
+}

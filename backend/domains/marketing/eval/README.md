@@ -58,3 +58,52 @@ uv run python domains/marketing/eval/score_embed_variant.py gemini-embedding-001
   함수(`score_embed_variant.select`·`evaluate`)만 검증했다(정답을 완벽히 가르는 값 →
   dev·holdout 모두 정밀도·재현율 1.00으로 지금 규칙을 앞서는 것, 변별력 없는 값 → 임계값이
   의미 없이 뽑히는 것). 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
+
+## 제작안 검토(다른 인물 가까이 나옴) 낱말 규칙 vs 임베딩 비교 (태윤 제안, #소통 2026-11-09 15:56, 2순위)
+
+"빠뜨리면 영상에 다른 인물이 나오니 재현율 **먼저**, 그다음 정밀도" 평가 — item 1(금지
+표현)과 우선순위가 반대다. 지금은 `ax_agent_template.plan_rules.close_other_person`이
+`OTHER_PERSON_WORDS`(친구·동료·손님·파트너 등, 영문 포함) 포함 여부로 "다른 인물이 있나"를
+보고, `CROWD_WORDS`(멀리·군중·배경의 사람들 등)·`WIDE_WORDS`(와이드·전신 등)에 걸리면 봐준다.
+이 기준은 기획 자체 검사(`plan_checks`)와 마케팅 제작안 확인(`plan_review.check`)이 도메인을
+넘나들지 않으려고 공용 모듈(`plan_rules`)에 같이 둔 것이다(11/26 "배경"만으로는 군중이 아니게
+좁힌 기록이 파일 안에 남아 있다 — "친구와 마주 보고 대화, 배경은 카페"를 더는 놓치지 않는다).
+
+- `plan_review_cases.json`: 합성 골든셋 23건(dev 15 · holdout 8), 장면 글(`body`)·카메라
+  글(`camera`), 국영문 섞음.
+  - 지금 규칙이 실제로 틀리는 사례 5건을 넣었다: "선생님"·"할머니"·"언니"·"이웃"처럼
+    `OTHER_PERSON_WORDS`에 없는 호칭이라 **놓치는** 4건(`p13`·`p14`·`p15`·`p16`), "먼 곳"이
+    `CROWD_WORDS`의 "멀리"와 다른 낱말이라 봐주지 못해 **오탐**하는 1건(`p17`). 이 덕에 지금
+    규칙의 dev 재현율은 0.71, holdout은 0.60 — 재현율에서 비교할 실제 여지가 있다.
+- `plan_review_rule_score.py`: 지금 production 함수(`plan_rules.close_other_person`)를
+  `marketing_agent.plan_review.check()`와 같은 방식(낱말만, `people` 인자 없이)으로 그대로
+  불러와 합치기만 한다. 새 규칙은 만들지 않는다.
+  - 실행: `cd backend && uv run python domains/marketing/eval/plan_review_rule_score.py`
+- `plan_review_anchors.json`: "다른 인물이 가까이 나오는" 대표 문장 8개(사람이 미리 적음).
+- `collect_plan_review_embed.py`/`score_plan_review_embed.py`: 위 두 item 1 스크립트와 같은
+  수집·채점 분리 방식. 와이드 샷 낱말(`WIDE_WORDS`)은 지금 규칙을 그대로 재사용해 판정에
+  같이 쓴다(이 평가가 바꾸는 것은 "다른 인물 있나"지 샷 폭 판정이 아니다). 유사도 임계값은
+  dev에서만 그리드 탐색하되, 이번엔 **재현율 우선**(재현율이 가장 높은 것들 중 정밀도가 가장
+  높은 것) — item 1의 `score_embed_variant.select`와 우선순위가 반대다.
+  - 실행: `EMBED_MODEL=<모델> uv run python domains/marketing/eval/collect_plan_review_embed.py <라벨>`
+  - 비교: `uv run python domains/marketing/eval/score_plan_review_embed.py <라벨1> <라벨2> ...`
+
+```bash
+cd backend
+uv run python domains/marketing/eval/plan_review_rule_score.py   # 지금 규칙만 (키 필요 없음)
+
+EMBED_MODEL=gemini-embedding-001 \
+  uv run python domains/marketing/eval/collect_plan_review_embed.py gemini-embedding-001
+uv run python domains/marketing/eval/score_plan_review_embed.py gemini-embedding-001
+```
+
+**한계**
+- 골든셋이 합성·소규모다(23건), 정답·대표 문장은 사람이 미리 적었다(item 1과 같음).
+- 임베딩 쪽은 "친구가 가까이" 대표 문장과의 유사도만 보고, 군중·와이드 봐주기는 `WIDE_WORDS`
+  낱말 재사용으로만 처리한다 — `CROWD_WORDS`(멀리·배경의 사람들 등, 거리를 뜻하는 낱말)는
+  임베딩 쪽에 전혀 반영하지 않았다. "친구가 멀리 보인다"(p06)처럼 인물은 같아도 거리가 다른
+  문장은 "친구가 바로 옆에서" 대표 문장과 여전히 비슷하게 임베딩될 수 있어, 임베딩이 거리를
+  구분하지 못하면 이 평가에서 낮은 정밀도로 정직하게 드러난다(일부러 봐주지 않았다).
+- 비용은 이 표에 아직 없다(item 1과 같은 한계).
+- 이 세션에는 임베딩 키가 없어 배선 확인(키 없이 멈춤)과 가짜 유사도 값(완벽히 가르는 값·
+  변별력 없는 값)으로 채점 함수만 검증했다. 실제 비교 숫자는 키가 있는 로컬 PC에서 내야 한다.
