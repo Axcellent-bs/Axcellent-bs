@@ -741,6 +741,10 @@ class Proposal(DomainModel):
     # 11/27 의뢰에서 사람이 고른 등장 캐릭터(회사 캐릭터 + 역할, 최대 3, 첫 번째 = 주인공 =
     # brand_character_record_id). 예전 제안·한 명 의뢰는 비어 있다(지금처럼 한 명)
     cast: list[CastMember] = Field(default_factory=list, max_length=MAX_CAST)
+    # 11/27 C: cast 캐릭터마다 마케팅에서 읽은 외형(번호 → 캐릭터)과 못 읽은 이유 코드(번호 → 코드).
+    # 주인공(cast[0])은 company_character에도 그대로. 다시 쓰기·고치기도 같은 값을 쓴다
+    cast_characters: dict[str, CompanyCharacter] = Field(default_factory=dict)
+    cast_reasons: dict[str, str] = Field(default_factory=dict)
     # 11/26 총괄 의뢰의 고객 문장 그대로(untrusted). 제작안 LLM에 데이터 칸으로만 넘겨 연출 지시
     # (대사·장면·배경·소품·동작·외형)를 뽑아 지키게 한다. 지시문에는 붙이지 않는다
     request_text: str | None = None

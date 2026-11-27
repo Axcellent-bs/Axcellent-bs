@@ -482,7 +482,18 @@ def place_change(scenes: Sequence[Any]) -> dict[str, Any] | None:
     return {"kind": "actions", "code": PLACE_CHANGE, "scene": first, "detail_ko": detail[:160]}
 
 
-def feasibility(scenes: Sequence[Any], has_character: bool = False) -> list[dict[str, Any]]:
+def cast_other_close(body: str, camera: str, people: int, cast_n: int) -> bool:
+    """11/27 C 등장 캐릭터가 여럿(cast_n ≥ 2): cast 수를 넘는 다른 인물이 가까이 나오나.
+
+    #1911과 같은 방식(군중·와이드면 아님)이지만 다른 인물 낱말은 보지 않는다(동료·친구 같은
+    역할 이름이 cast 캐릭터라서). 낱말 규칙은 더하지 않는다."""
+    other = people > cast_n
+    return (other and not plan_rules.has_word(body, plan_rules.CROWD_WORDS)
+            and not plan_rules.has_word(camera, plan_rules.WIDE_WORDS))  # fmt: skip
+
+
+def feasibility(scenes: Sequence[Any], has_character: bool = False,
+                cast_n: int = 0) -> list[dict[str, Any]]:  # fmt: skip
     """제작 검사 문제 {kind, scene, detail_ko, code?} (엔드카드 장면은 보지 않는다).
 
     scenes: LLM 장면(_SceneOut)처럼 visual·start_frame·end_frame·action_en·camera_en·people·
@@ -497,7 +508,13 @@ def feasibility(scenes: Sequence[Any], has_character: bool = False) -> list[dict
         text = " ".join(str(_get(s, k) or "") for k in ("visual", "start_frame", "end_frame"))
         said = _get(s, "people", 1)
         said = said if isinstance(said, int) and not isinstance(said, bool) else 1
-        if has_character:  # #1911 기준 그대로 (LLM 칸과 글 중 큰 값)
+        if cast_n >= 2:  # 11/27 C 등장 캐릭터 여럿: cast 수를 넘는 다른 인물만
+            camera = f"{_get(s, 'camera_en') or ''} {visual}"
+            people = max(said, people_in_text(text))
+            if cast_other_close(text, camera, people, cast_n):
+                out.append({"kind": "people", "code": CLOSE_PERSON, "scene": n,
+                            "detail_ko": CLOSE_PERSON_KO})  # fmt: skip
+        elif has_character:  # #1911 기준 그대로 (LLM 칸과 글 중 큰 값)
             camera = f"{_get(s, 'camera_en') or ''} {visual}"
             people = max(said, people_in_text(text))
             if plan_rules.close_other_person(text, camera, people):

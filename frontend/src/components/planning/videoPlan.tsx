@@ -9,7 +9,7 @@ import { Tag } from '@/components/planning-common/parts'
 import { CheckLog, RequestRules } from '@/components/planning/PlanChecks'
 import { usePrinting } from '@/lib/print'
 import { svgDataUri } from '@/lib/storyboardSvg'
-import { characterLine, formatChip, versionChip, sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoSvgLine, type VideoPlanView } from '@/lib/videoPlan'
+import { castLineKo, characterLine, formatChip, versionChip, sceneKeyframeLine, sceneTime, videoFallbackLine, videoPlanChip, videoSvgLine, type VideoPlanView } from '@/lib/videoPlan'
 import { goalBlock } from '@/lib/videoGoal'
 import { sceneRole, sceneShares } from '@/lib/videoStoryboard'
 import { orchestrator } from '@/lib/orchestrator'
@@ -66,7 +66,10 @@ export function VideoStoryboard({ v, audience, basis, children, requestText }: {
         <div><dt>길이</dt><dd>{v.durationS}초</dd></div>
         <div><dt>비율</dt><dd>{v.aspect}</dd></div>
         <div><dt>장면</dt><dd>{v.scenes.length}</dd></div>
-        {lead && <div className="sb-lead"><dt>주인공</dt><dd>{lead}</dd></div>}
+        {/* 11/27 등장 캐릭터가 여럿이면 "주인공" 줄 대신 역할 · 외형 줄 (못 읽은 것은 이유) */}
+        {v.cast?.length
+          ? <div className="sb-lead"><dt>등장 캐릭터</dt><dd>{v.cast.map((x) => <span key={x.recordId} className="block">{castLineKo(x)}</span>)}</dd></div>
+          : lead && <div className="sb-lead"><dt>주인공</dt><dd>{lead}</dd></div>}
         {formatChip(v) && <div className="sb-format"><dt>형식</dt><dd><span className="chip sb-format-chip">{formatChip(v)}</span></dd></div>}
         {v.formatId && v.situationKo && <div className="sb-situation"><dt>상황</dt><dd>{v.situationKo}</dd></div>}
         {audience && <div><dt>대상</dt><dd>{audience}</dd></div>}

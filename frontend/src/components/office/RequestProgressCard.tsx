@@ -5,7 +5,7 @@ import { CHARACTER_SKILL, chatCharacterLine, isVideoRequest, unansweredNotice } 
 import { BrandCharacterAsk, useChosenCharacter } from "@/components/office/BrandCharacterAsk";
 import { TONE_CLASS, barCells, brandIdOf, creativeSpot, currentIndex, deptTag, futureLine, headPill, nowLine, peekText, shortLabel, stepState, toneOfCurrent, type CardTone } from "@/lib/requestCardView";
 import { thumbSrc } from "@/lib/creativeRecords";
-import { characterLine } from "@/lib/videoPlan";
+import { castLineKo, characterLine } from "@/lib/videoPlan";
 import { goalLine } from "@/lib/videoGoal";
 import { RequestCreative } from "@/components/office/RequestCreative";
 import { RequestPublish } from "@/components/office/RequestPublish";
@@ -391,7 +391,9 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   const charStep = rows.some((s) => s.skill === CHARACTER_SKILL);
   // 사람 확인을 기다리는 동안은 검사 결과를 그 단계(버튼 위)에만 둔다 (두 번 보이지 않게)
   const humanDeciding = rows.some((s) => s.skill === "human_check" && !!s.decide && !decided.has(s.stepId));
-  const lead = found?.fullPlan ? characterLine(found.fullPlan) : "";
+  // 11/27 등장 캐릭터가 여럿이면 "등장 캐릭터: 주인공 · … / 동료 · …"
+  const castKo = found?.fullPlan?.cast?.length ? found.fullPlan.cast.map(castLineKo).join(" / ") : "";
+  const lead = castKo ? "" : found?.fullPlan ? characterLine(found.fullPlan) : "";
   // 11/23 홍보 영상: [이미지 시트][스토리보드] 대화방 안 패널 · 영상 승인 대기면 [승인 화면 열기] · 기술 검사 (자리만 creativeSpot)
   const creative = <RequestCreative row={row} plan={found?.videoPlan ?? null} />;
   // 끝났으면 머리 영상 카드에, 아니면 영상 단계 줄에 (한 곳에만)
@@ -512,6 +514,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                         {lead && <p className="break-words text-[14px] text-emerald-800">✓ 주인공: {lead}</p>}
                         <RequestRules v={found.fullPlan} />
                         <CheckLog v={found.fullPlan} />
+                        {castKo && <p className="break-words text-[14px] text-emerald-800">✓ 등장 캐릭터: {castKo}</p>}
                       </div>
                     )}
                     {isInsight && proposal && !plan && (

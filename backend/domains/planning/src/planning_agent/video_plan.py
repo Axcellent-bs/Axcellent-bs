@@ -39,11 +39,12 @@ from ax_contracts.schemas.planning import (
     CheckAttempt,
     CheckProblem,
     PlanAdjustment,
+    VideoCastLine,
     VideoMediaHints,
     VideoPlan,
     VideoScene,
 )
-from ax_workflow.models import Proposal
+from ax_workflow.models import CompanyCharacter, Proposal
 from planning_agent import plan_checks, plan_format, storyboard_svg
 
 log = logging.getLogger("ax.planning")
@@ -214,6 +215,9 @@ def look_problems(p: Proposal, scenes: list[tuple[int, str]]) -> list[tuple[int,
     if c is None or not c.look_en.strip():
         return []
     known = f"{c.look_en} {c.summary_ko}".casefold()
+    # 11/27 C: 등장 캐릭터가 여럿이면 누구 외형에든 있는 낱말은 지어낸 외형이 아니다
+    known += " " + " ".join(f"{x.look_en} {x.summary_ko}" for x in p.cast_characters.values()
+                            ).casefold()  # fmt: skip
     extra = [w for w in EXTRA_LOOK_WORDS if not _has_word(known, w.casefold())]
     out: list[tuple[int, str]] = []
     for n, text in scenes:
@@ -519,7 +523,57 @@ def finish(p: Proposal, plan: VideoPlan) -> VideoPlan:
     if plan.purpose in PURPOSE_DIRECTION:
         goal = AD
     cta = plan.cta_ko or GOAL_CTA[goal]
-    return plan.model_copy(update={"goal": goal, "cta_ko": cta[:40]})
+    return plan.model_copy(update={"goal": goal, "cta_ko": cta[:40], "cast": cast_lines(p)})
+
+
+# ---------------------------------------------------------------- 등장 캐릭터 여럿 (11/27 C)
+CAST_RULE = (
+    "- 등장 캐릭터는 데이터 블록 cast의 인물(역할·외형)이다. 장면 visual·start_frame·end_frame에 "
+    "그 장면에 나오는 캐릭터를 역할 이름으로 적는다(예: 주인공이 …, 동료가 …). 캐릭터마다 외형을 "
+    "cast 그대로 두고 바꾸거나 섞지 않는다. 의뢰에 나온 사람 수와 cast 수가 다르면 cast를 따른다\n"
+)
+
+
+def cast_entries(p: Proposal) -> list[tuple[Any, CompanyCharacter | None, str]]:
+    """(cast 한 명, 읽은 캐릭터 또는 None, 못 읽은 이유). 2명 미만이면 [] (지금 한 명 흐름)."""
+    if len(p.cast) < 2:
+        return []
+    out = []
+    for i, m in enumerate(p.cast):
+        c = p.cast_characters.get(m.record_id)
+        if c is None and i == 0:
+            c = p.company_character
+        out.append((m, c, "" if c is not None else p.cast_reasons.get(m.record_id, "read_failed")))
+    return out
+
+
+def cast_lines(p: Proposal) -> list[VideoCastLine]:
+    """VideoPlan.cast (화면 "등장 캐릭터" 줄). 2명 미만이면 []."""
+    lines = []
+    for m, c, why in cast_entries(p):
+        reason = why if why in ("read_failed", "gate_held", "no_look") else "read_failed"
+        lines.append(VideoCastLine(
+            record_id=m.record_id, role_ko=m.role_ko,
+            summary_ko=_short(c.summary_ko, 300) if c else "",
+            look=("photo" if c.photo else "illustration") if c else "",
+            reason="" if c else reason,  # type: ignore[arg-type]
+        ))  # fmt: skip
+    return lines
+
+
+def cast_data(p: Proposal) -> list[dict[str, Any]]:
+    """제작안 LLM 데이터 칸 cast (읽은 캐릭터만, 외형은 마케팅 시트 값 그대로)."""
+    return [
+        {"role": m.role_ko or ("주인공" if i == 0 else f"캐릭터 {i + 1}"),
+         "look_en": _short(c.look_en, LOOK_EN_MAX), "summary_ko": c.summary_ko,
+         "photorealistic": c.photo}
+        for i, (m, c, _) in enumerate(cast_entries(p)) if c is not None
+    ]  # fmt: skip
+
+
+def cast_count(p: Proposal) -> int:
+    """제작 검사가 "다른 인물"로 세지 않는 인원 (읽은 등장 캐릭터 수, 2명 미만이면 0)."""
+    return len(cast_data(p))
 
 
 def fun_timings(duration: int, n: int) -> list[tuple[int, int]]:
@@ -1446,7 +1500,8 @@ def plan_problems(p: Proposal, got: _PlanOut) -> list[dict[str, Any]]:
     """검사 기록에 남는 문제 (제작 검사 + 못 지킨 의뢰 지시). 의뢰 지시는 B와 같은 검사 결과."""
     checked = plan_checks.check_rules(_rules(p, got), _check_scenes(got), got.script,
                                       _company()["name"])  # fmt: skip
-    out = plan_checks.feasibility(got.scenes, has_character=bool(cast_fields(p)))
+    out = plan_checks.feasibility(got.scenes, has_character=bool(cast_fields(p)),
+                                  cast_n=cast_count(p))  # fmt: skip
     return out + [{**plan_checks.rule_problem(r), "rule": r} for r in checked if not r["kept"]]
 
 
@@ -1568,6 +1623,9 @@ def _plan_prompt(
             "summary_ko": p.company_character.summary_ko,
             "photorealistic": p.company_character.photo,
         }
+    cast_rows = cast_data(p)
+    if len(cast_rows) >= 2:  # 11/27 C 등장 캐릭터 표 (역할 · 외형 · 그림체, 데이터로만)
+        data["cast"] = cast_rows
     if p.request_text:  # 11/26 의뢰문(고객 글)은 데이터 칸으로만. 지시문에는 붙이지 않는다
         data["request_text"] = p.request_text[:REQUEST_TEXT_MAX]
     situations = plan_format.situations(p)
@@ -1583,6 +1641,7 @@ def _plan_prompt(
         setting_rule=setting_rule(style_, b),
         direction=direction(style_, exposure, purpose, goal_of(p))
         + (CHARACTER_RULE if company else "")
+        + (CAST_RULE if len(cast_rows) >= 2 else "")
         + (REQUEST_RULE if p.request_text else "")
         + (plan_format.prompt_block(card) if card else ""),
     )  # fmt: skip
@@ -1774,6 +1833,18 @@ COMPANY = "company_character"
 LOOK_LABEL = {"photo": "실사 그대로", "illustration": "그림체 그대로"}
 
 
+CAST_REASON_KO = {"read_failed": "못 읽음", "gate_held": "읽기 승인 대기",
+                  "no_look": "외형 글 없음"}  # fmt: skip
+
+
+def cast_line_ko(x: VideoCastLine) -> str:
+    """등장 캐릭터 한 줄 "동료 · 짧은 머리 남성 · 실사 그대로" / "동료 · 못 읽음" (화면과 같다)."""
+    role = x.role_ko or "캐릭터"
+    if x.reason:
+        return f"{role} · {CAST_REASON_KO.get(x.reason, '못 읽음')}"
+    return " · ".join(t for t in (role, x.summary_ko, LOOK_LABEL.get(x.look, "")) if t)
+
+
 def character_line(v: VideoPlan) -> str:
     """주인공 한 줄 (화면 lib/videoPlan.ts characterLine과 같은 문구)."""
     if v.character_source != COMPANY:
@@ -1827,7 +1898,10 @@ def markdown(v: VideoPlan) -> str:
         "",
         f"**대본**: {v.script}",
         "",
-        *([f"**주인공**: {character_line(v)}", ""] if v.character_source == COMPANY else []),
+        *([f"**주인공**: {character_line(v)}", ""]
+          if v.character_source == COMPANY and not v.cast else []),
+        *([f"**등장 캐릭터**: {' / '.join(cast_line_ko(x) for x in v.cast)}", ""]
+          if v.cast else []),
         "| 장면 | 시간 | 화면 구성 | 자막 |",
         "| --- | --- | --- | --- |",
     ]
