@@ -1,0 +1,93 @@
+{
+  "cases": [
+    {
+      "id": "d01",
+      "kind": "files_done",
+      "message": "shop-web의 배너 컴포넌트(Banner.tsx)에 발행일(publishedAt)을 보여 주는 문장을 추가해 줘. 완료 기준은 배너에 발행일이 보이는 거야.",
+      "repo_files": {
+        "shop-web/src/components/Banner.tsx": "export function Banner() {\n  return <div>배너</div>\n}\n",
+        "shop-web/src/components/Footer.tsx": "export function Footer() {\n  return <footer>푸터</footer>\n}\n",
+        "shop-web/src/components/Header.tsx": "export function Header() {\n  return <header>헤더</header>\n}\n"
+      },
+      "expected_paths": ["shop-web/src/components/Banner.tsx"],
+      "expected_done_keywords": ["발행일"]
+    },
+    {
+      "id": "d02",
+      "kind": "files_done",
+      "message": "dashboard-api의 회원 목록 응답(members.py)에 가입일(joined_at) 필드를 추가해 줘. 화면 members-web의 MemberTable.tsx에서 그 칸을 보여 줘야 해. 완료 기준: 목록 화면에 가입일 칸이 보이고, API 응답에 joined_at이 들어 있어야 해.",
+      "repo_files": {
+        "dashboard-api/src/members.py": "def list_members():\n    return []\n",
+        "dashboard-api/src/orders.py": "def list_orders():\n    return []\n",
+        "members-web/src/MemberTable.tsx": "export function MemberTable() {\n  return <table />\n}\n",
+        "members-web/src/OrderTable.tsx": "export function OrderTable() {\n  return <table />\n}\n"
+      },
+      "expected_paths": ["dashboard-api/src/members.py", "members-web/src/MemberTable.tsx"],
+      "expected_done_keywords": ["가입일", "joined_at"]
+    },
+    {
+      "id": "d03",
+      "kind": "files_done",
+      "message": "shop-web 결제 완료 화면(CheckoutDone.tsx)에서 주문 번호를 복사하는 버튼을 추가해 줘. 완료 기준은 버튼을 누르면 주문 번호가 클립보드에 복사되는 거야.",
+      "repo_files": {
+        "shop-web/src/pages/CheckoutDone.tsx": "export function CheckoutDone() {\n  return <div>주문 완료</div>\n}\n",
+        "shop-web/src/pages/Cart.tsx": "export function Cart() {\n  return <div>장바구니</div>\n}\n",
+        "shop-web/src/pages/ProductDetail.tsx": "export function ProductDetail() {\n  return <div>상품</div>\n}\n"
+      },
+      "expected_paths": ["shop-web/src/pages/CheckoutDone.tsx"],
+      "expected_done_keywords": ["복사"]
+    },
+    {
+      "id": "d04",
+      "kind": "files_done",
+      "message": "members-web의 알림 설정 화면(NotificationSettings.tsx)에서, 야간(22시~8시)에는 푸시 알림을 보내지 않는 토글을 추가해 줘. API는 members-web이 부르는 dashboard-api의 notifications.py에 야간 여부 필드를 저장해야 해. 완료 기준: 토글을 켜면 야간에 푸시가 안 가고, API가 저장한 값을 다시 읽어 와도 토글 상태가 유지돼.",
+      "repo_files": {
+        "members-web/src/NotificationSettings.tsx": "export function NotificationSettings() {\n  return <div>알림 설정</div>\n}\n",
+        "members-web/src/ProfileSettings.tsx": "export function ProfileSettings() {\n  return <div>프로필</div>\n}\n",
+        "dashboard-api/src/notifications.py": "def get_notification_settings():\n    return {}\n",
+        "dashboard-api/src/members.py": "def list_members():\n    return []\n"
+      },
+      "expected_paths": [
+        "members-web/src/NotificationSettings.tsx",
+        "dashboard-api/src/notifications.py"
+      ],
+      "expected_done_keywords": ["야간", "유지"]
+    },
+    {
+      "id": "c01",
+      "kind": "ci_cause",
+      "message": "CI 왜 실패했어? 어느 파일, 몇 번째 줄을 고쳐야 해?",
+      "check_name": "typecheck",
+      "ci_log": "2026-11-27T01:00:00.0000000Z Run npm run typecheck\n2026-11-27T01:00:01.0000000Z ##[error]src/components/Banner.tsx(2,10): error TS2339: Property 'publishedAt' does not exist on type 'BannerProps'. Did you mean 'published_at'?\n",
+      "expected_file": "Banner.tsx",
+      "expected_line": 2
+    },
+    {
+      "id": "c02",
+      "kind": "ci_cause",
+      "message": "CI가 막혔는데 원인이 뭐야? 고칠 파일이랑 줄 번호 알려 줘.",
+      "check_name": "lint",
+      "ci_log": "2026-11-27T01:05:00.0000000Z Run npm run lint\n2026-11-27T01:05:02.0000000Z ##[error]src/components/ProductCard.tsx\n2026-11-27T01:05:02.0000000Z   15:7  error  'gapPx' is not defined  no-undef\n2026-11-27T01:05:02.0000000Z ✖ 1 problem (1 error, 0 warnings)\n",
+      "expected_file": "ProductCard.tsx",
+      "expected_line": 15
+    },
+    {
+      "id": "c03",
+      "kind": "ci_cause",
+      "message": "CI 로그 봤어? 왜 떨어졌는지랑 고칠 파일·줄을 알려 줘.",
+      "check_name": "test",
+      "ci_log": "2026-11-27T01:10:00.0000000Z Run uv run pytest -q\n2026-11-27T01:10:05.0000000Z FAILED domains/finance/tests/test_vat.py::test_half_won_rounds_up - assert 1000 == 1001\n2026-11-27T01:10:05.0000000Z domains/finance/tests/test_vat.py:42: in test_half_won_rounds_up\n2026-11-27T01:10:05.0000000Z     assert round_vat(2001) == 1001\n",
+      "expected_file": "test_vat.py",
+      "expected_line": 42
+    },
+    {
+      "id": "c04",
+      "kind": "ci_cause",
+      "message": "이 PR CI 실패 이유 설명해 줘. 어느 파일 몇 번째 줄인지도.",
+      "check_name": "typecheck",
+      "ci_log": "2026-11-27T01:15:00.0000000Z Run npm run typecheck\n2026-11-27T01:15:03.0000000Z ##[error]src/pages/CheckoutDone.tsx(28,5): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n2026-11-27T01:15:03.0000000Z ##[error]src/pages/Cart.tsx(5,1): error TS6133: 'useMemo' is declared but its value is never read.\n",
+      "expected_file": "CheckoutDone.tsx",
+      "expected_line": 28
+    }
+  ]
+}
