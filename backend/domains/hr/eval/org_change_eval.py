@@ -8,13 +8,17 @@
 결과: results/org_change_eval.json
 """
 
-# 주의(2026-11-16): 근거 카드 검색 코드(retrieval)가 아카이브 AI(domains/archive)로 옮겨져
-# 이 스크립트의 retrieval import는 지금 돌지 않는다(CI 대상 아님). 3단계에서
-# 아카이브의 find_similar_decisions를 부르도록 고친다.
+# 주의(2026-11-16, 2026-11-27 재확인): 근거 카드 검색 코드(retrieval)가 아카이브
+# AI(domains/archive)로 옮겨지면서 `hr_agent.retrieval`도 없어지고 `build_services`도
+# `dense` 인자를 더는 받지 않는다. 9번(근거 카드 찾기, `eval_basis`)은 이 사실만으로는
+# 돌지 않는다(CI 대상 아님. `eval_basis` 호출 시 바로 알 수 있는 에러로 막아 둔다).
+# 3단계에서 아카이브의 find_similar_decisions를 부르도록 고친다.
+# 10번(발령 문장 정리, `eval_parse`)과 11번(요약 설명문, `eval_describe`)은 retrieval을
+# 쓰지 않아 영향이 없다 — 아래는 그 두 단계가 돌 수 있도록 깨진 retrieval 생성자만
+# 제거한 것이다(run_eval import 경로 수정과 함께, #소통 2026-11-27 준하 제안).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
@@ -25,9 +29,29 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 BACKEND = HERE.parents[2]
-sys.path.insert(0, str(HERE))
 
-from run_eval import load_env  # noqa: E402
+
+def load_env() -> dict[str, str]:
+    """프로세스 환경에 backend/.env 의 값을 얹는다. 파일 안의 값은 출력하지 않는다.
+
+    `domains/archive/eval/run_eval.py`의 같은 이름 함수와 내용이 같다(둘 다 독립된
+    작은 평가용 헬퍼라, 부서끼리 import하지 않는다는 규칙(CLAUDE.md)을 지키려고
+    복사해 둔다. `run_eval.py`는 아카이브 AI로 옮겨진 뒤 `domains/hr/eval/`에
+    더는 없어 예전처럼 같은 폴더에서 import할 수 없다).
+    """
+    env = dict(os.environ)
+    path = BACKEND / ".env"
+    if path.exists():
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            value = value.split(" #")[0].strip().strip('"')
+            if value:
+                env[key.strip()] = value
+    return env
+
 
 os.environ.update(load_env())
 os.environ["AGENT_TEMPLATE_MOCK"] = "1"
@@ -35,8 +59,6 @@ os.environ["HR_MOCK"] = "1"
 os.environ["AX_ORG_CONFIG"] = str(BACKEND / "config/tenants/catbooks/org.yaml")
 
 from fastapi.testclient import TestClient  # noqa: E402
-from hr_agent.retrieval.cards import DenseCardSearch  # noqa: E402
-from hr_agent.retrieval.dense import DenseIndex, LLMEmbedder  # noqa: E402
 
 from ax_agent_template.llm import LLMClient, LLMSettings  # noqa: E402
 from hr_agent.config import HrSettings, ManualClock  # noqa: E402
@@ -55,24 +77,12 @@ UP = ("늘", "증가", "더해", "들어", "합류", "입사", "충원")
 _n = 0
 
 
-class Counting:
-    """임베딩 호출 횟수(텍스트 수)를 센다."""
-
-    def __init__(self, inner) -> None:
-        self.inner = inner
-        self.texts = 0
-
-    async def embed(self, texts, *args, **kwargs):
-        self.texts += len(texts)
-        return await self.inner.embed(texts, *args, **kwargs)
-
-
 class Env:
     def __init__(self) -> None:
         self.tmp = tempfile.mkdtemp()
-        hs, ms = LLMSettings.from_env("hr"), LLMSettings.from_env("memory")
-        if not (hs.model and ms.embed_model):
-            raise SystemExit("LLM·임베딩 설정이 없다(backend/.env)")
+        hs = LLMSettings.from_env("hr")
+        if not hs.model:
+            raise SystemExit("LLM 설정이 없다(backend/.env)")
         self.llm = LLMClient("hr", hs)
         self.llm_calls = 0
         orig = self.llm.structured
@@ -82,15 +92,13 @@ class Env:
             return await orig(*a, **k)
 
         self.llm.structured = counted  # type: ignore[method-assign]
-        self.embedder = Counting(LLMEmbedder(LLMClient("memory", ms)))
-        self.dense = DenseCardSearch(
-            DenseIndex(str(Path(self.tmp) / "v.db"), self.embedder, ms.embed_model)
-        )
+        # 9번(근거 카드 찾기)이 쓰던 dense 검색은 아카이브 분리 뒤 build_services가
+        # dense 인자를 받지 않아 여기서는 만들지 않는다. 9번을 돌리면 eval_basis가
+        # 바로 알 수 있는 에러로 막는다(위 주석 참고).
         self.svc = build_services(
             HrSettings(mock=True),
             clock=ManualClock(datetime(2026, 11, 3, 9, 0, tzinfo=UTC)),
             llm=self.llm,
-            dense=self.dense,
         )
         set_services(self.svc)
         self.client = TestClient(app)
@@ -119,71 +127,17 @@ def pct(n: int, d: int) -> float | None:
 
 # ---------------------------------------------------------------- 9번
 def eval_basis(env: Env) -> dict:
-    ids: dict[str, str] = {}
-    for c in CASES["cards"]:
-        rec = {
-            "context_id": f"ctx_{c['id']}",
-            "kind": c["kind"],
-            "summary": c["summary"],
-            "decision_reason": c["reason"],
-            "alternatives_considered": c["alternatives"],
-            "source_refs": [f"eval:{c['id']}"],
-            "author": "planning",
-        }
-        res = env.call("record_case", rec, "mock:planning")
-        ids[c["id"]] = res["output"]["card_id"]
-    rejected = {ids[c["id"]] for c in CASES["cards"] if c["kind"] == "decision_rejected"}
-    back = {v: k for k, v in ids.items()}
-    pool = [
-        x
-        for x in asyncio.run(env.svc.memory.list_cards(area=None, states=["active"]))
-        if x.kind == "decision"
-    ]
-    rows = []
-    for q in CASES["basis_queries"]:
-        res = env.call("find_org_change_basis", {"reason": q["query"], "limit": 3})
-        cands = res["output"]["candidates"]
-        raw = asyncio.run(env.dense.search(q["query"], pool, k=len(pool), min_cosine=0.0))
-        rows.append(
-            {
-                **q,
-                "returned": [
-                    (back[c["card_id"]], round(c["similarity"], 3), c["rejected"]) for c in cands
-                ],
-                "raw": [(back[card.card_id], round(score, 3)) for card, score in raw],
-            }
-        )
-    answerable = [r for r in rows if r["answer"]]
-    none = [r for r in rows if not r["answer"]]
-    top3 = sum(1 for r in answerable if r["answer"] in [x[0] for x in r["returned"]])
-    top1 = sum(1 for r in answerable if r["returned"] and r["returned"][0][0] == r["answer"])
-    silent = sum(1 for r in none if not r["returned"])
-    near = [r for r in none if r["near"]]
-    near_silent = sum(1 for r in near if not r["returned"])
-    flag_total = flag_ok = 0
-    for r in answerable:
-        for cid, _, rej in r["returned"]:
-            if cid == r["answer"]:
-                flag_total += 1
-                flag_ok += int(rej == (ids[cid] in rejected))
-    sweep = {}
-    for thr in SWEEP:
-        hit = sum(1 for r in answerable if r["answer"] in [c for c, s in r["raw"] if s >= thr][:3])
-        quiet = sum(1 for r in none if not [c for c, s in r["raw"] if s >= thr])
-        sweep[str(thr)] = {"top3": pct(hit, len(answerable)), "silent": pct(quiet, len(none))}
-    summary = {
-        "answerable": len(answerable),
-        "top3_hit": top3,
-        "top3_pct": pct(top3, len(answerable)),
-        "top1_pct": pct(top1, len(answerable)),
-        "no_answer": len(none),
-        "silent": silent,
-        "silent_pct": pct(silent, len(none)),
-        "near_silent": f"{near_silent}/{len(near)}",
-        "rejected_flag_ok": f"{flag_ok}/{flag_total}",
-        "sweep": sweep,
-    }
-    return {"summary": summary, "rows": rows}
+    """근거 카드 찾기(9번) 평가. 현재는 돌지 않는다.
+
+    아카이브 분리 뒤 `hr_agent.retrieval`과 `build_services`의 `dense` 인자가
+    없어져, 이 함수가 쓰던 임베딩 기반 근거 카드 검색을 더는 만들 수 없다.
+    아카이브의 `find_similar_decisions`를 부르도록 고치는 3단계 작업 전까지는
+    막아 둔다(파일 맨 위 주석 참고). parse·describe(10·11번)는 영향이 없다.
+    """
+    raise SystemExit(
+        "9번(근거 카드 찾기)은 아카이브 분리 뒤 아직 못 고쳤다(파일 맨 위 주석 참고). "
+        "parse·describe만 돌린다: python org_change_eval.py parse (또는 describe)"
+    )
 
 
 # --------------------------------------------------------------- 10번
@@ -398,7 +352,9 @@ def main() -> None:
         result["parse"] = eval_parse(env)
     if which in ("describe", "all"):
         result["describe"] = eval_describe(env)
-    result["calls"] = {"embedding_texts": env.embedder.texts, "llm_calls": env.llm_calls}
+    # embedding_texts: 9번(근거 카드 찾기)이 돌 때만 의미가 있었다. 지금은 9번을 돌리지
+    # 않으므로(위 주석 참고) 항상 None이다.
+    result["calls"] = {"embedding_texts": None, "llm_calls": env.llm_calls}
     result["verdict"] = verdict(result)
     RESULT.parent.mkdir(exist_ok=True)
     RESULT.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
