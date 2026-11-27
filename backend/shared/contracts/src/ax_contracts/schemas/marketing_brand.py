@@ -24,6 +24,20 @@ BRAND_CHARACTER_MARK_SKILL = "brand_character_mark"
 BRAND_CHARACTER_UNMARK_SKILL = "brand_character_unmark"
 MAX_BRAND_CHARACTERS = 3
 MAX_BRAND_NAME = 80
+# 11/27 홍보 영상 의뢰의 등장 캐릭터(cast) 최대 수와 역할 글 길이
+MAX_CAST = 3
+MAX_CAST_ROLE = 20
+
+
+class CastMember(AxModel):
+    """의뢰 등장 캐릭터 한 명(11/27): 회사 캐릭터 기록(CR-…)과 역할(예 주인공·동료·마스코트).
+
+    사람이 의뢰 화면에서 고른 값이다(고객 글에서 만들지 않는다). 목록의 첫 번째가 주인공이고
+    `brand_character_record_id`와 같다. 종류(실사 가상 인물·그림 캐릭터·실제 사람 사진)는 기록마다
+    지금 규칙 그대로다."""
+
+    record_id: str = Field(pattern=RECORD_ID_PATTERN)
+    role_ko: str = Field(default="", max_length=MAX_CAST_ROLE)
 
 
 class BrandCharacter(AxModel):
