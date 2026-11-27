@@ -926,6 +926,18 @@ class PlanAdjustment(AxModel):
     why_ko: str = Field(min_length=1, max_length=160)  # 이유
 
 
+class VideoCastLine(AxModel):
+    """제작안의 등장 캐릭터 한 줄 (11/27). 기획이 마케팅에서 읽은 외형 요약(summary_ko)과 그림체.
+
+    못 읽었으면 summary_ko는 비고 reason에 이유 코드(character_source_reason과 같은 값)."""
+
+    record_id: str = Field(pattern=r"^CR-[0-9a-f]{12}$")
+    role_ko: str = Field(default="", max_length=20)
+    summary_ko: str = Field(default="", max_length=300)
+    look: Literal["", "photo", "illustration"] = ""
+    reason: Literal["", "read_failed", "gate_held", "no_look"] = ""
+
+
 class VideoPlan(AxModel):
     """기획 → 마케팅 영상 제작안: 콘셉트·대본·장면별 스토리보드·영상 생성 프롬프트.
 
@@ -1001,6 +1013,10 @@ class VideoPlan(AxModel):
     # 쓰는 장면 → 행동 문구, AXcellent 자사는 B2B 문제 → 해결 → 문의). 기존 purpose·promo_style·
     # brand_exposure는 그대로 두고 계속 채운다(마케팅·예전 데이터 호환). None = 예전 제작안
     goal: Literal["fun", "info", "promo", "ad"] | None = None
+    # 아래는 예전 제작안은 없다 (11/27). 등장 캐릭터가 2명 이상인 의뢰의 캐릭터 줄(의뢰 cast 순서,
+    # 첫 번째 = 주인공). 화면 "등장 캐릭터" 줄(역할 · 외형 · 그림체, 못 읽은 것은 이유).
+    # 한 명·없음은 []
+    cast: list[VideoCastLine] = Field(default_factory=list, max_length=MAX_CAST)
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:
