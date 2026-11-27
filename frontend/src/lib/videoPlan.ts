@@ -53,6 +53,8 @@ export interface VideoPlanView {
   characterSource?: 'company_character' | 'brand'
   characterKo?: string // 회사 캐릭터 외형 요약 (마케팅 시트 summary_ko)
   characterLook?: 'photo' | 'illustration'
+  /** 11/27 등장 캐릭터 여럿 (계약 VideoPlan.cast, 2명 이상일 때만). 첫 번째 = 주인공 */
+  cast?: VideoCastLineView[]
   requestRules?: RequestRuleView[] // 11/26 의뢰 연출 지시와 지켰는지 (계약 VideoPlan.request_rules). 없으면 칸 없음
   version?: number // 11/26 제작안 판 (계약 VideoPlan.version). 1판·예전 제작안은 칸 없음
   formatId?: string // 11/26 따른 형식 카드 (계약 VideoPlan.format_id·format_name). 없으면 칸 없음
@@ -164,6 +166,29 @@ function toRules(raw: unknown): RequestRuleView[] {
 
 const LOOK_LABEL: Record<'photo' | 'illustration', string> = { photo: '실사 그대로', illustration: '그림체 그대로' }
 /** "주인공" 줄 (기획 video_plan.character_line과 같은 문구). 예전 제작안(칸 없음)은 '' (줄을 그리지 않는다) */
+export interface VideoCastLineView { recordId: string; roleKo: string; summaryKo: string; look: '' | 'photo' | 'illustration'; reason: '' | 'read_failed' | 'gate_held' | 'no_look' }
+const CAST_REASON_KO: Record<string, string> = { read_failed: '못 읽음', gate_held: '읽기 승인 대기', no_look: '외형 글 없음' }
+/** 등장 캐릭터 한 줄 "동료 · 짧은 머리 남성 · 실사 그대로" / "동료 · 못 읽음" (기획 video_plan.cast_line_ko와 같다) */
+export function castLineKo(x: VideoCastLineView): string {
+  const role = x.roleKo || '캐릭터'
+  if (x.reason) return `${role} · ${CAST_REASON_KO[x.reason] ?? '못 읽음'}`
+  return [role, x.summaryKo, x.look ? LOOK_LABEL[x.look] : ''].filter(Boolean).join(' · ')
+}
+function toCast(raw: unknown): VideoCastLineView[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((x) => {
+    const o = obj(x)
+    const recordId = o ? str(pick(o, 'recordId', 'record_id')) : ''
+    if (!o || !/^CR-[0-9a-f]{12}$/.test(recordId)) return []
+    const look = str(o.look), reason = str(o.reason)
+    return [{
+      recordId, roleKo: str(pick(o, 'roleKo', 'role_ko')), summaryKo: str(pick(o, 'summaryKo', 'summary_ko')),
+      look: look === 'photo' || look === 'illustration' ? look : '',
+      reason: reason === 'read_failed' || reason === 'gate_held' || reason === 'no_look' ? reason : '',
+    } as VideoCastLineView]
+  }).slice(0, 3)
+}
+
 export function characterLine(v: Pick<VideoPlanView, 'characterSource' | 'characterKo' | 'characterLook' | 'characterSourceReason'>): string {
   if (!v.characterSource) return ''
   if (v.characterSource !== 'company_character') {
@@ -318,6 +343,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
   const characterKo = str(pick(o, 'characterKo', 'character_ko'))
   const look = str(pick(o, 'characterLook', 'character_look'))
   const rules = toRules(pick(o, 'requestRules', 'request_rules'))
+  const castLines = toCast(o.cast)
   const checkLog = toCheckLog(pick(o, 'checkLog', 'check_log'))
   const adjustments = toAdjustments(o.adjustments)
   const formatId = str(pick(o, 'formatId', 'format_id'))
@@ -343,6 +369,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     ...(source === 'company_character' && characterKo ? { characterKo } : {}),
     ...(source === 'company_character' && (look === 'photo' || look === 'illustration') ? { characterLook: look } : {}),
     ...(rules.length ? { requestRules: rules } : {}),
+    ...(castLines.length >= 2 ? { cast: castLines } : {}),
     ...((int(o.version) ?? 1) >= 2 ? { version: int(o.version) as number } : {}),
     ...(formatId ? { formatId, ...(formatName ? { formatName } : {}), ...(situationKo ? { situationKo } : {}) } : {}),
     ...(checkLog.length ? { checkLog } : {}),

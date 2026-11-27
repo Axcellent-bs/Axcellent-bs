@@ -454,6 +454,8 @@ class ProposalMixin:
                 past=[ProposalPast(**x.model_dump()) for x in inp.past],
                 options=options, scale=scale,
                 brand_character_record_id=inp.brand_character_record_id,
+                # 11/27 등장 캐릭터(사람이 의뢰 화면에서 고른 것, 첫 번째 = 주인공)
+                cast=list(inp.cast) if len(inp.cast) >= 2 else [],
                 request_text=inp.request_text if requester == "orchestrator" else None,
                 format_ids=list(inp.format_ids),
                 humor_situations=[HumorSituation(text_ko=s.text_ko, format_id=s.format_id)
@@ -485,7 +487,14 @@ class ProposalMixin:
         if p is None:
             return res
         writer = self._proposal_writer  # 테스트 가짜는 llm이 없다 → 규칙 제작안
-        character, why = await self._company_character_why(p)
+        if len(p.cast) >= 2:  # 11/27 C: 등장 캐릭터 모두 (주인공 = cast[0])
+            looks, whys = await self._cast_characters(p)
+            lead = p.cast[0].record_id
+            character, why = looks.get(lead), whys.get(lead, "")
+            p = p.model_copy(update={"cast_characters": looks, "cast_reasons": whys})
+        else:
+            looks, whys = {}, {}
+            character, why = await self._company_character_why(p)
         if character is not None:
             p = p.model_copy(update={"company_character": character})
         video = await video_plan.write(getattr(writer, "llm", None), p, _ctx(p))
@@ -496,6 +505,10 @@ class ProposalMixin:
             q = _find(s, pid)
             if q is not None and q.company_character is None and character is not None:
                 q.company_character = character
+            if q is not None and looks and not q.cast_characters:
+                q.cast_characters, q.cast_reasons = dict(looks), dict(whys)
+            elif q is not None and whys and not q.cast_reasons:
+                q.cast_reasons = dict(whys)
             if q is not None and q.video_plan is None:
                 q.video_plan = video
             return ActionResult(outcome="created", output=res.output)
@@ -567,6 +580,23 @@ class ProposalMixin:
             return p.company_character, ""
         if not p.brand_character_record_id:
             return None, "no_record_id"
+        return await self._read_character(p, p.brand_character_record_id)
+
+    async def _cast_characters(
+        self: Any, p: Proposal
+    ) -> tuple[dict[str, CompanyCharacter], dict[str, str]]:
+        """11/27 C 등장 캐릭터마다 외형을 마케팅 A2A로 동시에 읽는다 (호출마다 같은 시간 상한,
+        MarketingBrief.timeout). 못 읽은 캐릭터는 이유 코드를 남기고 나머지로 진행한다."""
+        if len(p.cast) < 2:
+            return {}, {}
+        got = await asyncio.gather(*(self._read_character(p, m.record_id) for m in p.cast))
+        looks = {m.record_id: c for m, (c, _) in zip(p.cast, got, strict=True) if c is not None}
+        whys = {m.record_id: w for m, (c, w) in zip(p.cast, got, strict=True) if c is None and w}
+        return looks, whys
+
+    async def _read_character(
+        self: Any, p: Proposal, record_id: str
+    ) -> tuple[CompanyCharacter | None, str]:
         read = getattr(self._marketing, "character", None)
         if read is None:
             got: Any = "no_reader"
@@ -576,7 +606,7 @@ class ProposalMixin:
             own = company_scope.active() or getattr(self, "company", None) or self.tenant_id
             try:
                 with company_scope.using(own):
-                    got = await read(_ctx(p), p.brand_character_record_id)
+                    got = await read(_ctx(p), record_id)
             except Exception as exc:  # noqa: BLE001 - 못 읽으면 회사 브랜드로 (종류만 로그)
                 got = type(exc).__name__
         if isinstance(got, CompanyCharacter):

@@ -147,5 +147,7 @@ test("끝남이면 머리 영상 카드: [영상 열기](큰 버튼) + 이미지
 });
 
 test("끝난 제작안 줄: 주인공 · 의뢰 지시 · 제작 검사 (사람 확인 중이면 그 단계에만)", () => {
-  assert.match(card, /isInsight && found\?\.fullPlan && !humanDeciding && \([\s\S]{0,200}주인공: \{lead\}[\s\S]{0,120}<RequestRules v=\{found\.fullPlan\} \/>\s*<CheckLog v=\{found\.fullPlan\} \/>/);
+  // 11/27 바뀐 기대값: 목적 한 줄(#1966 goalLine)이 주인공 줄 앞에 들어가 거리 200자 → 340자
+  // (같은 블록 순서는 그대로 본다. CI는 node 시험을 돌리지 않아 #1966 때 놓쳤다)
+  assert.match(card, /isInsight && found\?\.fullPlan && !humanDeciding && \([\s\S]{0,340}주인공: \{lead\}[\s\S]{0,120}<RequestRules v=\{found\.fullPlan\} \/>\s*<CheckLog v=\{found\.fullPlan\} \/>/);
 });

@@ -251,7 +251,9 @@ test("의뢰 지시는 기획 화면·카드 안 기획서·의뢰 카드 사람
   const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
   assert.match(read("../components/planning/videoPlan.tsx"), /<RequestRules v=\{v\} \/>/);
   assert.match(read("../components/office/InlineDoc.tsx"), /<RequestRules v=\{plan\} \/>/);
-  assert.match(read("../components/office/RequestProgressCard.tsx"), /s\.skill === "human_check" && found\?\.fullPlan[\s\S]{0,80}<RequestRules v=\{found\.fullPlan\} \/>/);
+  // 11/27 바뀐 기대값: 사람 확인 블록 안 목적 한 줄(#1966 goalLine)이 RequestRules 앞에 들어가 거리 80자 → 260자
+  // (같은 블록 안에 RequestRules가 있는지는 그대로 본다. CI는 node 시험을 돌리지 않아 #1966 때 놓쳤다)
+  assert.match(read("../components/office/RequestProgressCard.tsx"), /s\.skill === "human_check" && found\?\.fullPlan[\s\S]{0,260}<RequestRules v=\{found\.fullPlan\} \/>/);
 });
 
 test("제작 검사 기록 (계약 check_log·adjustments): 1차 ✕ → 2차 ✓ = 다시 써서 통과 · 달라진 점 · 예전 제작안 없음", () => {
