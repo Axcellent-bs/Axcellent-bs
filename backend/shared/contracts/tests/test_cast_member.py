@@ -29,6 +29,21 @@ def test_cast_round_trips_and_first_is_the_lead() -> None:
     assert CastMember(record_id=A).role_ko == ""  # 역할은 비어도 된다
 
 
+def test_video_plan_cast_lines_are_optional() -> None:
+    from ax_contracts.schemas.planning import VideoCastLine, VideoPlan
+
+    scene = {"n": 1, "start_s": 0, "end_s": 15, "visual": "v", "prompt": "p"}
+    old = {"concept": "c", "duration_s": 15, "script": "s", "scenes": [scene], "style": "st",
+           "negative": "ng"}  # fmt: skip
+    assert VideoPlan.model_validate(old).cast == []
+    lines = [{"record_id": A, "role_ko": "주인공", "summary_ko": "검은 긴 생머리", "look": "photo"},
+             {"record_id": B, "role_ko": "동료", "reason": "read_failed"}]  # fmt: skip
+    plan = VideoPlan.model_validate(old | {"cast": lines})
+    assert plan.cast[1] == VideoCastLine(record_id=B, role_ko="동료", reason="read_failed")
+    with pytest.raises(ValidationError):
+        VideoPlan.model_validate(old | {"cast": [{"record_id": A, "reason": "broken"}]})
+
+
 def test_cast_limits() -> None:
     four = [{"record_id": x} for x in (A, B, C, D)]
     assert MAX_CAST == 3
