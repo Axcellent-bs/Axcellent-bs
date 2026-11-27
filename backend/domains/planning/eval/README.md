@@ -42,3 +42,35 @@
   dev seed 점수가 63~96%로 떨어졌다. 확인 뒤 되돌렸다.
 - 한계: LLM 판단(요청 내용 묶기, 제안 할 일·이유 초안)은 재지 않았다. 안전 관문은 통과로 두었다.
 - 결과 파일: `results/holdout_20261110_02.json`
+
+## 요청 관계 판단 LLM 모델 비교 (예진 제안, #소통 2026-11-27 15:46, 1순위)
+
+위 holdout은 LLM을 꺼서 돌기 때문에, `related.py`(`same`·`conflict`·`update`·`related` 4분류
+판단)는 재지 못한다. 평가 데이터가 없어서(사용자 우선순위표 "만들 것") 새로 만들었다.
+
+- `related_cases.json`: 합성 골든셋 28건(관계당 6건 + 관계없음 4건). 정답은 `ax_workflow.related`의
+  `JUDGE_PROMPT` 정의(같은 일=same·둘 다 진행 중인 상충=conflict·끝난 요청을 다시 바꿈=update·
+  같은 화면이지만 따로 처리 가능=related)에 맞춰 사람이 직접 표시했다(검수 전).
+- `related_eval.py`: 케이스마다 `Request`·`State`를 실제로 만들어 `Relater(llm=실제 LLMClient)._judge()`
+  를 그대로 부른다(검색 단계는 건너뛰고 "후보가 주어졌을 때 판단만" 잰다). 채점(같은 same 정밀도·재현율,
+  4분류 정확도, none 정확도, 혼동표)은 이 스크립트에서 계산한다(다른 곳에 채점 로직이 없어서).
+  - 실행: `cd backend && uv run python domains/planning/eval/related_eval.py`
+  - 모델은 `PLANNING_LLM_MODEL` → 없으면 `LLM_MODEL`(`LLMSettings.from_env`와 동일)
+- 모델 비교: `model_compare_related.py <라벨>`로 모델별 결과를 `results/model_compare/related_<라벨>.json`에
+  쌓고, `model_compare_related_report.py <라벨1> <라벨2> ...`로 비교표를 뽑는다.
+
+```bash
+cd backend
+PLANNING_LLM_MODEL=claude-haiku-5-5 uv run python domains/planning/eval/model_compare_related.py haiku
+PLANNING_LLM_MODEL=claude-sonnet-5-5 uv run python domains/planning/eval/model_compare_related.py sonnet
+uv run python domains/planning/eval/model_compare_related_report.py haiku sonnet
+```
+
+**한계**
+- 골든셋 28건은 전부 합성이고 사람 검수 전이다(병환 님 holdout과 같은 한계). 표본이 작아 비율의
+  오차가 크다 — 재현님 의견(위 다른 부서 적용 요청 2 다음 섹션, `embed-compare/README.md`)과 같은
+  이유로, 실제로 모델을 바꾸기 전에는 더 늘리는 쪽이 먼저다.
+- 검색(임베딩으로 후보 5개 찾기)은 이 평가에 안 들어간다. "비슷한 요청 찾기" 자체의 재현율·정밀도는
+  우선순위표의 "비고" 항목이고, `related.py`의 `_vectors`/`MIN_SCORE`로 따로 재야 한다(아직 안 함).
+- 이 세션(클라우드 샌드박스)에는 키가 없어 실행만 확인했다(배선 확인, 가짜 LLM으로 채점 로직
+  검증 완료). 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
