@@ -304,6 +304,8 @@ export interface InstagramAccount {
   username: string | null;
   profile_url: string | null;
   expires_at: string | null;
+  /** false면 서버가 연장하지 못하는 토큰(비즈니스용): 만료 전에 사람이 다시 연결한다 */
+  auto_renew: boolean;
   refresh_error: string | null;
   needs_reconnect: boolean;
   user_id_mismatch: boolean;
@@ -319,6 +321,7 @@ export function readInstagramAccount(v: unknown): InstagramAccount | null {
     username: strOrNull(v.username),
     profile_url: profile && /^https:\/\/www\.instagram\.com\//.test(profile) ? profile : null,
     expires_at: strOrNull(v.expires_at),
+    auto_renew: v.auto_renew !== false,
     refresh_error: strOrNull(v.refresh_error),
     needs_reconnect: v.needs_reconnect === true,
     user_id_mismatch: v.user_id_mismatch === true,

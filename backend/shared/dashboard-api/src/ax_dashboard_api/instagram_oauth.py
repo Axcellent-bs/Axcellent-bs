@@ -26,6 +26,12 @@
   - `fb`(Facebook 사용자 토큰): `fb_exchange_token`으로 장기 토큰, 인스타 비즈니스 계정은
     `/me/accounts?fields=instagram_business_account{id,username}`에서 찾는다. 연장은 장기 토큰으로
     `fb_exchange_token`을 다시 부른다(거절되면 다시 연결)
+- 통합 로그인 구성이 비즈니스용 시스템 사용자 토큰을 주면(`/me?fields=client_business_id`가 값을
+  준다, 11/27 Meta 문서) `kind`는 `fb`, 표시값 `business`=true다. 장기 토큰으로 바꾸지 않고 받은
+  토큰을 그대로 쓰며, 계정은 `/me/assigned_instagram_accounts`에서 찾는다(Facebook 페이지 목록이
+  아니다). 응답에 `expires_in`이 없으면 만료 시각을 두지 않는다. 자동 연장은 하지 않는다
+- Meta 단계가 실패하면 424 `INSTAGRAM_FAILED`로 어느 단계인지와 Meta 오류 번호를 알린다(502·504는
+  앞단이 본문을 갈아 끼워 화면에 이유가 안 보였다). 번호만 싣고 Meta의 글·값은 싣지 않는다
 - 장기 토큰은 `MARKETING_IG_OAUTH_REFRESH_TOKEN`(`store_oauth_token`), 표시값은
   `instagram_login.json`
 - 직접 넣은 `MARKETING_IG_USER_ID`가 있는데 찾은 계정 ID와 다르면 화면에 알린다(`user_id_mismatch`)
@@ -175,8 +181,23 @@ class CompleteBody(BaseModel):
     state: str = Field(min_length=1, max_length=2000)
 
 
-def _fail(what: str) -> ApiError:
-    return ApiError(502, "INSTAGRAM_FAILED", f"Meta에서 {what}을(를) 받지 못했어요")
+def _reason(got: dict[str, Any] | None) -> str:
+    """실패 이유를 번호로만: Meta 오류 번호 → HTTP 응답 코드 → 닿지 못함. 글·값은 싣지 않는다."""
+    if got is None:
+        return ""
+    error = got.get("error")
+    if isinstance(error, dict) and isinstance(error.get("code"), int):
+        sub = error.get("error_subcode")
+        tail = f", 하위 {sub}" if isinstance(sub, int) else ""
+        return f" (Meta 오류 {error['code']}{tail})"
+    status = got.get("_status")
+    return f" (Meta 응답 코드 {status})" if status else " (Meta에 닿지 못했어요)"
+
+
+def _fail(what: str, got: dict[str, Any] | None = None) -> ApiError:
+    message = f"Meta에서 {what}을(를) 받지 못했어요{_reason(got)}"
+    logger.warning("인스타 연결 실패: %s", message)
+    return ApiError(424, "INSTAGRAM_FAILED", message)
 
 
 async def _get_json(client: httpx.AsyncClient, url: str, params: dict[str, str]) -> dict[str, Any]:
@@ -190,10 +211,15 @@ async def _get_json(client: httpx.AsyncClient, url: str, params: dict[str, str])
     return out | {"_status": res.status_code}
 
 
-def _expiry(body: dict[str, Any]) -> str:
+def _lifetime(body: dict[str, Any]) -> int | None:
     seconds = body.get("expires_in")
     if not isinstance(seconds, int) or isinstance(seconds, bool) or seconds <= 0:
-        seconds = LONG_TTL_DEFAULT
+        return None
+    return seconds
+
+
+def _expiry(body: dict[str, Any]) -> str:
+    seconds = _lifetime(body) or LONG_TTL_DEFAULT
     return (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat()
 
 
@@ -211,7 +237,7 @@ async def _kind(client: httpx.AsyncClient, token: str) -> tuple[str, dict[str, A
     fb = await _get_json(client, _fb("me"), {"fields": "id", "access_token": token})
     if fb.get("_status") == 200 and fb.get("id"):
         return "fb", fb
-    raise _fail("쓸 수 있는 토큰")
+    raise _fail("쓸 수 있는 토큰", fb)
 
 
 async def _ig_long(client: httpx.AsyncClient, token: str, secret: str) -> dict[str, Any]:
@@ -221,7 +247,7 @@ async def _ig_long(client: httpx.AsyncClient, token: str, secret: str) -> dict[s
         {"grant_type": "ig_exchange_token", "client_secret": secret, "access_token": token},
     )
     if got.get("_status") != 200 or not isinstance(got.get("access_token"), str):
-        raise _fail("장기 토큰")
+        raise _fail("장기 토큰", got)
     return got
 
 
@@ -237,8 +263,43 @@ async def _fb_long(client: httpx.AsyncClient, token: str, app: dict[str, str]) -
         },
     )
     if got.get("_status") != 200 or not isinstance(got.get("access_token"), str):
-        raise _fail("장기 토큰")
+        raise _fail("장기 토큰", got)
     return got
+
+
+async def _is_business(client: httpx.AsyncClient, token: str) -> bool:
+    """비즈니스용 시스템 사용자 토큰인가: 이 토큰의 `/me`만 `client_business_id`를 준다."""
+    got = await _get_json(
+        client, _fb("me"), {"fields": "client_business_id", "access_token": token}
+    )
+    return got.get("_status") == 200 and bool(got.get("client_business_id"))
+
+
+def _first_account(rows: object) -> dict[str, Any] | None:
+    for acct in rows if isinstance(rows, list) else []:
+        if isinstance(acct, dict) and _USER_ID.fullmatch(str(acct.get("id") or "")):
+            return {"user_id": str(acct["id"]), "username": _name(acct.get("username"))}
+    return None
+
+
+async def _business_account(client: httpx.AsyncClient, token: str) -> dict[str, Any]:
+    """비즈니스용 토큰에 맡긴 인스타 계정(첫 번째). Facebook 페이지를 거치지 않는다."""
+    got = await _get_json(
+        client,
+        _fb("me/assigned_instagram_accounts"),
+        {"fields": "id,username", "access_token": token},
+    )
+    if got.get("_status") != 200:
+        raise _fail("인스타 계정 목록", got)
+    found = _first_account(got.get("data"))
+    if found is None:
+        raise ApiError(
+            409,
+            "NO_INSTAGRAM_ACCOUNT",
+            "Meta 승인 화면에서 맡긴 인스타그램 계정을 찾지 못했어요."
+            " 인스타 계정을 골라 다시 연결해 주세요",
+        )
+    return found
 
 
 async def _fb_account(client: httpx.AsyncClient, token: str) -> dict[str, Any]:
@@ -249,10 +310,12 @@ async def _fb_account(client: httpx.AsyncClient, token: str) -> dict[str, Any]:
         {"fields": "instagram_business_account{id,username}", "access_token": token},
     )
     pages = got.get("data") if got.get("_status") == 200 else None
-    for page in pages if isinstance(pages, list) else []:
-        acct = page.get("instagram_business_account") if isinstance(page, dict) else None
-        if isinstance(acct, dict) and _USER_ID.fullmatch(str(acct.get("id") or "")):
-            return {"user_id": str(acct["id"]), "username": _name(acct.get("username"))}
+    rows = pages if isinstance(pages, list) else []
+    found = _first_account(
+        [p.get("instagram_business_account") for p in rows if isinstance(p, dict)]
+    )
+    if found is not None:
+        return found
     raise ApiError(
         409,
         "NO_INSTAGRAM_ACCOUNT",
@@ -260,8 +323,8 @@ async def _fb_account(client: httpx.AsyncClient, token: str) -> dict[str, Any]:
     )
 
 
-async def _exchange(code: str, app: dict[str, str]) -> tuple[str, str, dict[str, Any]]:
-    """코드 → (장기 토큰, 만료 시각, {kind, api_version, user_id, username})."""
+async def _exchange(code: str, app: dict[str, str]) -> tuple[str, str | None, dict[str, Any]]:
+    """코드 → (저장할 토큰, 만료 시각, {kind, api_version, user_id, username[, business]})."""
     async with CLIENT() as client:
         got = await _get_json(
             client,
@@ -275,15 +338,19 @@ async def _exchange(code: str, app: dict[str, str]) -> tuple[str, str, dict[str,
         )
         short = got.get("access_token")
         if got.get("_status") != 200 or not isinstance(short, str) or not short:
-            raise _fail("토큰")
+            raise _fail("토큰", got)
         kind, me = await _kind(client, short)
         if kind == "ig":
             long = await _ig_long(client, short, app[APP_SECRET_ENV])
             user_id = str(me.get("user_id") or me.get("id") or "")
             if not _USER_ID.fullmatch(user_id):
-                raise _fail("계정 정보")
+                raise _fail("계정 정보", me)
             profile = {"kind": "ig", "api_version": "", "user_id": user_id,
                        "username": _name(me.get("username"))}  # fmt: skip
+        elif await _is_business(client, short):
+            acct = await _business_account(client, short)
+            profile = {"kind": "fb", "business": True, "api_version": _version(), **acct}
+            return short, _expiry(got) if _lifetime(got) else None, profile
         else:
             long = await _fb_long(client, short, app)
             acct = await _fb_account(client, long["access_token"])
@@ -376,6 +443,7 @@ def _view(info: dict[str, Any], connected: bool) -> dict[str, Any]:
         "username": name,
         "profile_url": f"https://www.instagram.com/{name}/" if name else None,
         "expires_at": shown("expires_at"),
+        "auto_renew": connected and info.get("business") is not True,
         "refreshed_at": shown("refreshed_at"),
         "refresh_error": shown("refresh_error"),
         "needs_reconnect": connected and instagram_link.needs_reconnect(info),
@@ -438,7 +506,10 @@ def _mark(company_id: str, info: dict[str, Any], code: str) -> None:
 
 
 async def refresh_company(company_id: str, now: datetime | None = None) -> str:
-    """한 회사: 만료 7일 안이면 연장한다. 결과: skipped · refreshed · stale · expired · failed."""
+    """한 회사: 만료 7일 안이면 연장한다. 결과: skipped · refreshed · stale · expired · failed.
+
+    비즈니스용 토큰(`business`)은 연장하지 않는다. 만료 시각이 지나면 `expired`로 남긴다.
+    """
     from ax_secret_store import resolver
     from ax_secret_store.errors import SecretStoreError
 
@@ -451,6 +522,8 @@ async def refresh_company(company_id: str, now: datetime | None = None) -> str:
     if at <= now:
         _mark(company_id, info, "expired")
         return "expired"
+    if info.get("business") is True:
+        return "skipped"
     got = await _renew(info, current)
     new = got.get("access_token")
     if got.get("_status") != 200 or not isinstance(new, str) or not new:
