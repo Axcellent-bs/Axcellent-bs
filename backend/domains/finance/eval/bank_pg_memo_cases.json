@@ -1,0 +1,33 @@
+{
+  "pg_memo_placeholder": "토스",
+  "note_ko": "실제 pg_memo 값은 finance_policy.toml에서 비어 있다(\"비우면 모든 입금\" — 아직 실제 적요 표본이 없다, 태윤님 본인 메모). 이 평가는 태윤님이 쓴 placeholder('토스' — 기존 bank 테스트 fixture와 같은 값)로, 실제 은행 적요 표본이 아니다.",
+  "cases": [
+    {"id": "f01", "split": "dev", "memo": "토스페이먼츠", "label": "match", "note": "PG 정산금(그대로)"},
+    {"id": "f02", "split": "dev", "memo": "토스페이먼츠(주)정산대금", "label": "match", "note": "PG 정산금(부가 문구)"},
+    {"id": "f03", "split": "holdout", "memo": "토스페이먼츠 정산", "label": "match", "note": "PG 정산금"},
+    {"id": "f04", "split": "dev", "memo": "(주)토스페이먼츠", "label": "match", "note": "PG 정산금(법인 표기 앞)"},
+    {"id": "f05", "split": "dev", "memo": "이자", "label": "no-match", "note": "통장 이자(PG 아님)"},
+    {"id": "f06", "split": "dev", "memo": "급여", "label": "no-match", "note": "급여 입금(PG 아님)"},
+    {"id": "f07", "split": "holdout", "memo": "대출금 입금", "label": "no-match", "note": "대출(PG 아님)"},
+    {"id": "f08", "split": "dev", "memo": "환불", "label": "no-match", "note": "환불 입금(PG 아님)"},
+    {"id": "f09", "split": "dev", "memo": "개인 자금 이체", "label": "no-match", "note": "개인 이체(PG 아님)"},
+    {"id": "f10", "split": "holdout", "memo": "회사채 이자", "label": "no-match", "note": "이자(PG 아님)"},
+    {"id": "f11", "split": "dev", "memo": "(주)비바리퍼블리카", "label": "match",
+     "note": "놓침: 토스페이먼츠 운영사의 법인명(은행 적요에 브랜드명 대신 법인명이 찍히는 실제 사례)이라 '토스'와 안 겹쳐 지금 규칙은 놓친다"},
+    {"id": "f12", "split": "holdout", "memo": "TOSSPAYMENTS SETTLEMENT", "label": "match",
+     "note": "놓침: 영문 표기라 '토스'와 안 겹쳐 지금 규칙은 놓친다"},
+    {"id": "f13", "split": "dev", "memo": "토스뱅크 이자", "label": "no-match",
+     "note": "오탐: 같은 '토스' 브랜드의 다른 상품(토스뱅크 예금 이자)인데 '토스'가 겹쳐 지금 규칙은 PG 정산금으로 잘못 센다 — false-link"},
+    {"id": "f14", "split": "dev", "memo": "토스증권 배당금", "label": "no-match",
+     "note": "오탐: 같은 '토스' 브랜드의 다른 상품(토스증권 배당금)인데 '토스'가 겹쳐 지금 규칙은 PG 정산금으로 잘못 센다 — false-link"},
+    {"id": "f15", "split": "dev", "memo": "이자소득세 환급", "label": "no-match", "note": "세금 환급(PG 아님)"},
+    {"id": "f16", "split": "holdout", "memo": "지자체 지원금", "label": "no-match", "note": "지원금(PG 아님)"},
+    {"id": "f17", "split": "dev", "memo": "토스페이먼츠주식회사", "label": "match", "note": "PG 정산금(법인 표기 붙여 씀)"},
+    {"id": "f18", "split": "dev", "memo": "토스페이먼츠 2026-11 정산분", "label": "match", "note": "PG 정산금(정산월 포함)"},
+    {"id": "f19", "split": "holdout", "memo": "네이버페이 정산", "label": "no-match",
+     "note": "다른 PG(지금 설정은 토스페이먼츠만 본다 — 다른 PG 정산은 섞지 않아야 함)"},
+    {"id": "f20", "split": "dev", "memo": "카카오페이 정산", "label": "no-match", "note": "다른 PG(위와 같은 이유)"},
+    {"id": "f21", "split": "dev", "memo": "토스페이먼츠_정산_20261126", "label": "match", "note": "PG 정산금(구분자 포함 표기)"},
+    {"id": "f22", "split": "holdout", "memo": "자동이체 이자", "label": "no-match", "note": "이자(PG 아님)"}
+  ]
+}
