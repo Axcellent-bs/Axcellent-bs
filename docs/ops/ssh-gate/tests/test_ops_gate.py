@@ -123,6 +123,14 @@ exit 1
            '    exit 0\n'
            '  fi\n'
            'done < <(type -aP mv)\nexit 127\n'),
+    # 진짜 tar 를 부른다. state/tar_rc 가 있으면 묶음을 만든 뒤 그 끝 코드로 끝난다(읽는 사이 파일이 바뀐 tar = 1 시험용)
+    "tar": ('while IFS= read -r real; do\n'
+            '  if [[ "$(dirname "$real")" != "$(dirname "$0")" ]]; then\n'
+            '    "$real" "$@"; rc=$?\n'
+            '    if (( rc == 0 )) && [[ -f "$FAKE_STATE/tar_rc" ]]; then rc="$(cat "$FAKE_STATE/tar_rc")"; fi\n'
+            '    exit "$rc"\n'
+            '  fi\n'
+            'done < <(type -aP tar)\nexit 127\n'),
     # 가짜 uv: 부른 인자를 남기고 state/uv_rc 의 끝 코드로 끝난다. state/uv_sleep 이 있으면 그만큼 자고(시간 초과 시험용)
     # state/uv_moves_head 가 있으면 서버 HEAD 를 바꾼다
     "uv": ('echo "uv $*" >> "$FAKE_LOG"\n'
@@ -889,6 +897,27 @@ class RestartTests(GateCase):
         copy = sqlite3.connect(str(sq / "x.db"))
         self.assertEqual(copy.execute("select v from t").fetchall(), [("dir-row",)])
         copy.close()
+
+    def test_tar_exit_1_changed_files_is_a_warning_and_restart_continues(self):
+        # 실행 중인 서비스가 읽는 사이 파일을 바꾸면 tar 가 종료코드 1 로 끝난다. 묶음은 있으므로 재시작은 계속한다
+        (self.state / "tar_rc").write_text("1")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 0)
+        self.assertIn("tar 종료코드 1", p.stderr)
+        self.assertIn("systemctl restart example-backend", self.calls())
+        self.assertIn(f"data-dir.bak-before-{SHA[:8]}-sqlite", os.listdir(self.rootp / "backups"))
+
+    def test_tar_exit_2_still_fails_before_restart(self):
+        # 2 이상은 묶음을 믿을 수 없으므로 재시작하지 않고 실패한다
+        (self.state / "tar_rc").write_text("2")
+        p = self.gate("owner-a", self.CMD)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertNotIn("systemctl restart", self.calls())
+
+    def test_dir_backup_excludes_sqlite_journal_files(self):
+        p = self.gate("owner-a", f"restart-backend {SHA} --ack-data-loss --dry-run")
+        self.assertRc(p, 0)
+        self.assertIn(r"--exclude=\*.db-journal", p.stdout)
 
     def test_dry_run_shows_exclude_and_sqlite_backup_and_writes_nothing(self):
         p = self.gate("owner-a", f"restart-backend {SHA} --ack-data-loss --dry-run")

@@ -29,6 +29,7 @@ from ax_agent_template import events
 from ax_agent_template.config import set_agent_name
 from ax_contracts.schemas import TENANT_ID_DEFAULT, EventEnvelope, EventType
 from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
+from ax_contracts.schemas.marketing_brand import MAX_CAST, CastMember
 from ax_orchestrator import request_tasks
 from ax_orchestrator.a2a import build_a2a_app
 from ax_orchestrator.auth import bind_company, require_admin, require_agent, require_human
@@ -494,6 +495,8 @@ class BrandCharacterBody(BaseModel):
     """홍보 영상 의뢰에 쓸 회사 대표 캐릭터(마케팅 제작 기록 번호). null이면 캐릭터 없이."""
 
     record_id: str | None = None  # CR-<16진수 12자리>. 모양은 실행기가 본다(아니면 422)
+    # 11/27 등장 캐릭터 여럿(최대 3, 첫 번째 = record_id). 모양·수는 계약 CastMember가 본다(422)
+    cast: list[CastMember] = Field(default_factory=list, max_length=MAX_CAST)
 
 
 @app.post("/api/requests/{request_id}/brand-character")
@@ -512,7 +515,8 @@ async def set_request_brand_character(
     """
     runner = state.manager.request_runner if state.manager else None
     outcome, outdated = (
-        runner.answer_brand_character(request_id, body.record_id, by=who)
+        runner.answer_brand_character(request_id, body.record_id, by=who,
+                                      cast=[m.model_dump() for m in body.cast])  # fmt: skip
         if runner
         else ("missing", False)
     )
