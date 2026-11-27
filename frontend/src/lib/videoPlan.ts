@@ -41,6 +41,7 @@ export interface VideoPlanView {
   writtenBy: 'llm' | 'rule' | 'human'
   mediaHints?: { season?: string; colorTheme?: string; category?: string }
   purpose?: VideoPurpose // 광고 목적 (예전 제작안·규칙 제작안은 없음)
+  goal?: 'fun' | 'info' | 'promo' | 'ad' // 11/26 K 영상 목적 (계약 VideoPlan.goal). 예전 제작안은 없음 (lib/videoGoal.ts가 purpose로 짐작)
   offerKo?: string // 혜택 한 줄
   ctaKo?: string // 마지막 행동 문구
   fallbackReason?: VideoFallbackReason // 규칙 초안이 된 이유 (11/25, 예전 제작안·LLM 제작안은 없음)
@@ -287,6 +288,7 @@ export function sceneKeyframeLine(s: Pick<VideoSceneView, 'startFrame' | 'endFra
 }
 
 const PURPOSES = new Set<string>(Object.keys(VIDEO_PURPOSE))
+const GOALS = new Set<string>(['fun', 'info', 'promo', 'ad'])
 /** 광고 목적 칩 글. 모르는 값·없으면 null */
 export const videoPurposeChip = (v: Pick<VideoPlanView, 'purpose'>): string | null => (v.purpose ? VIDEO_PURPOSE[v.purpose] : null)
 
@@ -305,6 +307,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
   const h = obj(pick(o, 'mediaHints', 'media_hints'))
   const hints = h ? { season: str(h.season) || undefined, colorTheme: str(pick(h, 'colorTheme', 'color_theme')) || undefined, category: str(h.category) || undefined } : undefined
   const purpose = str(o.purpose)
+  const goal = str(o.goal)
   const offerKo = str(pick(o, 'offerKo', 'offer_ko')), ctaKo = str(pick(o, 'ctaKo', 'cta_ko'))
   const fallback = str(pick(o, 'fallbackReason', 'fallback_reason'))
   const svgWhy = str(pick(o, 'svgReason', 'svg_reason'))
@@ -327,6 +330,7 @@ export function toVideoPlan(raw: unknown): VideoPlanView | undefined {
     writtenBy: wb === 'llm' || wb === 'human' ? wb : 'rule',
     ...(hints && (hints.season || hints.colorTheme || hints.category) ? { mediaHints: hints } : {}),
     ...(PURPOSES.has(purpose) ? { purpose: purpose as VideoPurpose } : {}),
+    ...(GOALS.has(goal) ? { goal: goal as NonNullable<VideoPlanView['goal']> } : {}),
     ...(offerKo ? { offerKo } : {}),
     ...(ctaKo ? { ctaKo } : {}),
     ...(FALLBACKS.has(fallback) ? { fallbackReason: fallback as VideoFallbackReason } : {}),

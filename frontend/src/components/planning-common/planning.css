@@ -1341,6 +1341,13 @@ table.rq-table td { padding-top: 9px; padding-bottom: 9px; }
 .sb-place { align-self: flex-start; font-size: 11.5px; color: var(--text-2); }
 .sb-keyframe { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-2); }
 .sb-purpose { border-radius: 999px; color: rgb(var(--brand-500)); background: color-mix(in srgb, rgb(var(--brand-500)) 10%, transparent); }
+/* 11/26 K 시안 ⓪ 맨 위 목적 블록 (목적 칩 4개 · 왜 · 흐름 · 끝 행동 · 성공 기준). 좁은 폭에서는 칩이 다음 줄로 */
+.sb-goal { margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, rgb(var(--brand-500)) 5%, var(--surface, transparent)); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sb-goal-head { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; color: var(--text); }
+.sb-goal-chip { font-size: 12px; border-radius: 999px; color: var(--text-2); background: color-mix(in srgb, var(--text-3) 12%, transparent); }
+.sb-goal-on { color: rgb(var(--brand-500)); background: color-mix(in srgb, rgb(var(--brand-500)) 14%, transparent); font-weight: 700; }
+.sb-goal-row { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
+.sb-goal-row > span { display: inline-block; min-width: 4.5em; margin-right: 6px; font-weight: 600; color: var(--text-3); }
 /* 11/25 규칙 초안이 된 이유 한 줄 (칩 옆). 이유 칸이 비면 안 그린다 */
 .sb-fallback { font-size: 12px; font-weight: 400; color: var(--text-3); }
 .sb-svg-why { margin: 0 0 6px; }
