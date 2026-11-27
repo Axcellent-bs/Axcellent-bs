@@ -135,3 +135,45 @@ uv run python domains/dev/eval/model_compare_scope_accuracy_report.py haiku sonn
 - 이 세션(클라우드 샌드박스)에는 키가 없어 가짜 LLM으로 세 경로(정답만 정확히 고치는 답·
   미끼까지 같이 고치는 답·정답 파일에 범위 밖 줄을 더 얹는 답)를 검증했다. 실제 비교 숫자는
   키가 있는 로컬 PC에서 위 명령으로 내야 한다.
+
+## CI 자동 수정 성공률 LLM 모델 비교 (예진 제안, #소통 2026-11-27 15:46, 개발 3순위)
+
+"실패 → 한 번 고친 뒤 통과 비율" 평가. `coder._fix_ci`(CI가 실패하면 로그를 보고 한 번 고쳐
+같은 PR에 다시 커밋하는 길, `MAX_CI_FIXES=1`)가 실제로 동작하는지를 본다. 일부러 깬 PR
+케이스가 없어 새로 만들었다.
+
+- `ci_fix_cases.json`: 합성 코딩 작업 8건. 각 작업은 실제 타입체크·린트 오류 형식의 CI 로그
+  (`ci_log`)와, 로그가 가리키는 문제를 실제로 고치면 최종 글에 들어 있어야 할 문자열
+  (`fix_must_contain`)·사라져 있어야 할 문자열(`fix_must_not_contain`)을 같이 적어 뒀다
+  (예: TS 타입 오류 로그 → 올바른 필드명이 들어가고 잘못된 필드명은 없어야 함)
+- `ci_fix_eval.py`: `CiFixAdapter`(`MockVcsAdapter` 상속)가 PR을 열면 첫 CI 확인은 항상
+  실패시키고 정해 둔 로그를 돌려준다. `coder._fix_ci`가 그 로그를 데이터로 넣어 LLM에게
+  다시 쓰게 하고 커밋하면, 그 다음 CI 확인부터는 **커밋된 글이 `fix_must_contain`·
+  `fix_must_not_contain`을 채우는지 직접 보고** 통과·실패를 정한다 — 스크립트로 미리 정해
+  둔 pass/fail이 아니라, 실제로 고쳤는지를 production의 CI-실패-고침 경로가 그대로 거쳐
+  가며 판정하게 한 것
+  - 실행: `cd backend && uv run python domains/dev/eval/ci_fix_eval.py`
+  - 모델은 `DEV_LLM_MODEL` → 없으면 `LLM_MODEL`
+  - 지표: `ci_fix_success_rate`(전체 중 고친 뒤 통과까지 간 비율)·`fix_attempt_rate`(로그를
+    읽고 실제로 다시 커밋까지 갔는지, 고친 내용이 없으면 커밋하지 않고 포기하므로 0으로
+    셈)·`success_given_attempted`(시도한 것 중 성공 비율)
+- 모델 비교: `model_compare_ci_fix.py <라벨>` → `results/model_compare/ci_fix_<라벨>.json`,
+  `model_compare_ci_fix_report.py <라벨1> <라벨2> ...`로 비교표
+
+```bash
+cd backend
+DEV_LLM_MODEL=claude-haiku-5-5 uv run python domains/dev/eval/model_compare_ci_fix.py haiku
+DEV_LLM_MODEL=claude-sonnet-5-5 uv run python domains/dev/eval/model_compare_ci_fix.py sonnet
+uv run python domains/dev/eval/model_compare_ci_fix_report.py haiku sonnet
+```
+
+**한계**
+- 골든셋이 합성·소규모다(8건, `shop-web/` 단일 파일 작업, 각 1개 CI 검사만). 실제 CI 실패
+  기록으로 바꾸면 더 믿을 만하다.
+- CI 통과·실패 판정이 "정답 문자열 포함 여부"라는 평가 전용 근사치다(실제 타입체커·린터를
+  돌리지 않는다). 뜻은 같지만 다른 표현으로 고친 답은 틀린 것으로 셀 수 있다.
+- `MAX_CI_FIXES=1`이라 "두 번째 시도에서 고치는" 능력은 이 평가로는 보지 못한다(production
+  자체가 한 번만 시도하므로 평가도 그 정책을 그대로 따른다).
+- 이 세션(클라우드 샌드박스)에는 키가 없어 가짜 LLM으로 세 경로(정답을 정확히 고치는 답·
+  고쳐도 기준을 못 채우는 답·아예 고치지 않아 커밋조차 안 되는 답)를 검증했다. 실제 비교
+  숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
