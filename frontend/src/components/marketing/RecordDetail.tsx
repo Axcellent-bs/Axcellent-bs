@@ -11,7 +11,8 @@ import { listRequestVideos } from "@/lib/requestVideos";
 import { VIDEO_NOT_FOUND_KO, canUploadToYoutube, durationKo, type RequestVideo } from "@/lib/requestVideoView";
 import { RECORDS_PATH, defaultSteps, hasPublishState, linkedRecordId, renderStatuses, workStatus, workTitle, type StepNo } from "@/lib/recordWorks";
 import { DetailHeader, Fold, Step } from "./RecordSteps";
-import { BoardPicture, FinalVideoArea, Keyframes, MotionArea, RecordPublish, RecordThumbnails, SheetPicture, VideoArea, useRecordRender, type RecordRender } from "./RenderPanel";
+import { BoardPicture, CastPictures, FinalVideoArea, Keyframes, MotionArea, RecordPublish, RecordThumbnails, SheetPicture, VideoArea, useRecordRender, type RecordRender } from "./RenderPanel";
+import { castLeadRole } from "@/lib/sheetState";
 import { RequestVideoCard, RequestVideoPublish } from "./RequestVideoParts";
 import { RecordBoardFromScript, RecordScriptWrite } from "./RecordScriptStart";
 import { ScriptPanel } from "./ScriptPanel";
@@ -64,7 +65,10 @@ function SheetStep({ ctx, rec }: { ctx: RecordRender; rec: CreativeRecord }) {
   return (
     <>
       {rec.note && <p className="text-sm text-ink-900"><span className="text-xs text-ink-500">캐릭터 메모 </span>{rec.note}</p>}
+      {/* 11/27 등장 캐릭터 여럿: 주인공 칸 위에 역할 이름, 아래 캐릭터별 칸 */}
+      {castLeadRole(ctx.render as unknown as Record<string, unknown>) && <p className="text-xs font-semibold text-ink-900">{castLeadRole(ctx.render as unknown as Record<string, unknown>)} · 주인공</p>}
       <div className="max-w-sm"><SheetPicture ctx={ctx} /></div>
+      <div className="max-w-2xl"><CastPictures ctx={ctx} /></div>
       <Fold title="배치판과 색" open={!drawn}><SheetBoard r={rec.sheet} thumb={thumbSrc(rec.thumbnail_base64)} /></Fold>
       <Fold title="이미지 시트 프롬프트">
         <PromptBox title="영어 이미지 프롬프트" text={rec.sheet.prompt_en} />

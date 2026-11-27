@@ -14,11 +14,11 @@ import { KeyframePairs } from "./KeyframePairs";
 import { ApprovalDeadline, TimedOutRetry } from "./ApprovalDeadline";
 import { timedOut } from "@/lib/videoApprovalTime";
 import { framesOf, keyframesDone } from "@/lib/keyframes";
-import { videoSummaryLine } from "@/lib/creativeVideo";
+import { castRefLine, videoSummaryLine } from "@/lib/creativeVideo";
 import { VideoQc } from "@/components/marketing/VideoQc";
 import { canAskVideo, usesOriginalReference } from "@/lib/videoAsk";
 import { assetUrl, getCreativeRecord, redrawBoardImage, requestCreativeVideo, uploadCreativeFile, type CreativeRecord, type RenderPart, type RenderPartKey } from "@/lib/creativeRecords";
-import { MAKE_SHEET, SHEET_MISSING_NOTE, sheetMissingBrand, sheetState } from "@/lib/sheetState";
+import { MAKE_SHEET, SHEET_MISSING_NOTE, castSlots, sheetMissingBrand, sheetState } from "@/lib/sheetState";
 
 // 제작 기록 한 건의 Higgsfield 결과: 이미지 시트 그림 · 스토리보드 그림 · 스토리보드 영상(사람 승인 뒤).
 // 다른 도구로 만든 결과(그림·완성 영상)는 칸마다 [파일 올리기]로 직접 붙인다.
@@ -226,6 +226,42 @@ export function useRecordRender(recordId: string) {
 
 export type RecordRender = ReturnType<typeof useRecordRender>;
 
+/** 11/27 등장 캐릭터 여럿: 주인공 말고 캐릭터별 칸 (역할 이름 · 시트/원본 · [캐릭터 시트 만들기 · 약 1.5]).
+ *  시트 만들기는 그 회사 캐릭터 기록에 기존 다시 그리기 경로(사람이 누를 때만 크레딧). 2명 미만이면 그리지 않는다 */
+export function CastPictures({ ctx }: { ctx: RecordRender }) {
+  const { recordId, render, setError } = ctx;
+  const slots = castSlots(render as unknown as Record<string, unknown>);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [asked, setAsked] = useState<string | null>(null);
+  if (!slots.length) return null;
+  const make = (id: string) => {
+    setBusy(id);
+    redrawBoardImage(id).then(() => setAsked(id), (e: unknown) => setError(e instanceof Error ? e.message : "캐릭터 시트를 만들지 못했어요"))
+      .finally(() => setBusy(null));
+  };
+  return (
+    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2" aria-label="등장 캐릭터">
+      {slots.map((s) => (
+        <li key={s.part} className="min-w-0 space-y-1.5">
+          <p className="text-xs font-semibold text-ink-900">{s.title}</p>
+          {s.done && <CastThumb recordId={recordId} part={s.part} info={render[s.part]} alt={s.title} />}
+          {s.button && s.characterId && (
+            <button type="button" className="btn-ghost text-xs" disabled={busy === s.characterId} onClick={() => make(s.characterId as string)}>
+              {busy === s.characterId ? "요청하는 중…" : s.button}
+            </button>
+          )}
+          {asked === s.characterId && <p className="text-xs text-ink-500">회사 캐릭터에 시트를 만드는 중이에요. 다음 의뢰부터 시트를 써요</p>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CastThumb({ recordId, part, info, alt }: { recordId: string; part: RenderPartKey; info?: RenderPart | null; alt: string }) {
+  const { src } = useAuthedMedia(info?.status === "done" && info.sha256 ? assetUrl(recordId, part, info.sha256) : null);
+  return src ? <img src={src} alt={alt} className="w-full rounded-lg bg-ink-50 object-contain ring-1 ring-ink-100" /> : null;
+}
+
 /** 올린 원본 작은 그림 ("원본", 읽기 전용, 11/26 A) */
 function OriginalThumb({ recordId, part, info }: { recordId: string; part: RenderPartKey; info?: RenderPart | null }) {
   const { src } = useAuthedMedia(info?.status === "done" && info.sha256 ? assetUrl(recordId, part, info.sha256) : null);
@@ -309,9 +345,11 @@ export function MotionArea({ ctx }: { ctx: RecordRender }) {
 export function VideoArea({ ctx, label = "스토리보드 영상", uploadPart, webNote = PANEL_WEB_NOTE }: { ctx: RecordRender; label?: string; uploadPart?: RenderPartKey; webNote?: string }) {
   const { recordId, rec, render, video, keyframed, inputReady, canAsk, asking, ask, load, setError, showOriginal, overlayVersion, overlayControls } = ctx;
   const summaryLine = videoSummaryLine(video?.status, video?.summary);
+  const castRef = summaryLine ? castRefLine(video?.summary) : null; // 11/27 등장 캐릭터 참조 안내
   return (
     <>
       {summaryLine && <p className="text-xs text-ink-700" aria-label="영상 만들기 요약">{summaryLine}</p>}
+      {castRef && <p className={`text-xs ${video?.summary?.cast_single_ref ? "text-amber-800" : "text-ink-500"}`}>{castRef}</p>}
       <Picture recordId={recordId} part="video" info={video} label={label} onChanged={() => void load()} onError={setError}
         playPart={playPartFor("video", render, showOriginal)} version={overlayVersion} uploadPart={uploadPart} />
       {overlayControls("video")}

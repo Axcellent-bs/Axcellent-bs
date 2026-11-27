@@ -97,6 +97,39 @@ export function brandCardView(c: {
   return { thumb, info, button: s.button };
 }
 
+// ---- 11/27 등장 캐릭터 여럿: 제작 기록 1단계 캐릭터별 칸 (마케팅 render.cast · cast_1 · cast_2)
+export interface CastSlot {
+  part: "cast_1" | "cast_2";
+  role: string;
+  /** 그 회사 캐릭터 기록 번호 ([시트 만들기]는 그 기록에) */
+  characterId: string | null;
+  picture: "sheet" | "original" | null;
+  title: string;
+  /** 시트가 없으면 [캐릭터 시트 만들기 · 약 1.5 크레딧] */
+  button: string | null;
+  done: boolean;
+}
+type CastRender = Record<string, unknown> & { cast?: { members?: { record_id?: string; role_ko?: string }[] } | null };
+
+/** 주인공 역할 (여럿일 때만, 아니면 null) */
+export function castLeadRole(render: CastRender): string | null {
+  const members = render.cast?.members ?? [];
+  return members.length >= 2 ? members[0]?.role_ko || "주인공" : null;
+}
+
+export function castSlots(render: CastRender): CastSlot[] {
+  if ((render.cast?.members ?? []).length < 2) return [];
+  return (["cast_1", "cast_2"] as const).flatMap((part) => {
+    const p = render[part] as { status?: string; role_ko?: string; character_id?: string; picture?: string } | undefined;
+    if (!p) return [];
+    const picture = p.picture === "sheet" || p.picture === "original" ? p.picture : null;
+    const done = p.status === "done";
+    const role = p.role_ko || "캐릭터";
+    const title = !done ? `${role} · 그림 없음` : picture === "sheet" ? `${role} · 캐릭터 시트` : `${role} · 원본 사진 (시트 아직 없음)`;
+    return [{ part, role, characterId: p.character_id ?? null, picture, title, button: done && picture === "original" ? MAKE_SHEET : null, done }];
+  });
+}
+
 /** 의뢰 기록: 회사 캐릭터에 시트가 없어 원본만 복사해 왔으면 그 회사 캐릭터 기록 번호, 아니면 null */
 export function sheetMissingBrand(render: SheetRenderLike): string | null {
   const sheet = render.sheet_image;
