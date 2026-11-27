@@ -11,8 +11,12 @@ export function svgDataUri(svg: string): string {
   return `data:image/svg+xml;base64,${btoa(bin)}`;
 }
 
-/** 스토리보드를 SVG 콘티로 보여 줄지: board_source가 "svg"일 때만 (없거나 다른 값이면 지금 화면) */
-export const isSvgBoard = (r: Pick<StoryboardResult, "board_source">): boolean => r.board_source === "svg";
+/** 스토리보드를 SVG 콘티로 보여 줄지: board_source가 "svg"이거나 칸 하나라도 svg가 있으면.
+ *  11/27 운영 PROP-44: 준비 때 스토리보드 그림을 그리면 board_source가 "higgsfield"로 바뀌어, 칸에 기획 3D 콘티
+ *  SVG가 있는데도 "구도 참고"가 빈 배치판(사람 모양)으로 나왔다. board_source는 참고만 한다.
+ *  svg가 없는 칸은 SvgCellItem이 지금처럼 배치판으로 그린다 */
+export const isSvgBoard = (r: Pick<StoryboardResult, "board_source"> & { shots?: Pick<StoryboardShot, "svg">[] }): boolean =>
+  r.board_source === "svg" || (r.shots ?? []).some((s) => typeof s.svg === "string" && s.svg.trim() !== "");
 
 export interface SvgCell {
   no: number;

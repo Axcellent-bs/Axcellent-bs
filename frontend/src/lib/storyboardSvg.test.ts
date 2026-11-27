@@ -55,6 +55,19 @@ test("새 필드가 없으면 지금 화면: board_source 없음·higgsfield·la
   assert.equal(isSvgBoard({ board_source: "svg" }), true);
 });
 
+test("11/27 PROP-44: 그림을 그려 board_source가 higgsfield여도 칸에 기획 3D 콘티 svg가 있으면 SVG 칸", () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 320"><text>0초 · 소파</text></svg>';
+  const shots = [{ svg }, { svg: null }, { svg: "  " }];
+  assert.equal(isSvgBoard({ board_source: "higgsfield", shots }), true);
+  // svg가 없는 칸만 배치판 (SvgCellItem이 src null이면 배치판)
+  assert.ok(svgCell(shot({ svg })).src?.startsWith("data:image/svg+xml;base64,"));
+  assert.equal(svgCell(shot({ svg: null })).src, null);
+  assert.equal(svgCell(shot({ svg: "  " })).src, null);
+  // 칸 전부 svg가 없으면 지금처럼 SVG 보기가 아니다
+  assert.equal(isSvgBoard({ board_source: "higgsfield", shots: [{ svg: null }, {}] }), false);
+  assert.equal(isSvgBoard({ board_source: "layout", shots: [] }), false);
+});
+
 test("영상 요약: 전부 있으면 한 줄", () => {
   const s = { reference: "character_original", model: "Kling 4.0 Flash", seconds: 15, seconds_clamped_from: 20, aspect: "9:16", credits_estimate: 22.5 };
   const want = "참조: 가상 인물 원본 · Kling 4.0 Flash · 15초(20초에서 줄임) · 9:16 · 예상 약 22.5";

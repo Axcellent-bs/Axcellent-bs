@@ -162,6 +162,9 @@ function RedrawControl({ onRedraw }: { onRedraw: () => Promise<void> }) {
 
 export function StoryboardView({ r, onRedraw }: { r: StoryboardResult; onRedraw?: () => Promise<void> }) {
   const svgBoard = isSvgBoard(r);
+  // "그림 크레딧 0 · [Higgsfield 그림으로 다시 그리기]" 머리 줄은 SVG 콘티가 칸 그림일 때만
+  // (11/27 그림을 이미 그린 기록은 칸만 3D 콘티로 보이고, 그림은 위 스토리보드 그림 칸에 있다)
+  const svgSource = r.board_source === "svg";
   return (
     <div className="space-y-5">
       <div>
@@ -169,7 +172,7 @@ export function StoryboardView({ r, onRedraw }: { r: StoryboardResult; onRedraw?
         <p className="text-sm text-ink-500">{r.logline_ko}{r.character_used ? " · 이미지 시트 캐릭터 사용" : ""}{r.script_used ? " · 대본 장면을 따름" : ""}</p>
         {r.cta_ko && <p className="text-xs text-ink-500">끝 문장(CTA): {r.cta_ko}</p>}
       </div>
-      {svgBoard && (
+      {svgSource && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-ink-900">스토리보드 (AI 콘티)</span>
           <span className="chip bg-ink-50 text-ink-500">그림 크레딧 0</span>
