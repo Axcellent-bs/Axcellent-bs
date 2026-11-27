@@ -50,10 +50,55 @@ def fallback_catalog(env: Mapping[str, str] | None = None) -> str:
     return given or default_company_id()
 
 
+def _normal(text: str) -> str:
+    return " ".join(text.split())
+
+
+# 회사 이름으로 고를 수 있는 카탈로그에서 뺀다: 캣북스 것은 다른 회사가 빌려 쓰지 않고(11/25),
+# 공통 카탈로그는 이름으로 고르는 게 아니라 마지막 기본값이다
+_NOT_BY_NAME = frozenset({"catbooks", "common"})
+
+
+def _catalog_by_company_name(company: str) -> str | None:
+    """회사 연결 정보(회사 목록 `companies.json`의 `name`, 가입 때 넣은 회사 이름)와 `name`이 같은
+    카탈로그 파일. 새 회사 ID는 가입 때 정해지는 `c-xxxxxx`라 ID로는 카탈로그를 못 고른다(11/27:
+    누비투어 매출 분석 분류가 #1908 뒤에도 japan 같은 코드 그대로). 없거나 둘 이상이면 None."""
+    from ax_agent_template.companies import get_company
+
+    found = get_company(company)
+    want = _normal(found.name) if found is not None else ""
+    if not want:
+        return None
+    hits = _names_index().get(want, [])
+    return hits[0] if len(hits) == 1 else None
+
+
+_by_name: dict[str, list[str]] | None = None
+
+
+def _names_index() -> dict[str, list[str]]:
+    """카탈로그 `name` → 파일 이름들 (파일은 코드와 같이 배포되니 한 번만 읽는다)."""
+    global _by_name
+    if _by_name is None:
+        index: dict[str, list[str]] = {}
+        for path in sorted(CATALOG_DIR.glob("*.toml")):
+            if path.stem in _NOT_BY_NAME:
+                continue
+            try:
+                with path.open("rb") as f:
+                    name = tomllib.load(f).get("name")
+            except (OSError, tomllib.TOMLDecodeError):
+                continue
+            if isinstance(name, str) and _normal(name):
+                index.setdefault(_normal(name), []).append(path.stem)
+        _by_name = index
+    return _by_name
+
+
 def _company_catalog(company: str) -> str:
     """캣북스가 아닌 회사의 카탈로그 이름: 그 회사 폴더 설정 → `catalogs/<회사>.toml` →
-    회사 ID 앞부분(`nubi-tour` → `nubi`) → 틀 기본값(`config/frame`, 공통 카탈로그, 11/25).
-    설치 환경변수(캣북스 것)는 보지 않는다."""
+    회사 ID 앞부분(`nubi-tour` → `nubi`) → 회사 목록의 회사 이름과 같은 카탈로그 →
+    틀 기본값(`config/frame`, 공통 카탈로그, 11/25). 설치 환경변수(캣북스 것)는 보지 않는다."""
     from ax_agent_template import tenant
 
     named = tenant.current() is not None  # 회사 설정이 정해진 회사(아니면 아래 값은 틀 기본값)
@@ -63,6 +108,9 @@ def _company_catalog(company: str) -> str:
     for name in (company, company.split("-")[0]):
         if (CATALOG_DIR / f"{name}.toml").is_file():
             return name
+    by_name = _catalog_by_company_name(company)
+    if by_name:
+        return by_name
     if own:
         return own  # 가입만 한 회사: 틀 기본 카탈로그(다른 회사·캣북스 것으로 가지 않음)
     return company  # 파일이 없으면 아래에서 이유를 적어 알린다(다른 회사 것으로 갈음하지 않음)
