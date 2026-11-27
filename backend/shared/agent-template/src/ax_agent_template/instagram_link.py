@@ -33,7 +33,7 @@ INFO_FILE = "instagram_login.json"
 
 
 _SECRET_QUERY = re.compile(
-    r"((?:access_token|client_secret|fb_exchange_token|code)=)[^&\s\"']+", re.IGNORECASE
+    r"((?:access_token|client_secret|fb_exchange_token|input_token|code)=)[^&\s\"']+", re.IGNORECASE
 )
 
 
