@@ -375,10 +375,42 @@ def plan_svg_missing(plan: Any) -> str:
     return "unknown"
 
 
-def prepare_storyboard(brand_id: str, context_id: str, plan: Any) -> tuple[str | None, str | None]:
+def _copy_cast(record_id: str, cast: list[Any]) -> None:
+    """11/27 D 등장 캐릭터 여럿: 주인공 말고 캐릭터마다 시트 그림(없으면 원본, #1968 판정)을 의뢰
+    기록 `cast_<i>` 칸으로 파일째 복사한다(다시 만들지 않는다, 크레딧 0). render.cast에 명단."""
+    store = _creative.store()
+    members = [{"record_id": str(_val(m, "record_id")), "role_ko": _cut(_val(m, "role_ko"), 20)}
+               for m in cast]  # fmt: skip
+    _render._set(record_id, _render.CAST_STATE, status="done", members=members)  # noqa: SLF001
+    for i, m in enumerate(members[1:3], start=1):
+        part = f"cast_{i}"
+        brand = store.get(m["record_id"]) or {}
+        render = brand.get("render") or {}
+        ready = _render.sheet_ready(brand)
+        src_part = "sheet_image" if ready else _render.original_part(brand)
+        item = render.get(src_part) or {} if src_part else {}
+        name = str(item.get("asset") or "")
+        ext = "png" if name.endswith(".png") else "jpg"
+        target = f"{part}.{ext}"
+        if not src_part or not name or not _copy_file(m["record_id"], record_id, name, target):
+            _render._set(record_id, part, status="failed", error="cast_picture_missing",  # noqa: SLF001
+                         character_id=m["record_id"], role_ko=m["role_ko"])  # fmt: skip
+            continue
+        look = _cut((brand.get("sheet") or {}).get("consistency_en"), _render.CAST_LOOK_MAX)
+        _render._set(  # noqa: SLF001
+            record_id, part, status="done", error=None, asset=target, sha256=item.get("sha256"),
+            character_id=m["record_id"], role_ko=m["role_ko"], source="brand_copy",
+            picture="sheet" if ready else "original", look_en=look,
+            kind=_creative.upload_kind(brand.get("sheet")),
+        )  # fmt: skip
+
+
+def prepare_storyboard(brand_id: str, context_id: str, plan: Any,
+                       cast: list[Any] | None = None) -> tuple[str | None, str | None]:  # fmt: skip
     """(의뢰용 기록 번호, 못 쓴 이유).
 
-    대표 캐릭터 기록이 이 회사에 없으면 (None, "record_not_found")."""
+    대표 캐릭터 기록이 이 회사에 없으면 (None, "record_not_found").
+    11/27 D cast: 등장 캐릭터가 2명 이상이면 캐릭터별 그림도 복사한다(`_copy_cast`)."""
     if not RECORD_ID.fullmatch(brand_id):
         return None, "record_not_found"
     store = _creative.store()
@@ -388,6 +420,8 @@ def prepare_storyboard(brand_id: str, context_id: str, plan: Any) -> tuple[str |
     _render.unsupersede(record_id)  # 11/26 바꿨다가 이 캐릭터로 되돌아오면 다시 쓴다
     _copy_sheet_image(brand_id, record_id)
     _copy_extra_refs(brand_id, record_id)  # 11/26: 추가 참조도 (전에는 대표 1장만 갔다)
+    if cast and len(cast) >= 2:
+        _copy_cast(record_id, list(cast))
     rec = store.get(record_id) or {}
     board = plan_storyboard(plan, rec.get("sheet") or {})
     if board is None:

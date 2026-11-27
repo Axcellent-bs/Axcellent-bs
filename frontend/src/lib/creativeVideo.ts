@@ -16,6 +16,17 @@ export interface CreativeVideoSummary {
   /** 11/25 키프레임 방식(reference "keyframes"): 키프레임 장 수·그 그림에 쓴 크레딧(모르면 null) */
   keyframes?: number | null;
   keyframe_credits?: number | null;
+  /** 11/27 등장 캐릭터 여럿: 캐릭터 수·참조로 올리는 캐릭터 수·모델이 1장만 받는지 */
+  cast?: number | null;
+  cast_refs?: number | null;
+  cast_single_ref?: boolean | null;
+}
+
+/** 11/27 영상 모델이 참조 1장만 받으면 안내 한 줄 (등장 캐릭터 여럿일 때만) */
+export const CAST_SINGLE_REF_KO = "이 영상 모델은 캐릭터 1개만 참조해요";
+export function castRefLine(s: CreativeVideoSummary | null | undefined): string | null {
+  if (!s || typeof s.cast !== "number" || s.cast < 2) return null;
+  return s.cast_single_ref ? CAST_SINGLE_REF_KO : `캐릭터 ${s.cast_refs ?? s.cast}명 참조`;
 }
 
 /** 배속한 영상이면 "18초 만들어 1.2배속 → 15초", 아니면 null */

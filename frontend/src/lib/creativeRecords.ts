@@ -37,7 +37,8 @@ export interface CreativeRecordSummary {
 }
 
 /** original_image: 11/26 가상 인물·일러스트가 올린 원본 (읽기 전용, 시트 그림과 따로) */
-export type RenderPartKey = "sheet_image" | "board_image" | "video" | "final_video" | "motion_video" | "original_image";
+/** cast_1·cast_2: 11/27 등장 캐릭터 여럿일 때 주인공 말고 캐릭터별 시트(없으면 원본) 복사본 (읽기 전용) */
+export type RenderPartKey = "sheet_image" | "board_image" | "video" | "final_video" | "motion_video" | "original_image" | "cast_1" | "cast_2";
 export interface RenderPart {
   status?: string;
   error?: string | null;

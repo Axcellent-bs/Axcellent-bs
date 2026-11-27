@@ -407,7 +407,7 @@ def prepare_video_draft(
         from marketing_agent import request_creative
 
         rid, skipped = request_creative.prepare_storyboard(
-            data.brand_character_record_id, request.meta.context_id, plan
+            data.brand_character_record_id, request.meta.context_id, plan, cast=data.cast
         )
         if rid is not None and skipped is None:
             creative_id = rid

@@ -306,6 +306,59 @@ def asset_path(record_id: str, part: str, cid: str | None = None) -> Path:
     return _dir(record_id, cid) / FILES[part]
 
 
+# ---------------------------------------------------------------- 등장 캐릭터 여럿 (11/27 D)
+# 의뢰 기록 render.cast = {members: [{record_id, role_ko}]}(첫 번째 = 주인공 = 이 기록의 캐릭터),
+# 주인공 말고 캐릭터마다 render.cast_<i> = {asset: cast_<i>.jpg|png, sha256, character_id, role_ko,
+# picture: sheet|original, look_en}. 그림은 그 회사 캐릭터의 시트(없으면 원본, #1968 판정)
+CAST_STATE = "cast"
+CAST_PARTS = ("cast_1", "cast_2")
+CAST_FILES = {p: (f"{p}.jpg", f"{p}.png") for p in CAST_PARTS}
+CAST_LOOK_MAX = 300
+
+
+def cast_members(rec: dict[str, Any] | None) -> list[dict[str, str]]:
+    """의뢰 등장 캐릭터 [{record_id, role_ko}] (2명 이상일 때만, 아니면 [])."""
+    members = ((rec or {}).get("render") or {}).get(CAST_STATE, {}).get("members") or []
+    return [dict(m) for m in members] if len(members) >= 2 else []
+
+
+def cast_items(rec: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """주인공 말고 그림을 복사해 둔 캐릭터 칸 (cast_1, cast_2 순서)."""
+    render = (rec or {}).get("render") or {}
+    return [render[p] for p in CAST_PARTS
+            if (render.get(p) or {}).get("status") == "done"
+            and (render.get(p) or {}).get("asset") in CAST_FILES[p]]  # fmt: skip
+
+
+def cast_ref_bytes(record_id: str, rec: dict[str, Any], cid: str | None) -> list[bytes]:
+    """캐릭터별 대표 그림 1장씩 (주인공 말고, 순서대로). 파일이 없으면 건너뛴다."""
+    out = []
+    for item in cast_items(rec):
+        try:
+            out.append((_dir(record_id, cid) / str(item["asset"])).read_bytes())
+        except OSError:
+            continue
+    return out
+
+
+def cast_prompt_en(rec: dict[str, Any] | None, *, board: bool) -> str:
+    """캐릭터별 묘사·역할 한 문장 (스토리보드 그림·영상 프롬프트). 2명 미만이면 ""."""
+    members = cast_members(rec)
+    if not members:
+        return ""
+    lead_look = " ".join(str(((rec or {}).get("sheet") or {}).get("consistency_en") or "").split())
+    looks = {i.get("character_id"): str(i.get("look_en") or "") for i in cast_items(rec)}
+    parts = []
+    for n, m in enumerate(members):
+        look = lead_look if n == 0 else looks.get(m["record_id"], "")
+        role = m.get("role_ko") or ("lead" if n == 0 else f"character {n + 1}")
+        who = "Person" if n == 0 else "Character"
+        parts.append(f"{who} {chr(65 + n)} ({role}): {look[:CAST_LOOK_MAX] or 'see reference'}")
+    tail = ("keep each identical across panels; do not merge faces." if board
+            else "keep each identical across the video; do not merge faces.")  # fmt: skip
+    return f"{'; '.join(parts)}; {tail}"
+
+
 def latest_video_part(rec: dict[str, Any] | None) -> str | None:
     """지금 "최신 영상" 칸: 완성 영상(`final_video`, BGM)이 끝났으면 그것, 아니면 `video`.
 
@@ -793,9 +846,12 @@ def maybe_start_board(ledger: MediaLedger, meta: RequestMeta, record_id: str,
     # 11/26 C: 회사 계정(MCP)이면 구도판을 첫 참조로, 시트(없으면 원본)·추가 참조를 다음 참조로
     grid = layout_board_png(rec, cid) if layout and via == MCP else None
     if grid is not None:
-        extra = [ref, *extra_reference_bytes(record_id, rec, cid)] if ref else None
+        # 11/27 D: 등장 캐릭터가 여럿이면 주인공 시트 다음에 캐릭터별 시트(없으면 원본)
+        cast_refs = cast_ref_bytes(record_id, rec, cid)
+        extra = [ref, *cast_refs, *extra_reference_bytes(record_id, rec, cid)] if ref else None
         ref = grid
-        prompt = f"{BOARD_LAYOUT_EN} {prompt}"
+        cast_en = cast_prompt_en(rec, board=True)
+        prompt = " ".join(x for x in (BOARD_LAYOUT_EN, cast_en, prompt) if x)
         try:
             folder = _dir(record_id, cid)
             folder.mkdir(parents=True, exist_ok=True)
@@ -1112,6 +1168,11 @@ async def request_video(
         "speed": speed,
         "generated_seconds": seconds,
     }
+    if cast_members(rec):  # 11/27 D 등장 캐릭터 여럿: 참조로 올리는 캐릭터 수·모델이 1장만 받는지
+        used = cast_video_refs(rec, model)
+        summary["cast"] = len(cast_members(rec))
+        summary["cast_refs"] = used
+        summary["cast_single_ref"] = used <= 1
     extra_ko = f", {model or '모델 미정'}, 비율 {aspect}"
     if keyframed:
         summary["reference"] = _kf.REFERENCE
@@ -1363,10 +1424,24 @@ def _video_mcp_params(
 ) -> dict[str, Any]:
     model = mcp_video_model(cid)
     # 참조 방식은 영상을 만들 때 고르는 것(`video_reference`)과 같다
-    part, _ = video_reference(rec, model)
+    part, role = video_reference(rec, model)
     reference = REF_CHARACTER if part != "board_image" else REF_STORYBOARD
     prompt = _video_prompt(rec, speed, reference)
+    # 11/27 D 캐릭터별 묘사·역할 (캐릭터별 참조를 올릴 때만)
+    cast_en = cast_prompt_en(rec, board=False) if cast_video_refs(rec, model) > 1 else ""
+    if cast_en and role == _mcp.IMAGE_REF_ROLE:
+        prompt = f"{prompt} {cast_en}"[:VIDEO_PROMPT_MAX]
     return _mcp.video_params(model, prompt, video_aspect(cid), seconds)
+
+
+def cast_video_refs(rec: dict[str, Any] | None, model: str) -> int:
+    """영상에 참조로 올릴 캐릭터 수 (주인공 포함). 모델이 참조 1장만 받으면 1(주인공만)."""
+    members = cast_members(rec)
+    if not members:
+        return 0
+    if not _mcp.takes_image_references(model):
+        return 1
+    return min(1 + len(cast_items(rec)), _mcp.max_image_references(model))
 
 
 async def _render_video(
@@ -1411,7 +1486,9 @@ async def _render_video(
             extras: list[bytes] = []
             if role == _mcp.IMAGE_REF_ROLE:  # 11/25 참조 여러 장(모델 상한 안으로 자름)
                 room = _mcp.max_image_references(mcp_video_model(cid)) - 1
-                extras = extra_reference_bytes(record_id, rec, cid)[: max(room, 0)]
+                # 11/27 D: 캐릭터별 대표 1장씩 먼저, 남는 칸에 추가 참조
+                extras = [*cast_ref_bytes(record_id, rec, cid),
+                          *extra_reference_bytes(record_id, rec, cid)][: max(room, 0)]  # fmt: skip
             await _mcp_preflight(cid, "video", params)  # 승인 사이에 크레딧이 줄었을 수 있다
             async with CLIENT() as client:
                 sha = await _mcp_render(client, cid, record_id, "video", "video", params, ref,
