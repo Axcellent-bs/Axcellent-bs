@@ -210,8 +210,8 @@ class SessionCompanyScope:
 
     skill 요청(`/a2a`)은 `meta.tenant_id`로 회사를 걸지만, 화면이 부르는 HTTP 경로(GET 목록 등)는
     회사를 몰라 저장소가 설치 회사(캣북스)로 읽었다. 사람 세션 토큰의 회사(`cid`)가 캣북스가 아니면
-    요청 동안 `company_scope.using`을 걸어 그 회사 건만 보게 한다. 캣북스 세션·공용 토큰·토큰 없음은
-    예전 그대로(회사를 걸지 않음)다.
+    요청 동안 `company_scope.using`을 걸어 그 회사 건만 보게 한다. 캣북스 세션도 캣북스를
+    건다(11/27). 공용 토큰·토큰 없음은 회사를 걸지 않는다(그때 `visible`은 캣북스 건만).
     """
 
     def __init__(self, app: Any) -> None:
@@ -222,9 +222,10 @@ class SessionCompanyScope:
             await self.app(scope, receive, send)
             return
         company = _session_company(scope.get("headers", []))
-        if not company or company_scope.scope_id(company) == company_scope.CATBOOKS:
+        if not company:
             await self.app(scope, receive, send)
             return
+        # 캣북스 세션도 캣북스를 건다(11/27: 회사 없음 = 모든 회사 통과를 막음)
         with company_scope.using(company):
             await self.app(scope, receive, send)
 

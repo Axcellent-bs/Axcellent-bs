@@ -153,6 +153,61 @@ uv run python domains/archive/eval/compare.py 620
 자동 병합 기준이 높아져(0.9101) 시연의 "서비스 배포 시간…" 쌍(0.906)은 여전히 사람 승인으로 간다. 기준 근처의 쌍은
 사람이 보는 쪽으로 틀리게 되어 있다. 결과: `results/link_eval_v2.json`.
 
+## 임베딩 모델 비교 (고객지원 제안, #소통 2026-11-27, `model_compare_search.py`/`model_compare_report.py`)
+
+고객지원(병환)이 회사 기억 검색(data 소재↔상품 연결)을 4개 임베딩 모델로 비교한 뒤, 같은 방식을
+9번 카드 검색에도 적용해 달라는 제안이 있었다. 새 골든셋·채점 로직을 만들지 않고 `run_eval.py`의
+`dense` 방식을 그대로 재사용한다.
+
+```bash
+cd backend
+# 모델마다 한 번씩 (MEMORY_EMBED_MODEL 등은 backend/.env 또는 process env)
+MEMORY_EMBED_MODEL=gemini-embedding-001 \
+  uv run python domains/archive/eval/model_compare_search.py gemini-embedding-001
+
+MEMORY_EMBED_MODEL=text-embedding-3-large MEMORY_EMBED_BASE_URL=https://api.openai.com/v1 MEMORY_EMBED_API_KEY=sk-... \
+  uv run python domains/archive/eval/model_compare_search.py text-embedding-3-large
+
+# 비교표 (모델 · test 재현율@1·@5 · MRR · 오연결률)
+uv run python domains/archive/eval/model_compare_report.py gemini-embedding-001 text-embedding-3-large
+```
+
+- 벡터 캐시(`backend/.data/eval_vectors.db`)는 글 해시+모델 이름으로 저장하므로 모델을 바꿔도 안전하다.
+- 결과는 `results/model_compare/search_<라벨>.json`에 모델별로 따로 쌓인다(기존 `results/dense_620.json`은
+  건드리지 않음).
+- 이 세션(클라우드 샌드박스)에는 실제 임베딩 API 키가 없어 배선만 `dense-mock`으로 확인했다
+  (`uv run python domains/archive/eval/model_compare_search.py wiring-test 120 dense-mock`). 실제 비교 숫자는
+  `.env`에 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
+- 15번 카드 연결(중복 판단)은 아래 절(`model_compare_link.py`)로 같은 비교를 한다.
+
+## 임베딩 모델 비교 — 카드 연결/중복 판단 (준하 제안, #소통 2026-11-27, `model_compare_link.py`/`model_compare_link_report.py`)
+
+준하 제안의 "아카이브 중복 결정 판단"(1순위) 항목. `link_eval_v2.py`는 위 카드 검색과 달리 임베딩과
+Claude 중복 판정 호출이 모두 실제 호출이라(`run_eval.py`의 `dense-mock` 같은 무호출 경로가 없다),
+그 스크립트를 고치지 않고 서브프로세스로 그대로 돌린 뒤 고정 출력(`results/link_eval_v2.json`)을
+모델별 라벨을 붙여 복사하는 방식으로 감쌌다.
+
+```bash
+cd backend
+# 모델마다 한 번씩 (MEMORY_EMBED_MODEL 등은 backend/.env 또는 process env, HR_LLM_*는 판정용 Claude 호출)
+MEMORY_EMBED_MODEL=gemini-embedding-001 \
+  uv run python domains/archive/eval/model_compare_link.py gemini-embedding-001
+
+MEMORY_EMBED_MODEL=text-embedding-3-large MEMORY_EMBED_BASE_URL=https://api.openai.com/v1 MEMORY_EMBED_API_KEY=sk-... \
+  uv run python domains/archive/eval/model_compare_link.py text-embedding-3-large
+
+# 비교표 (모델 · test 정확도 · 정밀도 · 재현율 · 잘못 병합)
+uv run python domains/archive/eval/model_compare_link_report.py gemini-embedding-001 text-embedding-3-large
+```
+
+- 결과는 `results/model_compare/link_<라벨>.json`에 모델별로 쌓인다(기존 `results/link_eval_v2.json`은
+  매번 덮어써지므로, 비교가 끝나면 그 파일은 마지막에 돌린 모델의 결과일 뿐이다).
+- 모델 하나 돌릴 때마다 Claude 중복 판정(최대 60회)·제목 제안 호출이 들어가 과금된다.
+- 이 세션(클라우드 샌드박스)에는 임베딩 키가 없어 실제 비교는 못 돌렸다. 대신 키 없이 실행하면
+  `link_eval_v2.py`가 `AssertionError: 임베딩 설정이 없다`로 깔끔하게 실패하고 `model_compare_link.py`가
+  그 실패를 그대로 전달하며 결과 파일을 만들지 않는 것까지만 확인했다(배선 확인의 한계). 실제 비교 숫자는
+  `.env`에 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
+
 ## 조직 변동 RAG·LLM 평가 (12번, `org_change_eval.py`)
 
 조직 변동 화면의 세 기능을 `org-change-rules.md`에 결과 전에 적은 방법과 통과 기준으로 시험했다(임시 DB, 실제 임베딩·LLM,

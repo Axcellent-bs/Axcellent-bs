@@ -6,7 +6,7 @@
 
 - 돌 회사: 캣북스(예전 그대로) + 회사 연결이 켜진 다른 회사. 판매 수집(#1878)·변화 감지기(#1749)와
   같은 기준(회사 목록 → 그 회사 연결 파일이 켜짐)
-- 캣북스는 예전처럼 요청 회사 없이(`company_scope.active()` = None) 돈다. 동작이 바뀌지 않는다
+- 캣북스 차례도 `company_scope.using(캣북스)`로 돈다(11/27: 회사 없음 = 모든 회사 통과를 막음)
 - 다른 회사는 `company_scope.using(회사)` 안에서 돈다. 저장소가 그 회사 칸·파일만 읽고 쓴다
 - 한 회사가 실패해도(예외) 다음 회사는 돈다. 취소(`CancelledError`)만 그대로 올린다
 - 작업이 다른 에이전트를 부르는 요청을 만들면 `meta_tenant_id()`를 `RequestMeta.tenant_id`에 넣는다.
@@ -65,11 +65,9 @@ async def for_each_company[T](
     results: dict[str, T] = {}
     for cid in job_companies():
         try:
-            if cid == company_scope.CATBOOKS:
-                results[cid] = await run(cid)  # 캣북스는 예전처럼 요청 회사 없이
-            else:
-                with company_scope.using(cid):
-                    results[cid] = await run(cid)
+            # 캣북스 차례도 캣북스를 건다(11/27: 회사 없음 = 모든 회사 통과를 막음)
+            with company_scope.using(cid):
+                results[cid] = await run(cid)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - 한 회사 실패가 다른 회사를 막지 않게

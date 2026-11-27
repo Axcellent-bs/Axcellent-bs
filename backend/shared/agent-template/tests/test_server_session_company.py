@@ -31,10 +31,16 @@ def test_a_session_of_another_company_reads_that_company(client: TestClient) -> 
     assert res.json()["data"]["company"] == "nubi"
 
 
-def test_catbooks_shared_and_anonymous_requests_stay_as_before(client: TestClient) -> None:
+def test_catbooks_session_scopes_catbooks_shared_and_anonymous_stay_unscoped(
+    client: TestClient,
+) -> None:
+    # 11/27: 캣북스 세션도 캣북스를 건다(예전에는 회사 없음 → 다른 회사 건까지 보였다)
     for headers in (
         _session("catbooks", company_role="admin"),
         _session("shop-demo", company_role="admin"),  # 별칭도 캣북스
+    ):
+        assert client.get("/api/whose", headers=headers).json()["data"]["company"] == "catbooks"
+    for headers in (
         {"Authorization": "Bearer shared-human-token"},
         {"Authorization": "Bearer axs1.broken.token"},
         {},

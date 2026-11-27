@@ -52,7 +52,7 @@ def test_broken_connection_file_skips_only_that_company(monkeypatch: pytest.Monk
     assert company_jobs.job_companies() == ["catbooks", STUDY]
 
 
-def test_each_company_runs_in_its_own_scope_and_catbooks_as_before(two_companies) -> None:
+def test_each_company_runs_in_its_own_scope_including_catbooks(two_companies) -> None:
     seen: list[tuple[str, str | None, str]] = []
 
     async def job(cid: str) -> str:
@@ -62,7 +62,8 @@ def test_each_company_runs_in_its_own_scope_and_catbooks_as_before(two_companies
     got = asyncio.run(company_jobs.for_each_company(job))
     assert got == {"catbooks": "catbooks", NUBI: NUBI, STUDY: STUDY}
     assert seen == [
-        ("catbooks", None, TENANT_ID_DEFAULT),  # 캣북스는 예전처럼 요청 회사 없이, 예전 meta 값
+        # 캣북스 차례도 캣북스를 건다(11/27). meta 값은 예전 그대로
+        ("catbooks", "catbooks", TENANT_ID_DEFAULT),
         (NUBI, NUBI, NUBI),
         (STUDY, STUDY, STUDY),
     ]

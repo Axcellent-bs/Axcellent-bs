@@ -26,9 +26,10 @@ def owned(tenant_id: str | None) -> bool:
     저장소는 회사마다 파일이 따로라(#1773) 다른 회사 파일에는 그 회사 카드만 있다(예전 카드는
     회사 칸이 기본값 `shop-demo`로 남았을 수 있어 칸으로 거르지 않는다). 캣북스 파일에는 분리 전
     다른 회사 요청이 쓴 카드가 남아 있을 수 있어서, 캣북스 요청이면 칸이 캣북스인 것만 보인다.
-    요청 밖(스스로 도는 루틴)은 예전처럼 다 본다.
+    회사가 안 걸렸으면(공용 토큰·스스로 도는 루틴) 캣북스 파일을 쓰므로 캣북스 요청과 같게 본다
+    (11/27: 예전에는 다 보였다).
     """
-    company = company_scope.active()
+    company = company_scope.active() or company_scope.CATBOOKS
     if company != company_scope.CATBOOKS:
         return True
     return company_scope.scope_id(tenant_id) == company_scope.CATBOOKS

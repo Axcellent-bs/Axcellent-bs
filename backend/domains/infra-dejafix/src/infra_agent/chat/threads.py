@@ -15,6 +15,7 @@ status: `talking`(말 걸 수 있음) · `answering`(AI 답을 만드는 중) ·
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import sqlite3
@@ -25,7 +26,7 @@ from typing import Any, Literal
 
 from ax_agent_template import company_scope
 from ax_agent_template.companies import canonical_company_id
-from ax_contracts.schemas.common import TENANT_ID_CATBOOKS
+from ax_contracts.schemas.common import TENANT_ID_CATBOOKS, TENANT_ID_DEFAULT
 
 MAX_MESSAGES = 60  # 한 대화에 남기는 메시지 수(넘으면 오래된 것부터 버린다)
 SUMMARY_CHARS = 200
@@ -55,6 +56,12 @@ CREATE TABLE IF NOT EXISTS infra_chat_threads (
 # 숨김 처리(소프트 삭제): 행은 지우지 않고 removed_at·removed_by만 적는다.
 # 옛 DB는 열이 없어 켤 때 붙인다.
 _REMOVED_COLUMNS = ("removed_at", "removed_by")
+
+
+# 정리 루틴(오래 쉰 대화 끝내기·켤 때 되살리기)만 모든 회사 줄을 본다
+_EVERYWHERE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "infra_chat_everywhere", default=False
+)
 
 
 def _now() -> datetime:
@@ -89,11 +96,17 @@ class ChatStore:
 
     @staticmethod
     def _mine() -> tuple[str, tuple[str, ...]]:
-        """지금 요청의 회사 조건(요청 밖이면 조건 없음)."""
-        company = company_scope.active()
-        if company is None:
+        """지금 요청의 회사 조건. 회사가 안 걸렸으면(공용 토큰·스스로 도는 루틴) 캣북스만.
+
+        11/27: 예전에는 회사 없음 = 조건 없음이라 캣북스 화면에 다른 회사 대화까지 보였다.
+        캣북스 줄은 쓸 때 정식 id(`catbooks`)로 적고 옛 DB 기본값도 `catbooks`다. 별칭도 함께 본다.
+        모든 회사를 보는 건 정리 루틴(`expire_idle`·`recover_orphans`, `_EVERYWHERE`)뿐이다."""
+        if _EVERYWHERE.get():
             return "1 = 1", ()
-        return "tenant_id = ?", (company,)
+        cid = company_scope.scope_id(company_scope.active())
+        if cid == company_scope.CATBOOKS:
+            return "tenant_id IN (?, ?)", (TENANT_ID_CATBOOKS, TENANT_ID_DEFAULT)
+        return "tenant_id = ?", (cid,)
 
     @staticmethod
     def _view(row: dict[str, Any]) -> dict[str, Any]:
@@ -145,7 +158,11 @@ class ChatStore:
                 (thread_id, seq, title, who, now, now, tenant),
             )
             self._db.commit()
-        return self.get(thread_id) or {}
+        token = _EVERYWHERE.set(True)  # 방금 만든 줄은 회사 조건 없이 돌려준다
+        try:
+            return self.get(thread_id) or {}
+        finally:
+            _EVERYWHERE.reset(token)
 
     def _update(
         self,
@@ -257,8 +274,12 @@ class ChatStore:
             " WHERE status = 'talking' AND updated_at < ? AND removed_at IS NULL",
             (cut,),
         )
-        for r in rows:
-            self.close(r["id"])
+        token = _EVERYWHERE.set(True)
+        try:
+            for r in rows:
+                self.close(r["id"])
+        finally:
+            _EVERYWHERE.reset(token)
         return [r["id"] for r in rows]
 
     def recover_orphans(self) -> list[str]:
@@ -266,8 +287,12 @@ class ChatStore:
         rows = self._rows(
             "SELECT id FROM infra_chat_threads WHERE status = 'answering' AND removed_at IS NULL"
         )
-        for r in rows:
-            self.finish_turn(r["id"], INTERRUPTED, kind="error")
+        token = _EVERYWHERE.set(True)
+        try:
+            for r in rows:
+                self.finish_turn(r["id"], INTERRUPTED, kind="error")
+        finally:
+            _EVERYWHERE.reset(token)
         return [r["id"] for r in rows]
 
 

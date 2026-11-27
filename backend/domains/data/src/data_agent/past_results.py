@@ -168,7 +168,8 @@ def attach_past(
 
 # ---------------------------------------------------------------- 캠페인 결과 모으기
 
-_CACHE: dict[str, tuple[float, CampaignResultOutput]] = {}
+# (회사, 캠페인) → (시각, 결과). 회사마다 캠페인 번호가 겹칠 수 있어 회사를 키에 넣는다(11/27)
+_CACHE: dict[tuple[str, str], tuple[float, CampaignResultOutput]] = {}
 
 
 def clear_cache() -> None:
@@ -215,8 +216,11 @@ async def campaign_results(
         store.close()
     out: list[CampaignResultOutput] = []
     clock = time.monotonic()
+    from data_agent import company_scope
+
+    company = company_scope.active()
     for cid in ids:
-        hit = _CACHE.get(cid)
+        hit = _CACHE.get((company, cid))
         if hit is not None and clock - hit[0] < CACHE_SECONDS:
             out.append(hit[1])
             continue
@@ -228,6 +232,6 @@ async def campaign_results(
             now=now,
             measure=measure,
         )
-        _CACHE[cid] = (clock, result.output)
+        _CACHE[(company, cid)] = (clock, result.output)
         out.append(result.output)
     return out

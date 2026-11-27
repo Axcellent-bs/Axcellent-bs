@@ -22,6 +22,7 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
+from ax_agent_template import company_scope
 from ax_agent_template.client import call_agent
 from ax_contracts.schemas import (
     AgentRequest,
@@ -162,13 +163,16 @@ class HttpMemoryClient:
         return str(found)
 
     async def get_card(self, card_id: str) -> Card | None:
-        data = await self._request("GET", f"/api/memory/cards/{card_id}", allow_missing=True)
-        return None if data is None else self._card(data)
+        data = await self._request(
+            "GET", f"/api/memory/cards/{card_id}", params=_company(), allow_missing=True
+        )
+        card = None if data is None else self._card(data)
+        return card if card is not None and company_scope.visible(card.tenant_id) else None
 
     async def list_cards(
         self, *, area: str | None = None, states: list[str] | None = None
     ) -> list[Card]:
-        params: dict[str, Any] = {}
+        params: dict[str, Any] = _company()
         if area:
             params["area"] = area
         if states:
@@ -176,7 +180,8 @@ class HttpMemoryClient:
         data = await self._request("GET", "/api/memory/cards", params=params)
         if not isinstance(data, list):
             raise UpstreamError("memory", "카드 목록 형식 오류")
-        return [self._card(item) for item in data]
+        cards = [self._card(item) for item in data]
+        return [c for c in cards if company_scope.visible(c.tenant_id)]
 
     async def search_cards(
         self,
@@ -187,7 +192,7 @@ class HttpMemoryClient:
         states: list[str] | None = None,
         limit: int = 5,
     ) -> list[CardHit]:
-        params: dict[str, Any] = {"q": query, "limit": limit}
+        params: dict[str, Any] = {"q": query, "limit": limit, **_company()}
         if area:
             params["area"] = area
         if kinds:
@@ -200,9 +205,11 @@ class HttpMemoryClient:
         hits = []
         for item in data:
             try:
-                hits.append(CardHit(self._card(item["card"]), float(item["score"])))
+                hit = CardHit(self._card(item["card"]), float(item["score"]))
             except (KeyError, TypeError, ValueError) as exc:
                 raise UpstreamError("memory", "검색 결과 형식 오류") from exc
+            if company_scope.visible(hit.card.tenant_id):  # 회사를 모르는 서비스가 섞어 줘도 거른다
+                hits.append(hit)
         return hits
 
     async def set_status(self, card_id: str, status: str, superseded_by: str | None = None) -> None:
@@ -216,3 +223,10 @@ class HttpMemoryClient:
         await self._request(
             "PATCH", f"/api/memory/cards/{card_id}/candidate", json={"candidate": candidate}
         )
+
+
+def _company() -> dict[str, Any]:
+    """요청 회사를 memory 서비스에 넘긴다(`tenant_id` 쿼리, 아카이브와 같은 방식). 요청 밖이면
+    넘기지 않고, 받은 카드는 `company_scope.visible`로 다시 거른다(회사 없음 = 캣북스만)."""
+    company = company_scope.active()
+    return {"tenant_id": company} if company else {}

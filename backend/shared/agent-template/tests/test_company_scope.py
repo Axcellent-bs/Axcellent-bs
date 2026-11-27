@@ -90,7 +90,10 @@ def test_bad_tenant_value_falls_back_to_catbooks_with_warning(
 
 def test_visible_and_using_outside_and_inside_a_request() -> None:
     assert company_scope.active() is None
-    assert company_scope.visible("nubitour") and company_scope.visible(None)  # 요청 밖은 전부
+    # 회사가 안 걸렸으면 캣북스 건만(11/27: 예전에는 전부 통과). 회사 칸 없는 옛 건은 캣북스
+    assert company_scope.visible(None) and company_scope.visible("shop-demo")
+    assert company_scope.visible("catbooks")
+    assert not company_scope.visible("nubitour")
     with company_scope.using("nubitour") as cid:
         assert cid == "nubitour" == company_scope.active()
         assert company_scope.visible("nubitour")

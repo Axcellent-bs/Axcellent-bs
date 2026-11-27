@@ -31,7 +31,8 @@ def test_incident_queue_rows_stay_in_their_company() -> None:
         assert [i.tenant_id for i in queue.list()] == ["nubi-tour"]
     with company_scope.using("catbooks"):
         assert [i.tenant_id for i in queue.list()] == ["shop-demo"]
-    assert len(queue.list()) == 2  # 요청 밖(스스로 도는 루틴)은 예전처럼 전부
+    # 회사가 안 걸렸으면 캣북스 줄만(11/27: 예전에는 전부). 줄은 요청 안에서만 만들고 바뀐다
+    assert [i.tenant_id for i in queue.list()] == ["shop-demo"]
 
 
 def test_settlement_batches_are_kept_per_company(
