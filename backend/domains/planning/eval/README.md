@@ -159,3 +159,41 @@ uv run python domains/planning/eval/model_compare_spec_report.py haiku sonnet
 - 이 세션(클라우드 샌드박스)에는 키가 없어 실행만 확인했다(배선 확인, 가짜 LLM으로 채점 로직
   검증 완료 — 깨끗한 답·범위 넓히기/지어낸 숫자/화면 용어가 섞인 답·검증 실패·타임아웃 네
   경로 모두). 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
+
+## 제안 초안 LLM 모델 비교 (예진 제안, #소통 2026-11-27 15:46, 4순위)
+
+"형식 통과율"·"근거에 없는 숫자 0" 평가. 기존 holdout.py(위 "영역과 정답 규칙"의
+`receive_insight`)는 LLM을 꺼서 규칙 경로만 쟀다(결과 1400/1400) — LLM 경로는 이 평가가
+처음 잰다.
+
+- `proposal_cases.json`: 합성 인사이트 10건(제목·요약·근거 facts, 데이터분석이 보내는 모양
+  그대로)
+- `proposal_eval.py`: 케이스마다 실제 `planning_agent.proposals.write()`를 그대로 부른다.
+  `write()`는 production 파이프라인 전체다 — LLM(`ProposalWriter.draft`) → 실패·시간 초과면
+  규칙 초안(`rule_draft`) → 두 경로 모두 숫자 검사(`number_warnings`, 근거·목표에 없는 숫자를
+  경고). 이 평가는 새 검사를 하나도 만들지 않았다 — `write()`가 돌려준 `written_by`·`warnings`만
+  읽어 지표로 바꾼다
+  - 실행: `cd backend && uv run python domains/planning/eval/proposal_eval.py`
+  - 모델은 `PLANNING_LLM_MODEL` → 없으면 `LLM_MODEL`
+  - 지표: `format_pass_rate`(`written_by == "llm"` 비율, 즉 규칙 초안으로 안 떨어진 비율)·
+    `llm_zero_warning_rate`(LLM 경로 중 숫자 경고 0건 비율)·`zero_warning_rate`(전체 중 숫자
+    경고 0건 비율)·`total_warnings`·`avg_warnings`(평균 경고 수)
+- 모델 비교: `model_compare_proposal.py <라벨>` → `results/model_compare/proposal_<라벨>.json`,
+  `model_compare_proposal_report.py <라벨1> <라벨2> ...`로 비교표
+
+```bash
+cd backend
+PLANNING_LLM_MODEL=claude-haiku-5-5 uv run python domains/planning/eval/model_compare_proposal.py haiku
+PLANNING_LLM_MODEL=claude-sonnet-5-5 uv run python domains/planning/eval/model_compare_proposal.py sonnet
+uv run python domains/planning/eval/model_compare_proposal_report.py haiku sonnet
+```
+
+**한계**
+- 합성 인사이트 10건은 근거 facts가 이미 깔끔해서(데이터분석이 보내는 구조화된 값), LLM이
+  정상적으로 쓰면 숫자 경고가 잘 안 나올 수 있다 — 근거가 모호하거나 여러 숫자가 섞인 케이스를
+  늘리면 모델별 차이가 더 잘 드러날 것이다.
+- `draft_for_angle`(방향을 고른 뒤 다시 쓰는 경로, 11/18)는 이 평가에 넣지 않았다. 기본
+  `write()` 경로만 잰다.
+- 이 세션(클라우드 샌드박스)에는 키가 없어 실행만 확인했다(배선 확인, 가짜 LLM으로 깨끗한
+  답·숫자 경고가 걸리는 답·검증 실패로 규칙 초안에 떨어지는 경로 모두 검증 완료). 실제 비교
+  숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.

@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "insight_id": "p01",
+      "title": "독서 모임 숏츠 반응 좋음",
+      "summary": "독서 모임 브이로그 숏츠가 또래 대비 조회수가 높게 나옴",
+      "skill": "trend_insight_brief",
+      "facts": [
+        {"label": "\"독서 모임\" 숏츠 평균 조회", "value": "12.3만", "source": "shorts_stats"},
+        {"label": "20대 검색 평소 대비", "value": "1.6배", "source": "trend_insight_brief:age"}
+      ],
+      "products": ["모닝 다이어리"]
+    },
+    {
+      "insight_id": "p02",
+      "title": "겨울 방학 추천 도서 수요",
+      "summary": "겨울 방학을 앞두고 추천 도서 검색이 느는 계절성이 보임",
+      "skill": "trend_insight_brief",
+      "facts": [
+        {"label": "\"겨울방학 추천도서\" 작년 같은 시기", "value": "평균의 2.1배", "source": "trend_insight_brief:season"}
+      ],
+      "products": ["겨울 동화 전집"]
+    },
+    {
+      "insight_id": "p03",
+      "title": "육아서 리뷰 영상 인기",
+      "summary": "육아서 언박싱·리뷰 숏츠가 꾸준히 조회수를 받음",
+      "skill": "trend_insight_brief",
+      "facts": [
+        {"label": "\"육아서 리뷰\" 숏츠 중앙값 조회", "value": "8.7만", "source": "trend_insight_brief:shorts"}
+      ],
+      "products": ["초보 부모 육아 전집"]
+    },
+    {
+      "insight_id": "p04",
+      "title": "다이어리 신상품 고객 반응",
+      "summary": "신상품 다이어리에 클레임이 적고 판매가 꾸준함",
+      "skill": "trend_insight_brief",
+      "facts": [
+        {"label": "고객 반응 · 모닝 다이어리 (최근 한 달)", "value": "클레임 2건 · 판매 340권 중 0.6%", "source": "trend_insight_brief:book_issue_stats"}
+      ],
+      "products": ["모닝 다이어리"]
+    },
+    {
+      "insight_id": "p05",
+      "title": "자기계발서 유튜브 언급 증가",
+      "summary": "자기계발서 관련 유튜브 영상이 늘고 시간당 조회도 늘어남",
+      "skill": "trend_insight_brief",
+      "facts": [
+        {"label": "\"자기계발\" 나온 YouTube 인기 영상", "value": "14개", "source": "trend_insight_brief:youtube"},
+        {"label": "그 영상들 시간당 조회 합", "value": "2,300회", "source": "trend_insight_brief:youtube"}
+      ],
+      "products": ["하루 10분 습관"]
+    },
+    {
+      "insight_id": "p06",
+      "title": "동화 전집 네이버 검색 상승",
+      "summary": "동화 전집 네이버 검색이 평소보다 늘어남",
+      "skill": "trend_insight_brief",
+      "facts": [
+        {"label": "\"동화 전집\" 네이버 검색 평소 대비", "value": "1.8배", "source": "trend_insight_brief:naver"}
+      ],
+      "products": ["겨울 동화 전집"]
+    },
+    {
+      "insight_id": "p07",
+      "title": "에세이 구글 인기 검색어 진입",
+      "summary": "에세이 관련 키워드가 구글 인기 검색어에 올라감",
+      "skill": "trend_insight_brief",
+      "facts": [
+        {"label": "\"에세이\" 구글 인기 검색어", "value": "7위", "source": "trend_insight_brief:google"}
+      ],
+      "products": ["오늘의 문장"]
+    },
+    {
+      "insight_id": "p08",
+      "title": "육아 도서 30대 타깃 반응",
+      "summary": "30대 타깃 육아 도서 관련 검색이 평소보다 늘어남",
+      "skill": "trend_insight_brief",
+      "facts": [
+        {"label": "30대 검색 평소 대비", "value": "1.4배", "source": "trend_insight_brief:age"}
+      ],
+      "products": ["초보 부모 육아 전집"],
+      "audience": "30대"
+    },
+    {
+      "insight_id": "p09",
+      "title": "플래너 숏츠 포맷 반응",
+      "summary": "플래너 꾸미기 숏츠 포맷이 또래 콘텐츠보다 반응이 좋음",
+      "skill": "trend_insight_brief",
+      "facts": [
+        {"label": "\"플래너 꾸미기\" 숏츠 중앙값 조회", "value": "5.2만", "source": "trend_insight_brief:shorts"}
+      ],
+      "products": ["모닝 다이어리"],
+      "shorts_format": "플래너 꾸미기"
+    },
+    {
+      "insight_id": "p10",
+      "title": "에세이 판매가 할인 반응",
+      "summary": "에세이 판매가가 합리적이라는 고객 반응이 있음",
+      "skill": "trend_insight_brief",
+      "facts": [
+        {"label": "오늘의 문장 판매가", "value": "13,500원", "source": "shop-api"}
+      ],
+      "products": ["오늘의 문장"]
+    }
+  ]
+}
