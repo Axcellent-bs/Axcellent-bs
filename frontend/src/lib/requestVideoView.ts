@@ -128,6 +128,19 @@ export function coverCells(v: Pick<RequestVideo, "covers" | "cover_media_id">, s
   return covers.map((c) => ({ media_id: c.media_id, at: clock(c.at_s), chosen: c.media_id === chosen, selected: c.media_id === pick }));
 }
 
+/** 11/27 C 승인 카드 썸네일: 승인 요청에 묶인 썸네일(state.params.cover_media_id, 마케팅이 요청 때 넣은 값)이
+ *  먼저, 없으면 지금 정해진 썸네일(cover_media_id). 형식 밖 값·썸네일 없음이면 null (카드에 그림을 넣지 않는다).
+ *  썸네일을 바꾸면 마케팅이 승인을 다시 받게 하므로(cover_changed) 보이는 그림과 올라가는 그림이 같다 */
+export function approvalCoverId(
+  v: Pick<RequestVideo, "cover_media_id">,
+  state?: { params?: { cover_media_id?: unknown } | null } | null,
+): string | null {
+  const bound = state?.params?.cover_media_id;
+  if (typeof bound === "string" && COVER_ID.test(bound)) return bound;
+  return v.cover_media_id && COVER_ID.test(v.cover_media_id) ? v.cover_media_id : null;
+}
+export const APPROVAL_COVER_KO = "승인하면 이 썸네일로 올라가요";
+
 /** [이걸로 정하기]를 누를 수 있나: 눌러 둔 후보가 지금 정해진 것과 다를 때, 또는 아직 사람이 고르지 않았을 때 */
 export function canCommitCover(cells: CoverCell[], picked: boolean): boolean {
   const sel = cells.find((c) => c.selected);
