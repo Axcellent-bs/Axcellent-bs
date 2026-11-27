@@ -74,3 +74,41 @@ uv run python domains/planning/eval/model_compare_related_report.py haiku sonnet
   우선순위표의 "비고" 항목이고, `related.py`의 `_vectors`/`MIN_SCORE`로 따로 재야 한다(아직 안 함).
 - 이 세션(클라우드 샌드박스)에는 키가 없어 실행만 확인했다(배선 확인, 가짜 LLM으로 채점 로직
   검증 완료). 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
+
+## 영상 제작안 LLM 모델 비교 (예진 제안, #소통 2026-11-27 15:46, 2순위)
+
+"첫 답이 코드 검사를 통과한 비율(1판·2판)"·"금칙어·지어낸 숫자·실명 0" 평가. 이것도 평가
+데이터가 없어서 새로 만들었다.
+
+- `video_plan_cases.json`: 합성 제안(Proposal) 10건. 보통 제안 8건 + 의뢰 주제 후보에 실존
+  인물 이름을 넣은 제안 2건(v04·v10, `실명` 검사가 실제로 걸릴 조건을 만든 것)
+- `video_plan_eval.py`: 케이스마다 실제 `video_plan.write(llm, p, context_id)`를 그대로 부른다.
+  채점 로직을 새로 만들지 않고, `write()`가 이미 `VideoPlan`에 남기는 값(`written_by`·
+  `check_log`·`fallback_reason`·`fallback_detail`)만 읽어 지표로 바꾼다 — 금칙어
+  (`text_problems`)·지어낸 숫자(`invented_number`)·실명(`has_real_name`) 검사 자체는
+  `write()` 안에서 이미 돈 것이고 이 스크립트는 그 결과(통과했는지·어느 검사에 걸렸는지)만 센다.
+  - 실행: `cd backend && uv run python domains/planning/eval/video_plan_eval.py`
+  - 모델은 `PLANNING_LLM_MODEL` → 없으면 `LLM_MODEL`
+  - 지표: `first_draft_pass_rate`(1판 통과율)·`rewrite_rate`(다시 쓰기 비율)·
+    `second_draft_pass_rate`(다시 쓴 뒤 통과율)·`llm_plan_rate`(최종 LLM 제작안 비율, 1 -
+    이 값 = 규칙 제작안으로 떨어진 비율)·`watched_check_hits`(marketing_word·
+    invented_offer_number·real_name_in_scene 각각 몇 건 걸렸는지)
+- 모델 비교: `model_compare_video_plan.py <라벨>` → `results/model_compare/video_plan_<라벨>.json`,
+  `model_compare_video_plan_report.py <라벨1> <라벨2> ...`로 비교표
+
+```bash
+cd backend
+PLANNING_LLM_MODEL=claude-haiku-5-5 uv run python domains/planning/eval/model_compare_video_plan.py haiku
+PLANNING_LLM_MODEL=claude-sonnet-5-5 uv run python domains/planning/eval/model_compare_video_plan.py sonnet
+uv run python domains/planning/eval/model_compare_video_plan_report.py haiku sonnet
+```
+
+**한계**
+- 제안 10건은 합성이고, 실명 검사를 걸기 위한 2건을 뺀 8건은 평범한 입력이라 LLM이 정상적으로
+  쓰면 보통 1판에서 통과한다 — "모델이 얼마나 자주 위반을 시도하는가"를 보려면 의도적으로 애매한
+  입력(상충하는 할인율·여러 실존 이름 후보 등)을 더 늘려야 한다.
+- 콘티 SVG 호출(`storyboard_svg.draw`)은 제작안과 같은 LLM으로 돌지만 이 평가의 지표에는 넣지
+  않았다(제작안 자체의 통과율만 본다).
+- 이 세션(클라우드 샌드박스)에는 키가 없어 실행만 확인했다(배선 확인). 가짜 LLM으로 (1) 깨끗한
+  답은 10건 전부 1판 통과, (2) 의도적으로 실명을 섞은 답은 그 2건만 `real_name_in_scene`으로
+  거절되는지 직접 검증했다. 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
