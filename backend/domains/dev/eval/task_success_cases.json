@@ -1,0 +1,109 @@
+{
+  "_comment": "예진 제안(#소통 2026-11-27 15:46, 개발 AI 1순위) 작업 성공률 평가용 합성 코딩 작업 8건. 각 작업은 seed 저장소(files)·기획(plan)·완료 기준(done)과, 사람이 직접 작성한 정답 최종 파일 글(golden)을 함께 둔다. 정답은 전부 작업 원래 글에서 바뀐 부분만 담는다(difflib로 added_lines를 뽑아 평가 전용으로 비교).",
+  "cases": [
+    {
+      "id": "c01",
+      "title": "배너 문구를 신간 안내로 바꾸기",
+      "plan": "메인 배너 문구를 '신간 안내'로 바꾸고 래퍼 클래스를 wrap로 둔다.",
+      "done": "배너에 '신간 안내' 문구가 보인다\n래퍼 class가 wrap이다",
+      "paths": ["shop-web/src/components/Banner.tsx"],
+      "files": {
+        "shop-web/src/components/Banner.tsx": "export function Banner() {\n  return <div>배너</div>\n}\n"
+      },
+      "golden": {
+        "shop-web/src/components/Banner.tsx": "export function Banner() {\n  return <div className='wrap'>신간 안내</div>\n}\n"
+      }
+    },
+    {
+      "id": "c02",
+      "title": "장바구니 수량 버튼 간격 맞추기",
+      "plan": "장바구니 수량 증감 버튼 사이 gap을 8px로 맞춘다.",
+      "done": "증감 버튼 묶음에 gap: 8px가 적용된다",
+      "paths": ["shop-web/src/components/QtyButtons.tsx"],
+      "files": {
+        "shop-web/src/components/QtyButtons.tsx": "export function QtyButtons() {\n  return (\n    <div style={{ display: 'flex' }}>\n      <button>-</button>\n      <span>1</span>\n      <button>+</button>\n    </div>\n  )\n}\n"
+      },
+      "golden": {
+        "shop-web/src/components/QtyButtons.tsx": "export function QtyButtons() {\n  return (\n    <div style={{ display: 'flex', gap: '8px' }}>\n      <button>-</button>\n      <span>1</span>\n      <button>+</button>\n    </div>\n  )\n}\n"
+      }
+    },
+    {
+      "id": "c03",
+      "title": "재고 0이면 품절 배지 보이기",
+      "plan": "재고가 0이면 StockBadge에 '품절' 배지를 보여준다.",
+      "done": "stock이 0이면 '품절' 글자가 보인다\nstock이 0보다 크면 배지가 없다",
+      "paths": ["shop-web/src/StockBadge.tsx"],
+      "files": {
+        "shop-web/src/StockBadge.tsx": "export function StockBadge({ stock }: { stock: number }) {\n  return null\n}\n"
+      },
+      "golden": {
+        "shop-web/src/StockBadge.tsx": "export function StockBadge({ stock }: { stock: number }) {\n  if (stock === 0) {\n    return <span className='badge'>품절</span>\n  }\n  return null\n}\n"
+      }
+    },
+    {
+      "id": "c04",
+      "title": "검색어 없으면 추천어 보이기",
+      "plan": "검색창에 검색어가 없으면 추천어 '베스트셀러'를 placeholder로 보여준다.",
+      "done": "검색어가 비어 있으면 placeholder가 '베스트셀러'다",
+      "paths": ["shop-web/search/Box.tsx"],
+      "files": {
+        "shop-web/search/Box.tsx": "export function Box() {\n  return <input placeholder='검색' />\n}\n"
+      },
+      "golden": {
+        "shop-web/search/Box.tsx": "export function Box() {\n  return <input placeholder='베스트셀러' />\n}\n"
+      }
+    },
+    {
+      "id": "c05",
+      "title": "환불 안내 문구에 처리 기간 추가",
+      "plan": "환불 안내 문구 뒤에 '영업일 기준 3일 이내 처리' 문장을 추가한다.",
+      "done": "환불 안내에 '영업일 기준 3일 이내 처리'가 포함된다\n기존 문구는 그대로 남는다",
+      "paths": ["shop-web/src/lib/refundNotice.ts"],
+      "files": {
+        "shop-web/src/lib/refundNotice.ts": "export const REFUND_NOTICE = '환불은 신청 뒤 진행됩니다'\n"
+      },
+      "golden": {
+        "shop-web/src/lib/refundNotice.ts": "export const REFUND_NOTICE = '환불은 신청 뒤 진행됩니다. 영업일 기준 3일 이내 처리됩니다'\n"
+      }
+    },
+    {
+      "id": "c06",
+      "title": "상품 카드 이미지에 alt 문구 추가",
+      "plan": "ProductCard 이미지에 상품명을 alt로 넣는다.",
+      "done": "img 태그에 alt={name}이 있다",
+      "paths": ["shop-web/src/components/ProductCard.tsx"],
+      "files": {
+        "shop-web/src/components/ProductCard.tsx": "export function ProductCard({ name, image }: { name: string; image: string }) {\n  return <img src={image} />\n}\n"
+      },
+      "golden": {
+        "shop-web/src/components/ProductCard.tsx": "export function ProductCard({ name, image }: { name: string; image: string }) {\n  return <img src={image} alt={name} />\n}\n"
+      }
+    },
+    {
+      "id": "c07",
+      "title": "로그에서 토큰 값 가리기",
+      "plan": "요청 로그를 남길 때 Authorization 헤더 값은 'REDACTED'로 가린다.",
+      "done": "logRequest가 Authorization 값을 'REDACTED'로 남긴다\n다른 헤더는 그대로 남긴다",
+      "paths": ["shop-web/src/lib/logRequest.ts"],
+      "files": {
+        "shop-web/src/lib/logRequest.ts": "export function logRequest(headers) {\n  return { ...headers }\n}\n"
+      },
+      "golden": {
+        "shop-web/src/lib/logRequest.ts": "export function logRequest(headers) {\n  const out = { ...headers }\n  if ('Authorization' in out) {\n    out['Authorization'] = 'REDACTED'\n  }\n  return out\n}\n"
+      }
+    },
+    {
+      "id": "c08",
+      "title": "홈 화면 섹션 사이 여백 늘리기",
+      "plan": "홈 화면 섹션 사이 margin-bottom을 24px로 늘린다.",
+      "done": "섹션 요소에 marginBottom: 24가 적용된다",
+      "paths": ["shop-web/src/pages/Home.tsx"],
+      "files": {
+        "shop-web/src/pages/Home.tsx": "export function Home() {\n  return <section style={{ marginBottom: 8 }}>홈</section>\n}\n"
+      },
+      "golden": {
+        "shop-web/src/pages/Home.tsx": "export function Home() {\n  return <section style={{ marginBottom: 24 }}>홈</section>\n}\n"
+      }
+    }
+  ]
+}
