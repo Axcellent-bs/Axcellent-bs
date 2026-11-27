@@ -81,6 +81,23 @@ bge-m3·multilingual-e5-large 등 나머지 자체호스팅 후보는 이번 주
 방식(`local_embeddinggemma_server.py`를 모델만 바꿔 재사용하거나 TEI로 띄우고
 `EMBED_BASE_URL=http://localhost:<port>`)으로 다음에 추가하면 된다.
 
+## 결과 해석 주의 (재현 제안, #소통 2026-11-27 16:16)
+
+병환 님이 공유한 4개 모델 holdout 결과(gemini-embedding-001 0.86, solar-embedding-1-large 0.86,
+EmbeddingGemma 2 0.86, text-embedding-3-large 0.71, 모두 정밀도 1.00)에 대한 의견.
+
+- **이 holdout(`domains/data/eval/product_link/`, 소재 42개 중 holdout 12개, 관련 질의 7개)은
+  표본이 작아 모델 간 우열을 가리기 어렵다.** 0.86과 0.71의 차이는 관련 질의 7개 중 맞힌 개수가
+  6개냐 5개냐(6/7 vs 5/7) 질의 1개 차이일 뿐이다. `product_link/README.md` 자신도 이 holdout이
+  "작다"고 이미 적어 두었다(상품 8개·소재 42개·holdout 관련 질의 7개) — 이 세트는 원래
+  gemini 임계값(0.6→0.65) 보정용으로 만든 것이라, 모델 비교용으로 쓰기엔 작다.
+- 영상 제작(Picsart) 쪽은 장면/레퍼런스 매칭에 임베딩을 쓰지 않으므로 이 비교를 따로 적용할
+  필요가 없다.
+- 모델을 바꾸면 저장된 벡터 재임베딩과 임계값 재조정이 필요하고, 자체호스팅(EmbeddingGemma 2
+  등)은 의존성·서버 자원이 추가로 든다. 그래서 (동결/freeze) 전에는 지금 모델(gemini) 유지를
+  권장한다.
+- 비교를 더 이어가려면 **API 키 준비보다 정답 있는 질의를 50개 이상으로 늘리는 것이 먼저**다.
+
 ## 다른 부서 적용 요청 (태윤 제안, #소통 2026-11-27 14:13)
 
 고객지원(상품-문의 연결) 결과를 공유한 뒤, 태윤이 같은 방식(`collect_variant.py` /
