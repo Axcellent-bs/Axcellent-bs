@@ -7,7 +7,7 @@
 - 어느 회사인가:
   - skill 요청: 서버가 핸들러를 부르는 동안 `meta.tenant_id`의 정식 id (contextvar. 그 요청에서
     띄운 작업(asyncio task)도 같은 값을 잇는다)
-  - 그 밖(스스로 도는 루틴·화면용 HTTP 경로): None. 저장소는 지금까지처럼 본다
+  - 그 밖(스스로 도는 루틴·회사 모르는 HTTP 경로): None. `visible`은 캣북스 건만 보인다(11/27)
   - 별칭 `shop-demo`는 `catbooks`로, 없거나 형식이 맞지 않는 값은 캣북스
 - 회사 목록에 없는 값·형식이 틀린 값은 거절하지 않고 경고 로그만 남긴다(`checked`, 값마다 한 번).
   거절(`TENANT_REQUIRED`)은 설계 4장 강제 단계에서 켠다. 그전에는 경고만
@@ -52,9 +52,14 @@ def active() -> str | None:
 
 
 def visible(tenant_id: str | None) -> bool:
-    """이 회사의 건을 지금 보여도 되는가. 요청 밖이면 늘 True."""
-    company = _ACTIVE.get()
-    return company is None or scope_id(tenant_id) == company
+    """이 회사의 건을 지금 보여도 되는가. 회사가 안 걸렸으면 캣북스 건만.
+
+    11/27: 예전에는 회사 없음(캣북스 세션·스스로 도는 루틴) = 모든 회사 통과라 캣북스 화면·캣북스
+    주기 차례에 다른 회사 건이 보였다. 회사 칸이 없거나 옛 값(`shop-demo`)인 건은 `scope_id`가
+    캣북스로 보므로 그대로 캣북스에 남는다. 모든 회사를 도는 작업은 `company_jobs`로 회사마다 건다.
+    """
+    company = _ACTIVE.get() or CATBOOKS
+    return scope_id(tenant_id) == company
 
 
 @contextmanager

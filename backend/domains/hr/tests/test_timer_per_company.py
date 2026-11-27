@@ -56,8 +56,8 @@ async def test_timer_starts_handovers_per_company(svc, clock, nubi_connected, mo
     cat, nubi = _handovers(svc, None), _handovers(svc, NUBI)
     assert len(cat) == len(started["catbooks"]) and len(cat) > len(nubi) > 0
     assert {r["area"] for r in nubi} == {"payment"}  # 누비투어는 자기 교대만
-    # 캣북스는 예전처럼(요청 회사 없음·예전 meta 값), 누비투어는 그 회사 범위·그 회사 id
-    assert (None, TENANT_ID_DEFAULT) in calls and (NUBI, NUBI) in calls
+    # 캣북스 차례도 캣북스 범위(11/27)·예전 meta 값, 누비투어는 그 회사 범위·그 회사 id
+    assert ("catbooks", TENANT_ID_DEFAULT) in calls and (NUBI, NUBI) in calls
     assert all(tenant == NUBI for active, tenant in calls if active == NUBI)
 
 

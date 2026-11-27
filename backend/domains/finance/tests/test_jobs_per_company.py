@@ -76,7 +76,7 @@ async def test_daily_closing_runs_per_company_into_its_own_record(kit, monkeypat
 
     seen = await _one_round(main.daily_closing_loop, monkeypatch, "run_and_store_daily_closing")
 
-    assert seen == [None, NUBI]  # 캣북스는 예전처럼 요청 회사 없이, 누비투어는 그 회사 범위
+    assert seen == ["catbooks", NUBI]  # 캣북스 차례도 캣북스 범위(11/27), 누비투어는 그 회사 범위
     cat = handlers.state().last_daily_closing
     with company_scope.using(NUBI):
         nubi = handlers.state().last_daily_closing
@@ -95,7 +95,7 @@ async def test_close_alerts_run_per_company(monkeypatch) -> None:  # noqa: ANN00
 
     monkeypatch.setattr(main, "run_close_alerts", none)
     seen = await _one_round(main.close_alert_loop, monkeypatch, "run_close_alerts")
-    assert seen == [None, NUBI]
+    assert seen == ["catbooks", NUBI]
 
 
 @pytest.mark.asyncio
@@ -109,6 +109,6 @@ async def test_one_company_failing_does_not_stop_the_next(kit, monkeypatch) -> N
 
     handlers.state().books_loader = broken
     seen = await _one_round(main.daily_closing_loop, monkeypatch, "run_and_store_daily_closing")
-    assert seen == [None, NUBI]
+    assert seen == ["catbooks", NUBI]
     with company_scope.using(NUBI):
         assert handlers.state().last_daily_closing["date"] == YESTERDAY.isoformat()

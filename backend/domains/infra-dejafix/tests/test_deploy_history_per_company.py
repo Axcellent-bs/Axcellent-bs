@@ -121,7 +121,7 @@ def test_poll_runs_per_company_and_one_failure_does_not_stop_others(
     other = "c-f6c188"
     monkeypatch.setattr(company_jobs, "job_companies", lambda: ["catbooks", NUBI, other])
     tools = {
-        None: [FakeTool("shop-api", [_run("1", "v3.0.1", 5)])],
+        "catbooks": [FakeTool("shop-api", [_run("1", "v3.0.1", 5)])],  # 캣북스 차례도 캣북스를 건다
         NUBI: [FakeTool("tour-api", [_run("2", "v1.0.0", 4)], fail=True)],
         other: [FakeTool("course-api", [_run("3", "v2.0.0", 3)])],
     }

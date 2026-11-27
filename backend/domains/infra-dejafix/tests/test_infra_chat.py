@@ -285,7 +285,7 @@ def test_other_agents_cannot_open_the_chat() -> None:
 
 def test_chat_threads_are_seen_only_by_their_company() -> None:
     """누비투어 요청에는 캣북스 대화가 안 보인다(목록·열기·숨기기).
-    요청 밖 정리는 모두 본다 (11/25)."""
+    회사가 안 걸린 요청은 캣북스만, 요청 밖 정리 루틴은 모두 본다 (11/25·11/27)."""
     from ax_agent_template import company_scope
 
     store = threads.ChatStore()
@@ -299,7 +299,9 @@ def test_chat_threads_are_seen_only_by_their_company() -> None:
     with company_scope.using("catbooks"):
         assert [t["id"] for t in store.list_all()] == [cat["id"]]
         assert store.get(nubi["id"]) is None
-    assert {t["id"] for t in store.list_all()} == {cat["id"], nubi["id"]}  # 요청 밖
+    # 요청 밖(회사 없음)은 캣북스만(11/27: 예전에는 전부). 정리 루틴은 모든 회사를 본다
+    assert [t["id"] for t in store.list_all()] == [cat["id"]]
+    assert set(store.expire_idle(minutes=-1)) == {cat["id"], nubi["id"]}
 
 
 # --- 사람이 확정한 원인 (dashboard-api 읽기 창구) ---

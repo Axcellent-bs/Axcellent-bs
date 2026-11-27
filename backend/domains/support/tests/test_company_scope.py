@@ -146,11 +146,15 @@ def test_claim_list_and_queue_hold_only_the_requesting_company(client: TestClien
 
 
 # ---------------------------------------------------------------- 요청 밖
-def test_routines_outside_a_request_see_every_company() -> None:
+def test_outside_a_request_only_catbooks_is_seen() -> None:
+    """11/27: 회사가 안 걸렸으면(캣북스 세션·공용 토큰·스스로 도는 루틴) 캣북스 건만 보인다.
+
+    예전에는 모든 회사 건이 보여 캣북스 화면에 다른 회사 문의가 섞였다."""
     cat = inquiry("shop-demo")
     acme = inquiry(ACME, context_id="ctx_ui_2")
     assert company_scope.active() is None
-    assert {c.id for c in handlers.STORE.all()} == {cat.id, acme.id}
+    assert {c.id for c in handlers.STORE.all()} == {cat.id}
+    assert handlers.STORE.get(acme.id) is None
     with company_scope.using(ACME):
         assert {c.id for c in handlers.STORE.all()} == {acme.id}
         assert handlers.STORE.get(cat.id) is None

@@ -77,7 +77,8 @@ async def test_brief_handoff_runs_per_company_with_that_company_id(monkeypatch) 
         await brief_auto_handoff.auto_handoff_loop(lambda: handlers.STATE.briefs, handoff)
 
     # 캣북스는 예전처럼(요청 회사 없음·예전 meta 값) 자기 기획안만, 누비투어는 그 회사 기획안만
-    assert seen == [(None, TENANT_ID_DEFAULT, "P_CAT"), (NUBI, NUBI, "P_NUBI")]
+    # 캣북스 차례도 캣북스 범위(11/27), meta 값은 예전 그대로
+    assert seen == [("catbooks", TENANT_ID_DEFAULT, "P_CAT"), (NUBI, NUBI, "P_NUBI")]
     assert handlers.STATE.briefs.auto_attempts("P_CAT")[0] == 1
     assert handlers.STATE.briefs.auto_attempts("P_NUBI")[0] == 0  # 캣북스 칸에는 없다
     with company_scope.using(NUBI):
@@ -104,7 +105,7 @@ async def test_campaign_auto_record_runs_per_company(monkeypatch) -> None:  # no
     monkeypatch.setattr(campaign_auto.RT, "sleep", sleep)
     with pytest.raises(_Stop):
         await campaign_auto.auto_record_loop(handlers.STATE.campaigns)
-    assert seen == [None, NUBI]
+    assert seen == ["catbooks", NUBI]
 
 
 def test_campaign_auto_request_carries_the_company() -> None:
