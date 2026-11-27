@@ -91,3 +91,47 @@ uv run python domains/dev/eval/model_compare_task_success_report.py haiku sonnet
 - 이 세션(클라우드 샌드박스)에는 키가 없어 가짜 LLM으로 세 경로(완료 기준을 다 채우는 답·
   채우지 않는 답·LLM 실패)만 검증했다. 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로
   내야 한다.
+
+## 범위 정확도 LLM 모델 비교 (예진 제안, #소통 2026-11-27 15:46, 개발 2순위)
+
+"기대 파일·기대 줄만 바꾼 비율" 평가. 작업 성공률(위)과 같은 production 경로를 쓰지만
+다른 것을 잰다: 작업 성공률은 "목표를 이뤘나"(더 고쳐도 괜찮음, 재현율 쪽), 범위 정확도는
+"그것만 고쳤나"(더 고치면 틀림, 정밀도 쪽)다. 이것도 평가 데이터가 없어 새로 만들었다.
+
+- `scope_accuracy_cases.json`: 합성 코딩 작업 6건. `task_success_cases.json`과 같은 형식(seed
+  파일·기획·완료 기준·golden)에, 이름이 비슷해 집기 쉬운 미끼 파일(`BannerOld.tsx`·
+  `QtyButtonsLegacy.tsx` 등)을 저장소에 같이 둔다 — 모델이 정답 파일만 고르는지, 미끼까지
+  건드리는지를 보려는 것
+- `scope_accuracy_eval.py`: 작업마다 `MockVcsAdapter`에 seed(미끼 포함)를 심고 실제
+  `DevService.create_dev_task` → `coder.run()` → 자동 머지까지 돌린다(task_success_eval.py와
+  같은 흐름). 두 가지를 본다:
+  - 파일 범위: 실제로 고친 파일 집합이 정답 파일 집합과 정확히 같은가(미끼 파일을 같이
+    고쳤으면 틀림)
+  - 줄 범위: 병합된 최종 글이 정답(golden) 글과 줄 단위로 정확히 같은가(정답에 없는 줄을
+    더 얹었으면 틀림 — 작업 성공률의 "더해진 줄이 다 들어 있나"와 반대 방향 검사)
+  - 실행: `cd backend && uv run python domains/dev/eval/scope_accuracy_eval.py`
+  - 모델은 `DEV_LLM_MODEL` → 없으면 `LLM_MODEL`
+  - 지표: `scope_accuracy`(파일·줄 범위를 모두 지킨 비율, 머지된 작업 중)·`merge_rate`·
+    `file_scope_rate`·`line_scope_rate`·`extra_files_total`(미끼까지 고친 수)·
+    `extra_lines_total`(범위 밖에 더 얹은 줄 수)
+- 모델 비교: `model_compare_scope_accuracy.py <라벨>` →
+  `results/model_compare/scope_accuracy_<라벨>.json`,
+  `model_compare_scope_accuracy_report.py <라벨1> <라벨2> ...`로 비교표
+
+```bash
+cd backend
+DEV_LLM_MODEL=claude-haiku-5-5 uv run python domains/dev/eval/model_compare_scope_accuracy.py haiku
+DEV_LLM_MODEL=claude-sonnet-5-5 uv run python domains/dev/eval/model_compare_scope_accuracy.py sonnet
+uv run python domains/dev/eval/model_compare_scope_accuracy_report.py haiku sonnet
+```
+
+**한계**
+- 골든셋이 합성·소규모다(6건, 파일당 미끼 1~2개). task_success_cases.json과 마찬가지로
+  11/24~26 운영 시험 요청 등 실제 기록으로 바꾸면 더 믿을 만하다.
+- 줄 범위 판정(`final == golden`)은 글자 그대로 비교라, 뜻은 같지만 줄바꿈·공백·변수명이
+  다른 정답도 "범위를 벗어남"으로 셀 수 있다. production 판정이 아닌 이 평가 전용 근사치다.
+- 파일 범위는 "정답 파일 집합과 정확히 같은가"만 본다. 정답 파일 중 일부만 고치고 나머지는
+  빠뜨린 경우도 틀림으로 센다(부분 일치는 따로 재지 않는다).
+- 이 세션(클라우드 샌드박스)에는 키가 없어 가짜 LLM으로 세 경로(정답만 정확히 고치는 답·
+  미끼까지 같이 고치는 답·정답 파일에 범위 밖 줄을 더 얹는 답)를 검증했다. 실제 비교 숫자는
+  키가 있는 로컬 PC에서 위 명령으로 내야 한다.

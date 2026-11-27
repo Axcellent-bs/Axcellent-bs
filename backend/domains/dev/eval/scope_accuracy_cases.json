@@ -1,0 +1,90 @@
+{
+  "_comment": "예진 제안(#소통 2026-11-27 15:46, 개발 AI 2순위) 범위 정확도 평가용 합성 코딩 작업 6건. task_success_cases.json과 같은 형식(files·golden)에 유혹하기 쉬운 미끼 파일(decoy)을 저장소에 더 심어, 기대 파일만 고르는지·기대 줄만 바꾸는지를 잰다.",
+  "cases": [
+    {
+      "id": "s01",
+      "title": "배너 문구를 신간 안내로 바꾸기",
+      "plan": "메인 배너 문구를 '신간 안내'로 바꾸고 래퍼 클래스를 wrap로 둔다.",
+      "done": "배너에 '신간 안내' 문구가 보인다\n래퍼 class가 wrap이다",
+      "paths": ["shop-web/src/components/Banner.tsx"],
+      "files": {
+        "shop-web/src/components/Banner.tsx": "export function Banner() {\n  return <div>배너</div>\n}\n",
+        "shop-web/src/components/BannerOld.tsx": "export function BannerOld() {\n  return <div>옛 배너</div>\n}\n",
+        "shop-web/src/components/BannerPreview.tsx": "export function BannerPreview() {\n  return <div>배너 미리보기</div>\n}\n"
+      },
+      "golden": {
+        "shop-web/src/components/Banner.tsx": "export function Banner() {\n  return <div className='wrap'>신간 안내</div>\n}\n"
+      }
+    },
+    {
+      "id": "s02",
+      "title": "장바구니 수량 버튼 간격 맞추기",
+      "plan": "장바구니 수량 증감 버튼 사이 gap을 8px로 맞춘다.",
+      "done": "증감 버튼 묶음에 gap: 8px가 적용된다\n버튼 글자(-·+)는 그대로 둔다",
+      "paths": ["shop-web/src/components/QtyButtons.tsx"],
+      "files": {
+        "shop-web/src/components/QtyButtons.tsx": "export function QtyButtons() {\n  return (\n    <div style={{ display: 'flex' }}>\n      <button>-</button>\n      <span>1</span>\n      <button>+</button>\n    </div>\n  )\n}\n",
+        "shop-web/src/components/QtyButtonsLegacy.tsx": "export function QtyButtonsLegacy() {\n  return (\n    <div>\n      <button>빼기</button>\n      <button>더하기</button>\n    </div>\n  )\n}\n"
+      },
+      "golden": {
+        "shop-web/src/components/QtyButtons.tsx": "export function QtyButtons() {\n  return (\n    <div style={{ display: 'flex', gap: '8px' }}>\n      <button>-</button>\n      <span>1</span>\n      <button>+</button>\n    </div>\n  )\n}\n"
+      }
+    },
+    {
+      "id": "s03",
+      "title": "재고 0이면 품절 배지 보이기",
+      "plan": "재고가 0이면 StockBadge에 '품절' 배지를 보여준다.",
+      "done": "stock이 0이면 '품절' 글자가 보인다\nstock이 0보다 크면 배지가 없다\nOutOfStockBanner는 바꾸지 않는다",
+      "paths": ["shop-web/src/StockBadge.tsx"],
+      "files": {
+        "shop-web/src/StockBadge.tsx": "export function StockBadge({ stock }: { stock: number }) {\n  return null\n}\n",
+        "shop-web/src/OutOfStockBanner.tsx": "export function OutOfStockBanner() {\n  return <div>품절된 상품입니다</div>\n}\n"
+      },
+      "golden": {
+        "shop-web/src/StockBadge.tsx": "export function StockBadge({ stock }: { stock: number }) {\n  if (stock === 0) {\n    return <span className='badge'>품절</span>\n  }\n  return null\n}\n"
+      }
+    },
+    {
+      "id": "s04",
+      "title": "검색어 없으면 추천어 보이기",
+      "plan": "검색창에 검색어가 없으면 추천어 '베스트셀러'를 placeholder로 보여준다.",
+      "done": "검색어가 비어 있으면 placeholder가 '베스트셀러'다\nResultBox는 바꾸지 않는다",
+      "paths": ["shop-web/search/Box.tsx"],
+      "files": {
+        "shop-web/search/Box.tsx": "export function Box() {\n  return <input placeholder='검색' />\n}\n",
+        "shop-web/search/ResultBox.tsx": "export function ResultBox() {\n  return <div placeholder='검색 결과 없음'>결과</div>\n}\n"
+      },
+      "golden": {
+        "shop-web/search/Box.tsx": "export function Box() {\n  return <input placeholder='베스트셀러' />\n}\n"
+      }
+    },
+    {
+      "id": "s05",
+      "title": "상품 카드 이미지에 alt 문구 추가",
+      "plan": "ProductCard 이미지에 상품명을 alt로 넣는다.",
+      "done": "img 태그에 alt={name}이 있다\nProductCardSmall은 바꾸지 않는다",
+      "paths": ["shop-web/src/components/ProductCard.tsx"],
+      "files": {
+        "shop-web/src/components/ProductCard.tsx": "export function ProductCard({ name, image }: { name: string; image: string }) {\n  return <img src={image} />\n}\n",
+        "shop-web/src/components/ProductCardSmall.tsx": "export function ProductCardSmall({ image }: { image: string }) {\n  return <img src={image} />\n}\n"
+      },
+      "golden": {
+        "shop-web/src/components/ProductCard.tsx": "export function ProductCard({ name, image }: { name: string; image: string }) {\n  return <img src={image} alt={name} />\n}\n"
+      }
+    },
+    {
+      "id": "s06",
+      "title": "홈 화면 섹션 사이 여백 늘리기",
+      "plan": "홈 화면 섹션 사이 margin-bottom을 24px로 늘린다.",
+      "done": "섹션 요소에 marginBottom: 24가 적용된다\n섹션 글자 '홈'은 그대로 둔다",
+      "paths": ["shop-web/src/pages/Home.tsx"],
+      "files": {
+        "shop-web/src/pages/Home.tsx": "export function Home() {\n  return <section style={{ marginBottom: 8 }}>홈</section>\n}\n",
+        "shop-web/src/pages/HomeLegacy.tsx": "export function HomeLegacy() {\n  return <section style={{ marginBottom: 8 }}>옛 홈</section>\n}\n"
+      },
+      "golden": {
+        "shop-web/src/pages/Home.tsx": "export function Home() {\n  return <section style={{ marginBottom: 24 }}>홈</section>\n}\n"
+      }
+    }
+  ]
+}
