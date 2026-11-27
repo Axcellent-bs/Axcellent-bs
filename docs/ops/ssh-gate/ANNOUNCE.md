@@ -123,6 +123,8 @@ ssh axgate deploy-bundle <SHA> --announced pr=<PR번호>
 
 | 명령 | 하는 일 |
 | --- | --- |
+| `nginx-remove-location <이름>` | 이미 연 location 하나 닫기(게이트가 넣은 것만, 손으로 넣은 것은 안 됨). 백업이 남고 `nginx-restore`로 되돌림 |
+| `nginx-reload` | 설정은 그대로 두고 `nginx -t` 통과 시 nginx reload |
 | `rollback-code <SHA>` | 서버 코드(레포 HEAD)를 그 배포 직전으로 되돌림. 재시작은 따로 `restart-backend` |
 | `uv-sync <SHA>` | 의존성 맞추기(`uv.lock`·`pyproject.toml`이 바뀐 커밋을 배포한 뒤, 재시작 전) |
 | `autodeploy-pause <사유> [재개시각]` / `autodeploy-resume` | 자동 배포 잠깐 멈추기·다시 켜기(아래) |

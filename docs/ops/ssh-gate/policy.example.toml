@@ -20,6 +20,8 @@ label = "server"      # 알림 문안 맨 앞에 붙는 이름(영어·숫자·-
 #       직접 더한다. _default 에는 둘 수 없다)
 #       autodeploy-pause autodeploy-resume (자동 배포 정지·재개. 쓰려면 권한자 줄에 직접 더한다.
 #       _default 에는 둘 수 없다: 넣으면 게이트가 정책을 거부한다)
+#       nginx-remove-location nginx-reload (v0.6.0. 게이트가 넣은 location 하나 지우기 / 설정은 그대로 두고 nginx -t 후 reload.
+#       쓰려면 권한자 줄에 직접 더한다. 새 정책 키는 없다. 둘 다 --announced 필요)
 #       rollback-code uv-sync (v0.5.0. 서버 코드를 deploy-bundle 직전 HEAD 로 되돌림 / 서버 HEAD 가 그 SHA 일 때 uv sync --frozen.
 #       쓰려면 권한자·자동 배포 계정 줄에 직접 더한다. _default 에는 둘 수 없다. uv-sync 는 아래 [uv_sync] 도 채워야 한다)
 #

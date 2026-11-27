@@ -404,6 +404,87 @@ class ProfileTests(unittest.TestCase):
         self.assertIn("proxy_send_timeout 300s; }\n", out)
 
 
+class RemoveTests(unittest.TestCase):
+    """remove: 게이트가 넣은 블록(주석 줄 + location 한 줄)만 이름으로 뺀다. 서버 0.6.0 의 동작을 그대로 고정한다."""
+
+    GOOD2 = "^/example-api/api/items/cards/[^/]+/approve$"
+
+    def two_blocks(self):
+        out = chk.apply_to_conf(CONF, "mkt-cr", "owner-a", "20260102-101500", "POST", GOOD,
+                                METHODS, PREFIXES, UPSTREAMS, BLOCK_LINES)
+        return chk.apply_to_conf(out, "mkt-cr-draft", "owner-b", "20260103-111500", "POST", self.GOOD2,
+                                 METHODS, PREFIXES, UPSTREAMS, BLOCK_LINES)
+
+    def test_removes_only_the_named_block_and_reports_owner(self):
+        conf = self.two_blocks()
+        new, owner = chk.remove_from_conf(conf, "mkt-cr")
+        self.assertEqual(owner, "owner-a")
+        self.assertNotIn("name=mkt-cr user=", new)
+        self.assertNotIn(GOOD, new)
+        # 이름 앞부분이 같은 다른 블록, 삽입 표시 줄, 손으로 넣은 location 은 그대로 남는다
+        self.assertIn("name=mkt-cr-draft user=owner-b", new)
+        self.assertIn(self.GOOD2, new)
+        self.assertEqual(new.count("# AX-GATE-INSERT-BELOW"), 1)
+        self.assertIn("location ~ ^/example-api/api/items/old/[^/]+/decision$", new)
+        self.assertIn("location /example-api/ {", new)
+        self.assertEqual(len(new.splitlines()), len(conf.splitlines()) - 2)
+        # 둘 다 지우면 처음 설정으로 돌아온다
+        new2, owner2 = chk.remove_from_conf(new, "mkt-cr-draft")
+        self.assertEqual(owner2, "owner-b")
+        self.assertEqual(new2, CONF)
+
+    def test_absent_name_returns_none(self):
+        self.assertEqual(chk.remove_from_conf(CONF, "mkt-cr"), (None, None))
+        self.assertEqual(chk.remove_from_conf(self.two_blocks(), "mkt"), (None, None))
+
+    def test_hand_written_location_is_never_removed(self):
+        # 이름 주석이 없는 location 은 지우지 못한다(없는 것으로 취급)
+        self.assertEqual(chk.remove_from_conf(CONF, "old"), (None, None))
+        self.assertEqual(chk.remove_from_conf(CONF, "example-api"), (None, None))
+
+    def test_bad_name_is_rejected(self):
+        for name in ("Bad", "a b", "../x", "", "-x", "a" * 41):
+            with self.subTest(name=name):
+                with self.assertRaises(chk.Rejected) as ctx:
+                    chk.remove_from_conf(self.two_blocks(), name)
+                self.assertEqual(ctx.exception.code, "bad-name")
+
+    def test_duplicate_name_is_rejected(self):
+        conf = self.two_blocks()
+        dup = conf.replace("name=mkt-cr-draft user=", "name=mkt-cr user=")
+        with self.assertRaises(chk.Rejected) as ctx:
+            chk.remove_from_conf(dup, "mkt-cr")
+        self.assertEqual(ctx.exception.code, "multiple-match")
+
+    def test_block_with_wrong_shape_is_rejected(self):
+        comment = "    # ax-gate: name=n1 user=owner-a added=20260102-101500\n"
+        shapes = {
+            "location 줄 없음": comment,
+            "location 이 여러 줄": comment + "    location ~ " + GOOD + " {\n        return 200;\n    }\n",
+            "location 아닌 줄": comment + "    return 200;\n",
+            "다른 줄이 붙은 블록": comment + "    location ~ " + GOOD + " { limit_except POST { deny all; } } location /x/ { }\n",
+        }
+        for label, body in shapes.items():
+            with self.subTest(label=label):
+                with self.assertRaises(chk.Rejected) as ctx:
+                    chk.remove_from_conf(CONF + body, "n1")
+                self.assertEqual(ctx.exception.code, "block-shape")
+
+    def test_insert_marker_line_is_not_removed(self):
+        # 주석이 삽입 표시 줄 바로 위에 있어도 표시 줄은 지우지 않는다
+        conf = ("server {\n    # ax-gate: name=n1 user=owner-a added=20260102-101500\n"
+                "    # AX-GATE-INSERT-BELOW\n}\n")
+        with self.assertRaises(chk.Rejected) as ctx:
+            chk.remove_from_conf(conf, "n1")
+        self.assertEqual(ctx.exception.code, "block-shape")
+
+    def test_policy_is_not_needed_and_source_is_untouched(self):
+        conf = self.two_blocks()
+        before = conf
+        chk.remove_from_conf(conf, "mkt-cr")
+        self.assertEqual(conf, before)
+
+
 class CliTests(unittest.TestCase):
     def test_profile_flags(self):
         base = ["check", "--method", "POST", "--regex", GOOD] + self.BASE
@@ -472,6 +553,35 @@ class CliTests(unittest.TestCase):
             argv[2] = os.path.join(tmp, "none")
             rc, _o, _e = self.run_cli(argv + self.NAMING + self.BASE)
             self.assertEqual(rc, 3)
+
+    def test_remove_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conf = os.path.join(tmp, "site.conf")
+            out = os.path.join(tmp, "site.conf.new")
+            block = chk.apply_to_conf(CONF, "n1", "owner-a", "20260102-101500", "POST", GOOD,
+                                      METHODS, PREFIXES, UPSTREAMS, BLOCK_LINES)
+            with open(conf, "w", encoding="utf-8", newline="") as fh:
+                fh.write(block)
+            # --out 없이: 검사만(FOUND), 파일은 안 쓴다
+            rc, o, _e = self.run_cli(["remove", "--conf", conf, "--name", "n1"])
+            self.assertEqual((rc, o), (0, "FOUND owner-a\n"))
+            # 없는 이름은 ABSENT, 종료 코드 0
+            rc, o, _e = self.run_cli(["remove", "--conf", conf, "--name", "zz"])
+            self.assertEqual((rc, o), (0, "ABSENT\n"))
+            # --out 이 있으면 새 파일을 쓰고 원본은 그대로
+            rc, o, _e = self.run_cli(["remove", "--conf", conf, "--name", "n1", "--out", out])
+            self.assertEqual((rc, o), (0, "REMOVED owner-a\n"))
+            with open(out, encoding="utf-8", newline="") as fh:
+                self.assertEqual(fh.read(), CONF)
+            with open(conf, encoding="utf-8", newline="") as fh:
+                self.assertEqual(fh.read(), block)
+            # 이름 형식이 잘못되면 거부(2), 파일이 없으면 설정 오류(3)
+            rc, _o, err = self.run_cli(["remove", "--conf", conf, "--name", "Bad"])
+            self.assertEqual(rc, 2)
+            self.assertTrue(err.startswith("REJECT bad-name:"))
+            rc, _o, _e = self.run_cli(["remove", "--conf", os.path.join(tmp, "none"), "--name", "n1"])
+            self.assertEqual(rc, 3)
+            self.assertEqual(self.run_cli(["remove", "--conf", conf])[0], 3)    # --name 없음
 
 
 if __name__ == "__main__":

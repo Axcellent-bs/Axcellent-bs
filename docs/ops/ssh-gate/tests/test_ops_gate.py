@@ -1502,7 +1502,8 @@ class NginxRestoreAndStatusTests(GateCase):
 
 PAUSED_SH = HERE.parent / "autodeploy-paused.sh"
 OWNER_PLUS = (ALL + ', "gateway-allow-propose", "gateway-allow-approve", "gateway-allow-restore", '
-              '"autodeploy-pause", "autodeploy-resume", "rollback-code", "uv-sync"')
+              '"autodeploy-pause", "autodeploy-resume", "rollback-code", "uv-sync", '
+              '"nginx-remove-location", "nginx-reload"')
 
 
 class AutodeployPauseTests(GateCase):
@@ -2233,10 +2234,10 @@ class UsabilityTests(GateCase):
             self.assertIn(line + "\n", p.stdout)
         self.assertNotIn("  restart-backend <SHA>", p.stdout)
         self.assertIn("이 계정에 없는 동작(권한자에게 요청한다): lock unlock nginx-restore nginx-add-location "
-                      "nginx-approve-location gateway-allow-propose gateway-allow-approve gateway-allow-restore "
-                      "restart-backend rollback-bundle", p.stdout)
+                      "nginx-approve-location nginx-remove-location nginx-reload gateway-allow-propose "
+                      "gateway-allow-approve gateway-allow-restore restart-backend rollback-bundle", p.stdout)
         self.assertIn("--dry-run", p.stdout)
-        self.assertIn("ax-gate 0.5.0", p.stdout)
+        self.assertIn("ax-gate 0.6.0", p.stdout)
         self.assertEqual(self.calls(), "")                       # sudo 를 부르지 않는다(앞단에서 끝난다)
         self.assertIn("user=member-x\taction=help\targs=-\tmode=real\tannounced=no\tpr=-\tnote=-\t"
                       "layer=front\tresult=help", self.audit_text())
@@ -2247,7 +2248,7 @@ class UsabilityTests(GateCase):
         self.assertRc(p, 0)
         self.assertIn("  restart-backend <SHA> --ack-data-loss\n", p.stdout)
         # 이 테스트 정책의 권한자에게 없는 것은 게이트웨이 허용 3개와 자동 배포 정지·재개뿐이다(따로 적어야 열린다)
-        self.assertIn("이 계정에 없는 동작(권한자에게 요청한다): gateway-allow-propose gateway-allow-approve "
+        self.assertIn("이 계정에 없는 동작(권한자에게 요청한다): nginx-remove-location nginx-reload gateway-allow-propose gateway-allow-approve "
                       "gateway-allow-restore autodeploy-pause autodeploy-resume rollback-code uv-sync\n", p.stdout)
         p = self.gate("member-x", "help restart-backend")
         self.assertRc(p, 0)
@@ -2385,7 +2386,7 @@ class UsabilityTests(GateCase):
 
     def test_version_has_no_draft_suffix(self):
         p = self.gate("member-x", "status")
-        self.assertIn("ax-gate 0.5.0 — status", p.stdout)
+        self.assertIn("ax-gate 0.6.0 — status", p.stdout)
         self.assertNotIn("draft", p.stdout)
 
 
@@ -3190,6 +3191,377 @@ class UvSyncTests(CodeRollbackAndUvSyncBase):
         self.assertRc(p, 0)
         self.assertIn("rollback-code uv-sync", p.stdout)     # owner-c 에는 열지 않았다 → "없는 동작"에 나온다
         self.assertNotIn("  rollback-code <SHA>\n", p.stdout.split("이 계정에 없는 동작")[0])
+
+
+NGINX_EXTRA_ACTIONS = ', "nginx-remove-location", "nginx-reload"'
+
+
+class NginxRemoveBase(GateCase):
+    """게이트 0.6.0 nginx-remove-location / nginx-reload. owner-a·owner-b·owner-c 에게만 새 동작을 연다."""
+
+    def setUp(self):
+        super().setUp()
+        text = policy_text(self.root)
+        for owner in ("owner-a", "owner-b", "owner-c"):
+            text = text.replace(f"{owner} = [{ALL}]", f"{owner} = [{ALL}{NGINX_EXTRA_ACTIONS}]")
+        self.base_policy_text = text
+        write(self.policy, text)
+
+    def backup_dirs(self):
+        return sorted(os.listdir(self.rootp / "etc/nginx/backup"))
+
+    def add_block(self, name="card-decision", proposer="owner-b", approver="owner-c"):
+        """제안 → 다른 권한자 승인으로 게이트가 넣은 블록을 만든다. 그 위에서 시험하므로 기록·호출은 비운다."""
+        digest = self.propose(key=proposer, name=name)
+        self.assertRc(self.gate(approver, f"nginx-approve-location {name} {digest} --announced"), 0)
+        time.sleep(1.1)   # 백업 폴더 이름의 초 단위 시각이 겹치지 않게 한다
+        write(self.fakelog, "")
+
+    def remove_dirs(self):
+        return [d for d in self.backup_dirs() if d.startswith("pre-gate-remove-")]
+
+
+class NginxRemoveLocationTests(NginxRemoveBase):
+    CMD = "nginx-remove-location card-decision --announced"
+
+    def test_removes_only_the_gate_block_backs_up_and_records(self):
+        self.add_block()
+        with_block = self.conf.read_text(encoding="utf-8")
+        self.assertIn("# ax-gate: name=card-decision user=owner-b added=", with_block)
+        p = self.gate("owner-a", self.CMD + " pr=1234")
+        self.assertRc(p, 0)
+        # 설정은 제안 전 모양으로 돌아온다(삽입 표시 줄·손으로 넣은 location 은 그대로)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertEqual((self.rootp / "opt/app/ops-copies/site.conf").read_text(encoding="utf-8"), ORIG_CONF)
+        calls = self.calls()
+        self.assertEqual(calls.count("nginx -t"), 1)
+        self.assertEqual(calls.count("systemctl reload nginx"), 1)
+        self.assertLess(calls.index("nginx -t"), calls.index("systemctl reload nginx"))
+        # 지우기 전 설정이 백업 폴더(체크섬 포함)에 남는다
+        (bdir,) = self.remove_dirs()
+        self.assertRegex(bdir, r"^pre-gate-remove-card-decision-[0-9]{8}-[0-9]{6}$")
+        saved = self.rootp / "etc/nginx/backup" / bdir
+        self.assertEqual((saved / "site.conf").read_text(encoding="utf-8"), with_block)
+        self.assertTrue((saved / "site.conf.sha256").exists())
+        self.assertIn(f"nginx-restore {bdir}", p.stdout)
+        self.assertIn("제안 owner-b, 지운 사람 owner-a", p.stdout)
+        # 제안자와 지운 사람이 다르면 cross:yes 로 남는다
+        self.assertIn("user=owner-a\taction=nginx-remove-location\targs=card-decision\tmode=real\t"
+                      "announced=yes\tpr=1234\tnote=owner:owner-b,cross:yes\tlayer=root\t"
+                      f"result=removed:{bdir}", self.audit_text())
+
+    def test_remove_is_undone_by_nginx_restore(self):
+        self.add_block()
+        with_block = self.conf.read_text(encoding="utf-8")
+        self.assertRc(self.gate("owner-a", self.CMD), 0)
+        (bdir,) = self.remove_dirs()
+        time.sleep(1.1)
+        self.assertRc(self.gate("owner-a", f"nginx-restore {bdir} --announced"), 0)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), with_block)
+
+    def test_owner_removing_own_block_is_cross_no(self):
+        self.add_block(proposer="owner-b", approver="owner-c")
+        self.assertRc(self.gate("owner-b", self.CMD), 0)
+        self.assertIn("note=owner:owner-b,cross:no", self.audit_text())
+
+    def test_second_approval_is_not_needed(self):
+        # 길을 닫는 방향이라 제안·승인 두 사람 규칙은 없다. 한 사람이 --announced 로 바로 지운다
+        self.add_block()
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/pending"), [])
+        self.assertRc(self.gate("owner-c", self.CMD), 0)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+
+    def test_other_gate_blocks_and_similar_names_are_kept(self):
+        self.add_block(name="card-decision")
+        digest = self.propose(key="owner-b", name="card-decision-draft",
+                              regex="^/example-api/api/items/cards/[^/]+/draft$")
+        self.assertRc(self.gate("owner-c", f"nginx-approve-location card-decision-draft {digest} --announced"), 0)
+        time.sleep(1.1)
+        self.assertRc(self.gate("owner-a", self.CMD), 0)
+        conf = self.conf.read_text(encoding="utf-8")
+        self.assertNotIn("name=card-decision user=", conf)
+        self.assertIn("name=card-decision-draft user=owner-b", conf)
+        self.assertIn("/draft$", conf)
+
+    def test_hand_written_location_cannot_be_removed(self):
+        # ORIG_CONF 의 손으로 넣은 location 은 이름이 무엇이든 지울 수 없다. 설정은 한 글자도 안 바뀐다
+        for name in ("example-api", "old"):
+            with self.subTest(name=name):
+                p = self.gate("owner-a", f"nginx-remove-location {name} --announced")
+                self.assertRc(p, 2)
+                self.assertIn("result=fail:no-such-location", self.audit_text())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+        self.assertEqual(self.remove_dirs(), [])
+        self.assertNotIn("nginx", self.calls())
+        self.assertNotIn("reload", self.calls())
+
+    def test_missing_name_is_refused(self):
+        self.add_block()
+        before = self.conf.read_text(encoding="utf-8")
+        p = self.gate("owner-a", "nginx-remove-location not-there --announced")
+        self.assertRc(p, 2)
+        self.assertIn("result=fail:no-such-location", self.audit_text())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), before)
+        self.assertEqual(self.remove_dirs(), [])
+        self.assertNotIn("nginx", self.calls())
+
+    def test_block_with_wrong_shape_is_refused_untouched(self):
+        # 게이트 주석 줄은 있는데 location 이 여러 줄이면(손으로 고친 흔적) 지우지 않는다
+        broken = ORIG_CONF.replace(
+            "    # AX-GATE-INSERT-BELOW\n",
+            "    # AX-GATE-INSERT-BELOW\n    # ax-gate: name=card-decision user=owner-b added=20261111-101500\n"
+            "    location ~ ^/example-api/api/items/x$ {\n        return 200;\n    }\n")
+        write(self.conf, broken)
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 2)
+        self.assertIn("result=fail:location-rejected", self.audit_text())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), broken)
+        self.assertEqual(self.remove_dirs(), [])
+        self.assertNotIn("reload", self.calls())
+
+    def test_duplicate_block_is_refused_untouched(self):
+        self.add_block()
+        text = self.conf.read_text(encoding="utf-8")
+        start = text.index("    # ax-gate: name=card-decision")
+        end = text.index("    location /example-api/ {")
+        doubled = text[:end] + text[start:end] + text[end:]
+        write(self.conf, doubled)
+        self.assertRc(self.gate("owner-a", self.CMD), 2)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), doubled)
+        self.assertEqual(self.remove_dirs(), [])
+
+    def test_name_format_and_argument_count(self):
+        for cmd in ("nginx-remove-location Bad --announced", "nginx-remove-location a_b --announced",
+                    "nginx-remove-location -x --announced", f"nginx-remove-location {'a' * 41} --announced",
+                    "nginx-remove-location ../x --announced"):
+            with self.subTest(cmd=cmd):
+                p = self.gate("owner-a", cmd)
+                self.assertRc(p, 2)
+        self.assertIn("result=denied:bad-name", self.audit_text())
+        for cmd in ("nginx-remove-location --announced", "nginx-remove-location a b --announced"):
+            with self.subTest(cmd=cmd):
+                self.assertRc(self.gate("owner-a", cmd), 2)
+        self.assertEqual(self.calls(), "")
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+
+    def test_needs_announced_and_prints_notice(self):
+        self.add_block()
+        before = self.conf.read_text(encoding="utf-8")
+        p = self.gate("owner-a", "nginx-remove-location card-decision")
+        self.assertRc(p, 2)
+        self.assertIn("팀 채널", p.stderr)
+        self.assertIn("[test-server] owner-a: nginx-remove-location card-decision", p.stderr)
+        self.assertIn("되돌리는 방법: nginx-restore pre-gate-remove-card-decision-", p.stderr)
+        self.assertIn("result=denied:not-announced", self.audit_text())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), before)
+        self.assertEqual(self.calls(), "")
+
+    def test_dry_run_changes_nothing(self):
+        self.add_block()
+        before = self.conf.read_text(encoding="utf-8")
+        for how in ("flag", "env"):
+            with self.subTest(how=how):
+                if how == "flag":
+                    p = self.gate("owner-a", "nginx-remove-location card-decision --dry-run")
+                else:
+                    p = self.gate("owner-a", "nginx-remove-location card-decision", DRY_RUN="1")
+                self.assertRc(p, 0)
+                self.assertIn("DRY_RUN:", p.stdout)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), before)
+        self.assertEqual(self.remove_dirs(), [])
+        self.assertNotIn("nginx", self.calls())
+        self.assertNotIn("reload", self.calls())
+        self.assertNotIn("result=removed", self.audit_text())
+        self.assertIn("mode=dry", self.audit_text())
+
+    def test_unpermitted_accounts_are_refused(self):
+        self.add_block()
+        before = self.conf.read_text(encoding="utf-8")
+        for key in ("member-x", "restore-only"):
+            with self.subTest(key=key):
+                self.assertRc(self.gate(key, self.CMD), 3)
+        self.assertIn("result=denied:not-permitted", self.audit_text())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), before)
+        self.assertEqual(self.calls().count("nginx"), 0)
+
+    def test_old_policy_without_the_action_does_not_open_it(self):
+        write(self.policy, policy_text(self.root))   # 새 동작이 없는 예전 정책
+        self.assertRc(self.gate("owner-a", self.CMD), 3)
+
+    def test_failed_nginx_test_restores_and_does_not_reload(self):
+        self.add_block()
+        before = self.conf.read_text(encoding="utf-8")
+        write(self.state / "nginx_rc", "1\n")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), before)
+        self.assertNotIn("reload", self.calls())
+        self.assertIn("result=fail:nginx-test-failed", self.audit_text())
+        self.assertNotIn("result=removed", self.audit_text())
+
+    def test_failed_reload_restores(self):
+        self.add_block()
+        before = self.conf.read_text(encoding="utf-8")
+        write(self.state / "systemctl_rc", "1\n")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), before)
+        self.assertIn("result=fail:nginx-reload-failed", self.audit_text())
+
+    def test_lock_blocks_both_new_actions(self):
+        self.add_block()
+        before = self.conf.read_text(encoding="utf-8")
+        self.assertRc(self.gate("owner-a", "lock team-demo"), 0)
+        write(self.fakelog, "")
+        for cmd in ("nginx-remove-location card-decision --announced", "nginx-reload --announced"):
+            with self.subTest(cmd=cmd):
+                self.assertRc(self.gate("owner-b", cmd), 4)
+        self.assertIn("result=denied:locked", self.audit_text())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), before)
+        self.assertEqual(self.calls(), "")
+
+    def test_help_lists_new_actions_only_for_permitted_accounts(self):
+        p = self.gate("owner-a", "help")
+        self.assertRc(p, 0)
+        self.assertIn("nginx-remove-location <이름>", p.stdout)
+        self.assertIn("nginx-reload", p.stdout)
+        p = self.gate("member-x", "help")
+        allowed, missing = p.stdout.split("이 계정에 없는 동작")
+        self.assertNotIn("nginx-remove-location", allowed)
+        self.assertNotIn("nginx-reload", allowed)
+        self.assertIn("nginx-remove-location nginx-reload", missing)
+
+
+class NginxRemoveMultiTargetTests(NginxRemoveBase):
+    """대상 파일이 둘일 때: 대상 전부에서 함께 지우고, 한 번만 검사·reload 한다."""
+
+    def setUp(self):
+        super().setUp()
+        self.conf_b = self.rootp / "etc/nginx/conf.d/site-b.conf"
+        write(self.conf_b, CONF_B)
+        self.targets = f'\n[nginx_targets]\nsite-b = "{self.root}/etc/nginx/conf.d/site-b.conf"\n'
+        write(self.policy, self.base_policy_text + self.targets)
+
+    def both(self):
+        return self.conf.read_text(encoding="utf-8"), self.conf_b.read_text(encoding="utf-8")
+
+    def test_block_is_removed_from_every_target_with_one_test_and_reload(self):
+        self.add_block()
+        a, b = self.both()
+        self.assertIn("name=card-decision", a)
+        self.assertIn("name=card-decision", b)
+        p = self.gate("owner-a", "nginx-remove-location card-decision --announced")
+        self.assertRc(p, 0)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+        calls = self.calls()
+        self.assertEqual(calls.count("nginx -t"), 1)
+        self.assertEqual(calls.count("systemctl reload nginx"), 1)
+        (bdir,) = self.remove_dirs()
+        saved = self.rootp / "etc/nginx/backup" / bdir
+        self.assertEqual((saved / "site.conf").read_text(encoding="utf-8"), a)
+        self.assertEqual((saved / "targets/site-b/site-b.conf").read_text(encoding="utf-8"), b)
+
+    def test_block_only_in_one_target_removes_only_there(self):
+        self.add_block()
+        # 둘째 대상에서 먼저 손으로 지워 둔 상황: 기본 대상에만 있다
+        write(self.conf_b, CONF_B)
+        p = self.gate("owner-a", "nginx-remove-location card-decision --announced")
+        self.assertRc(p, 0)
+        self.assertIn("그 이름의 게이트 블록이 없다(그대로 둔다)", p.stdout)
+        self.assertEqual(self.both(), (ORIG_CONF, CONF_B))
+
+    def test_different_owners_across_targets_stop_without_changes(self):
+        self.add_block()
+        a, b = self.both()
+        b2 = b.replace("name=card-decision user=owner-b", "name=card-decision user=owner-a")
+        self.assertNotEqual(b, b2)
+        write(self.conf_b, b2)
+        p = self.gate("owner-c", "nginx-remove-location card-decision --announced")
+        self.assertRc(p, 1)
+        self.assertIn("result=fail:owner-mismatch", self.audit_text())
+        self.assertEqual(self.both(), (a, b2))
+        self.assertEqual(self.remove_dirs(), [])
+        self.assertNotIn("reload", self.calls())
+
+    def test_failed_nginx_test_restores_every_target(self):
+        self.add_block()
+        before = self.both()
+        write(self.state / "nginx_rc", "1\n")
+        self.assertRc(self.gate("owner-a", "nginx-remove-location card-decision --announced"), 1)
+        self.assertEqual(self.both(), before)
+        self.assertNotIn("reload", self.calls())
+
+
+class NginxReloadTests(NginxRemoveBase):
+    CMD = "nginx-reload --announced"
+
+    def test_reloads_only_after_nginx_test_passes_and_leaves_config_alone(self):
+        before = self.conf.read_text(encoding="utf-8")
+        p = self.gate("owner-a", self.CMD + " pr=55")
+        self.assertRc(p, 0)
+        calls = self.calls()
+        self.assertEqual(calls.count("nginx -t"), 1)
+        self.assertEqual(calls.count("systemctl reload nginx"), 1)
+        self.assertLess(calls.index("nginx -t"), calls.index("systemctl reload nginx"))
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), before)
+        self.assertEqual(self.backup_dirs(), [])       # 설정을 바꾸지 않으니 백업도 없다
+        self.assertEqual(os.listdir(self.rootp / "var/lib/ax-gate/approved"), [])
+        self.assertIn("user=owner-a\taction=nginx-reload\targs=-\tmode=real\tannounced=yes\tpr=55\tnote=-\t"
+                      "layer=root\tresult=reloaded", self.audit_text())
+
+    def test_failed_nginx_test_means_no_reload(self):
+        write(self.state / "nginx_rc", "1\n")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertNotIn("reload", self.calls())
+        self.assertIn("result=fail:nginx-test-failed", self.audit_text())
+        self.assertNotIn("result=reloaded", self.audit_text())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+
+    def test_failed_reload_is_reported_and_config_untouched(self):
+        write(self.state / "systemctl_rc", "1\n")
+        p = self.gate("owner-a", self.CMD)
+        self.assertRc(p, 1)
+        self.assertIn("systemctl reload nginx", self.calls())
+        self.assertIn("result=fail:nginx-reload-failed", self.audit_text())
+        self.assertNotIn("result=reloaded", self.audit_text())
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), ORIG_CONF)
+
+    def test_needs_announced_and_prints_notice(self):
+        p = self.gate("owner-a", "nginx-reload")
+        self.assertRc(p, 2)
+        self.assertIn("팀 채널", p.stderr)
+        self.assertIn("[test-server] owner-a: nginx-reload", p.stderr)
+        self.assertIn("되돌릴 것 없음", p.stderr)
+        self.assertIn("result=denied:not-announced", self.audit_text())
+        self.assertEqual(self.calls(), "")
+
+    def test_takes_no_arguments(self):
+        for cmd in ("nginx-reload x --announced", "nginx-reload --announced x"):
+            with self.subTest(cmd=cmd):
+                self.assertRc(self.gate("owner-a", cmd), 2)
+        self.assertEqual(self.calls(), "")
+
+    def test_dry_run_runs_nothing(self):
+        for how in ("flag", "env"):
+            with self.subTest(how=how):
+                if how == "flag":
+                    p = self.gate("owner-a", "nginx-reload --dry-run")
+                else:
+                    p = self.gate("owner-a", "nginx-reload", DRY_RUN="1")
+                self.assertRc(p, 0)
+                self.assertIn("DRY_RUN:", p.stdout)
+        self.assertNotIn("nginx", self.calls())
+        self.assertNotIn("reload", self.calls())
+        self.assertNotIn("result=reloaded", self.audit_text())
+
+    def test_unpermitted_accounts_are_refused(self):
+        for key in ("member-x", "restore-only"):
+            with self.subTest(key=key):
+                self.assertRc(self.gate(key, self.CMD), 3)
+        self.assertIn("result=denied:not-permitted", self.audit_text())
+        self.assertEqual(self.calls().count("nginx"), 0)
+        self.assertNotIn("reload", self.calls())
 
 
 class ExamplePolicyTests(GateCase):
