@@ -182,10 +182,12 @@ uv run python domains/archive/eval/model_compare_report.py gemini-embedding-001 
 
 ## 임베딩 모델 비교 — 카드 연결/중복 판단 (준하 제안, #소통 2026-11-27, `model_compare_link.py`/`model_compare_link_report.py`)
 
-준하 제안의 "아카이브 중복 결정 판단"(1순위) 항목. `link_eval_v2.py`는 위 카드 검색과 달리 임베딩과
-Claude 중복 판정 호출이 모두 실제 호출이라(`run_eval.py`의 `dense-mock` 같은 무호출 경로가 없다),
-그 스크립트를 고치지 않고 서브프로세스로 그대로 돌린 뒤 고정 출력(`results/link_eval_v2.json`)을
-모델별 라벨을 붙여 복사하는 방식으로 감쌌다.
+준하 제안의 "아카이브 중복 결정 판단"(1순위, 임베딩 문턱값 기준)과 "아카이브 같은 결정
+판정"(3순위, LLM이 duplicate·update·related 3종을 가르는 정확도) 두 항목을 같은 스크립트·같은
+결과 파일로 함께 비교한다(둘 다 `link_eval_v2.py` 결과에서 지표만 다르게 읽는다). `link_eval_v2.py`는
+위 카드 검색과 달리 임베딩과 Claude 중복 판정 호출이 모두 실제 호출이라(`run_eval.py`의
+`dense-mock` 같은 무호출 경로가 없다), 그 스크립트를 고치지 않고 서브프로세스로 그대로 돌린 뒤
+고정 출력(`results/link_eval_v2.json`)을 모델별 라벨을 붙여 복사하는 방식으로 감쌌다.
 
 ```bash
 cd backend
@@ -196,7 +198,7 @@ MEMORY_EMBED_MODEL=gemini-embedding-001 \
 MEMORY_EMBED_MODEL=text-embedding-3-large MEMORY_EMBED_BASE_URL=https://api.openai.com/v1 MEMORY_EMBED_API_KEY=sk-... \
   uv run python domains/archive/eval/model_compare_link.py text-embedding-3-large
 
-# 비교표 (모델 · test 정확도 · 정밀도 · 재현율 · 잘못 병합)
+# 비교표 (모델 · test 정확도 · 정밀도 · 재현율 · 3종 판정 정확도 · 잘못 병합)
 uv run python domains/archive/eval/model_compare_link_report.py gemini-embedding-001 text-embedding-3-large
 ```
 
