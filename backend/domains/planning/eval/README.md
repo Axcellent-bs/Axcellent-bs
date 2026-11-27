@@ -112,3 +112,50 @@ uv run python domains/planning/eval/model_compare_video_plan_report.py haiku son
 - 이 세션(클라우드 샌드박스)에는 키가 없어 실행만 확인했다(배선 확인). 가짜 LLM으로 (1) 깨끗한
   답은 10건 전부 1판 통과, (2) 의도적으로 실명을 섞은 답은 그 2건만 `real_name_in_scene`으로
   거절되는지 직접 검증했다. 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
+
+## 기획서 초안 LLM 모델 비교 (예진 제안, #소통 2026-11-27 15:46, 3순위)
+
+"요구사항이 개발 작업 하나로 바로 되는 비율" 평가. 이것도 평가 데이터가 없어서 새로 만들었다.
+
+- `spec_cases.json`: 합성 변경 요청 10건(제목·근거·보낸 부서). 평범한 요청 8건 + 결제·개인정보
+  쪽으로 범위를 넓히게 유혹하는 2건(s04 카드사 재청구, s05 생년월일·주소 수집)
+- `spec_eval.py`: 케이스마다 실제 `planning_agent.spec_writer.SpecWriter.draft()`를 그대로
+  부른다. 두 갈래로 잰다:
+  1. spec_writer가 이미 하는 일: 성공/실패(규칙 초안으로 떨어짐)·걸린 시간·30초 타임아웃 여부,
+     "코드가 뺀 문장 수"(LLM이 낸 원본 문장 수와 spec_writer의 실제 `_clean()`이 거른 뒤 문장
+     수의 차이 — `_clean()`을 그대로 가져와 쓰고, 원본을 보려고 LLM 클라이언트를 얇게 감싸
+     draft() 안에서 실제로 받은 답만 옆에서 기록한다. 동작은 바꾸지 않는다)
+  2. spec_writer에는 아직 없는 검사라서 이 평가 전용으로 새로 만든 근사치 세 가지(투명하게
+     적는다, production 코드 아님): `invented_number`(초안 문장 숫자가 근거 어디에도 없음)·
+     `scope_widening`(카드번호 저장·주민등록번호 등 결제·개인정보 범위 넓히는 낱말)·
+     `axcellent_term`(합성 근거에는 없을 이 레포 실제 화면 용어, 나오면 지어낸 것)
+  "요구사항이 개발 작업 하나로 바로 되는지"의 정확한 판정(실제로 작업 하나로 끝나는지)은
+  개발 쪽에서 실행해봐야 알 수 있어 여기서는 재지 않는다. 이 세 검사가 모두 0인 비율
+  (`clean_requirement_rate`)을 근사치로 쓴다
+  - 실행: `cd backend && uv run python domains/planning/eval/spec_eval.py`
+  - 모델은 `PLANNING_LLM_MODEL` → 없으면 `LLM_MODEL`
+  - 지표: `draft_rate`(초안 성공률)·`fallback_rate`(규칙 초안으로 떨어진 비율)·
+    `timeout_rate`(30초 초과 비율)·`clean_requirement_rate`(세 근사 검사 모두 통과한 비율)·
+    `invented_number_hits`·`scope_widening_hits`·`axcellent_term_hits`(각 검사 걸린 건수)·
+    `avg_dropped_sentences`(평균 뺀 문장 수)
+- 모델 비교: `model_compare_spec.py <라벨>` → `results/model_compare/spec_<라벨>.json`,
+  `model_compare_spec_report.py <라벨1> <라벨2> ...`로 비교표
+
+```bash
+cd backend
+PLANNING_LLM_MODEL=claude-haiku-5-5 uv run python domains/planning/eval/model_compare_spec.py haiku
+PLANNING_LLM_MODEL=claude-sonnet-5-5 uv run python domains/planning/eval/model_compare_spec.py sonnet
+uv run python domains/planning/eval/model_compare_spec_report.py haiku sonnet
+```
+
+**한계**
+- `invented_number`·`scope_widening`·`axcellent_term`은 production 코드가 아니라 이 평가를
+  위해 새로 만든 근사치다. 특히 "요구사항 하나 = 개발 작업 하나"는 실제로 개발에 넘겨 실행해
+  봐야 확실해서, 여기 지표는 그 대리 신호(지어낸 숫자·범위 넓히기·엉뚱한 화면 용어가 없는지)일
+  뿐이다.
+- 합성 요청 10건 중 범위 넓히기 유혹 2건(s04·s05)을 빼면 나머지는 평범한 입력이라 LLM이
+  정상적으로 쓰면 보통 통과한다 — 더 애매한 입력(모호한 근거·상충하는 요청)을 늘리면 모델별
+  차이가 더 잘 드러날 것이다.
+- 이 세션(클라우드 샌드박스)에는 키가 없어 실행만 확인했다(배선 확인, 가짜 LLM으로 채점 로직
+  검증 완료 — 깨끗한 답·범위 넓히기/지어낸 숫자/화면 용어가 섞인 답·검증 실패·타임아웃 네
+  경로 모두). 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
