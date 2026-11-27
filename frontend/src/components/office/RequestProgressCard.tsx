@@ -23,6 +23,7 @@ import { planDocPath } from "@/lib/planDoc";
 import { planId } from "@/lib/format";
 import { STALE_HOURS, staleHours } from "@/lib/officeRequests";
 import { keyEvidence, recommendationItems, reportHash } from "@/lib/trendReportView";
+import { requestBasedReport } from "@/lib/chatCards";
 import type { TrendReportDoneCard } from "@/lib/planningData";
 import type { TrendReport as Report } from "@/lib/data";
 import { DoneCard, ProgressCard } from "@/components/office/ChatCards";
@@ -72,6 +73,7 @@ function ReportCell({ reportId }: { reportId: string }) {
     kind: "trend_report_done", report_id: r.report_id, status: r.status, summary_line: r.summary_line,
     top_evidence: keyEvidence(recommendationItems(r.sections.recommendation)).map((k) => k.short),
     report_path: `/data/trend${reportHash(r.report_id)}`,
+    request_based: requestBasedReport(r),
   });
   return <ProgressCard card={{ kind: "trend_report_progress", report_id: reportId }} onDone={finish} />;
 }

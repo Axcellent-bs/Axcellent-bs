@@ -107,8 +107,16 @@ def test_content_read_without_bursts_is_empty_and_unread_stays_unknown() -> None
     ({"hashtags": "empty", "content": "empty"}, None, "skipped", "done"),
     ({"hashtags": "empty", "competitors": "unknown"}, None, "skipped", "partial"),
     ({"content": "failed"}, None, "skipped", "partial"),
+    # 11/27 바뀐 기대값(예전 failed): 칸 하나 예외 + 나머지 unknown(설정·데이터 없음)은 partial
+    # → 총괄이 의뢰를 멈추지 않고 의뢰문 기반으로 기획에 넘긴다
     ({"search": "unknown", "hashtags": "unknown", "content": "unknown",
-      "competitors": "unknown", "recommendation": "failed"}, None, "skipped", "failed"),
+      "competitors": "unknown", "recommendation": "failed"}, None, "skipped", "partial"),
+    # 11/27 새 회사(설정 없음): 모든 칸 unknown → partial (예전 failed)
+    ({"search": "unknown", "hashtags": "unknown", "content": "unknown",
+      "competitors": "unknown", "recommendation": "unknown"}, None, "skipped", "partial"),
+    # 진짜 예외로 전부 실패하면 지금처럼 failed
+    ({"search": "failed", "hashtags": "failed", "content": "failed",
+      "competitors": "failed", "recommendation": "failed"}, None, "skipped", "failed"),
     ({"search": "unknown", "hashtags": "empty", "content": "unknown",
       "competitors": "unknown", "recommendation": "unknown"}, None, "skipped", "partial"),
     ({}, "find", "empty", "done"),
