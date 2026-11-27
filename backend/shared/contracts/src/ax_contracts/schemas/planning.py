@@ -15,6 +15,7 @@ from pydantic import ConfigDict, Field, model_validator
 
 from ax_contracts.schemas.common import AxModel, UtcDatetime
 from ax_contracts.schemas.finance import ContentFormat
+from ax_contracts.schemas.marketing_brand import MAX_CAST, CastMember
 
 
 class RelatedPr(AxModel):
@@ -714,6 +715,9 @@ class ReceiveInsightInput(AxModel):
     # (마케팅 제작 기록 CR-…, 11/26). 고객 글이 아니다. 기획은 이 번호로 마케팅
     # creative_record_get을 불러 주인공 외형·그림체를 쓴다
     brand_character_record_id: str | None = Field(default=None, pattern=r"^CR-[0-9a-f]{12}$")
+    # 아래는 예전 요청은 없다 (11/27). 의뢰에서 사람이 고른 등장 캐릭터(회사 캐릭터 + 역할, 최대 3).
+    # 첫 번째가 주인공이고 brand_character_record_id와 같다. 비면 지금처럼 한 명(또는 없음)
+    cast: list[CastMember] = Field(default_factory=list, max_length=MAX_CAST)
     # 아래는 예전 요청은 없다. 홍보 영상 방향 (11/24 재현 님 "재미 먼저, 브랜드는 끝에"). 데이터가
     # 회사 브랜드 설정(tenant.brand)과 의뢰 문장("책 소개"면 product)으로 정한 최종값을 보낸다.
     # None이면 기획은 fun_first·end_card로 본다

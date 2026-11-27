@@ -14,6 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ax_contracts.schemas import TENANT_ID_DEFAULT, UtcDatetime
+from ax_contracts.schemas.marketing_brand import MAX_CAST, CastMember
 from ax_contracts.schemas.planning import VideoPlan
 
 Dept = Literal[
@@ -737,6 +738,9 @@ class Proposal(DomainModel):
     # 못 읽었으면 company_character는 None(회사 브랜드 기본 캐릭터, 지금 동작)
     brand_character_record_id: str | None = None
     company_character: CompanyCharacter | None = None
+    # 11/27 의뢰에서 사람이 고른 등장 캐릭터(회사 캐릭터 + 역할, 최대 3, 첫 번째 = 주인공 =
+    # brand_character_record_id). 예전 제안·한 명 의뢰는 비어 있다(지금처럼 한 명)
+    cast: list[CastMember] = Field(default_factory=list, max_length=MAX_CAST)
     # 11/26 총괄 의뢰의 고객 문장 그대로(untrusted). 제작안 LLM에 데이터 칸으로만 넘겨 연출 지시
     # (대사·장면·배경·소품·동작·외형)를 뽑아 지키게 한다. 지시문에는 붙이지 않는다
     request_text: str | None = None
