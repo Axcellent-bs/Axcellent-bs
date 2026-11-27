@@ -396,6 +396,8 @@ export interface TrendReportDoneCard {
   top_evidence: string[]
   /** "/data/trend#request?id=<id>" */
   report_path: string
+  /** 11/27 화면만: 한 칸도 못 본 일부 완료(설정·자료가 없어 시장 근거 0) → 의뢰문 기반으로 다음 단계 */
+  request_based?: boolean
 }
 /** 마케팅 1:1 대화: 올린 캐릭터(attached)와 그 이미지 시트·스토리보드 결과(result). 기록은 /marketing/creative-records/{id} */
 export interface CreativeCard {

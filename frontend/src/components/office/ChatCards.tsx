@@ -158,6 +158,7 @@ export function DoneCard({ card }: { card: TrendReportDoneCard }) {
   return (
     <section aria-label="보고서 완료" className={`mt-2 w-full max-w-[80%] space-y-2 rounded-xl border-2 ${tone.border} bg-surface px-3.5 py-3 text-sm`}>
       <h4 className={`text-[13px] font-semibold ${tone.title}`}>{v.title}</h4>
+      {v.note && <p className="text-xs text-ink-700">{v.note}</p>}
       {card.summary_line && <p className="whitespace-pre-line break-words font-medium text-ink-900">{card.summary_line}</p>}
       {v.evidence.length > 0 && (
         <ul className="space-y-0.5">{v.evidence.map((e, i) => <li key={i} className="text-xs text-ink-700">· {e}</li>)}</ul>

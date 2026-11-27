@@ -178,11 +178,26 @@ export const progressKeepPolling = (status: ReportStatus) => keepPolling(status)
 
 // ---- 완료 카드
 
-export interface DoneView { title: string; tone: "ok" | "warn" | "bad"; evidence: string[] }
+export interface DoneView { title: string; tone: "ok" | "warn" | "bad"; evidence: string[]; note?: string }
+
+/** 11/27 의뢰문 기반 (기획 데이터분석 trend_report_insight.REQUEST_BASED와 같은 글) */
+export const REQUEST_BASED_KO = "의뢰문 기반 (시장 근거 부족)";
+
+/** 한 칸도 못 본 일부 완료인가 (새 회사: 검색 키워드·인스타 설정이 없어 모든 칸이 자료 없음).
+ *  이때 의뢰는 멈추지 않고 의뢰문 기반으로 기획에 넘어간다(데이터분석 final_status·build_insight) */
+export function requestBasedReport(r: Pick<TrendReport, "status" | "sections"> & { brief?: TrendReport["brief"] }): boolean {
+  if (r.status !== "partial") return false;
+  return countedSections(r).every((name) => {
+    const s = (r.sections as unknown as Record<string, { status?: string } | undefined>)[name]?.status;
+    return s !== "known" && s !== "empty";
+  });
+}
 
 export function doneView(card: TrendReportDoneCard): DoneView {
   const code = reportLabel(card.report_id);
   const evidence = card.top_evidence.slice(0, 3);
+  // 11/27 설정·자료가 없어 못 본 것은 실패가 아니다: 초록 완료 + 의뢰문 기반 한 줄 (설정 안내는 넣지 않는다)
+  if (card.request_based && card.status === "partial") return { title: `보고서 완료 · ${code}`, tone: "ok", evidence, note: REQUEST_BASED_KO };
   if (card.status === "partial") return { title: `보고서 일부만 완료 · ${code}`, tone: "warn", evidence };
   if (card.status === "failed") return { title: `보고서 실패 · ${code}`, tone: "bad", evidence };
   if (card.status === "interrupted") return { title: `보고서 중단 · ${code}`, tone: "bad", evidence };

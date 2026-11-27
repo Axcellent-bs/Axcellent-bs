@@ -364,6 +364,21 @@ def body_md(report: TrendReport, facts: list[InsightFact] | None = None) -> str:
     return text if len(text) <= BODY_MAX else text[: BODY_MAX - 1] + "…"
 
 
+# 11/27 운영(새 회사 가비): 검색 키워드·인스타 설정이 없어 시장 근거가 0이면 의뢰가 멈췄다.
+# 재현 님 원칙: 의뢰 문장이 출발점이고 시장 자료는 있으면 더하는 참고 → 의뢰문 기반 근거 한 줄
+REQUEST_BASED = "의뢰문 기반 (시장 근거 부족)"
+REQUEST_SOURCE = "request_text"
+REQUEST_SUMMARY = "시장 근거가 부족해 의뢰 문장(제품·대상·길이·목적)을 바탕으로 기획한다"
+
+
+def request_fact(report: TrendReport) -> InsightFact:
+    """의뢰 문장에서 읽은 제품·대상·길이·목적(보고서 brief, 데이터 칸) 한 줄. 없으면 "의뢰 문장"."""
+    b = report.brief
+    parts = [b.product, audience(report), b.format, b.goal]
+    value = " · ".join(clip(p, 40) for p in parts if p) or "의뢰 문장"
+    return InsightFact(label=REQUEST_BASED, value=clip(value, VALUE_MAX), source=REQUEST_SOURCE)
+
+
 def build_insight(report: TrendReport | None) -> tuple[ReceiveInsightInput | None, str | None]:
     """(기획 입력, 없을 때 이유). 같은 보고서면 같은 결과."""
     if report is None:
@@ -371,10 +386,13 @@ def build_insight(report: TrendReport | None) -> tuple[ReceiveInsightInput | Non
     if report.status in LIVE:
         return None, NOT_DONE
     facts = pick_facts(report)
+    request_based = not facts and report.status in ("done", "partial")
+    if request_based:  # 11/27 시장 근거가 없으면 의뢰문 기반 (숫자는 지어내지 않는다)
+        facts = [request_fact(report)]
     if not facts:
         return None, NO_FACTS
     title = f"트렌드 분석: {report.brief.product}" if report.brief.product else "트렌드 분석 의뢰"
-    summary = report.summary_line or (
+    summary = REQUEST_SUMMARY if request_based else report.summary_line or (
         "검색·인스타·경쟁사 근거를 모았지만 추천 결론은 없음"
         f"({report.summary_reason or '이유 모름'})")  # fmt: skip
     return ReceiveInsightInput(

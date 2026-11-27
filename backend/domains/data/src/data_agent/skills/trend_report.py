@@ -336,8 +336,10 @@ async def search_section(
         if own:
             store.close()
     out.rows = list(rows.values())
+    # 11/27: 월 검색량만 있어도(10 미만 포함) 사실이 있는 칸 (트렌드 값을 안 주는 작은 키워드)
     known = any(r.search_change_pct is not None or r.shopping_change_pct is not None
-                or r.monthly_volume is not None for r in out.rows)  # fmt: skip
+                or r.monthly_volume is not None or r.monthly_volume_note is not None
+                for r in out.rows)  # fmt: skip
     if known:
         out.status = "known"
     else:
@@ -1323,12 +1325,35 @@ def final_status(report: TrendReport) -> str:
     """known·empty(봤지만 없음)를 다 한 칸으로 센다. skipped 칸(주제 후보, find 아님)은
     `counted_sections`가 이미 뺀다 (find 의뢰인데 skipped면 못 한 칸).
 
-    모든 칸이 다 했으면 done, 하나라도 unknown·failed면 partial, 하나도 못 했으면 failed."""
+    모든 칸이 다 했으면 done, 하나라도 unknown·failed면 partial.
+
+    11/27 운영(새 회사 가비): 검색 키워드·회사/경쟁사 인스타 설정이 비어 모든 칸이 unknown(설정·
+    데이터가 없어 못 봄)이면 예전엔 failed라 총괄이 의뢰를 멈췄다. 이제 failed는 모든 칸이 예외
+    (`_guard`가 남긴 failed)일 때만이고, 그 밖은 partial(의뢰문 기반으로 기획에 넘긴다)."""
     states = [getattr(report.sections, name).status for name in counted_sections(report)]
     done = sum(1 for s in states if s in DONE_STATES)
     if done == len(states):
         return "done"
-    return "partial" if done else "failed"
+    if done:
+        return "partial"
+    return "failed" if all(s == "failed" for s in states) else "partial"
+
+
+SECTION_LABEL = {"search": "검색", "hashtags": "해시태그", "content": "콘텐츠",
+                 "competitors": "경쟁사", "recommendation": "AI 추천",
+                 "theme": "주제 후보"}  # fmt: skip
+
+
+def unseen_limits(report: TrendReport) -> list[str]:
+    """한 칸도 못 본 보고서(partial)의 칸별 이유 한 줄씩 (내부 기록용, 11/27)."""
+    out = []
+    for name in counted_sections(report):
+        section = getattr(report.sections, name)
+        if section.status in DONE_STATES:
+            return []  # 본 칸이 있으면 지금 한계 줄 그대로
+        why = section.reason or ("계산 실패" if section.status == "failed" else "자료 없음")
+        out.append(f"{SECTION_LABEL.get(name, name)}: {why}")
+    return out
 
 
 async def _guard(report: TrendReport, name: str, run: Callable[[], Awaitable[None]]) -> None:
@@ -1543,6 +1568,10 @@ async def build(report: TrendReport, request: Any, deps: Deps, store: Any, *,
     report.limits = list(dict.fromkeys(limits))
     report.limit_groups = limit_groups(limits)
     report.status = final_status(report)  # type: ignore[assignment]
+    if report.status == "partial":  # 11/27 한 칸도 못 봤으면 칸별 이유 한 줄씩
+        limits.extend(unseen_limits(report))
+        report.limits = list(dict.fromkeys(limits))
+        report.limit_groups = limit_groups(limits)
     report.finished_at = datetime.now(UTC)
     await save()
     return report
