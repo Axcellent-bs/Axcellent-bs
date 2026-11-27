@@ -267,6 +267,19 @@ def test_uploaded_final_video_is_attached_after_the_gate(env: dict[str, Any]) ->
     assert [c[0] for c in env["gate"].calls] == ["attach_creative_file"]
 
 
+def test_uploaded_motion_video_is_attached_after_the_gate(env: dict[str, Any]) -> None:
+    env["gate"].status["attach_creative_file"] = "executed"
+    rid = env["store"].add_sheet(SHEET, None, None)
+    sha = _put_file(env, rid, "motion.mp4", b"\x00\x00\x00\x18ftypmp42" + bytes(20))
+
+    item = _run(
+        lambda: rr.attach_upload(META, rid, "motion_video", "motion.mp4", sha, 32, "m.mp4", "재헌")
+    )
+
+    assert item["status"] == "done" and item["source"] == "upload" and item["sha256"] == sha
+    assert "motion_video" in env["store"].get(rid)["render"]
+
+
 def test_upload_refuses_a_changed_file_and_a_held_gate(env: dict[str, Any]) -> None:
     rid = env["store"].add_sheet(SHEET, None, None)
     sha = _put_file(env, rid, "sheet.png", b"\x89PNG\r\n\x1a\n" + bytes(8))
