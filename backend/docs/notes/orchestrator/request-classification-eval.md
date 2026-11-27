@@ -65,3 +65,27 @@ uv run python scripts/eval_request_classifier.py --env-file <키가 든 .env 경
 샘플을 늘리려면 `request_samples.json`에 `{"text", "expect", "task"}`를 더한다(`expect`는 task·question·
 clarify·rejected·unknown, `task`는 일 목록의 일 이름). 시험 `test_request_samples.py`는 개수(30)를 고정해 두었으니
 함께 고친다.
+
+## 모델 비교 (준하 제안, #소통 2026-11-27, 2순위, `scripts/model_compare_request.py`/`model_compare_request_report.py`)
+
+위 30개 샘플·채점 로직(`verdict()`)을 그대로 재사용해 분류용 LLM 모델을 바꿔 가며 비교한다. 새 골든셋을
+만들지 않고 `eval_request_classifier.py`를 서브프로세스로 그대로 돌린다.
+
+```bash
+cd backend
+# 모델마다 한 번씩 (ORCHESTRATOR_LLM_MODEL 등은 backend/.env 또는 --env-file)
+ORCHESTRATOR_LLM_MODEL=claude-haiku-5-5 \
+  uv run python scripts/model_compare_request.py claude-haiku-5-5
+
+ORCHESTRATOR_LLM_MODEL=claude-sonnet-5 \
+  uv run python scripts/model_compare_request.py claude-sonnet-5
+
+# 비교표 (모델 · 정답 · 안전하게 빗나감 · 엉뚱하게 보냄 · 일 의뢰 적중)
+uv run python scripts/model_compare_request_report.py claude-haiku-5-5 claude-sonnet-5
+```
+
+- 결과는 `scripts/results/model_compare/request_<라벨>.json`에 모델별로 쌓인다(기존 1회성 결과 파일 이름인
+  `request_eval_results.json`과는 별도).
+- 문장 30개마다 실제 LLM을 한 번씩 부르므로 모델 하나 돌릴 때마다 과금된다.
+- 이 세션(클라우드 샌드박스)에는 키가 없어 실행만 확인했다(래퍼가 `eval_request_classifier.py`의 실패를
+  그대로 전달하는 것까지만 검증). 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
