@@ -32,6 +32,9 @@
   check-block  블록 글이 정책의 블록 줄로 만든 것과 정확히 같은지 검사한다(표준 입력).
   apply        설정 파일의 삽입 표시 줄 바로 아래에 블록을 넣은 새 파일을 쓴다.
                원본은 건드리지 않는다(교체·nginx -t·reload 는 게이트가 한다).
+  remove       이름으로 게이트가 넣은 블록(주석 줄 + location 한 줄)만 뺀 새 파일을 쓴다.
+               --out 을 안 주면 검사만 한다. 원본은 건드리지 않는다.
+               표준 출력: FOUND <제안자> / REMOVED <제안자> / ABSENT (이름이 이 파일에 없음).
 
 끝 코드: 0 통과, 2 거부(입력이 규칙에 어긋남), 3 설정·사용법 오류.
 거부 사유는 표준 오류에 "REJECT <코드>: <설명>" 한 줄로 나온다.
@@ -392,6 +395,49 @@ def apply_to_conf(conf_text, name, user, stamp, method, regex,
         lines[marker_at[0]] = marker_line + "\n"
     return "".join(lines[:marker_at[0] + 1]) + block + "".join(lines[marker_at[0] + 1:])
 
+def remove_from_conf(conf_text, name):
+    """게이트가 넣은 블록(주석 줄 + 바로 아래 location 한 줄)만 뺀 새 설정 글을 돌려준다.
+
+    돌려주는 값: (새 글 또는 None, 제안자 또는 None). 이름이 없으면 (None, None).
+    같은 이름이 둘 이상이거나 블록 모양이 게이트가 만든 것과 다르면 거부한다.
+    삽입 표시 줄·수동으로 넣은 location·다른 이름의 블록은 한 글자도 바꾸지 않는다.
+    """
+    if not RE_NAME.match(name):
+        raise Rejected("bad-name", "이름은 영어 소문자·숫자·- 만, 40자 이하")
+    lines = conf_text.splitlines(keepends=True)
+    # 이름 뒤 " user=" 까지 맞춰서 앞부분이 같은 다른 이름(mkt-cr-ig / mkt-cr-ig-draft)과 섞이지 않게 한다.
+    prefix = "# ax-gate: name=%s user=" % name
+    hits = [i for i, ln in enumerate(lines) if ln.strip().startswith(prefix)]
+    if not hits:
+        return None, None
+    if len(hits) > 1:
+        raise Rejected("multiple-match", "같은 이름의 게이트 블록이 %d개 있다. 사람이 정리해야 한다" % len(hits))
+    i = hits[0]
+    if i + 1 >= len(lines):
+        raise Rejected("block-shape", "게이트 주석 줄 아래에 location 줄이 없다")
+    comment, loc = lines[i], lines[i + 1]
+    flat = " ".join((comment + loc).split())
+    m = RE_COMMENT.match(flat)
+    if not m or m.group("name") != name:
+        raise Rejected("block-shape", "게이트가 만든 블록의 모양이 아니다(주석 아래 줄이 location 한 줄이어야 한다)")
+    loc_s = loc.strip()
+    # location 한 줄 안에 블록이 다 있어야 하고(여는 { 한 번, 닫는 } 로 끝), location 이 하나뿐이어야 한다.
+    if (not loc_s.startswith("location ~ ") or not loc_s.endswith("}")
+            or loc_s.count("location ") != 1 or loc_s.count("{") != loc_s.count("}")):
+        raise Rejected("block-shape", "location 이 한 줄 블록이 아니다. 사람이 직접 지워야 한다")
+    if comment.strip() == INSERT_MARKER or loc.strip() == INSERT_MARKER:
+        raise Rejected("block-shape", "삽입 표시 줄은 지우지 않는다")
+    new_lines = lines[:i] + lines[i + 2:]
+    # 자기 점검: 두 줄만 줄었고, 표시 줄은 그대로 한 개, 다른 게이트 주석·location 은 하나씩만 줄었다.
+    if len(new_lines) != len(lines) - 2:
+        raise ConfigError("자기 점검 실패: 줄 수")
+    if sum(1 for ln in new_lines if ln.strip() == INSERT_MARKER) != sum(1 for ln in lines if ln.strip() == INSERT_MARKER):
+        raise ConfigError("자기 점검 실패: 삽입 표시 줄")
+    count = lambda ls, key: sum(1 for ln in ls if ln.lstrip().startswith(key))
+    if count(lines, "location") - count(new_lines, "location") != 1 or count(lines, "# ax-gate:") - count(new_lines, "# ax-gate:") != 1:
+        raise ConfigError("자기 점검 실패: 블록 수")
+    return "".join(new_lines), m.group("user")
+
 
 def parse_upstreams(items):
     out = {}
@@ -433,6 +479,10 @@ def build_parser():
     naming(sp)
     sp.add_argument("--conf", required=True)
     sp.add_argument("--out", required=True)
+    sp = sub.add_parser("remove")
+    sp.add_argument("--conf", required=True)
+    sp.add_argument("--name", required=True)
+    sp.add_argument("--out", default="")   # 없으면 검사만 한다
     return p
 
 
@@ -446,6 +496,19 @@ def main(argv=None):
         parser.print_usage(sys.stderr)
         return EXIT_CONFIG
     try:
+        if args.cmd == "remove":
+            with open(args.conf, "r", encoding="utf-8", newline="") as fh:
+                conf_text = fh.read()
+            new_text, owner = remove_from_conf(conf_text, args.name)
+            if new_text is None:
+                print("ABSENT")
+            elif not args.out:
+                print("FOUND %s" % owner)
+            else:
+                with open(args.out, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(new_text)
+                print("REMOVED %s" % owner)
+            return EXIT_OK
         upstreams = parse_upstreams(args.upstream)
         rules = (args.allowed_method, args.allowed_prefix, upstreams, args.block_line)
         profile_name, profile_lines = args.profile_name, tuple(args.profile_line)

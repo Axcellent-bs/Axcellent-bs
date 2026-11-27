@@ -22,12 +22,12 @@ set -Eeuo pipefail
 IFS=$' \t\n'
 export LC_ALL=C
 
-readonly GATE_VERSION="0.5.0"
-readonly ALL_ACTIONS=(status lock unlock nginx-restore nginx-add-location nginx-approve-location gateway-allow-propose gateway-allow-approve gateway-allow-restore deploy-bundle restart-backend rollback-bundle record-pr autodeploy-pause autodeploy-resume rollback-code uv-sync)
+readonly GATE_VERSION="0.6.0"
+readonly ALL_ACTIONS=(status lock unlock nginx-restore nginx-add-location nginx-approve-location nginx-remove-location nginx-reload gateway-allow-propose gateway-allow-approve gateway-allow-restore deploy-bundle restart-backend rollback-bundle record-pr autodeploy-pause autodeploy-resume rollback-code uv-sync)
 # 기본 계정(_default)에 열 수 없는 동작. 정책 _default 에 들어 있으면 정책 로드가 실패한다(전체 거부).
 readonly NOT_FOR_DEFAULT=(autodeploy-pause autodeploy-resume gateway-allow-propose gateway-allow-approve gateway-allow-restore rollback-code uv-sync)
 # 실행 전에 팀 채널 알림을 올렸다고 확인(--announced)해야 하는 동작
-readonly NEED_ANNOUNCE=(nginx-restore nginx-approve-location gateway-allow-approve gateway-allow-restore deploy-bundle restart-backend rollback-bundle rollback-code uv-sync)
+readonly NEED_ANNOUNCE=(nginx-restore nginx-approve-location nginx-remove-location nginx-reload gateway-allow-approve gateway-allow-restore deploy-bundle restart-backend rollback-bundle rollback-code uv-sync)
 
 # 끝 코드
 readonly RC_FAIL=1 RC_USAGE=2 RC_PERM=3 RC_LOCKED=4 RC_CONFIG=5
@@ -417,6 +417,8 @@ action_format() {
     nginx-restore) REPLY="nginx-restore <백업폴더명>" ;;
     nginx-add-location) REPLY="nginx-add-location <이름> <POST|PUT|PATCH|DELETE> <정규식> [프로필]" ;;
     nginx-approve-location) REPLY="nginx-approve-location <이름> <확인값 12자>" ;;
+    nginx-remove-location) REPLY="nginx-remove-location <이름>" ;;
+    nginx-reload) REPLY="nginx-reload" ;;
     gateway-allow-propose) REPLY="gateway-allow-propose <skill>" ;;
     gateway-allow-approve) REPLY="gateway-allow-approve <skill> <확인값 12자>" ;;
     gateway-allow-restore) REPLY="gateway-allow-restore <백업폴더명>" ;;
@@ -442,6 +444,8 @@ action_note() {
     nginx-restore) REPLY="nginx 설정을 백업으로 되돌린다" ;;
     nginx-add-location) REPLY="새 쓰기 경로 제안만 한다(바로 적용되지 않는다). 프로필은 정책에 있는 이름만(status 에 나온다). 대상 파일은 고를 수 없다" ;;
     nginx-approve-location) REPLY="제안자와 다른 권한자가 승인하면 적용된다" ;;
+    nginx-remove-location) REPLY="게이트가 넣은 location 하나(이름)만 지운다. 손으로 넣은 location·삽입 표시 줄은 건드리지 않는다. 대상 파일 전부에서 함께 지우고 nginx -t 를 통과해야 reload 한다" ;;
+    nginx-reload) REPLY="설정은 건드리지 않고 nginx -t 가 통과하면 nginx 를 reload 한다" ;;
     gateway-allow-propose) REPLY="게이트웨이 허용 목록에 skill 추가를 제안만 한다(바로 적용되지 않는다). 읽기(read) 등급 skill 만" ;;
     gateway-allow-approve) REPLY="제안자와 다른 권한자가 승인하면 허용 목록에 더하고 게이트웨이에 반영한다" ;;
     gateway-allow-restore) REPLY="게이트웨이 허용 목록을 백업(gwa-...)으로 되돌린다" ;;
@@ -560,7 +564,7 @@ validate_args() {
     deny "unknown-action" "${RC_USAGE}" "허용 목록에 없는 동작이다. help 로 내 계정에 허용된 동작을 본다"
   fi
   case "${ACTION}" in
-    status | unlock | autodeploy-resume)
+    status | unlock | autodeploy-resume | nginx-reload)
       (( n == 0 )) || bad_args
       ;;
     autodeploy-pause)
@@ -595,6 +599,10 @@ validate_args() {
       (( n == 2 )) || bad_args
       [[ "${ARGS[0]}" =~ ${RE_LOCNAME} ]] || deny "bad-name" "${RC_USAGE}" "이름은 영어 소문자·숫자·- 만"
       [[ "${ARGS[1]}" =~ ${RE_DIGEST} ]] || deny "bad-digest" "${RC_USAGE}" "확인값은 status 에 나온 16진수 12자"
+      ;;
+    nginx-remove-location)
+      (( n == 1 )) || bad_args
+      [[ "${ARGS[0]}" =~ ${RE_LOCNAME} ]] || deny "bad-name" "${RC_USAGE}" "이름은 영어 소문자·숫자·- 만"
       ;;
     gateway-allow-propose)
       (( n == 1 )) || bad_args
@@ -646,6 +654,8 @@ notice_text() {
     restart-backend) undo="되돌릴 수 없음(메모리에만 있는 상태 소실). 파일 백업은 *bak-before-${ARGS[0]:0:8}" ;;
     nginx-restore) undo="nginx-restore pre-gate-restore-<실행 시각>(실행하면 폴더명이 출력됨)" ;;
     nginx-approve-location) undo="nginx-restore pre-gate-add-${ARGS[0]}-<실행 시각>(실행하면 폴더명이 출력됨)" ;;
+    nginx-remove-location) undo="nginx-restore pre-gate-remove-${ARGS[0]}-<실행 시각>(실행하면 폴더명이 출력됨). 다시 열려면 nginx-add-location 으로 새로 제안" ;;
+    nginx-reload) undo="되돌릴 것 없음(설정 파일은 바꾸지 않는다. reload 는 지금 설정 파일을 읽을 뿐이다)" ;;
     gateway-allow-approve) undo="gateway-allow-restore gwa-<실행 시각>(실행하면 폴더명이 출력됨)" ;;
     gateway-allow-restore) undo="gateway-allow-restore gwa-pre-restore-<실행 시각>(실행하면 폴더명이 출력됨)" ;;
   esac
@@ -1775,6 +1785,89 @@ do_nginx_approve_location() {
   pr_reminder "${bname}"
 }
 
+# 이미 연 location 하나를 지운다. 게이트가 넣은 블록(주석 줄 + location 한 줄)만 대상이다.
+# 지우는 쪽이 제안자일 필요는 없다: 길을 닫는 방향이라 두 번째 승인은 두지 않고, 대신
+# --announced(팀 알림)·백업·감사 기록(owner·cross)으로 남긴다. 되돌리려면 nginx-restore.
+do_nginx_remove_location() {
+  local name="${ARGS[0]}" i out o owner="" found=0 cross="no" stamp bname new
+  local -a news=() present=()
+  require_paths nginx_backup_dir
+  load_nginx_targets
+  # 1) 사전 검사(파일은 읽기만 한다): 대상마다 그 이름의 블록이 0개 또는 1개여야 한다. 2개 이상·모양이 다르면 거부.
+  #    어느 대상에도 없으면 거부. 한 대상에만 있으면(예전에 추가된 것) 그 대상만 지운다.
+  for i in "${!NGX_CONFS[@]}"; do
+    ngx_label "${i}"
+    out="$(python3 "${CHECKER}" remove --conf "${NGX_CONFS[i]}" --name "${name}")" ||
+      step_fail "location-rejected" "${RC_USAGE}" "대상 ${REPLY} 에서 그 이름의 블록을 지울 수 없다(위 사유 참고). 아무것도 바꾸지 않았다"
+    case "${out}" in
+      ABSENT)
+        present+=("0")
+        say "대상 ${REPLY}: 그 이름의 게이트 블록이 없다(그대로 둔다)"
+        ;;
+      "FOUND "*)
+        o="${out#FOUND }"
+        [[ "${o}" =~ ${RE_KEY} ]] || step_fail "location-rejected" "${RC_FAIL}" "블록의 제안자 이름을 읽을 수 없다. 아무것도 바꾸지 않았다"
+        if [[ -n "${owner}" && "${owner}" != "${o}" ]]; then
+          step_fail "owner-mismatch" "${RC_FAIL}" "대상마다 블록의 제안자가 다르다. 사람이 확인해야 한다. 아무것도 바꾸지 않았다"
+        fi
+        owner="${o}"
+        present+=("1")
+        found=$((found + 1))
+        say "대상 ${REPLY}: 지울 블록 있음(제안자 ${o})"
+        ;;
+      *) step_fail "location-rejected" "${RC_FAIL}" "검증기 출력을 해석할 수 없다. 아무것도 바꾸지 않았다" ;;
+    esac
+  done
+  (( found > 0 )) || step_fail "no-such-location" "${RC_USAGE}" "그 이름으로 게이트가 넣은 location 이 없다(손으로 넣은 location 은 게이트로 지울 수 없다)"
+  [[ "${owner}" == "${KEY}" ]] || cross="yes"
+  NOTE="owner:${owner},cross:${cross}"
+  if [[ "${cross}" == "yes" ]]; then
+    say "알림: 이 location 은 ${owner} 가 제안한 것이다. 팀 채널 알림에 그 사실을 적는다"
+  fi
+  copy_compare "운영 사본" ops_copy_file
+  stamp_now
+  stamp="${REPLY}"
+  bname="pre-gate-remove-${name}-${stamp}"
+  # 2) 대상 전부 백업
+  nginx_backup_all "${bname}"
+  # 3) 블록이 있는 대상만 새 파일을 백업 폴더 안에 만든다(아직 교체 전). 없는 대상은 빈 글로 건너뛴다.
+  for i in "${!NGX_CONFS[@]}"; do
+    if [[ "${present[i]}" != "1" ]]; then
+      news+=("")
+      continue
+    fi
+    ngx_backup_path "${bname}" "${i}"
+    new="${REPLY}.new"
+    run python3 "${CHECKER}" remove --conf "${NGX_CONFS[i]}" --name "${name}" --out "${new}" ||
+      step_fail "location-rejected" "${RC_USAGE}" "블록을 지운 새 파일을 만들지 못했다. 아무것도 바꾸지 않았다"
+    news+=("${new}")
+  done
+  # 4) 교체 → 5) nginx -t 한 번 → reload. 어느 단계든 실패하면 대상 전부를 되돌린다.
+  nginx_swap_in "${bname}" "${news[@]}"
+  nginx_test_reload_or_revert "${bname}"
+  if (( ! DRY )); then
+    audit "removed:${bname}"
+  fi
+  ops_copy_sync
+  say "location ${name} 을 지우고 reload 했다(제안 ${owner}, 지운 사람 ${KEY}). 되돌리려면: nginx-restore ${bname}"
+  say "라우팅(그 경로가 이제 막히는지, 다른 경로는 그대로인지)을 직접 확인한다"
+  pr_reminder "${bname}"
+}
+
+# reload 만 한다. 설정 파일은 건드리지 않는다. nginx -t 가 통과해야 reload 한다.
+do_nginx_reload() {
+  if ! run nginx -t; then
+    step_fail "nginx-test-failed" "${RC_FAIL}" "nginx -t 실패. reload 하지 않았다. 설정 파일은 건드리지 않았다. 사람이 설정을 직접 봐야 한다"
+  fi
+  if ! run systemctl reload nginx; then
+    step_fail "nginx-reload-failed" "${RC_FAIL}" "reload 실패. 설정 파일은 건드리지 않았다. nginx 가 어느 설정으로 떠 있는지 사람이 바로 확인한다"
+  fi
+  if (( ! DRY )); then
+    audit "reloaded"
+  fi
+  say "nginx -t 를 통과해 reload 했다(설정 파일은 바뀌지 않았다)"
+}
+
 # ---------------------------------------------------------------------------
 # 게이트웨이 허용 목록 (gateway-allow-propose / -approve / -restore)
 # 위치·카드·반영 명령은 전부 정책 [gateway_allow] 에서 읽는다. 허용 목록 파일 형식과 카드 모양은
@@ -2726,6 +2819,8 @@ root_main() {
       nginx-restore) do_nginx_restore ;;
       nginx-add-location) do_nginx_add_location ;;
       nginx-approve-location) do_nginx_approve_location ;;
+      nginx-remove-location) do_nginx_remove_location ;;
+      nginx-reload) do_nginx_reload ;;
       gateway-allow-propose) do_ga_propose ;;
       gateway-allow-approve) do_ga_approve ;;
       gateway-allow-restore) do_ga_restore ;;

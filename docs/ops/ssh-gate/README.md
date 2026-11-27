@@ -29,6 +29,8 @@
 | 자동 배포 잠깐 멈추기·다시 켜기 | 된다(정책에 그 권한이 적힌 권한자) | `autodeploy-pause <사유> [재개시각]` / `autodeploy-resume` |
 | 새 쓰기 경로(POST 등) 열기: 정책의 대상 파일, 허용 접두 안, 정책의 블록 모양 | 된다(권한자, 두 사람) | `nginx-add-location` → `nginx-approve-location` |
 | nginx 설정을 백업으로 되돌리기 | 된다(권한자) | `nginx-restore <백업폴더명>` |
+| 이미 연 location 하나 닫기(게이트가 넣은 블록만) | 된다(정책에 그 권한이 적힌 계정, 한 사람 + 팀 알림) | `nginx-remove-location <이름>` |
+| 설정은 그대로 두고 nginx 다시 읽기 | 된다(정책에 그 권한이 적힌 계정) | `nginx-reload` |
 | 게이트웨이 허용 목록에 읽기(read) 등급 skill 추가 | 된다(정책에 그 권한이 적힌 권한자, 두 사람) | `gateway-allow-propose <skill>` → `gateway-allow-approve <skill> <확인값>` |
 | 게이트웨이 허용 목록을 백업으로 되돌리기 | 된다(정책에 그 권한이 적힌 권한자) | `gateway-allow-restore <백업폴더명>` |
 | 작업과 PR 번호 연결 | 된다 | `record-pr <참조> <PR번호>` |
@@ -98,6 +100,8 @@
 | `nginx-restore <백업폴더명>` | 백업 폴더의 설정으로 되돌림. 먼저 현재 설정을 백업, `nginx -t` 실패면 원래대로. 대상 파일이 여럿이면 전부 한 번에 | 필수 |
 | `nginx-add-location <이름> <메서드> <정규식> [프로필]` | 새 쓰기 경로 **제안**. 검증기만 돌리고 승인 대기 파일을 만든다. nginx는 안 바뀐다. 프로필은 정책에 있는 이름만 | |
 | `nginx-approve-location <이름> <확인값>` | 제안자와 **다른** 권한자가 승인하면 그때 적용: 사전 검증 → 백업 → 삽입 → `nginx -t` → reload. 대상 파일이 여럿이면 전부 한 번에 | 필수 |
+| `nginx-remove-location <이름>` | 게이트가 넣은 location 블록(주석 줄 + location 한 줄) **하나만** 이름으로 지운다(0.6.0). 손으로 넣은 location·삽입 표시 줄·다른 이름의 블록은 건드리지 않는다. 길을 닫는 방향이라 제안·승인 두 사람 규칙은 없고, `--announced`·백업·감사 기록(`note=owner:<제안자>,cross:<yes|no>`)으로 남긴다. 사전 검사(대상 파일은 읽기만) → 대상 전부 백업(`pre-gate-remove-<이름>-<시각>`) → 새 파일 교체 → `nginx -t` 한 번 → reload. 어느 단계든 실패하면 대상 전부를 되돌린다. 그 이름의 블록이 어느 대상에도 없거나(손으로 넣은 location 포함), 같은 이름이 둘 이상이거나, 블록 모양이 게이트가 만든 것과 다르거나, 대상마다 제안자가 다르면 아무것도 바꾸지 않고 거부. 되돌리려면 `nginx-restore <백업폴더명>` | 필수 |
+| `nginx-reload` | 설정 파일은 건드리지 않고 `nginx -t`가 통과할 때만 `systemctl reload nginx`를 한다(0.6.0). `nginx -t`가 실패하면 reload하지 않고, reload가 실패하면 실패로 끝난다. 백업·되돌릴 것 없음 | 필수 |
 | `deploy-bundle <SHA>` | 번들 배포(배포 스크립트를 배포 계정으로 실행). 지금 서버 코드보다 **앞선** 커밋만. 번들 백업, 직전 배포 해시 기록, 번들 점검 | 필수 |
 | `restart-backend <SHA> --ack-data-loss` | 정책의 파일들을 백업한 뒤 서비스 재시작, health가 전부 뜰 때까지 폴링 | 필수 |
 | `rollback-bundle <SHA>` | 그 SHA를 배포하기 직전의 번들 백업으로 되돌림. 코드(레포)는 그대로 | 필수 |
@@ -187,7 +191,7 @@ autodeploy-resume                               # 먼저 끝났으면
 | 단계 | 누구 | 동작 |
 | --- | --- | --- |
 | 모두 | 개인 계정이 있는 팀원 전부 | `status`, `deploy-bundle`, `record-pr` |
-| 권한자 | 정책에 적힌 소수 | 위 + `nginx-restore`, `nginx-add-location`, `nginx-approve-location`, `restart-backend`, `rollback-bundle`, `lock`, `unlock` (`rollback-code`·`uv-sync`, `autodeploy-pause`·`autodeploy-resume`, `gateway-allow-*`는 필요한 계정 줄에 직접 더한다) |
+| 권한자 | 정책에 적힌 소수 | 위 + `nginx-restore`, `nginx-add-location`, `nginx-approve-location`, `restart-backend`, `rollback-bundle`, `lock`, `unlock` (`nginx-remove-location`·`nginx-reload`, `rollback-code`·`uv-sync`, `autodeploy-pause`·`autodeploy-resume`, `gateway-allow-*`는 필요한 계정 줄에 직접 더한다) |
 | 자동 배포 계정 | 백엔드 자동 배포 전용 계정 하나(사람 아님) | `status`, `deploy-bundle`, `restart-backend`, `rollback-bundle`, `rollback-code`, `uv-sync` (백엔드 자동 배포 설계 11/24 확정) |
 
 이렇게 나눈 이유
@@ -201,6 +205,16 @@ autodeploy-resume                               # 먼저 끝났으면
 - 다른 레포가 원본인 설정(예: 컨테이너 안의 게이트웨이 설정)은 서버에서 직접 고치지 않고 그 레포의 PR로 바꾼다 → 게이트 범위 밖.
 
 게이트는 "자동 배포가 막혔는지"를 알지 못한다. 모두에게 `deploy-bundle`을 연 만큼, 배포 기준 브랜치에 들어간 커밋만 받는 규칙과 알림·감사 로그가 통제 수단이다.
+
+## 열어 둔 경로 닫기와 nginx reload (0.6.0)
+
+- `nginx-remove-location <이름> --announced`: 게이트가 넣은 블록만 지운다. 이름은 영어 소문자·숫자·`-`만(40자 이하). 설정 파일의 `# ax-gate: name=<이름> user=<제안자> ...` 주석 줄로 이름과 제안자를 확인한다.
+  - 제안자가 아닌 계정이 지워도 된다(길을 닫는 방향). 대신 감사 기록에 제안자(`owner`)와 제3자 여부(`cross`)가 남고, 팀 채널 알림에 그 사실을 적는다.
+  - 대상 파일이 여럿이면 전부에서 함께 지운다. 한 대상에만 있으면 그 대상만 지우고 나머지는 그대로 둔다. 한 번의 `nginx -t`·reload.
+  - 되돌리기: 출력에 나오는 백업 폴더로 `nginx-restore <폴더명>`, 또는 `nginx-add-location`으로 새로 제안.
+  - 손으로 넣은 location은 게이트로 지울 수 없다(사람이 직접).
+- `nginx-reload --announced`: 직접 고친 설정을 `nginx -t`로 확인한 뒤 읽히게 할 때 쓴다. 게이트는 설정 파일을 바꾸지 않는다.
+- 두 동작 모두 `[permissions]`의 계정 줄에 직접 적어야 열린다(예시 정책의 어느 계정에도 열려 있지 않다). 새 정책 키는 없다. 둘 다 팀 알림(`--announced`)이 필수다.
 
 ## 새 쓰기 경로 열기: 두 사람 확인
 
@@ -341,7 +355,7 @@ nginx 설정을 바꾼 사람(승인자 또는 복원한 사람)이 한다.
 | `pr` | PR 번호(없으면 `-`) |
 | `note` | 제안자·확인값(프로필을 썼으면 `profile:<이름>`), `record-pr`의 참조 |
 | `layer` | `front`(앞단) 또는 `root`(뒷단) |
-| `result` | `start`, `end:rc=<코드>`, `denied:<사유>`, `fail:<사유>`, `proposed`, `applied:<백업폴더>`, `prev-head:<해시>`, `help`, `paused:<재개시각>`, `resumed`, `deploy-first:<SHA 8자>`, `rollback-code:<이전 8자>-><직전 8자>`, `backup-prune:<이름>:<크기>` |
+| `result` | `start`, `end:rc=<코드>`, `denied:<사유>`, `fail:<사유>`, `proposed`, `applied:<백업폴더>`, `removed:<백업폴더>`, `reloaded`, `prev-head:<해시>`, `help`, `paused:<재개시각>`, `resumed`, `deploy-first:<SHA 8자>`, `rollback-code:<이전 8자>-><직전 8자>`, `backup-prune:<이름>:<크기>` |
 
 끝 코드: 0 성공, 1 실행 실패, 2 인자·사용법, 3 권한 없음, 4 잠금, 5 설정 오류(신원을 알 수 없을 때 포함).
 
