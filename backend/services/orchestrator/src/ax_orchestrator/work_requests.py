@@ -249,17 +249,27 @@ class WorkRequests:
         row["buyer_id"] = buyer_id
         self._save(row)
 
-    def set_brand_character(self, request_id: str, record_id: str | None, by: str | None) -> None:
+    def set_brand_character(self, request_id: str, record_id: str | None, by: str | None,
+                            cast: list[dict[str, str]] | None = None) -> None:  # fmt: skip
         """홍보 영상 의뢰에 쓸 회사 대표 캐릭터(마케팅 제작 기록 CR-…)를 적는다.
 
         None이면 캐릭터 없이 만든다.
 
-        값은 기록 번호뿐이다. 영상 준비 단계가 이 값을 마케팅 입력으로 넘긴다 (11/23)."""
+        값은 기록 번호뿐이다. 영상 준비 단계가 이 값을 마케팅 입력으로 넘긴다 (11/23).
+        11/27 cast: 등장 캐릭터가 2명 이상이면 [{record_id, role_ko}](첫 번째 = record_id)를
+        같이 적는다. 한 명·없음이면 칸을 지운다(예전과 같은 기록)."""
         row = self._row(request_id)
         row["brand_character_record_id"] = record_id
+        if cast and len(cast) >= 2:
+            row["cast"] = [dict(m) for m in cast]
+        else:
+            row.pop("cast", None)
         # 11/24: 언제 정했는지(화면이 기획 시작 시각과 견줘 "기획서는 예전 캐릭터 기준"을 띄운다)
         row["brand_character_at"] = now().isoformat()
         what = f"회사 캐릭터 {record_id}로 만들기" if record_id else "캐릭터 없이 만들기"
+        if row.get("cast"):
+            ids = ", ".join(m["record_id"] for m in row["cast"])
+            what = f"등장 캐릭터 {len(row['cast'])}명({ids})로 만들기"
         row["log"].append({"at": now().isoformat(), "message": f"{what} ({by or '사람'})"})
         self._save(row)
 

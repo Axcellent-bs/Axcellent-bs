@@ -10,6 +10,7 @@ import {
   UPLOAD_HINT, VIRTUAL_CONFIRM_LABEL, VIRTUAL_NOTE,
   PREPARING_LINE, REPREPARE_CONFIRM, VIDEO_LOCKED_LINE,
   askMode, canUploadKind, characterStage, chatCharacterLine, isPromoVideo, isReferenceKind, needsReprepare, planOutdated,
+  CAST_ROLE_HINT, MAX_CAST_ROLE, addCast, canAddCast, castPayload, removeCast, setCastRole, type CastPick,
   type CharacterRow, type UploadKind,
 } from "@/lib/requestCharacter";
 import { refreshWorkRequests } from "@/components/office/useWorkRequests";
@@ -57,6 +58,18 @@ export function useChosenCharacter(recordId: string | null | undefined): BrandCh
   return (recordId && saved?.find((c) => c.record_id === recordId)) || null;
 }
 
+/** 11/27 등장 캐릭터 이름 찾기 (같은 목록·같은 1분 캐시). 여럿일 때만 읽는다 */
+export function useCharacterNames(enabled: boolean): (id: string) => string | null {
+  const [saved, setSaved] = useState<BrandCharacter[] | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    loadSaved().then((x) => live && setSaved(x), () => live && setSaved([]));
+    return () => { live = false; };
+  }, [enabled]);
+  return (id) => saved?.find((c) => c.record_id === id)?.name ?? null;
+}
+
 const errText = (e: unknown) => (e instanceof Error && e.message ? e.message : "처리하지 못했어요");
 
 export function BrandCharacterAsk({ row, variant = "handoff" }: { row: CharacterRow & { request_id: string }; variant?: "handoff" | "chat" }) {
@@ -72,6 +85,9 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
   const [virtualOk, setVirtualOk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 11/27 등장 캐릭터 여럿: 고른 목록(null = 아직 안 건드림 → 기본 캐릭터 한 명)과 추가하는 길
+  const [picked, setPicked] = useState<CastPick[] | null>(null);
+  const [adding, setAdding] = useState<"none" | "saved" | "upload">("none");
   const shown = askMode(row, saved);
   const mode = change && (shown === "chosen" || shown === "none") ? (saved?.length ? "saved" : "ask") : shown;
 
@@ -86,8 +102,12 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
   if (mode === "hidden" || (mode === "closed" && row.brand_character_record_id === undefined)) return null;
   if (chat && !isPromoVideo(row)) return null;
   const chosen = saved?.find((c) => c.record_id === row.brand_character_record_id);
-  const line = chat ? chatCharacterLine(row, chosen?.name) : null;
+  const nameOf = (id: string) => saved?.find((c) => c.record_id === id)?.name ?? null;
+  const line = chat ? chatCharacterLine(row, chosen?.name, nameOf) : null;
   const def = saved?.find((c) => c.is_default) ?? saved?.[0];
+  const cast = picked ?? (def ? addCast([], def.record_id) : []);
+  const castOf = (id: string) => saved?.find((c) => c.record_id === id);
+  const lead = castOf(cast[0]?.record_id ?? ""); // 한 명일 때 보이는 캐릭터 (지금 문구·동작 그대로)
   const stage = characterStage(row);
   // 영상 초안 준비 뒤면 [바꾸기] 전에 화면 안에서 한 번 더 묻는다(콘티·키프레임 다시 준비, 그림 크레딧)
   const startChange = () => (needsReprepare(row) ? setConfirm(true) : setChange(true));
@@ -107,11 +127,11 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
     </div>
   ) : null;
 
-  const pick = (recordId: string | null) => {
+  const pick = (recordId: string | null, many?: CastPick[]) => {
     setBusy(true);
     setError(null);
-    orchestrator.setBrandCharacter(row.request_id, recordId)
-      .then(() => { setUpload(false); setChange(false); void refreshWorkRequests(); })
+    orchestrator.setBrandCharacter(row.request_id, recordId, many)
+      .then(() => { setUpload(false); setChange(false); setAdding("none"); void refreshWorkRequests(); })
       .catch((e: unknown) => { setError(errText(e)); void refreshWorkRequests(); })
       .finally(() => setBusy(false));
   };
@@ -138,9 +158,18 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
       })
       .then((recordId) => {
         void loadSaved(true).then(setSaved, () => undefined);
+        // 11/27 [+ 이미지 올려 추가]면 목록에만 더한다(의뢰에는 [이 캐릭터들로 만들기]로 정한다)
+        if (adding === "upload") {
+          setPicked(addCast(cast, recordId));
+          return undefined;
+        }
         return orchestrator.setBrandCharacter(row.request_id, recordId);
       })
-      .then(() => { setUpload(false); setChange(false); setFile(null); setExtras({}); setRights(false); setVirtualOk(false); setKind("real_photo"); void refreshWorkRequests(); })
+      .then(() => {
+        setUpload(false); setFile(null); setExtras({}); setRights(false); setVirtualOk(false); setKind("real_photo");
+        if (adding === "upload") { setAdding("none"); return; }
+        setChange(false); void refreshWorkRequests();
+      })
       .catch((e: unknown) => setError(errText(e)))
       .finally(() => setBusy(false));
   };
@@ -206,16 +235,63 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
       {(mode === "ask" || mode === "saved") && (
         <>
           <p className="text-ink-900">{CHARACTER_QUESTION}</p>
-          {mode === "saved" && def && !upload && (
+          {mode === "saved" && def && !upload && cast.length <= 1 && (
             <>
-              {savedCard(def)}
+              {savedCard(lead ?? def)}
               <span className="flex flex-wrap gap-1.5">
-                <button type="button" className="btn-primary btn-card" disabled={busy} onClick={() => pick(def.record_id)}>이 캐릭터로 만들기</button>
+                <button type="button" className="btn-primary btn-card" disabled={busy} onClick={() => pick((lead ?? def).record_id)}>이 캐릭터로 만들기</button>
                 <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => setUpload(true)}>다른 이미지 올리기</button>
-                {sheetButton(def)}
+                {sheetButton(lead ?? def)}
                 <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => pick(null)}>캐릭터 없이</button>
               </span>
             </>
+          )}
+          {/* 11/27 등장 캐릭터 여럿 (최대 3): 목록(역할 입력 · ×빼기) + 추가 버튼 + [이 캐릭터들로 만들기] */}
+          {mode === "saved" && def && !upload && cast.length >= 2 && (
+            <>
+              <ul className="space-y-1.5" aria-label="등장 캐릭터">
+                {cast.map((m, i) => {
+                  const c = castOf(m.record_id);
+                  return (
+                    <li key={m.record_id} className="space-y-1">
+                      {c ? savedCard(c) : <p className="text-xs text-ink-500">{m.record_id}</p>}
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <input className="field min-w-0 flex-1 py-1 text-xs" value={m.role_ko} maxLength={MAX_CAST_ROLE}
+                          placeholder={i === 0 ? "주인공" : CAST_ROLE_HINT} aria-label={`${c?.name ?? m.record_id} 역할`}
+                          onChange={(e) => setPicked(setCastRole(cast, m.record_id, e.target.value))} />
+                        {c && sheetButton(c)}
+                        <button type="button" className="btn-ghost btn-card" aria-label={`${c?.name ?? m.record_id} 빼기`} disabled={busy}
+                          onClick={() => setPicked(removeCast(cast, m.record_id))}>×</button>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <span className="flex flex-wrap gap-1.5">
+                <button type="button" className="btn-primary btn-card" disabled={busy} onClick={() => { const p = castPayload(cast); pick(p.recordId, p.cast); }}>이 캐릭터들로 만들기</button>
+                <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => pick(null)}>캐릭터 없이</button>
+              </span>
+            </>
+          )}
+          {mode === "saved" && def && !upload && canAddCast(cast) && (
+            <span className="flex flex-wrap gap-1.5">
+              {(saved ?? []).some((c) => !cast.some((m) => m.record_id === c.record_id)) && (
+                <button type="button" className="btn-ghost btn-card" disabled={busy} aria-expanded={adding === "saved"}
+                  onClick={() => setAdding((a) => (a === "saved" ? "none" : "saved"))}>+ 회사 캐릭터에서 추가</button>
+              )}
+              <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => { setAdding("upload"); setUpload(true); }}>+ 이미지 올려 추가</button>
+            </span>
+          )}
+          {mode === "saved" && !upload && adding === "saved" && canAddCast(cast) && (
+            <ul className="space-y-1.5" aria-label="추가할 회사 캐릭터">
+              {(saved ?? []).filter((c) => !cast.some((m) => m.record_id === c.record_id)).map((c) => (
+                <li key={c.record_id} className="space-y-1">
+                  {savedCard(c)}
+                  <button type="button" className="btn-ghost btn-card" disabled={busy}
+                    onClick={() => { setPicked(addCast(cast, c.record_id)); setAdding("none"); }}>이 캐릭터 추가</button>
+                </li>
+              ))}
+            </ul>
           )}
           {mode === "ask" && !upload && (
             <span className="flex flex-wrap gap-1.5">
@@ -279,7 +355,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
               )}
               <span className="flex flex-wrap gap-1.5">
                 <button type="button" className="btn-primary btn-card" disabled={!canUploadKind(!!file, kind, rights, virtualOk, busy)} onClick={send}>{busy ? "올리는 중…" : "올리기"}</button>
-                <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => { setUpload(false); setFile(null); setExtras({}); setRights(false); setVirtualOk(false); setKind("real_photo"); }}>취소</button>
+                <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => { setUpload(false); setAdding("none"); setFile(null); setExtras({}); setRights(false); setVirtualOk(false); setKind("real_photo"); }}>취소</button>
               </span>
               <p className="chip self-start bg-amber-50 text-[11px] text-amber-800">{CHARACTER_NOTE}</p>
             </div>

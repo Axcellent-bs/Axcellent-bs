@@ -32,7 +32,43 @@ export type CharacterRow = Pick<WorkRequestRow, "plan" | "steps" | "status"> & {
   /** 11/24 캐릭터를 마지막으로 정한 때 (서버 기록) */
   brand_character_at?: string | null;
   stopped_at?: string | null;
+  /** 11/27 등장 캐릭터 여럿(2명 이상일 때만, 첫 번째 = brand_character_record_id). 한 명이면 칸 없음 */
+  cast?: CastPick[] | null;
 };
+
+// ---- 11/27 등장 캐릭터 여럿 (회사 캐릭터 + 역할, 최대 3). 서버 계약 CastMember와 같은 모양
+export interface CastPick { record_id: string; role_ko: string }
+export const MAX_CAST = 3;
+export const MAX_CAST_ROLE = 20;
+export const CAST_ROLE_HINT = "역할 (예: 주인공·동료·마스코트)";
+
+/** 목록에 더한다 (같은 캐릭터는 한 번, 최대 3). 첫 번째가 주인공 */
+export function addCast(list: CastPick[], recordId: string): CastPick[] {
+  if (list.length >= MAX_CAST || list.some((m) => m.record_id === recordId)) return list;
+  return [...list, { record_id: recordId, role_ko: list.length === 0 ? "주인공" : "" }];
+}
+export const removeCast = (list: CastPick[], recordId: string): CastPick[] => list.filter((m) => m.record_id !== recordId);
+/** 역할 글: 20자까지 (서버도 21자는 422) */
+export const setCastRole = (list: CastPick[], recordId: string, role: string): CastPick[] =>
+  list.map((m) => (m.record_id === recordId ? { ...m, role_ko: role.slice(0, MAX_CAST_ROLE) } : m));
+export const canAddCast = (list: CastPick[]) => list.length < MAX_CAST;
+
+/** 보낼 값: 주인공 번호와, 2명 이상이면 cast(역할 앞뒤 공백 뗌). 한 명이면 지금과 같은 요청 */
+export function castPayload(list: CastPick[]): { recordId: string | null; cast?: CastPick[] } {
+  const clean = list.map((m) => ({ record_id: m.record_id, role_ko: m.role_ko.trim() }));
+  return clean.length >= 2 ? { recordId: clean[0].record_id, cast: clean } : { recordId: clean[0]?.record_id ?? null };
+}
+
+/** 1단계 완료 줄 "등장 캐릭터 2 · 주인공 여성(CR-…) · 동료 남성(CR-…)". 2명 미만이면 null */
+export function castLine(cast: CastPick[] | null | undefined, nameOf?: (id: string) => string | null | undefined): string | null {
+  if (!cast || cast.length < 2) return null;
+  const parts = cast.map((m) => {
+    const name = nameOf?.(m.record_id);
+    const who = name ? `${name}(${m.record_id})` : m.record_id;
+    return m.role_ko ? `${m.role_ko} ${who}` : who;
+  });
+  return [`등장 캐릭터 ${cast.length}`, ...parts].join(" · ");
+}
 
 // ---- 11/24 캐릭터 답을 먼저 받는다 (총괄 promo_video 맨 앞 사람 단계 character)
 export const CHARACTER_SKILL = "brand_character";
@@ -139,10 +175,13 @@ export const chatAskShown = (r: CharacterRow) =>
   isPromoVideo(r) && characterStage(r) === "before_prepare" && r.brand_character_record_id === undefined;
 
 /** 정한 뒤 접힌 한 줄: "회사 캐릭터: 이름(CR-…)" 또는 "캐릭터 없이 진행". [바꾸기]는 영상 준비 전까지만 (뒤면 서버도 409) */
-export function chatCharacterLine(r: CharacterRow, name?: string | null): { text: string; canChange: boolean } | null {
+export function chatCharacterLine(r: CharacterRow, name?: string | null,
+  nameOf?: (id: string) => string | null | undefined): { text: string; canChange: boolean } | null {
   if (!isPromoVideo(r) || r.brand_character_record_id === undefined) return null;
   const id = r.brand_character_record_id;
-  const text = id ? `회사 캐릭터: ${name ? `${name}(${id})` : id}` : CHAT_NONE_LINE;
+  // 11/27 등장 캐릭터가 여럿이면 "등장 캐릭터 2 · 주인공 …(CR-…) · 동료 …(CR-…)"
+  const many = castLine(r.cast, (x) => nameOf?.(x) ?? (x === id ? name : null));
+  const text = many ?? (id ? `회사 캐릭터: ${name ? `${name}(${id})` : id}` : CHAT_NONE_LINE);
   return { text, canChange: characterOpen(r) };
 }
 
