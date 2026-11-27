@@ -991,6 +991,12 @@ class VideoPlan(AxModel):
     #   고른 캐릭터 번호 없음, read_failed = 마케팅에서 못 읽음(꺼짐·시간 초과·실패),
     #   gate_held = 읽기가 승인 관문에서 보류됨, no_look = 시트에 외형 글 없음. 회사 캐릭터면 ""
     character_source_reason: Literal["", "no_record_id", "read_failed", "gate_held", "no_look"] = ""
+    # 아래는 예전 제작안은 없다 (11/26 K, 재현 님 "홍보인지 재미인지 광고인지 모르겠다").
+    # 영상 목적 4가지: fun = 재미(재밌는 릴스, 끝에 채널 이름만), info = 정보(문제 제기 → 팁·추천
+    # 2~3개 → 채널 이름), promo = 홍보(브랜드·상품을 소품·자막으로 → 채널 이름), ad = 광고(혜택 →
+    # 쓰는 장면 → 행동 문구, AXcellent 자사는 B2B 문제 → 해결 → 문의). 기존 purpose·promo_style·
+    # brand_exposure는 그대로 두고 계속 채운다(마케팅·예전 데이터 호환). None = 예전 제작안
+    goal: Literal["fun", "info", "promo", "ad"] | None = None
 
     @model_validator(mode="after")
     def _scenes_cover_duration(self) -> VideoPlan:
