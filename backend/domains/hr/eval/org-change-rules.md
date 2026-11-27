@@ -151,3 +151,23 @@
 - 카드는 짧은 합성 문장 16장이라 실제 카드보다 검색이 쉽다. 10번은 문장이 규칙적이라 100%가 나온 것이며 실제 입력은 더 다양하다.
 - 기준을 모두 통과했지만 표본이 작아(질의 28, 문장 38, 설명문 24) 비율의 오차가 크다. "항상 맞는다"는 뜻이 아니다.
 - 11번은 호출마다 문장이 달라 3회만 봤다. 방향 표현은 키워드 휴리스틱이라 정확한 검증이 아니다.
+
+### 다시 돌리는 방법 / 모델 비교 (준하 제안, #소통 2026-11-27, 3순위: "인사 발령 문장 정리")
+
+`org_change_eval.py`는 아카이브 분리 뒤 `from run_eval import load_env`가 깨져 있었다(`run_eval.py`가
+`domains/archive/eval/`로만 옮겨감). 부서끼리 import하지 않는다는 규칙(CLAUDE.md)을 지키려고 그
+작은 헬퍼 함수를 복사해 두는 방식으로 고쳤다. 9번(근거 카드 찾기, `eval_basis`)은 같은 분리로
+`hr_agent.retrieval`과 `build_services`의 `dense` 인자도 없어져 지금도 돌지 않는다(파일 맨 위 주석,
+3단계 작업 전까지 보류) — `eval_basis` 호출은 바로 알 수 있는 에러로 막아 둔다. 이 항목이 필요로
+하는 10번(발령 문장 정리)·11번(요약 설명문)은 영향이 없다.
+
+```bash
+cd backend
+uv run python domains/hr/eval/org_change_eval.py parse     # 10번만(인사 발령 문장 정리)
+uv run python domains/hr/eval/org_change_eval.py describe   # 11번만
+uv run python domains/hr/eval/org_change_eval.py all        # parse+describe (basis는 바로 에러)
+```
+
+모델을 바꿔 비교하려면 `HR_LLM_MODEL`(없으면 `LLM_MODEL`) 등을 바꿔 가며 돌리고, 돌릴 때마다
+`results/org_change_eval.json`을 모델별 이름으로 백업한다(덮어쓰므로). 이 세션(클라우드 샌드박스)에는
+키가 없어 `LLM 설정이 없다(backend/.env)`로 깔끔하게 멈추는 것까지만 확인했다.
