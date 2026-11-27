@@ -177,3 +177,46 @@ uv run python domains/dev/eval/model_compare_ci_fix_report.py haiku sonnet
 - 이 세션(클라우드 샌드박스)에는 키가 없어 가짜 LLM으로 세 경로(정답을 정확히 고치는 답·
   고쳐도 기준을 못 채우는 답·아예 고치지 않아 커밋조차 안 되는 답)를 검증했다. 실제 비교
   숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
+
+## 레포 고르기 정확도 LLM 모델 비교 (예진 제안, #소통 2026-11-27 15:46, 개발 4순위)
+
+"정답 레포를 고른 비율" 평가. `repo_routing.py`(PR을 어느 연결에 올릴지 고르는 production
+모듈 — 규칙 점수가 기준선이고 LLM이 있으면 LLM 판단을 쓰며, LLM이 후보 밖 id를 내거나
+오류면 규칙으로 돌아간다)를 그대로 돌린다. 연결 2개 이상 + 정답 표시 평가 데이터가 없어
+새로 만들었다.
+
+- `repo_routing_cases.json`: 합성 케이스 8건. 각 작업은 제목·문단·바뀐 경로·요청 글·영역과
+  2~4개의 후보 연결(연결 id·레포 이름·설명·담당 경로)을 가지고, 정답 연결 id를 표시해 뒀다.
+  그중 2건(`r03`·`r08`)은 **규칙 점수만으로는 실제로 틀리게** 설계했다 — 바뀐 경로가 어느
+  후보의 담당 경로와도 안 겹치고, 낱말 겹침은 엉뚱한 후보 쪽이 더 많다(예: 정답은
+  `recurring-payments`인데 설명에 "회원 안내 문자 발송"이 들어간 `billing-core`가 낱말
+  점수로 앞섬). 나머지 6건은 규칙으로도 쉽게 맞는 사례라, LLM이 실제로 도움이 되는지와
+  방해가 안 되는지를 같이 본다
+- `repo_routing_eval.py`: production 함수 `score_rules`(규칙만)와 `decide`(규칙 + LLM, 둘 다
+  그대로)를 같은 케이스에 돌려 나란히 비교한다. 새로 만든 건 합성 케이스뿐, 판정 로직은
+  전부 production 그대로
+  - 실행: `cd backend && uv run python domains/dev/eval/repo_routing_eval.py`
+  - 모델은 `DEV_LLM_MODEL` → 없으면 `LLM_MODEL`
+  - 지표: `repo_pick_accuracy`(정답 레포를 고른 비율, `decide`의 최종 결과)·
+    `rule_only_accuracy`(비고: 규칙 점수만 쓸 때)·`accuracy_delta`(둘의 차이)·
+    `llm_used_rate`(LLM 판단이 실제로 채택된 비율, 후보 밖 id·오류면 규칙으로 돌아가므로
+    낮을수록 LLM이 신뢰를 못 받았다는 뜻)
+- 모델 비교: `model_compare_repo_routing.py <라벨>` →
+  `results/model_compare/repo_routing_<라벨>.json`,
+  `model_compare_repo_routing_report.py <라벨1> <라벨2> ...`로 비교표
+
+```bash
+cd backend
+DEV_LLM_MODEL=claude-haiku-5-5 uv run python domains/dev/eval/model_compare_repo_routing.py haiku
+DEV_LLM_MODEL=claude-sonnet-5-5 uv run python domains/dev/eval/model_compare_repo_routing.py sonnet
+uv run python domains/dev/eval/model_compare_repo_routing_report.py haiku sonnet
+```
+
+**한계**
+- 골든셋이 합성·소규모다(8건, 연결 2~4개). 실제 연결·PR 기록으로 바꾸면 더 믿을 만하다.
+- 정답은 이 평가를 만들며 사람이 미리 적어 둔 것이다(production 승인 기록이 아니다).
+- 토큰(파일 내용)은 보내지 않는다는 production 설계 그대로라, 레포 이름·설명·경로·작업 글만
+  보고 고른다 — 실제 코드를 읽어야만 구분되는 경우는 이 평가로 보지 못한다.
+- 이 세션(클라우드 샌드박스)에는 키가 없어 가짜 LLM으로 세 경로(정답을 정확히 고르는 답·
+  후보 밖 id를 내는 답·항상 오류인 답)를 검증했다 — 뒤 두 경로 모두 규칙으로 정확히 돌아감을
+  확인했다. 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.

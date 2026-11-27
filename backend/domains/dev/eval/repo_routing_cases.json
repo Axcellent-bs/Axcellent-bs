@@ -1,0 +1,133 @@
+{
+  "cases": [
+    {
+      "id": "r01",
+      "note": "경로가 바로 맞음 (규칙도 쉽게 맞혀야 함)",
+      "input": {
+        "title": "품절 배지 색 맞추기",
+        "text": "품절이면 회색 배지를 보여준다.",
+        "changed_paths": ["shop-web/src/components/StockBadge.tsx"],
+        "request_title": "품절 배지",
+        "area": "shop-web"
+      },
+      "candidates": [
+        {"connection_id": "c1", "repo": "acme/shop-api", "description": "주문 API", "paths": ["shop-api/"]},
+        {"connection_id": "c2", "repo": "acme/shop-web", "description": "쇼핑몰 화면", "paths": ["shop-web/"]}
+      ],
+      "correct_connection_id": "c2"
+    },
+    {
+      "id": "r02",
+      "note": "경로 없이 낱말만 (규칙은 mid, 틀릴 수 있음)",
+      "input": {
+        "title": "환불 처리 완료 안내 문구",
+        "text": "환불이 끝나면 안내 문구를 보여준다.",
+        "changed_paths": [],
+        "request_title": "환불 안내",
+        "area": ""
+      },
+      "candidates": [
+        {"connection_id": "c1", "repo": "acme/shop-api", "description": "주문·환불·정산 API", "paths": ["shop-api/"]},
+        {"connection_id": "c2", "repo": "acme/shop-web", "description": "쇼핑몰 화면·안내 문구", "paths": ["shop-web/"]}
+      ],
+      "correct_connection_id": "c2"
+    },
+    {
+      "id": "r03",
+      "note": "규칙이 실제로 틀리는 경우: 경로는 어느 후보와도 안 겹치고, 낱말 겹침은 엉뚱한 후보가 더 많음(규칙 점수 c2=5 > c1=3, 정답은 c1)",
+      "input": {
+        "title": "정기 결제 재시도 실패 안내",
+        "text": "결제 재시도 실패 회원 안내 문자 발송",
+        "changed_paths": ["svc-billing/src/retry_notice.ts"],
+        "request_title": "정기 결제 실패 안내",
+        "area": ""
+      },
+      "candidates": [
+        {"connection_id": "c1", "repo": "acme/recurring-payments", "description": "정기 결제·재시도 결제 처리", "paths": ["recurring-payments/"]},
+        {"connection_id": "c2", "repo": "acme/billing-core", "description": "사내 청구서 발행 시스템, 회원 안내 문자 발송", "paths": ["billing-core/"]}
+      ],
+      "correct_connection_id": "c1"
+    },
+    {
+      "id": "r04",
+      "note": "세 후보, 설명 낱말이 레포 두 곳에 겹쳐 규칙이 틀릴 수 있음",
+      "input": {
+        "title": "검색 결과 정렬 기준 추가",
+        "text": "검색 결과를 가격순으로도 정렬할 수 있게 한다.",
+        "changed_paths": ["search/src/sort.ts"],
+        "request_title": "검색 정렬",
+        "area": ""
+      },
+      "candidates": [
+        {"connection_id": "c1", "repo": "acme/search-service", "description": "상품 검색·정렬·추천", "paths": ["search/"]},
+        {"connection_id": "c2", "repo": "acme/shop-web", "description": "쇼핑몰 화면·검색창", "paths": ["shop-web/"]},
+        {"connection_id": "c3", "repo": "acme/recommend-service", "description": "추천 정렬 모델", "paths": ["recommend/"]}
+      ],
+      "correct_connection_id": "c1"
+    },
+    {
+      "id": "r05",
+      "note": "요청 글(request_title)만 단서, 경로는 비어 있음",
+      "input": {
+        "title": "인사 발령 문장 다듬기",
+        "text": "발령 문장을 더 자연스럽게 바꾼다.",
+        "changed_paths": [],
+        "request_title": "인사팀 발령 문구 검토",
+        "area": "hr"
+      },
+      "candidates": [
+        {"connection_id": "c1", "repo": "acme/hr-tools", "description": "인사 발령·조직 변경 도구", "paths": ["hr/"]},
+        {"connection_id": "c2", "repo": "acme/shop-web", "description": "쇼핑몰 화면", "paths": ["shop-web/"]}
+      ],
+      "correct_connection_id": "c1"
+    },
+    {
+      "id": "r06",
+      "note": "경로가 두 레포 담당 경로 모두와 겹치지 않음 (완전히 새 폴더), 설명으로만 구분",
+      "input": {
+        "title": "배송 추적 페이지 추가",
+        "text": "주문 배송 상태를 보여주는 새 페이지를 만든다.",
+        "changed_paths": ["tracking/src/page.tsx"],
+        "request_title": "배송 추적",
+        "area": ""
+      },
+      "candidates": [
+        {"connection_id": "c1", "repo": "acme/shop-web", "description": "쇼핑몰 화면·주문 배송 추적 페이지", "paths": ["shop-web/"]},
+        {"connection_id": "c2", "repo": "acme/admin-web", "description": "운영자 관리 화면", "paths": ["admin-web/"]}
+      ],
+      "correct_connection_id": "c1"
+    },
+    {
+      "id": "r07",
+      "note": "낱말이 엉뚱한 레포 이름과도 겹쳐 규칙이 흔들릴 수 있음 (dev는 불용어지만 development는 아님)",
+      "input": {
+        "title": "개발 환경 배포 스크립트 고치기",
+        "text": "개발 환경에 배포할 때 쓰는 스크립트를 고친다.",
+        "changed_paths": ["infra/scripts/deploy_dev.sh"],
+        "request_title": "배포 스크립트",
+        "area": "infra"
+      },
+      "candidates": [
+        {"connection_id": "c1", "repo": "acme/infra-tools", "description": "배포·인프라 스크립트", "paths": ["infra/"]},
+        {"connection_id": "c2", "repo": "acme/development-portal", "description": "개발자 포털 화면", "paths": ["portal/"]}
+      ],
+      "correct_connection_id": "c1"
+    },
+    {
+      "id": "r08",
+      "note": "규칙이 실제로 틀리는 경우: 경로는 어느 후보와도 안 겹치고, 정답 후보는 설명이 짧아 낱말 겹침이 적음(규칙 점수 c2=4 > c1=2, 정답은 c1)",
+      "input": {
+        "title": "쿠폰 발급 한도 조정",
+        "text": "이벤트 쿠폰 발급 한도를 늘린다. 재고 수량 한도도 같이 확인한다.",
+        "changed_paths": ["svc-promo/src/limit.py"],
+        "request_title": "쿠폰 한도",
+        "area": ""
+      },
+      "candidates": [
+        {"connection_id": "c1", "repo": "acme/promotion-engine", "description": "쿠폰 발급 처리", "paths": ["promotion-engine/"]},
+        {"connection_id": "c2", "repo": "acme/inventory-web", "description": "재고 수량 한도 확인 화면, 이벤트 재고 알림", "paths": ["inventory-web/"]}
+      ],
+      "correct_connection_id": "c1"
+    }
+  ]
+}
