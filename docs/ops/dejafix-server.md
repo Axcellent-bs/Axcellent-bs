@@ -50,19 +50,24 @@
 
 ## 4. DejaFix 재배포 순서
 
-서버 변경이므로 서버 책임자가 한다. 11/26·11/27 재배포가 서버에 남긴 흔적(백업 폴더, 이전 트리, 이미지 태그) 기준의 순서다. 이미지 빌드에 쓴 정확한 명령은 서버에 기록이 없어 여기 적지 못했다.
+서버 변경이므로 서버 책임자가 한다. 11/27 재배포(dev `566de75`) 때 실제로 쓴 순서다.
 
 1. 팀 채널에 알린다(장애 대응 탭이 잠깐 비거나 "연결 전"으로 보일 수 있다).
 2. 백업 폴더 `/home/ubuntu/dejafix-before-<새 태그>-<시각>/`를 만들고 볼륨 `dejafix-data` 묶음, 지금의 override 사본, 지금 이미지 id를 넣는다.
-3. 지금 소스 트리를 `/opt/dejafix-app-build.prev-<표시>`로 남기고, `/opt/dejafix-app-build/`에 올릴 커밋의 트리를 둔다.
-4. 그 트리로 이미지를 만들어 `dejafix-app:dev-<커밋 7자>`로 태그하고, override의 `image:` 줄을 새 태그로 바꾼다.
-5. 컨테이너를 다시 만든다. 프로젝트 이름과 compose 파일 두 개는 늘 같게 준다(아래는 떠 있는 컨테이너의 compose 라벨에서 읽은 형태다. 올리기 전에 같은 인자로 `config`를 먼저 돌려 값이 채워지는지 본다).
+3. 지금 이미지에 보관용 태그(`dejafix-app:<직전 태그>-keep`)를 붙이고, 지금 소스 트리를 `/opt/dejafix-app-build.prev-<표시>`로 남긴다. 올릴 커밋의 트리는 DejaFix 레포에서 `git archive <커밋>`으로 만들어 `/opt/dejafix-app-build/`에 둔다.
+4. override의 `image:` 줄을 새 태그 `dejafix-app:dev-<커밋 7자>`로 바꾸고 이미지를 만든다. 프로젝트 이름과 compose 파일 두 개는 늘 같게 준다.
    ```bash
    docker compose -p dejafix \
      -f /opt/dejafix-app-build/infra/docker-compose.app.yml \
-     -f /opt/dejafix-ops/docker-compose.app.server.yml up -d dejafix-app
+     -f /opt/dejafix-ops/docker-compose.app.server.yml build
    ```
-6. 확인: `docker ps`에서 `dejafix-app`이 `healthy`, AXcellent 화면의 DejaFix 연결 카드(회원·서버 관리)와 장애 대응 탭이 읽히는지.
+5. 이 컨테이너만 다시 만든다.
+   ```bash
+   docker compose -p dejafix \
+     -f /opt/dejafix-app-build/infra/docker-compose.app.yml \
+     -f /opt/dejafix-ops/docker-compose.app.server.yml up -d --no-build dejafix-app
+   ```
+6. 확인: `docker ps`에서 `dejafix-app`이 `healthy`, 서버 안에서 `/healthz`가 ok, 컨테이너 로그에 에러 없음, AXcellent 화면의 DejaFix 연결 카드(회원·서버 관리)와 장애 대응 탭이 읽히는지.
 7. 되돌리기: override의 `image:`를 직전 태그로 되돌려 5번을 다시 한다. 데이터까지 되돌려야 하면 2번의 볼륨 묶음을 쓴다.
 
 지킬 것

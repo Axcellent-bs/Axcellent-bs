@@ -29,7 +29,7 @@
 - 사람 토큰 출처: 로그인(`POST /api/dashboard/auth/login`) 응답의 세션 토큰(`axs1.…`)을 `sessionStorage`(탭 단위, `frontend/src/lib/humanSession.ts`)에 둔다. 세션이 있으면 `SAFETY_HUMAN_TOKEN`이 그 값이고, 없으면 번들의 자리표시자(공유 서버에서 nginx 가 진짜 공용 토큰으로 바꿔 붙인다).
 - nginx 주입(`docs/superpowers/specs/2026-11-19-human-session-tokens-design.md`): 쓰기 경로는 화면이 보낸 `Authorization`을 그대로 넘기고(4단계), 읽기와 A2A 중계 경로는 공용 토큰 주입을 둔다. 직접 호스트는 주입이 없으므로 **읽기에도 화면이 세션 토큰을 실어야 한다**.
 - 그래서 화면은 세션 토큰이 없으면 직접 호스트로 보내지 않는다(자리표시자는 직접 호스트에서 401). 로그인 전 공개 두 경로(`auth/status`, `auth/company`)만 토큰 없이 직접 간다.
-- 백엔드 확인: dashboard-api 는 `PUBLIC_ROUTES`(health, auth/status, auth/login, auth/company) 밖의 GET 에 모두 사람 토큰을 요구한다(`auth.py require_human`). 총괄 `GET /api/incidents`, safety `GET /api/safety/executions`, 기획·개발 `GET /api/planning/state`는 11/25(회사 분리)부터 화면이 세션 토큰을 싣는다(`apiDirect.ts` `DIRECT_ROUTES`의 `auth: "session"`. 세션 토큰의 회사로 그 회사 것만 읽는다). 그래서 이 읽기들도 `Authorization` 때문에 OPTIONS 사전 요청이 생긴다. 세션이 없으면 직접 가지 않고 같은 출처 nginx로 간다. 토큰 없이 직접 가는 것은 로그인 전 공개 두 경로뿐이다.
+- 백엔드 확인: dashboard-api 는 `PUBLIC_ROUTES`(health, auth/status, auth/login, auth/company) 밖의 GET 에 모두 사람 토큰을 요구한다(`auth.py require_human`). 총괄 `GET /api/incidents`, safety `GET /api/safety/executions`, 기획·개발 `GET /api/planning/state`는 11/25(회사 분리)부터 화면이 세션 토큰을 싣는다(`apiDirect.ts` `DIRECT_ROUTES`의 `auth: "session"`. 이것은 화면이 보내는 값 기준이고, 서버가 토큰 없는 요청을 어떻게 다루는지는 이번 최신화에서 확인하지 않았다). 그래서 이 읽기들도 `Authorization` 때문에 OPTIONS 사전 요청이 생긴다. 세션이 없으면 직접 가지 않고 같은 출처 nginx로 간다. 토큰 없이 직접 가는 것은 로그인 전 공개 두 경로뿐이다.
 - 주의: 토큰을 안 보는 읽기를 직접 호스트로 열면, 같은 출처로 이미 열려 있는 것과 노출 수준은 같지만 CORS 때문에 다른 사이트 스크립트가 읽을 수는 없게 된다(Origin 고정). 서버가 막는 것은 아니므로(CORS 는 브라우저만 지킨다) 민감도는 별도로 판단한다(위험 4절).
 
 ## 3. 1차: 로그인 직후 첫 화면 읽기 (우선순위순)
