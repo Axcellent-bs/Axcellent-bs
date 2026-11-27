@@ -166,6 +166,20 @@ run() {
   "$@"
 }
 
+# 실행 중인 서비스의 폴더를 tar 로 묶으면, 읽는 사이 바뀐 파일("file changed as we read it")이나 사라진 임시 파일이 있을 때
+# tar 가 묶음은 만들고도 종료코드 1 로 끝난다. 이것만 경고로 넘긴다(sqlite 는 따로 backup API 로 뜬다).
+# 2 이상(읽기·쓰기 실패 등 묶음을 믿을 수 없는 경우)은 그대로 실패한다.
+run_tar_live() {
+  local rc=0
+  run tar "$@" || rc=$?
+  if (( rc == 1 )); then
+    printf '경고: 묶는 동안 바뀐 파일이 있었다(tar 종료코드 1). 묶음은 만들어졌고 sqlite 는 따로 뜬다
+' >&2
+    return 0
+  fi
+  return "${rc}"
+}
+
 # ---------------------------------------------------------------------------
 # 정책 파일: TOML 의 좁은 부분집합만 읽는다. 모르는 줄이 하나라도 있으면 전체 거부.
 #   [구역] / 키 = "글" / 키 = 123 / 키 = true|false / 키 = ["a", "b"] (한 줄)
@@ -2571,8 +2585,9 @@ do_restart_backend() {
   for src in "${dirs[@]}"; do
     [[ "${src}" != *..* && -d "${src}" ]] || step_fail "backup-source" "${RC_FAIL}" "백업할 폴더가 없다: ${src##*/}"
     backup_dest "${src}" ".tgz"
-    # sqlite 파일은 쓰는 중이라 tar 가 "file changed as we read it" 로 실패하므로 빼고, 아래에서 backup API 로 따로 뜬다
-    run tar --force-local -czf "${BACKUP_DEST}" --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' -C "${src%/*}" "${src##*/}"
+    # sqlite 파일은 쓰는 중이라 빼고(-journal 은 생겼다 사라진다), 아래에서 backup API 로 따로 뜬다.
+    # 그래도 다른 상태 파일이 읽는 사이 바뀌면 종료코드 1 이므로 run_tar_live 가 경고로 넘긴다
+    run_tar_live --force-local -czf "${BACKUP_DEST}" --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' --exclude='*.db-journal' -C "${src%/*}" "${src##*/}"
     backup_dest "${src}" "-sqlite"
     run mkdir -m 700 -- "${BACKUP_DEST}"
     for db in "${src}"/*.db; do
