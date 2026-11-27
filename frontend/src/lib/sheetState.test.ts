@@ -1,7 +1,7 @@
 // 캐릭터 시트 칸 상태 (11/26 A). node --test src/lib/sheetState.test.ts
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAKE_SHEET, REMAKE_SHEET, brandSheetState, legacyOriginal, sheetMissingBrand, sheetState } from "./sheetState.ts";
+import { MAKE_SHEET, REMAKE_SHEET, brandCardView, brandSheetState, legacyOriginal, sheetMissingBrand, sheetState } from "./sheetState.ts";
 import { readFileSync } from "node:fs";
 
 const ORIGINAL = { status: "done", source: "upload_original" };
@@ -57,6 +57,29 @@ test("회사 캐릭터 카드 (preview_part)", () => {
   assert.equal(brandSheetState("sheet_image", "virtual_human").title, "캐릭터 시트");
   assert.equal(brandSheetState("sheet_image", "real_photo").button, null);
   assert.equal(brandSheetState(null, "virtual_human").button, null);
+});
+
+test("11/27 회사 캐릭터 카드: 시트가 있으면 시트 썸네일, 글은 한 줄, 시트 버튼은 아래 버튼 줄용", () => {
+  const refs = [{}, {}, {}];
+  const made = brandCardView({ record_id: "CR-05c62f5944f0", kind: "virtual_human", preview_part: "sheet_image", references: refs, thumbnail_base64: "x" });
+  assert.deepEqual(made, { thumb: "sheet_image", info: "AI 가상 인물 · 참조 3장 · 캐릭터 시트 ✓ · CR-05c62f5944f0", button: REMAKE_SHEET });
+  const raw = brandCardView({ record_id: "CR-aaaaaaaaaaaa", kind: "illustration", preview_part: "original_image", thumbnail_base64: "x" });
+  assert.deepEqual(raw, { thumb: "thumbnail", info: "일러스트 캐릭터 · 시트 아직 없음 · CR-aaaaaaaaaaaa", button: MAKE_SHEET });
+  // 실사 사진 캐릭터: 시트 버튼 없음, 썸네일이 없으면 null
+  const photo = brandCardView({ record_id: "CR-bbbbbbbbbbbb", kind: "real_photo", preview_part: null });
+  assert.deepEqual(photo, { thumb: null, info: "사진으로 만든 캐릭터 · CR-bbbbbbbbbbbb", button: null });
+});
+
+test("카드 줄: 시트 버튼은 캐릭터 줄 밖(아래 버튼 줄), 글 칸 min-w-0·줄바꿈 (폭 400px에서 글자가 세로로 쪼개지지 않게)", () => {
+  const src = readFileSync(new URL("../components/office/BrandCharacterAsk.tsx", import.meta.url), "utf8");
+  const card = src.slice(src.indexOf("const savedCard"), src.indexOf("const sheetButton"));
+  assert.doesNotMatch(card, /<button/); // 줄 안에 버튼이 없다
+  assert.match(card, /<span className="min-w-0 flex-1">/);
+  assert.doesNotMatch(card, /flex-wrap/); // 썸네일 + 글이 한 줄
+  // 아래 버튼 줄: [이 캐릭터로 만들기] [다른 이미지 올리기] [시트 만들기/다시 만들기]
+  const row = src.slice(src.indexOf("이 캐릭터로 만들기</button>"), src.indexOf("캐릭터 없이</button>"));
+  assert.match(row, /다른 이미지 올리기<\/button>\s*\{sheetButton\(def\)\}/);
+  assert.match(src, /aspect-video w-24 shrink-0 rounded-lg bg-ink-50 object-contain/); // 시트 16:9 잘림 없이
 });
 
 test("의뢰 기록 sheet_missing → 회사 캐릭터 번호", () => {

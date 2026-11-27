@@ -65,6 +65,38 @@ export function brandSheetState(previewPart: string | null | undefined, kind: st
   };
 }
 
+const KIND_SHORT: Record<string, string> = {
+  virtual_human: "AI 가상 인물",
+  illustration: "일러스트 캐릭터",
+  real_photo: "사진으로 만든 캐릭터",
+};
+
+export interface BrandCardView {
+  /** 썸네일: 만든 캐릭터 시트가 있으면 시트 그림(sheet_image, 16:9 contain), 없으면 원본 작은 그림(thumbnail), 둘 다 없으면 null */
+  thumb: "sheet_image" | "thumbnail" | null;
+  /** 이름 밑 작은 글 "AI 가상 인물 · 참조 3장 · 캐릭터 시트 ✓ · CR-…" */
+  info: string;
+  /** 아래 버튼 줄의 시트 버튼 글 ([시트 만들기 / 다시 만들기 · 약 1.5 크레딧]), 없으면 null */
+  button: string | null;
+}
+
+/** 11/27 의뢰 1단계 회사 캐릭터 카드 (운영 CR-05c62f5944f0: 시트 버튼이 줄 안에서 폭을 차지해 글이 세로로 쪼개지고,
+ *  썸네일은 원본 사진이었다). 시트 판정은 brandSheetState(preview_part, #1968과 같은 규칙) */
+export function brandCardView(c: {
+  record_id: string;
+  kind?: string | null;
+  preview_part?: string | null;
+  references?: readonly unknown[] | null;
+  thumbnail_base64?: string | null;
+}): BrandCardView {
+  const s = brandSheetState(c.preview_part, c.kind);
+  const thumb = s.hasSheet ? "sheet_image" : c.thumbnail_base64 ? "thumbnail" : null;
+  const refs = c.references?.length ? `참조 ${c.references.length}장` : "";
+  const sheet = s.hasSheet ? "캐릭터 시트 ✓" : s.originalPart ? "시트 아직 없음" : "";
+  const info = [KIND_SHORT[c.kind ?? ""] ?? "", refs, sheet, c.record_id].filter(Boolean).join(" · ");
+  return { thumb, info, button: s.button };
+}
+
 /** 의뢰 기록: 회사 캐릭터에 시트가 없어 원본만 복사해 왔으면 그 회사 캐릭터 기록 번호, 아니면 null */
 export function sheetMissingBrand(render: SheetRenderLike): string | null {
   const sheet = render.sheet_image;
