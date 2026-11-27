@@ -48,6 +48,8 @@ class Meta:
         self.exchange: httpx.Response | None = None  # 코드 교환 응답을 통째로 바꾼다
         self.assigned: httpx.Response | None = None
         self.accounts: list[dict[str, Any]] = [{"id": IG_ID, "username": "nubitour_lab"}]
+        self.me: dict[str, Any] | None = None  # graph.facebook.com/me 응답을 통째로 바꾼다
+        self.debug: dict[str, Any] | None = None  # debug_token의 data
         self.pages: list[dict[str, Any]] = [
             {"id": "p1", "instagram_business_account": {"id": IG_ID, "username": "catbooks.lab"}}
         ]
@@ -73,9 +75,16 @@ class Meta:
         if where.endswith("/me") and "graph.facebook.com" in where:
             if self.kind != "fb":
                 return httpx.Response(400, json={"error": {"code": 190}})
+            if self.me is not None:
+                return httpx.Response(200, json=self.me)
             if q.get("fields") == "client_business_id" and self.business:
                 return httpx.Response(200, json={"client_business_id": "900", "id": "su1"})
             return httpx.Response(200, json={"id": "fbuser1"})
+        if where.endswith("/debug_token") and self.debug is not None:
+            assert q["input_token"] == SHORT and q["access_token"] == f"1000|{SECRET}"
+            return httpx.Response(200, json={"data": self.debug})
+        if where.endswith(f"/{IG_ID}"):
+            return httpx.Response(200, json={"id": IG_ID, "username": "nubitour_lab"})
         if where.endswith("/me/assigned_instagram_accounts"):
             assert q["access_token"] == SHORT
             return self.assigned or httpx.Response(200, json={"data": self.accounts})
@@ -291,6 +300,69 @@ def test_failed_step_says_which_one_with_meta_numbers_only(
     what = {"exchange": "토큰을", "assigned": "인스타 계정 목록을"}[step]
     assert what in message and "Meta 오류 100, 하위 36008" in message
     assert SECRET not in res.text and SHORT not in res.text
+    assert get_secret(io.TOKEN_NAME, tenant="catbooks") == ""
+
+
+def _granted(app_id: str = "1000", expires_at: int = 0) -> dict[str, Any]:
+    return {
+        "app_id": app_id,
+        "is_valid": True,
+        "type": "SYSTEM_USER",
+        "expires_at": expires_at,
+        "scopes": ["instagram_basic", "instagram_content_publish"],
+        "granular_scopes": [{"scope": "instagram_content_publish", "target_ids": [IG_ID]}],
+    }
+
+
+def test_me_without_id_still_finds_the_assigned_account(
+    client: TestClient,
+    people: Any,
+    meta: Meta,  # noqa: F811
+) -> None:
+    meta.kind, meta.me = "fb", {}
+    done = _connect(client, people["a-1"])
+    assert done["username"] == "nubitour_lab" and done["auto_renew"] is False
+    assert instagram_link.load("catbooks")["business"] is True
+    assert get_secret(io.TOKEN_NAME, tenant="catbooks") == SHORT
+
+
+def test_account_is_found_from_the_token_grant_when_the_list_is_empty(
+    client: TestClient,
+    people: Any,
+    meta: Meta,
+    caplog: pytest.LogCaptureFixture,  # noqa: F811
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    later = int((datetime.now(UTC) + timedelta(days=60)).timestamp())
+    meta.kind, meta.me, meta.accounts = "fb", {}, []
+    meta.debug = _granted(expires_at=later)
+    done = _connect(client, people["a-1"])
+    assert done["username"] == "nubitour_lab"
+    assert instagram_link.load("catbooks")["user_id"] == IG_ID
+    assert int(datetime.fromisoformat(done["expires_at"]).timestamp()) == later
+    assert SHORT not in caplog.text and SECRET not in caplog.text  # debug_token 주소도 가린다
+
+
+@pytest.mark.parametrize("app_id", ["1000", "9999"])
+def test_nothing_found_reports_names_without_values(
+    client: TestClient,
+    people: Any,
+    meta: Meta,  # noqa: F811
+    app_id: str,
+) -> None:
+    meta.kind, meta.me, meta.accounts = "fb", {"name": "비밀 이름"}, []
+    meta.debug = _granted(app_id) | {"granular_scopes": []}
+    state = _start(client, people["a-1"])
+    res = client.post(COMPLETE, json={"code": "c", "state": state}, headers=people["a-1"])
+    assert res.status_code == 409 and res.json()["error"]["code"] == "NO_INSTAGRAM_ACCOUNT"
+    message = res.json()["error"]["message"]
+    assert "instagram 오류 190" in message and "facebook 200[name]" in message
+    if app_id == "1000":
+        assert "토큰 종류 SYSTEM_USER" in message and "instagram_content_publish" in message
+    else:  # 다른 앱의 토큰 정보는 믿지 않는다
+        assert "SYSTEM_USER" not in message and "토큰 정보 200" in message
+    for hidden in (SHORT, SECRET, IG_ID, "비밀 이름"):
+        assert hidden not in res.text
     assert get_secret(io.TOKEN_NAME, tenant="catbooks") == ""
 
 
