@@ -132,7 +132,8 @@ def test_plan_of_has_what_work_requests_needs() -> None:
         "on_missing": "skip",
         "timeout_s": None,
         # 11/26: 고른 회사 캐릭터 번호를 기획에도 넘긴다(값만, 준비 단계 표시 row_input 아님)
-        "pass_row": ["brand_character_record_id"],
+        # 11/27 바뀐 기대값: 등장 캐릭터 cast도 (예전 ["brand_character_record_id"])
+        "pass_row": ["brand_character_record_id", "cast"],
     }
     assert plan[0]["kind"] == "human" and plan[0]["skill"] == "brand_character"
     assert plan[1]["ref_key"] == "report_id"  # 트렌드 보고서는 번호(report_id)만 다음 부서에 넘긴다

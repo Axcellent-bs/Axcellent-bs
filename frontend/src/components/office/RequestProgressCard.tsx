@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { orchestrator } from "@/lib/orchestrator";
 import { CHARACTER_SKILL, chatCharacterLine, isVideoRequest, unansweredNotice } from "@/lib/requestCharacter";
-import { BrandCharacterAsk, useChosenCharacter } from "@/components/office/BrandCharacterAsk";
+import { BrandCharacterAsk, useCharacterNames, useChosenCharacter } from "@/components/office/BrandCharacterAsk";
 import { TONE_CLASS, barCells, brandIdOf, creativeSpot, currentIndex, deptTag, futureLine, headPill, nowLine, peekText, shortLabel, stepState, toneOfCurrent, type CardTone } from "@/lib/requestCardView";
 import { thumbSrc } from "@/lib/creativeRecords";
 import { characterLine } from "@/lib/videoPlan";
@@ -354,6 +354,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   const [open, setOpen] = useState(true);
   const [askFull, setAskFull] = useState(false);
   const chosen = useChosenCharacter(row ? brandIdOf(row) : null);
+  const castNames = useCharacterNames(!!row && (((row as { cast?: unknown[] | null }).cast?.length ?? 0) >= 2));
   if (!showRequestCard(hasToken, requestId) || !row) return null;
   // 삭제한 의뢰: 카드 대신 회색 한 줄 (되돌리면 카드 전체가 다시 보인다)
   const hiddenLine = hiddenRequestLine(row, requestTitle(row, tasks), hasToken);
@@ -384,7 +385,7 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
   const now = nowLine(rows.map((s) => ({ ...s, reasonCode: row.steps[s.stepId]?.reason_code ?? null })), row.status, isVideoRequest(row));
   const pill = headPill(rows, row.status);
   const cells = barCells(rows, row.status);
-  const charLine = chatCharacterLine(row, chosen?.name);
+  const charLine = chatCharacterLine(row, chosen?.name, castNames); // 11/27 여럿이면 "등장 캐릭터 2 · …"
   const photo = chosen ? thumbSrc(chosen.thumbnail_base64) : null;
   const peek = peekText(charLine?.text, plan?.line, row.text);
   const spot = creativeSpot(rows, row.status, !!videoLink);

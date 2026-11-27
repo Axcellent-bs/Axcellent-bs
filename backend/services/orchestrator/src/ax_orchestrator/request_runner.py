@@ -100,6 +100,36 @@ CHARACTER_WAIT_NOTE = "캐릭터 답 대기"
 PLAN_STARTED = ("running", "waiting_async", "completed")  # 기획이 이미 캐릭터 없이 받은 상태
 CATBOOKS = "catbooks"
 CREATIVE_RECORD = re.compile(r"CR-[0-9a-f]{12}")  # 마케팅 제작 기록 번호
+CAST_MAX, CAST_ROLE_MAX = 3, 20  # 계약 marketing_brand.MAX_CAST·MAX_CAST_ROLE과 같다
+
+
+def clean_cast(
+    record_id: str | None, cast: list[dict[str, str]] | None
+) -> tuple[list[dict[str, str]], bool]:
+    """등장 캐릭터 (11/27). (정리한 목록, 맞나). 없으면 ([], True).
+
+    번호는 CR 모양·겹침 없음·최대 3, 역할은 앞뒤 공백을 떼고 20자 이내. record_id를 같이 주면
+    첫 번째와 같아야 한다(첫 번째 = 주인공 = brand_character_record_id)."""
+    if not cast:
+        return [], True
+    out: list[dict[str, str]] = []
+    for m in cast:
+        rid = str((m or {}).get("record_id") or "")
+        role = " ".join(str((m or {}).get("role_ko") or "").split())
+        if not CREATIVE_RECORD.fullmatch(rid) or len(role) > CAST_ROLE_MAX:
+            return [], False
+        if any(x["record_id"] == rid for x in out):
+            return [], False
+        out.append({"record_id": rid, "role_ko": role})
+    if len(out) > CAST_MAX or (record_id is not None and record_id != out[0]["record_id"]):
+        return [], False
+    return out, True
+
+
+def cast_line(members: list[dict[str, str]]) -> str:
+    """"등장 캐릭터 2명(주인공 CR-…, 동료 CR-…)" (대화 문장·단계 메모)."""
+    parts = [f"{m['role_ko']} {m['record_id']}".strip() for m in members]
+    return f"등장 캐릭터 {len(members)}명({', '.join(parts)})"
 # 11/26 영상 제작 단계가 영상을 사람 승인에 올린 뒤(대기·끝남·거절)면 캐릭터를 바꾸지 않는다
 VIDEO_SENT = ("held", "completed", "rejected_by_human")
 REPLACED_RECORD_KEY = "replaces_creative_record_id"  # 바꾸기 전 캐릭터의 의뢰 기록(CR-…)
@@ -867,8 +897,9 @@ class RequestRunner:
         return self.answer_brand_character(request_id, record_id, by)[0]
 
     def answer_brand_character(
-        self, request_id: str, record_id: str | None, by: str | None = None
-    ) -> tuple[str, bool]:
+        self, request_id: str, record_id: str | None, by: str | None = None,
+        cast: list[dict[str, str]] | None = None,
+    ) -> tuple[str, bool]:  # fmt: skip
         """회사 캐릭터 답을 받는다. (결과, plan_outdated).
 
         - 캐릭터 단계(11/24)가 기다리는 중이면 답(CR-… 또는 None=없어요)을 적고 단계를 완료로
@@ -876,7 +907,14 @@ class RequestRunner:
         - 답한 뒤에도 영상 준비 단계를 시작하기 전까지는 다시 바꿀 수 있다(그 뒤면 `started`).
           기획이 이미 시작됐거나 끝난 뒤 바꾸면 plan_outdated=True(기획서는 예전 캐릭터 기준).
         - 캐릭터 단계가 없는 옛 의뢰는 지금처럼 적기만 한다.
+        - 11/27 cast: 등장 캐릭터 [{record_id, role_ko}] 최대 3(첫 번째 = 주인공 = record_id).
+          사람이 화면에서 정한 값만 받는다. 한 명이면 지금과 같은 기록.
         """
+        members, ok = clean_cast(record_id, cast)
+        if not ok:
+            return "invalid", False
+        if members:
+            record_id = members[0]["record_id"]
         if record_id is not None and not CREATIVE_RECORD.fullmatch(record_id):
             return "invalid", False
         row = self._requests.get(request_id)
@@ -892,14 +930,16 @@ class RequestRunner:
             return "started", False
         if step.get("status") != "pending":
             # 11/26 영상 요청(사람 승인 요청) 전까지는 바꾼다: 같은 의뢰를 새 캐릭터로 다시 준비
-            return self._reprepare(row, prepare, record_id, by)
+            return self._reprepare(row, prepare, record_id, by, members)
         outdated = any(
             p.get("dept") == "planning"
             and (row["steps"].get(p["step_id"]) or {}).get("status") in PLAN_STARTED
             for p in row["plan"]
         )
-        self._requests.set_brand_character(request_id, record_id, by)
+        self._requests.set_brand_character(request_id, record_id, by, members)
         said = f"캐릭터 {record_id}로 할게요." if record_id else "캐릭터 없이 할게요."
+        if len(members) >= 2:
+            said = f"{cast_line(members)}로 할게요."
         char = next(
             (p for p in row["plan"] if p.get("skill") == request_tasks.CHARACTER_SKILL), None
         )
@@ -923,8 +963,9 @@ class RequestRunner:
         return "ok", outdated
 
     def _reprepare(
-        self, row: dict[str, Any], prepare: dict[str, Any], record_id: str | None, by: str | None
-    ) -> tuple[str, bool]:
+        self, row: dict[str, Any], prepare: dict[str, Any], record_id: str | None, by: str | None,
+        members: list[dict[str, str]] | None = None,
+    ) -> tuple[str, bool]:  # fmt: skip
         """영상 초안 준비가 시작된 뒤 캐릭터를 바꾼다 (11/26). (결과, plan_outdated=True).
 
         - 영상 제작 단계가 영상을 사람 승인에 올렸으면(held·completed·rejected_by_human)
@@ -948,7 +989,7 @@ class RequestRunner:
         if not source or not self._requests.get_carry(rid, source):
             return "no_plan", False
         old = prep.get("result_ref")
-        self._requests.set_brand_character(rid, record_id, by)
+        self._requests.set_brand_character(rid, record_id, by, members)
         self._requests.set_replaced_record(
             rid, old if isinstance(old, str) and CREATIVE_RECORD.fullmatch(old) else None
         )
@@ -956,6 +997,8 @@ class RequestRunner:
             if spec is not None:
                 self._update(rid, spec["step_id"], **RESET_STEP, note=REPREPARE_NOTE)
         said = f"캐릭터 {record_id}로" if record_id else "캐릭터 없이"
+        if members and len(members) >= 2:
+            said = f"{cast_line(members)}로"
         self._tell(row, f"{said} 바꿔 콘티·키프레임을 다시 준비할게요(그림 크레딧을 다시 써요).")
         self._requests.set_status(rid, "running", "캐릭터를 바꿔 영상 초안을 다시 준비한다")
         self.start(rid)

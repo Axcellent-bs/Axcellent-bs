@@ -36,6 +36,9 @@ SELF_KIND = "self"
 ROLLBACK_STATUS_SKILL = "incident_rollback_status"
 HUMAN_GRADE = "C"  # 총괄이 사람 승인을 먼저 받는 등급(`human_gate`가 있는 단계도 같다)
 BRAND_CHARACTER_KEY = "brand_character_record_id"  # 홍보 영상에 쓸 회사 대표 캐릭터 (11/23)
+# 11/27 등장 캐릭터(회사 캐릭터 + 역할, 최대 3, 첫 번째 = BRAND_CHARACTER_KEY). 사람이 화면에서
+# 정한 값만 의뢰 기록에 둔다(고객 글에서 만들지 않는다). 2명 이상일 때만 적고 한 명이면 지금 그대로
+CAST_KEY = "cast"
 # 11/24: 홍보 영상은 회사 캐릭터 답을 먼저 받는다. 이 사람 단계는 사람 확인(승인·거절)이 아니라
 # 캐릭터 답(POST /api/requests/{id}/brand-character)으로만 닫힌다
 CHARACTER_SKILL = "brand_character"
@@ -191,7 +194,8 @@ PROMO_VIDEO = TaskDef(
             # 11/23: 고객 문장의 길이("30초 이내")를 기획이 제작안 길이로 쓴다 (문장은 데이터로만)
             text_key="request_text",
             # 11/26: 사람이 고른 회사 캐릭터 번호를 기획에도 넘긴다(제작안 주인공 = 그 캐릭터)
-            pass_row=(BRAND_CHARACTER_KEY,),
+            # 11/27: 등장 캐릭터가 여럿이면 cast도 (기획이 캐릭터마다 외형을 읽는다)
+            pass_row=(BRAND_CHARACTER_KEY, CAST_KEY),
         ),
         TaskStep("confirm", None, "human_check", "사람 확인", None, after=("plan",), kind="human"),
         # 사람이 제작안을 확인한 뒤: 마케팅이 제작안으로 SNS 초안·장면 템플릿을 정하고(읽기),
@@ -212,6 +216,7 @@ PROMO_VIDEO = TaskDef(
             on_missing="fail",
             ref_key="creative_record_id",
             row_input=(BRAND_CHARACTER_KEY,),
+            pass_row=(CAST_KEY,),  # 11/27 등장 캐릭터(마케팅이 캐릭터별 시트·참조)
         ),
         TaskStep(
             "make",

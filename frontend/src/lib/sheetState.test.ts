@@ -78,7 +78,8 @@ test("카드 줄: 시트 버튼은 캐릭터 줄 밖(아래 버튼 줄), 글 칸
   assert.doesNotMatch(card, /flex-wrap/); // 썸네일 + 글이 한 줄
   // 아래 버튼 줄: [이 캐릭터로 만들기] [다른 이미지 올리기] [시트 만들기/다시 만들기]
   const row = src.slice(src.indexOf("이 캐릭터로 만들기</button>"), src.indexOf("캐릭터 없이</button>"));
-  assert.match(row, /다른 이미지 올리기<\/button>\s*\{sheetButton\(def\)\}/);
+  // 11/27 바뀐 기대값: 한 명일 때 보이는 캐릭터(lead, 기본은 def)의 시트 버튼 (예전 sheetButton(def))
+  assert.match(row, /다른 이미지 올리기<\/button>\s*\{sheetButton\(lead \?\? def\)\}/);
   assert.match(src, /aspect-video w-24 shrink-0 rounded-lg bg-ink-50 object-contain/); // 시트 16:9 잘림 없이
 });
 
