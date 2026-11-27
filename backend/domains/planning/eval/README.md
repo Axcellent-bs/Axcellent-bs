@@ -197,3 +197,45 @@ uv run python domains/planning/eval/model_compare_proposal_report.py haiku sonne
 - 이 세션(클라우드 샌드박스)에는 키가 없어 실행만 확인했다(배선 확인, 가짜 LLM으로 깨끗한
   답·숫자 경고가 걸리는 답·검증 실패로 규칙 초안에 떨어지는 경로 모두 검증 완료). 실제 비교
   숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
+
+## 칸 채우기 LLM 모델 비교 (예진 제안, #소통 2026-11-27 15:46, 5순위)
+
+"칸 채움률·남은 질문 수" · "지어낸 값 0" 평가. 이것도 평가 데이터가 없어서 새로 만들었다.
+
+- `spec_fill_cases.json`: 합성 자유 작성(body_md) 10건 — 소제목이 있는 글(`## 문제` 등, 규칙
+  읽기로도 잡히는 경우) · 소제목 없는 회의 메모(글의 뜻을 읽어야 칸에 넣을 수 있는 경우)를
+  섞었다. 그중 3건은 공개 질문(`question`)을 같이 주고, 자유 작성에 실제 답이 있는지
+  (`expect_answer`)를 골든셋에 표시해 뒀다(f03·f07 답 있음, f04 답 없음 — 답이 없는데
+  지어내는지 보려고 일부러 넣음)
+- `spec_fill_eval.py`: 케이스마다 실제 `planning_agent.spec_fill.fill()`을 그대로 부른다.
+  `fill()`은 production 파이프라인 전체다 — LLM(`SpecFiller.read`)이 먼저 읽고, 비어 둔 칸만
+  소제목 읽기(`parse`, 규칙)로 보탠다. 칸 채움률·남은 질문 수는 `fill()`이 돌려준 `Filled`를
+  그대로 센 것이고(새 판정 없음), "지어낸 값 0"만 이 평가 전용 근사치 두 가지를 더했다(투명하게
+  적는다, production 코드 아님): `invented_number`(채운 칸 숫자가 자유 작성 어디에도 없음)·
+  `hallucinated_answer`(골든셋이 "답 없음"으로 표시한 질문인데 답을 채움)
+  - 실행: `cd backend && uv run python domains/planning/eval/spec_fill_eval.py`
+  - 모델은 `PLANNING_LLM_MODEL` → 없으면 `LLM_MODEL`
+  - 지표: `field_fill_rate`(plan 양식 칸 중 채워진 비율)·`remaining_question_count`(질문을
+    준 케이스 중 아직 답이 안 채워진 수)·`answerable_answered_rate`(답이 실제로 있는 질문 중
+    답을 찾은 비율)·`hallucinated_answer_count`(답이 없는데 지어낸 수)·
+    `invented_number_hits`(지어낸 숫자 걸린 건수)·`llm_rate`(규칙 읽기만으로 안 떨어진 비율)
+- 모델 비교: `model_compare_spec_fill.py <라벨>` → `results/model_compare/spec_fill_<라벨>.json`,
+  `model_compare_spec_fill_report.py <라벨1> <라벨2> ...`로 비교표
+
+```bash
+cd backend
+PLANNING_LLM_MODEL=claude-haiku-5-5 uv run python domains/planning/eval/model_compare_spec_fill.py haiku
+PLANNING_LLM_MODEL=claude-sonnet-5-5 uv run python domains/planning/eval/model_compare_spec_fill.py sonnet
+uv run python domains/planning/eval/model_compare_spec_fill_report.py haiku sonnet
+```
+
+**한계**
+- `invented_number`·`hallucinated_answer`는 production 코드가 아니라 이 평가를 위해 새로
+  만든 근사치다. 숫자가 아닌 지어낸 값(없는 기능·없는 일정 등)은 이 두 검사로는 못 잡는다.
+- 질문이 있는 케이스가 3건뿐이라 `answerable_answered_rate`는 표본이 작다 — 답이 있는/없는
+  케이스를 더 늘리면 모델별 차이가 더 잘 드러날 것이다.
+- `suggest()`(빈 칸에 쓸 안을 제안하는 경로, "예:" 표시가 붙는 제안용)는 이 평가에 넣지
+  않았다. 확정해서 쓰는 `fill()` 경로만 잰다.
+- 이 세션(클라우드 샌드박스)에는 키가 없어 실행만 확인했다(배선 확인, 가짜 LLM으로 잘 작동하는
+  답·지어낸 숫자가 섞인 답·없는 답을 지어내는 답·LLM 실패로 규칙 읽기에 떨어지는 경로 모두
+  검증 완료). 실제 비교 숫자는 키가 있는 로컬 PC에서 위 명령으로 내야 한다.
