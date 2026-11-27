@@ -35,7 +35,7 @@
 | 읽기용(GET·HEAD) 경로, 허용 접두 밖 경로, 블록 모양이 다른 경로 | 안 된다 | 책임자에게 요청 |
 | 비밀값·환경변수 파일 변경 | 안 된다 | 책임자에게 요청. 값은 요청 글에도 적지 않는다 |
 | 권한 정책·계정·키·방화벽·sudoers·sshd·systemd 구성 | 안 된다 | 책임자만 |
-| 데이터·백업 삭제, 코드(레포) 롤백 | 안 된다 | 책임자만 |
+| 데이터·백업 삭제, `rollback-code`가 못 하는 코드(레포) 롤백(기록된 직전 HEAD가 아닌 커밋으로) | 안 된다 | 책임자만 |
 | 게이트 스크립트 자체의 변경 | 안 된다 | 레포 PR → 머지 → 책임자가 설치 |
 
 ### 비상 절차
@@ -86,6 +86,7 @@
 - **서버마다 다른 것은 전부 정책에 있다.** 경로, 서비스 이름, health 주소 목록, 배포 스크립트에 넘기는 환경변수, location 블록의 모양, 접두 → 포트 표. 스크립트와 검증기에는 특정 서버의 값이 없다.
 - 실제 작업은 뒷단(root)이 하고, 배포 스크립트와 git은 `runuser`로 정책의 배포 계정 권한에서 돌린다(root로 빌드하지 않는다).
 - 접속 경로는 두 겹으로 한다. 방화벽이 허용 출처에서 오는 SSH만 받고, authorized_keys의 `from=`이 그 계정의 키를 그 출처에서만 받는다.
+- **사람이 아닌 자동 배포 계정**(백엔드 자동 배포, `docs/ops/autodeploy/README.md`)도 같은 게이트를 쓴다. SSH로 들어오지 않고, 서버 안의 자동 배포 스크립트가 그 전용 계정으로 앞단을 부른다(`sudo -n -u <자동 배포 계정> env SSH_ORIGINAL_COMMAND="<동작> <SHA> --announced" /usr/local/sbin/ax-gate <자동 배포 계정>`). 신원·허용표·잠금·감사 로그는 사람 계정과 똑같이 적용되고, 권한은 정책의 그 계정 줄에 적힌 동작뿐이다. 설치는 `INSTALL.md` 2-1절.
 
 ## 동작
 
@@ -158,7 +159,7 @@ autodeploy-resume                               # 먼저 끝났으면
 ```
 
 - **게이트가 쓰는 것은 파일 하나다**: 정책 `[autodeploy] pause_file`(root 소유 644, 파일 이름은 `autodeploy.pause`로 고정). 자동 배포의 타이머·서비스·스크립트는 건드리지 않는다. root 권한 범위와 sudoers는 그대로다.
-- 자동 배포를 돌리는 쪽이 매 주기 맨 앞에서 그 파일을 읽고 건너뛰어야 실제로 멈춘다. 서버 책임자가 **한 번** 연결한다. 판정용 스크립트 `autodeploy-paused.sh`를 같이 둔다(끝 코드 0 = 멈춤, 1 = 안 멈춤. 파일이 없으면 안 멈춤, 읽을 수 없거나 해석할 수 없으면 멈춤). 연결 전에는 이 동작이 파일만 쓰고 자동 배포는 그대로 돈다.
+- 자동 배포를 돌리는 쪽이 매 주기 맨 앞에서 그 파일을 읽고 건너뛰어야 실제로 멈춘다. 서버 책임자가 **한 번** 연결한다. 판정용 스크립트 `autodeploy-paused.sh`를 같이 둔다(끝 코드 0 = 멈춤, 1 = 안 멈춤. 파일이 없으면 안 멈춤, 읽을 수 없거나 해석할 수 없으면 멈춤). 연결 전에는 이 동작이 파일만 쓰고 자동 배포는 그대로 돈다. 이 레포의 자동 배포 스크립트(`docs/ops/autodeploy/ax-autodeploy`)는 `/etc/ax-autodeploy/env`의 `AX_PAUSE_FILE=<pause_file 경로>` 한 줄로 연결하고, 백엔드 단계가 `on`인데 이 값이 비어 있으면 멈춘 것으로 본다. 운영 서버는 연결돼 있다(2026-11-27 확인).
 - 재개시각이 지나면 저절로 재개된다(재개를 잊어도 배포가 영영 멈추지 않는다). 한 번에 멈출 수 있는 최대 시간은 정책 `max_hours`다.
 - `autodeploy-resume`은 파일을 지우지 않는다. 재개 시각을 지금으로 덮어쓰고 `resumed_by=<계정>`을 남긴다. 게이트에는 지우는 동작이 없다.
 - 권한자용이다. 정책 `[permissions]`의 그 계정 줄에 적어야 쓸 수 있고, `_default`에 적으면 게이트가 정책을 통째로 거부한다.
@@ -179,14 +180,15 @@ autodeploy-resume                               # 먼저 끝났으면
 
 정책 `[restart] deploy_first = true`(기본 false)면, 서버 코드가 **뒤**인 경우에 한해 그 계정에 `deploy-bundle` 권한도 있을 때 번들 배포를 먼저 하고 이어서 재시작한다. 배포의 검사(앞선 커밋만, 번들 백업, 번들 점검, 배포 뒤 HEAD 확인)는 전부 그대로 돌고, 하나라도 실패하면 재시작하지 않는다. 감사 로그에 `result=deploy-first:<SHA 8자>`가 남는다. 이때 알림 문안은 재시작 것만 나오므로, 켠다면 팀 채널 알림에 "번들 배포 포함"을 같이 적는다.
 
-게이트에 넣지 않은 것(사람이 직접): 코드(레포) 롤백, 권한 정책 변경, 계정 생성·삭제, 방화벽, 비밀값 파일, sudoers, sshd 설정, 외부 서비스 게시, 컨테이너 스택, 정책의 블록 줄과 모양이 다른 location, 읽기용(GET) location.
+게이트에 넣지 않은 것(사람이 직접): 기록된 직전 HEAD가 아닌 커밋으로의 코드(레포) 롤백(직전 배포로 되돌리는 것은 0.5.0부터 `rollback-code`), 권한 정책 변경, 계정 생성·삭제, 방화벽, 비밀값 파일, sudoers, sshd 설정, 외부 서비스 게시, 컨테이너 스택, 정책의 블록 줄과 모양이 다른 location, 읽기용(GET) location.
 
 ## 권한 단계(예시)
 
 | 단계 | 누구 | 동작 |
 | --- | --- | --- |
 | 모두 | 개인 계정이 있는 팀원 전부 | `status`, `deploy-bundle`, `record-pr` |
-| 권한자 | 정책에 적힌 소수 | 위 + `nginx-restore`, `nginx-add-location`, `nginx-approve-location`, `restart-backend`, `rollback-bundle`, `lock`, `unlock` (`rollback-code`·`uv-sync`는 필요한 계정 줄에 직접 더한다) |
+| 권한자 | 정책에 적힌 소수 | 위 + `nginx-restore`, `nginx-add-location`, `nginx-approve-location`, `restart-backend`, `rollback-bundle`, `lock`, `unlock` (`rollback-code`·`uv-sync`, `autodeploy-pause`·`autodeploy-resume`, `gateway-allow-*`는 필요한 계정 줄에 직접 더한다) |
+| 자동 배포 계정 | 백엔드 자동 배포 전용 계정 하나(사람 아님) | `status`, `deploy-bundle`, `restart-backend`, `rollback-bundle`, `rollback-code`, `uv-sync` (백엔드 자동 배포 설계 11/24 확정) |
 
 이렇게 나눈 이유
 
@@ -339,7 +341,7 @@ nginx 설정을 바꾼 사람(승인자 또는 복원한 사람)이 한다.
 | `pr` | PR 번호(없으면 `-`) |
 | `note` | 제안자·확인값(프로필을 썼으면 `profile:<이름>`), `record-pr`의 참조 |
 | `layer` | `front`(앞단) 또는 `root`(뒷단) |
-| `result` | `start`, `end:rc=<코드>`, `denied:<사유>`, `fail:<사유>`, `proposed`, `applied:<백업폴더>`, `prev-head:<해시>`, `help`, `paused:<재개시각>`, `resumed`, `deploy-first:<SHA 8자>` |
+| `result` | `start`, `end:rc=<코드>`, `denied:<사유>`, `fail:<사유>`, `proposed`, `applied:<백업폴더>`, `prev-head:<해시>`, `help`, `paused:<재개시각>`, `resumed`, `deploy-first:<SHA 8자>`, `rollback-code:<이전 8자>-><직전 8자>`, `backup-prune:<이름>:<크기>` |
 
 끝 코드: 0 성공, 1 실행 실패, 2 인자·사용법, 3 권한 없음, 4 잠금, 5 설정 오류(신원을 알 수 없을 때 포함).
 

@@ -13,7 +13,7 @@
 - **캣북스 관리자 토큰이 있어야 넣을 수 있습니다.**
   - 장애를 넣는 데는 쇼핑몰 admin 토큰(캣북스 쪽 `.env`의 값)이 필요합니다. AXcellent `run_all.sh`가 만드는 토큰으로는 통하지 않습니다.
   - `shop_fault.sh`는 `SHOP_API_URL`(판매 서버 주소, 로컬이면 `http://127.0.0.1:8010`)과 `SHOP_ADMIN_TOKEN`을 둘 다 받아야 하고, 하나라도 없으면 멈춥니다. [5]
-  - 251 공용 서버에서는 캣북스 관리자 토큰을 가진 사람이 넣습니다.
+  - 공용 운영 서버에서는 캣북스 관리자 토큰을 가진 사람이 넣습니다(옛 251 서버는 이관으로 정지했고, 판매 서버도 새 운영 서버에서 돕니다).
 - **화면에는 장애 버튼이 없습니다.** 명령으로만 넣습니다. [6]
 
 ## 2. 장애 넣기
@@ -50,7 +50,7 @@ bash backend/scripts/shop_fault.sh           # 지금 상태 보기
 3. **되돌리기** (인프라 AI) [15]
    - 안전 관문에서 사람 승인 대기에 걸릴 수 있습니다.
    - 최대 10분(600초) 기다리고, 마감이 지나면 자동으로 거절됩니다. [16] [17]
-   - **승인 화면:** 재무 관리(`/finance`)의 **"안전 장치 보류 큐"**에서 승인·거절합니다. [18]
+   - **승인 화면:** 배포 되돌리기(`rollback_deployment`) 보류는 개발·배포의 **"안전 확인"** 탭(`/dev/work/holds`)에서 승인·거절합니다. 재무 관리(`/finance`)의 "안전 장치 보류 큐"에는 이제 나오지 않습니다(담당 화면이 따로 없는 보류만 재무 큐로 갑니다). [18]
    - 총괄·사건 화면(`/orchestrator`)은 승인 대기를 보여 주기만 하고, 여기서는 결정할 수 없습니다. [17]
    - 원인 배포를 못 찾았을 때는 되돌리기 대신 "과거 같은 장애의 처리 방식 다시 하기"가 돌 수 있습니다(5장).
 4. **영향 분석:** 실패 주문, 영향 고객, 피해 금액 (데이터 AI) [19]
@@ -98,7 +98,7 @@ bash backend/scripts/shop_fault.sh         # 풀렸는지 확인
 | 공지 배너 | 점검 공지 게시 [20]. 해결되면 내려갑니다 [24] |
 | 사례 카드 | 사례 기록 [25]. 다음 시험에 영향을 줍니다(5장) |
 
-## 7. 251 공용 서버 규칙
+## 7. 공용 운영 서버 규칙
 
 - **넣기 전과 끝난 뒤 #소통 채널에 알립니다.** 시작 알림과 종료 알림 둘 다 필수입니다.
 - **다른 사람의 시연 시간과 겹치지 않게 합니다.** 장애 중에는 그 쇼핑몰의 결제가 모두 실패해서 다른 팀원의 시연이 망가집니다.
@@ -184,28 +184,28 @@ bash backend/scripts/pg_demo_file.sh clear    # 시연 끝나면 빼기
 | [9] | 지속 20초, 판단 간격 5초 (시연 값) | 캣북스 쪽 `SHOP_DEGRADED_SUSTAIN_S`·`SHOP_MONITOR_INTERVAL_S` |
 | [10] | 지속 시간은 첫 기준 초과 표본부터 셈 (코드 기본값 60초) | 캣북스 레포 `backend/shop-api/src/ax_shop_api/monitor.py` |
 | [11] | 감시 루프 간격 | 캣북스 레포 `backend/shop-api/src/ax_shop_api/main.py` |
-| [12] | 되돌리기는 진단·영향 분석 뒤 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:546` |
-| [13] | 원인 진단 단계 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:506` |
-| [14] | 원인 후보 추정 단계 (영향 분석 뒤) | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:525-528` |
-| [15] | 되돌리기 단계 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:543` |
-| [16] | 승인 대기 600초 | `backend/services/orchestrator/src/ax_orchestrator/main.py:63` |
-| [17] | 총괄 화면은 보기만, 마감이 지나면 자동 거절 | `frontend/src/pages/Orchestrator.tsx:138`, `:283` |
-| [18] | 재무 화면의 안전 장치 보류 큐 (되돌리기는 다른 화면으로 빠지지 않음) | `frontend/src/pages/Finance.tsx:175`, `:381`, `frontend/src/lib/finance.ts:850`, `frontend/src/components/finance/SafetyQueue.tsx:106` |
-| [19] | 영향 분석 단계 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:523` |
-| [20] | 점검 공지 초안·게시 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:572-582` |
-| [21] | 영향 고객 일괄 보상 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:587-590` |
-| [22] | 복구 확인 (되돌리기·과거 처리 다시 하기 뒤) | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:598-601` |
-| [23] | 복구 확인 최대 5번, 30초 간격 | `backend/domains/infra-dejafix/src/infra_agent/handlers.py:419`, `:423` |
-| [24] | 정상화 공지, 배너 내리기 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:609-625` |
-| [25] | 재무 기록, 처리 시간 요약, 사례 기록 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:638-656` |
-| [26] | 복구 확인 실패 시 정상화 공지 없이 이관 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:1-14` (맨 위 설명) |
-| [27] | 사람이 해제해 풀린 사건은 처리 방식 `release_fault` | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:440-447` |
-| [28] | 과거 처리 다시 하기 조건 (원인 배포 없음, 유사도 0.95 이상, `release_fault`) | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:155-178` |
-| [29] | 결제 서버가 이상할 때만 해제, 안전 관문 거침 | `backend/domains/infra-dejafix/agent-card.json:33-34` |
-| [30] | 운영 지표 > 복구 속도, 1차·2차 비교 | `frontend/src/demo/services.ts:126`, `frontend/src/components/data/LearningKpi.tsx:57`, `:73-74`, `:83` |
+| [12] | 되돌리기는 진단·영향 분석 뒤 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:635-647` (`after`·`also_after`) |
+| [13] | 원인 진단 단계 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:599` |
+| [14] | 원인 후보 추정 단계 (영향 분석 뒤) | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:617-625` |
+| [15] | 되돌리기 단계 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:635-647` |
+| [16] | 승인 대기 600초 | `backend/services/orchestrator/src/ax_orchestrator/main.py:75` (`ORCHESTRATOR_HOLD_TIMEOUT`, 기본 600) |
+| [17] | 총괄 화면은 보기만, 마감이 지나면 자동 거절 | `frontend/src/pages/Orchestrator.tsx:55`, `frontend/src/components/incident/IncidentDetail.tsx:218` |
+| [18] | 배포 되돌리기 보류는 개발·배포 "안전 확인" 탭에서 결정 (재무 큐에서는 빠짐) | `frontend/src/lib/finance.ts:980-981` (`DEV_HOLD_ACTIONS`), `:994` (`NOT_FINANCE_ACTIONS`), `frontend/src/pages/Dev.tsx:27`, `:86`, `frontend/src/lib/agentChat.ts:153` |
+| [19] | 영향 분석 단계 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:616` |
+| [20] | 점검 공지 초안·게시 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:664-678` |
+| [21] | 영향 고객 일괄 보상 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:679-689` |
+| [22] | 복구 확인 (되돌리기·과거 처리 다시 하기 뒤) | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:690-700` |
+| [23] | 복구 확인 최대 5번, 30초 간격 | `backend/domains/infra-dejafix/src/infra_agent/handlers.py:747-752` (`INFRA_RECOVERY_ATTEMPTS`·`INFRA_RECOVERY_INTERVAL_S`) |
+| [24] | 정상화 공지, 배너 내리기 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:701-715`, `:733-746` |
+| [25] | 재무 기록, 처리 시간 요약, 사례 기록 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:747-790` |
+| [26] | 복구 확인 실패 시 정상화 공지 없이 이관 | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:6-7` (맨 위 설명) |
+| [27] | 사람이 해제해 풀린 사건은 처리 방식 `release_fault` | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:510-540` (`_resolution`) |
+| [28] | 과거 처리 다시 하기 조건 (원인 배포 없음, 유사도 0.95 이상, `release_fault`) | `backend/services/orchestrator/src/ax_orchestrator/plans/scenario_a.py:165-207` (`REPLAYABLE`, `_past_fix_gate`), `backend/shared/contracts/src/ax_contracts/schemas/infra.py:24` (`PAST_FIX_MIN_SIMILARITY = 0.95`) |
+| [29] | 결제 서버가 이상할 때만 해제, 안전 관문 거침 | `backend/domains/infra-dejafix/agent-card.json:33-38` |
+| [30] | 운영 지표 > 복구 속도, 1차·2차 비교 | `frontend/src/demo/services.ts:130`, `frontend/src/components/data/LearningKpi.tsx:54`, `:63`, `:77-78` |
 | [31] | `slow_agent.ps1` Windows 로컬 전용, "확인 필요" | `backend/scripts/slow_agent.ps1:1-2` |
 | [32] | `-HoldSeconds`는 30초보다 길게 | `backend/scripts/slow_agent.ps1:11` |
-| [33] | PG 사건 4건 | `backend/scripts/pg_demo_file.py:10-16` |
+| [33] | PG 사건 4건 | `backend/scripts/pg_demo_file.py:10-14` |
 | [34] | `clear`로 빼기 | `backend/scripts/pg_demo_file.py:17`, `:21` |
 
-줄 번호는 이 문서를 올린 때의 dev 기준입니다.
+줄 번호는 2026-11-27 dev(`56cd5e8f`) 기준으로 다시 맞췄습니다.

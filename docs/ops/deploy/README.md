@@ -1,8 +1,8 @@
 # 운영 서버 화면 배포: api-app 직접 호출 기본값
 
-우리 운영 서버(axcellent.cloud)의 화면 배포가 `VITE_API_DIRECT_BASE`·`VITE_API_DIRECT_SERVICES` 없이 빌드되면 읽기 API 가 api-app 으로 가지 않고 같은 출처로 돌아간다(2026-11-20 두 번 발생). 이 폴더는 서버의 `/opt/axcellent/deploy.sh` 가 그 두 값을 **기본으로 켜게** 하는 조각을 둔다.
+우리 운영 서버(화면 `app.axcellent.cloud`)의 화면 배포가 `VITE_API_DIRECT_BASE`·`VITE_API_DIRECT_SERVICES` 없이 빌드되면 읽기 API 가 api-app 으로 가지 않고 같은 출처로 돌아간다(2026-11-20 두 번 발생). 이 폴더는 서버의 `/opt/axcellent/deploy.sh` 가 그 두 값을 **기본으로 켜게** 하는 조각을 둔다.
 
-서버에 실제로 설치하는 일은 이 PR 범위 밖이다. 머지 뒤 재헌 승인으로 한다.
+상태(2026-11-27 서버에서 읽기 전용으로 확인): **운영 서버에 설치돼 있다.** `/opt/axcellent/api-direct-env.sh` 는 이 폴더의 `api-direct-env.sh`(dev `56cd5e8f`)와 sha256 이 같고, `/opt/axcellent/deploy.sh` 에 아래 "서버 설치 절차" 4번의 두 줄이 들어 있다. 조각을 고치면 레포 PR → 머지 → 재헌 승인으로 서버 파일을 다시 설치한다(레포를 고친다고 서버가 바뀌지는 않는다).
 
 ## 파일
 
@@ -45,7 +45,7 @@
 | --- | --- |
 | 사람이 수동 실행 | `/opt/axcellent/deploy.sh` (`/home/ubuntu/run-fe-deploy.sh`, `/home/ubuntu/apidirect.sh` 가 그걸 부른다. 서버 쪽 사실) |
 | ssh-gate `deploy-bundle` | 정책 `[deploy]` 의 배포 스크립트(`runuser -u <배포계정> -- env <정책 env> <스크립트>`). 게이트가 넘기는 env 에 `VITE_*` 는 없다 -> 조각의 기본값이 적용된다 |
-| ax-autodeploy(PR #1478, 머지 전) | `DEPLOY_SH=/opt/axcellent/deploy.sh` 를 빌드 전용 트리에서 재사용 |
+| ax-autodeploy(PR #1478, 11/23 머지·운영 중. `docs/ops/autodeploy/README.md`) | `DEPLOY_SH=/opt/axcellent/deploy.sh` 를 빌드 전용 트리에서 재사용. 백엔드 단계가 배포할 때는 게이트 `deploy-bundle` 을 거친다(윗줄) |
 | 앱의 배포 도구(`dev_agent/deploy*.py`, `infra_agent/deploy_tools.py`·`deploy_poll.py`, `demo_deploy.sh`) | 화면을 빌드하지 않는다. 배포 기록·판정, Jenkins/GitHub Actions 로 고객 쇼핑몰 재배포 요청, 시연 기록 |
 
 deploy.sh 의 원본은 이 리포에 없다. 전체를 새로 복사해 두면 서버 파일과 어긋나 덮어쓸 때 서버에만 있던 수정이 사라질 수 있어 하지 않았다. 대신 작은 조각(이 폴더)을 두고 deploy.sh 에는 두 곳만 더한다. 비교한 대안:
@@ -58,6 +58,8 @@ deploy.sh 의 원본은 이 리포에 없다. 전체를 새로 복사해 두면 
 | 호출하는 쪽(gate 정책, autodeploy, run-fe-deploy.sh)마다 env 지정 | 경로가 늘 때마다 빠진다. 이번 사고가 그 모양이다 |
 
 ## 서버 설치 절차 (머지 뒤, 재헌 승인 후)
+
+지금 운영 서버는 이 절차가 끝난 상태다(서버 deploy.sh 의 웹 루트 변수 이름은 `WEB_ROOT` 라서 확인 줄이 `ax_api_direct_verify "${WEB_ROOT}"` 로 들어가 있다). 새 서버에 다시 깔거나 조각을 새 버전으로 바꿀 때 아래를 따른다.
 
 배포 계정으로, 자동 배포(ax-autodeploy)가 있으면 먼저 `autodeploy-pause` 로 멈추고 한다.
 

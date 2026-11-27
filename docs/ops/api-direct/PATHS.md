@@ -1,7 +1,16 @@
 # API 직접 호스트(api-app) 허용 경로 초안
 
-목표: 화면(axcellent.cloud, Cloudflare)은 그대로 두고, 읽기 API 만 별도 호스트(`https://api-app.axcellent.cloud`, 별도 nginx)로 직접 보내 응답 지연(경로)을 줄인다.
-이 문서는 초안이다. 서버 작업(nginx·DNS·인증서)은 이 PR 범위 밖이고, 구체 값(내부 주소·포트·토큰)은 이 문서에 적지 않는다. 서버 작업 요청은 `docs/nginx-path-convention.md`의 절차(비공개 채널)를 따른다.
+목표: 화면(`app.axcellent.cloud`, Cloudflare)은 그대로 두고, 읽기 API 만 별도 호스트(`https://api-app.axcellent.cloud`, 별도 nginx)로 직접 보내 응답 지연(경로)을 줄인다.
+이 문서는 초안으로 시작했고, 아래 "지금 상태"대로 운영에 들어가 있다. 6·7절의 nginx 블록은 설계 초안 그대로 남겨 둔 것이고 서버의 실제 설정 사본이 아니다. 구체 값(내부 주소·포트·토큰)은 이 문서에 적지 않는다. 서버 작업 요청은 `docs/nginx-path-convention.md`의 절차(비공개 채널)를 따른다.
+
+### 지금 상태 (2026-11-27 서버에서 읽기 전용으로 확인)
+
+- **운영 중.** 직접 호스트는 운영 서버에서 화면용 nginx 와 분리된 별도 nginx 로 443 을 직접 받는다(CDN 은 보류, 11/20 결정. 트래픽·고객사가 늘면 다시 논의). 인증서는 서버에서 발급·갱신한다.
+- 화면 쪽 스위치는 운영 서버 배포 스크립트가 기본으로 켠다(`docs/ops/deploy/README.md`, 서비스 `dashboard,orch,safety,planning,dev` 전부).
+- 허용 경로는 1차 표(3절) 그대로이고 2차(4절)는 열지 않았다. 서버는 정규식 대신 경로마다 정확히 일치(`location =`)로 열고, 그 밖은 404 다.
+- CORS 허용 출처는 `https://app.axcellent.cloud` 하나, 메서드 GET·HEAD·OPTIONS, 허용 헤더 `Authorization, Content-Type`, `Access-Control-Max-Age` 7200. gzip(JSON)과 요청 수 제한(`limit_req`)이 걸려 있다(8절 6번).
+- 총괄 이슈·safety 실행 기록도 11/25(회사 분리)부터 화면이 세션 토큰을 싣는다(2·3절에 반영).
+- 10절 질문 중 정해진 것은 10절 끝에 적었다.
 
 ## 1. 한눈에
 
@@ -11,7 +20,7 @@
 | 화면이 보내는 것 | GET 만, 아래 1차 표의 경로만. 쓰기·관리자 경로는 같은 출처 nginx 그대로 |
 | 직접 호스트 주소 모양 | 같은 접두를 유지한다: `https://api-app.axcellent.cloud/dashboard-api/api/dashboard/...` (nginx 안에서 접두를 떼고 업스트림에 넘긴다. 접두를 떼고 싶으면 `apiDirect.ts`의 `DIRECT_PREFIX`만 바꾼다) |
 | 인증 | 쿠키 없음. `Authorization: Bearer <로그인 세션 토큰 axs1.…>` 헤더. 직접 호스트는 토큰을 주입하지 않는다 |
-| CORS | 허용 출처 `https://axcellent.cloud` 하나, 메서드 GET·HEAD·OPTIONS, credentials 불필요 |
+| CORS | 허용 출처 `https://app.axcellent.cloud` 하나(화면 출처), 메서드 GET·HEAD·OPTIONS, credentials 불필요 |
 | 실패 시 | 직접 호스트에 닿지 못하면(네트워크·CORS 실패) 화면이 같은 출처로 다시 보내고 60초 쉰다. 서버가 늦게 준비돼도 화면은 안 깨진다 |
 
 ## 2. 인증 방식 조사 결과
@@ -20,7 +29,7 @@
 - 사람 토큰 출처: 로그인(`POST /api/dashboard/auth/login`) 응답의 세션 토큰(`axs1.…`)을 `sessionStorage`(탭 단위, `frontend/src/lib/humanSession.ts`)에 둔다. 세션이 있으면 `SAFETY_HUMAN_TOKEN`이 그 값이고, 없으면 번들의 자리표시자(공유 서버에서 nginx 가 진짜 공용 토큰으로 바꿔 붙인다).
 - nginx 주입(`docs/superpowers/specs/2026-11-19-human-session-tokens-design.md`): 쓰기 경로는 화면이 보낸 `Authorization`을 그대로 넘기고(4단계), 읽기와 A2A 중계 경로는 공용 토큰 주입을 둔다. 직접 호스트는 주입이 없으므로 **읽기에도 화면이 세션 토큰을 실어야 한다**.
 - 그래서 화면은 세션 토큰이 없으면 직접 호스트로 보내지 않는다(자리표시자는 직접 호스트에서 401). 로그인 전 공개 두 경로(`auth/status`, `auth/company`)만 토큰 없이 직접 간다.
-- 백엔드 확인: dashboard-api 는 `PUBLIC_ROUTES`(health, auth/status, auth/login, auth/company) 밖의 GET 에 모두 사람 토큰을 요구한다(`auth.py require_human`). 총괄 `GET /api/incidents`·`/api/departments`, safety `GET /api/safety/executions`는 서버가 토큰을 보지 않는다(코드 확인). 이 읽기들은 화면도 `Authorization`을 보내지 않으므로 단순 요청이 되어 OPTIONS 사전 요청이 없다. 기획·개발 `GET /api/planning/state`는 11/25부터 세션 토큰을 싣는다(서버가 세션 회사 상태를 돌려준다, 회사 분리). 세션이 없으면 직접 가지 않고 같은 출처 nginx로 간다.
+- 백엔드 확인: dashboard-api 는 `PUBLIC_ROUTES`(health, auth/status, auth/login, auth/company) 밖의 GET 에 모두 사람 토큰을 요구한다(`auth.py require_human`). 총괄 `GET /api/incidents`, safety `GET /api/safety/executions`, 기획·개발 `GET /api/planning/state`는 11/25(회사 분리)부터 화면이 세션 토큰을 싣는다(`apiDirect.ts` `DIRECT_ROUTES`의 `auth: "session"`. 이것은 화면이 보내는 값 기준이고, 서버가 토큰 없는 요청을 어떻게 다루는지는 이번 최신화에서 확인하지 않았다). 그래서 이 읽기들도 `Authorization` 때문에 OPTIONS 사전 요청이 생긴다. 세션이 없으면 직접 가지 않고 같은 출처 nginx로 간다. 토큰 없이 직접 가는 것은 로그인 전 공개 두 경로뿐이다.
 - 주의: 토큰을 안 보는 읽기를 직접 호스트로 열면, 같은 출처로 이미 열려 있는 것과 노출 수준은 같지만 CORS 때문에 다른 사이트 스크립트가 읽을 수는 없게 된다(Origin 고정). 서버가 막는 것은 아니므로(CORS 는 브라우저만 지킨다) 민감도는 별도로 판단한다(위험 4절).
 
 ## 3. 1차: 로그인 직후 첫 화면 읽기 (우선순위순)
@@ -34,13 +43,13 @@
 | 2 | `GET /dashboard-api/api/dashboard/auth/me` | dashboard-api | 세션 | 읽기 | 세션 확인 1회(+주기) |
 | 3 | `GET /dashboard-api/api/dashboard/connection-keys` | dashboard-api | 세션 | 읽기 | 로그인 직후 1회. Guarded 가 이 응답을 기다려야 첫 화면이 열린다(`App.tsx`) |
 | 3 | `GET /dashboard-api/api/dashboard/company-connection` | dashboard-api | 세션 | 읽기 | 위와 같은 순간 1회. 응답 작음 |
-| 4 | `GET /orch/api/incidents` | 총괄(8000), `/orch` | 없음 | 읽기 | AI 대화방 3초 폴링. 이슈마다 steps·events 포함이라 응답이 크다(가장 무거움) |
-| 4 | `GET /safety-api/api/safety/executions` | safety(8001) | 없음 | 읽기 | 위와 같이 3초 폴링. 기록이 쌓일수록 커진다 |
+| 4 | `GET /orch/api/incidents` | 총괄(8000), `/orch` | 세션(11/25부터) | 읽기 | AI 대화방 3초 폴링. 이슈마다 steps·events 포함이라 응답이 크다(가장 무거움) |
+| 4 | `GET /safety-api/api/safety/executions` | safety(8001) | 세션(11/25부터) | 읽기 | 위와 같이 3초 폴링. 기록이 쌓일수록 커진다 |
 | 4 | `GET /dashboard-api/api/dashboard/communications` | dashboard-api | 세션 | 읽기 | 위와 같이 3초 폴링 |
 | 5 | `GET /dashboard-api/api/dashboard/office-room` | dashboard-api | 세션 | 읽기 | 4초 폴링(단톡방) |
 | 6 | `GET /dashboard-api/api/dashboard/handoffs?status=open` | dashboard-api | 세션 | 읽기 | 사이드바 숫자, 30초 |
 | 6 | `GET /planning-api/api/planning/state`, `GET /dev-api/api/planning/state` | 기획(8101)·개발(8111) | 세션 | 읽기 | 사이드바 숫자, 30초마다 각 1회. state 전체라 응답이 크다. 11/25부터 세션 토큰을 실어 서버가 세션 회사 상태를 준다(회사 분리) |
-| 6 | `GET /orch/api/incidents` | 총괄 | 없음 | 읽기 | 사이드바 총괄 승인 대기 숫자, 30초 (4번과 같은 경로. 11/23부터 캣북스 경유 중계를 쓰지 않는다) |
+| 6 | `GET /orch/api/incidents` | 총괄 | 세션 | 읽기 | 사이드바 총괄 승인 대기 숫자, 30초 (4번과 같은 경로. 11/23부터 캣북스 경유 중계를 쓰지 않는다) |
 | 7 | `GET /dashboard-api/api/dashboard/shop/banners`, `.../shop/faults` | dashboard-api 중계 | 세션 | 읽기 | 대화방·마케팅 화면에서 필요할 때 |
 
 폴링이 3~4초 간격이라 요청 수의 대부분은 4번 묶음이 만든다. 직접 호스트의 이득도 여기서 가장 크다(Cloudflare 경유 왕복을 건너뜀).
@@ -58,13 +67,15 @@
 
 ## 6. 외부용 nginx location 허용 목록 (초안)
 
+아래는 설계 초안이다(실제 서버는 같은 원칙으로 경로마다 정확히 일치하는 location 을 쓰고, 허용 출처는 `https://app.axcellent.cloud` 다. 맨 위 "지금 상태").
+
 원칙: 기본 거부(`location / { return 404; }`), 읽기만(`limit_except GET HEAD OPTIONS`), 정규식은 `^…$`로 고정하고 가변 조각은 쓰지 않는다(1차에는 id 경로가 없다). 업스트림 주소·포트는 비공개 정책 파일 값을 쓴다(아래는 자리표시). 접두를 떼고(`rewrite`) 업스트림에 넘긴다.
 
 ```nginx
 # 응답에 업스트림의 CORS 헤더가 섞이면 중복되므로 숨기고 nginx 가 한 번만 단다
 map $http_origin $api_direct_origin {
     default                  "";
-    "https://axcellent.cloud" "https://axcellent.cloud";
+    "https://app.axcellent.cloud" "https://app.axcellent.cloud";
 }
 
 # 허용 외 전부 거부
@@ -95,7 +106,7 @@ location ~ ^/dashboard-api/api/dashboard/shop/(banners|faults)$ {
     include snippets/api-direct-proxy.conf;
 }
 
-# 3) 총괄·safety·기획·개발: 토큰을 안 보는 읽기
+# 3) 총괄·safety·기획·개발 읽기. 화면이 실은 Authorization 을 그대로 넘긴다(주입 금지)
 location ~ ^/orch/api/incidents$ {
     limit_except GET HEAD OPTIONS { deny all; }
     include snippets/api-direct-cors.conf;
@@ -133,7 +144,7 @@ location ~ ^/dev-api/api/planning/state$ {
 
 ```nginx
 # snippets/api-direct-cors.conf (location 안에서 include)
-if ($api_direct_origin = "") { return 403; }          # axcellent.cloud 가 아닌 Origin 이 붙은 브라우저 요청은 거부 (Origin 없는 서버 간 호출은 위 map 이 아닌 별도 판단)
+if ($api_direct_origin = "") { return 403; }          # app.axcellent.cloud 가 아닌 Origin 이 붙은 브라우저 요청은 거부 (Origin 없는 서버 간 호출은 위 map 이 아닌 별도 판단)
 add_header Access-Control-Allow-Origin  $api_direct_origin always;
 add_header Vary Origin always;
 add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
@@ -142,12 +153,12 @@ add_header Access-Control-Max-Age 86400 always;
 if ($request_method = OPTIONS) { return 204; }
 ```
 
-- 허용 출처: `https://axcellent.cloud` 하나(와일드카드 금지). 개발 중 확인은 `http://localhost:3090`을 임시로 map 에 더하되 운영에는 두지 않는다. Origin 헤더가 없는 호출(curl·서버 간)은 `$http_origin`이 비어 위 `if`에 걸려 403 이 되므로, 서버 간 호출·헬스 체크를 허용해야 하면 `if` 대신 map 결과가 빈 값일 때 CORS 헤더만 안 다는 방식으로 바꿀지 서버 책임자가 정한다(질문 1).
+- 허용 출처: `https://app.axcellent.cloud` 하나(와일드카드 금지). 개발 중 확인은 `http://localhost:3090`을 임시로 map 에 더하되 운영에는 두지 않는다. Origin 헤더가 없는 호출(curl·서버 간)은 `$http_origin`이 비어 위 `if`에 걸려 403 이 되므로, 서버 간 호출·헬스 체크를 허용해야 하면 `if` 대신 map 결과가 빈 값일 때 CORS 헤더만 안 다는 방식으로 바꿀지 서버 책임자가 정한다(질문 1).
 - 허용 메서드: GET, HEAD, OPTIONS 뿐.
 - 허용 헤더: `Authorization`(세션 토큰), `Content-Type`(화면 일부 읽기가 `application/json`을 단다). 둘 다 안전 목록 밖이라 사전 요청이 생긴다.
 - `Access-Control-Max-Age`: 86400 을 적어도 Chrome 은 7200초(2시간), Firefox 는 86400초로 자른다. 사전 요청 캐시는 **URL 별**이라 같은 경로(쿼리 포함)를 폴링하면 이득이 크지만 처음 부르는 주소마다 사전 요청 1회가 든다.
 - credentials: **불필요**(`Access-Control-Allow-Credentials`를 달지 않는다). 인증은 헤더 토큰이고 쿠키를 안 쓴다. 달면 와일드카드 금지 등 제약만 늘고, 쿠키가 교차 출처로 가는 길을 열 뿐이다. 화면 `fetch`도 `credentials` 기본값(same-origin)이다.
-- OPTIONS 사전 요청이 생기는 조건: 교차 출처 + (`Authorization` 헤더 또는 `Content-Type: application/json` 등 비단순 헤더, 또는 GET·HEAD·POST 이외 메서드). 이 화면에서는 세션 토큰을 싣는 dashboard-api 읽기는 항상 생기고, 헤더를 안 다는 총괄·safety·기획·개발 읽기(`fetch(url,{cache:'no-store'})`)는 단순 요청이라 안 생긴다. 총괄·safety 를 먼저 직접으로 돌리면 사전 요청 없이 이득만 얻는다.
+- OPTIONS 사전 요청이 생기는 조건: 교차 출처 + (`Authorization` 헤더 또는 `Content-Type: application/json` 등 비단순 헤더, 또는 GET·HEAD·POST 이외 메서드). 이 화면에서는 세션 토큰을 싣는 읽기에 항상 생긴다. 처음 설계 때는 총괄·safety·기획·개발 읽기가 헤더 없는 단순 요청이었지만, 11/25(회사 분리)부터 이 읽기들도 세션 토큰을 실어 사전 요청이 생긴다. 사전 요청이 없는 것은 로그인 전 공개 두 경로뿐이다.
 - 업스트림(FastAPI 서비스)도 자기 CORS 미들웨어를 갖고 있다(dashboard-api·safety·planning). nginx 가 `proxy_hide_header Access-Control-Allow-Origin` 등으로 가리지 않으면 헤더가 중복돼 브라우저가 거부한다.
 
 ## 8. 위험과 주의
@@ -175,3 +186,11 @@ if ($request_method = OPTIONS) { return 204; }
 3. api-app 을 Cloudflare 프록시 뒤에 둘지(지연 이득과 보호의 맞교환).
 4. 직접 호스트 경로의 접두(`/dashboard-api/…` 유지 vs 제거). 지금 코드는 유지 전제.
 5. 2차 경로를 어디까지 열지(고객 글이 든 읽기 포함 여부).
+
+정해진 것(2026-11-27 기준)
+
+- 2번: `orch`·`safety`·`planning`·`dev` 읽기도 직접 호스트에 열려 있고, 화면 기본값도 다섯 서비스 전부다. 11/25부터 이 읽기들도 세션 토큰을 싣는다.
+- 3번: CDN(프록시)은 보류하고 443 을 직접 연다(11/20). 트래픽·고객사가 늘면 다시 논의한다.
+- 4번: 접두 유지(`/dashboard-api/…` 등 그대로).
+- 5번: 2차 경로는 아직 열지 않았다.
+- 1번(Origin 없는 호출)은 이 문서 기준으로는 확인하지 못했다. 서버 책임자가 정한 값을 따른다.
