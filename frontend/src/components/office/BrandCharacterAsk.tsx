@@ -1,18 +1,29 @@
 import { useEffect, useState } from "react";
 import { ACCEPT, makeCharacterSheet, shrinkExtra, shrinkImage, shrinkReference, type ExtraLabel } from "@/lib/characterSheet";
-import { MULTI_HINT, buildExtras, referenceChip, slotsFor } from "@/lib/characterRefs";
+import { MULTI_HINT, buildExtras, slotsFor } from "@/lib/characterRefs";
 import { listBrandCharacters, markBrandCharacter, type BrandCharacter } from "@/lib/brandCharacters";
-import { redrawBoardImage, thumbSrc } from "@/lib/creativeRecords";
-import { brandSheetState } from "@/lib/sheetState";
+import { assetUrl, redrawBoardImage, thumbSrc } from "@/lib/creativeRecords";
+import { brandCardView } from "@/lib/sheetState";
 import { orchestrator } from "@/lib/orchestrator";
 import {
   CHARACTER_NOTE, CHARACTER_QUESTION, KIND_OPTIONS, PLAN_OUTDATED_LINE, RIGHTS_HINT, RIGHTS_LABEL, SPACE_NOTE,
-  UPLOAD_HINT, VIRTUAL_CONFIRM_LABEL, VIRTUAL_HUMAN_LABEL, VIRTUAL_NOTE,
+  UPLOAD_HINT, VIRTUAL_CONFIRM_LABEL, VIRTUAL_NOTE,
   PREPARING_LINE, REPREPARE_CONFIRM, VIDEO_LOCKED_LINE,
-  askMode, canUploadKind, characterStage, chatCharacterLine, isPromoVideo, isReferenceKind, needsReprepare, planOutdated, savedLine,
+  askMode, canUploadKind, characterStage, chatCharacterLine, isPromoVideo, isReferenceKind, needsReprepare, planOutdated,
   type CharacterRow, type UploadKind,
 } from "@/lib/requestCharacter";
 import { refreshWorkRequests } from "@/components/office/useWorkRequests";
+import { useAuthedMedia } from "@/lib/authedMedia";
+
+/** 11/27 카드 썸네일: 캐릭터 시트가 있으면 시트 그림(16:9, 잘림 없이 contain, 사람 토큰으로 읽음), 없거나 받는 중·실패면 원본 작은 그림 */
+function CardThumb({ c, sheet }: { c: BrandCharacter; sheet: boolean }) {
+  const media = useAuthedMedia(sheet ? assetUrl(c.record_id, "sheet_image", null) : null);
+  const original = thumbSrc(c.thumbnail_base64);
+  if (sheet && media.src) return <img src={media.src} alt="캐릭터 시트" className="aspect-video w-24 shrink-0 rounded-lg bg-ink-50 object-contain" />;
+  return original
+    ? <img src={original} alt="" className="h-11 w-11 shrink-0 rounded-lg object-contain" />
+    : <span className="h-11 w-11 shrink-0 rounded-lg bg-ink-100" aria-hidden="true" />;
+}
 
 // 고객 의뢰 넘김 카드의 회사 캐릭터 질문 (홍보 영상 의뢰, 11/23 시안 ①).
 // - 저장된 대표 캐릭터가 있으면 먼저: [이 캐릭터로 만들기][다른 이미지 올리기][캐릭터 없이]
@@ -144,26 +155,26 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
       .finally(() => setSheetBusy(null));
   };
 
+  // 11/27 줄 = 썸네일 + 글(이름 한 줄 · 작은 글 한 줄). 시트 버튼은 아래 버튼 줄로(줄 안에서 폭을 차지해 글이 세로로 쪼개졌다)
   const savedCard = (c: BrandCharacter) => {
-    const src = thumbSrc(c.thumbnail_base64);
-    const sheet = brandSheetState(c.preview_part, c.kind);
+    const view = brandCardView(c);
     return (
-      <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-ink-100 bg-surface p-2">
-        {src ? <img src={src} alt="" className="h-11 w-11 shrink-0 rounded-lg object-contain" /> : <span className="h-11 w-11 shrink-0 rounded-lg bg-ink-100" aria-hidden="true" />}
+      <div className="flex items-center gap-2.5 rounded-xl border border-ink-100 bg-surface p-2">
+        <CardThumb c={c} sheet={view.thumb === "sheet_image"} />
         <span className="min-w-0 flex-1">
-          <b className="block truncate text-[13px] text-ink-900">{c.name}</b>
-          {c.kind === "virtual_human" && <span className="chip text-[11px]">{VIRTUAL_HUMAN_LABEL}</span>}
-          {referenceChip(c) && <span className="chip ml-1 text-[11px]">{referenceChip(c)}</span>}
-          <small className="block truncate text-xs tabular-nums text-ink-500">{savedLine(c)}</small>
-          {sheet.button && <small className={`block text-xs ${sheet.hasSheet ? "text-ink-500" : "text-amber-800"}`}>{sheet.title}</small>}
+          <b className="block break-words text-[13px] text-ink-900">{c.name}</b>
+          <small className="block break-words text-xs tabular-nums text-ink-500">{view.info}</small>
         </span>
-        {sheet.button && (
-          <button type="button" className="btn-ghost shrink-0 text-xs" disabled={sheetBusy === c.record_id} onClick={() => makeSheet(c.record_id)}>
-            {sheetBusy === c.record_id ? "요청하는 중…" : sheet.button}
-          </button>
-        )}
       </div>
     );
+  };
+  const sheetButton = (c: BrandCharacter) => {
+    const label = brandCardView(c).button;
+    return label ? (
+      <button type="button" className="btn-ghost btn-card" disabled={busy || sheetBusy === c.record_id} onClick={() => makeSheet(c.record_id)}>
+        {sheetBusy === c.record_id ? "요청하는 중…" : label}
+      </button>
+    ) : null;
   };
 
   return (
@@ -201,6 +212,7 @@ export function BrandCharacterAsk({ row, variant = "handoff" }: { row: Character
               <span className="flex flex-wrap gap-1.5">
                 <button type="button" className="btn-primary btn-card" disabled={busy} onClick={() => pick(def.record_id)}>이 캐릭터로 만들기</button>
                 <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => setUpload(true)}>다른 이미지 올리기</button>
+                {sheetButton(def)}
                 <button type="button" className="btn-ghost btn-card" disabled={busy} onClick={() => pick(null)}>캐릭터 없이</button>
               </span>
             </>
