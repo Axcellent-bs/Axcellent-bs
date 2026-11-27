@@ -15,6 +15,8 @@ export interface InstagramPostState {
   /** 제작 기록은 video·final_video, 의뢰로 만든 영상은 늘 labeled_video */
   part?: "video" | "final_video" | "labeled_video" | null;
   review_id?: string | null;
+  /** 승인 요청에 넣은 값 (11/27 화면은 승인에 묶인 표지 cover_media_id만 읽는다) */
+  params?: { cover_media_id?: string | null } | null;
   media_id?: string;
   permalink?: string | null;
   published_at?: string;

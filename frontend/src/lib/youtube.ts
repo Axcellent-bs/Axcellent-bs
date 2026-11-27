@@ -43,6 +43,8 @@ export interface YoutubeState {
   part?: "video" | "final_video" | "labeled_video" | null;
   source?: "ai" | "template" | "human_edit";
   review_id?: string | null;
+  /** 승인 요청에 넣은 값 (11/27 화면은 승인에 묶인 썸네일 cover_media_id만 읽는다) */
+  params?: { cover_media_id?: string | null } | null;
   video_id?: string;
   url?: string;
   error?: string | null;
