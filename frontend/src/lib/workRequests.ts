@@ -35,6 +35,8 @@ export interface WorkRequestStep {
   async_task_id: string | null;
   started_at: string | null;
   finished_at: string | null;
+  /** 11/27 사람이 이 단계부터 다시 시도한 횟수 (옛 기록엔 없음, 상한 3) */
+  retry_count?: number | null;
 }
 
 export interface WorkRequestRow {

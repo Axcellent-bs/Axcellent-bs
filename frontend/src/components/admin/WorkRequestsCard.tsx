@@ -6,6 +6,8 @@ import { ago, shortDateTime } from "@/lib/format";
 import { orchestrator } from "@/lib/orchestrator";
 import { requestVideoLink } from "@/lib/requestVideoView";
 import { requestActionError } from "@/lib/requestCards";
+import { FULL_RERUN_LABEL } from "@/lib/requestRetry";
+import { StepRetry } from "@/components/office/StepRetry";
 import {
   REQUEST_STATUS, STEP_STATUS, canDecide, canRerun, confidenceText,
   type WorkRequestRow, type WorkRequestTask,
@@ -88,6 +90,8 @@ function Row({ row, tasks, onChanged }: { row: WorkRequestRow; tasks: WorkReques
                         {s?.result_ref && <span className="font-mono text-ink-500">결과 번호 {s.result_ref}</span>}
                       </p>
                       {s?.note && <p className="mt-1 text-ink-500">{s.note}</p>}
+                      {/* 11/27 실패·취소·막힌 단계: 앞 단계 결과는 그대로 두고 이 단계부터 다시 */}
+                      <div className="mt-2"><StepRetry requestId={row.request_id} stepId={p.step_id} skill={p.skill} step={s} onDone={onChanged} small /></div>
                       {videoLink && p.skill === "generate_media" && <p className="mt-1"><Link to={videoLink} className="btn-ghost text-xs">영상 열기</Link></p>}
                       {s && canDecide(s) && (
                         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -105,24 +109,6 @@ function Row({ row, tasks, onChanged }: { row: WorkRequestRow; tasks: WorkReques
             )}
           </section>
 
-          {canRerun(row) && (
-            <section aria-label="다시 돌리기" className="space-y-1">
-              <h3 className="font-semibold text-ink-900">잘못 골랐나요?</h3>
-              <div className="flex flex-wrap items-center gap-2">
-                <select className="field text-xs" value={pick} onChange={(e) => setPick(e.target.value)} aria-label="바꿀 일">
-                  <option value="">바꿀 일 고르기</option>
-                  {tasks.map((t) => <option key={t.name} value={t.name}>{t.name === row.task ? `${t.label} (지금 일, 처음부터 다시)` : t.label}</option>)}
-                </select>
-                <button type="button" className="btn-ghost text-xs" disabled={busy || !pick || !SAFETY_HUMAN_TOKEN}
-                  title={SAFETY_HUMAN_TOKEN ? undefined : "로그인이 필요해요"}
-                  onClick={() => void run(() => orchestrator.rerunRequest(row.request_id, pick))}>이 일로 다시 돌리기</button>
-              </div>
-              <p className="text-ink-500">처음 고른 일은 기록에 남아 분류 정확도를 잴 때 쓰여요. 상태를 바꾸는 일은 이번에도 승인을 거쳐요.</p>
-            </section>
-          )}
-          {row.corrections && row.corrections.length > 0 && (
-            <p className="text-ink-500">바꾼 기록: {row.corrections.map((c) => `${c.by ?? "사람"}이 ${shortDateTime(c.at)}에 바꿈`).join(" · ")}</p>
-          )}
           {failed && <p role="alert" className="text-red-700">{failed}</p>}
 
           <details>
@@ -131,6 +117,26 @@ function Row({ row, tasks, onChanged }: { row: WorkRequestRow; tasks: WorkReques
               {row.log.slice(-8).map((l, i) => <li key={`${l.at}-${i}`}><span className="tabular-nums">{shortDateTime(l.at)}</span> {l.message}</li>)}
             </ul>
           </details>
+
+          {/* 11/27 실패한 단계는 위 [이 단계부터 다시]. 이건 계획부터 새로(보고서·제안을 다시 만든다) — 아래로 내림 */}
+          {canRerun(row) && (
+            <section aria-label="처음부터 다시" className="space-y-1 border-t border-ink-100 pt-3">
+              <h3 className="font-semibold text-ink-900">잘못 골랐거나 처음부터 다시 하려면</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <select className="field text-xs" value={pick} onChange={(e) => setPick(e.target.value)} aria-label="바꿀 일">
+                  <option value="">바꿀 일 고르기</option>
+                  {tasks.map((t) => <option key={t.name} value={t.name}>{t.name === row.task ? `${t.label} (지금 일)` : t.label}</option>)}
+                </select>
+                <button type="button" className="btn-ghost text-xs" disabled={busy || !pick || !SAFETY_HUMAN_TOKEN}
+                  title={SAFETY_HUMAN_TOKEN ? undefined : "로그인이 필요해요"}
+                  onClick={() => void run(() => orchestrator.rerunRequest(row.request_id, pick))}>{FULL_RERUN_LABEL}</button>
+              </div>
+              <p className="text-ink-500">1단계부터 새로 해서 보고서·인사이트·제작안을 다시 쓰고 사람 확인도 다시 해요. 처음 고른 일은 기록에 남아 분류 정확도를 잴 때 쓰여요. 상태를 바꾸는 일은 이번에도 승인을 거쳐요.</p>
+            </section>
+          )}
+          {row.corrections && row.corrections.length > 0 && (
+            <p className="text-ink-500">바꾼 기록: {row.corrections.map((c) => `${c.by ?? "사람"}이 ${shortDateTime(c.at)}에 바꿈`).join(" · ")}</p>
+          )}
         </div>
       </details>
     </li>

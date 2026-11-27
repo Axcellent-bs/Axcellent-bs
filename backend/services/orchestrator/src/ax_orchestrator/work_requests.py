@@ -67,6 +67,7 @@ def _blank_step() -> dict[str, Any]:
         "last_signal_at": None,  # 긴 작업을 받아 간 뒤 마지막으로 소식을 들은 때
         "started_at": None,
         "finished_at": None,
+        "retry_count": 0,  # 11/27 사람이 이 단계부터 다시 시도한 횟수 (상한 3, 멱등 키 :retryN)
     }
 
 

@@ -76,6 +76,19 @@ def _plan_data(llm: Any) -> dict[str, Any]:
     return json.loads(sent.split("<untrusted_data>")[1].split("</untrusted_data>")[0])
 
 
+def test_retry_with_a_proposal_but_no_video_plan_writes_the_plan_on_that_proposal() -> None:
+    """11/27 의뢰 단계 다시 시도: 제안은 있는데 제작안을 못 썼으면 새 제안을 만들지 않는다."""
+    svc, out = _receive({LEAD: WOMAN}, CAST[:1])
+    before = [p.id for p in svc.state.proposals]
+    svc.state.proposals[-1].video_plan = None  # 제작안 쓰다 실패한 것처럼
+    inp = V._insight().model_copy(update={"brand_character_record_id": LEAD})  # noqa: SLF001
+    res = asyncio.run(svc.receive_insight(requester="orchestrator", inp=inp))
+    again = ReceiveInsightOutput.model_validate(res.output)
+    assert [p.id for p in svc.state.proposals] == before  # 제안 수 그대로
+    assert again.proposal_id == out.proposal_id and again.video_plan is not None
+    assert svc.state.proposals[-1].video_plan is not None
+
+
 @pytest.mark.parametrize("n", [2, 3])
 def test_every_cast_member_goes_to_the_plan_llm_with_its_role(n: int) -> None:
     llm = V._mock(V._llm_out())  # noqa: SLF001

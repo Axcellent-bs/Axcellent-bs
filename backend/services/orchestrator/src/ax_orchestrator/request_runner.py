@@ -146,6 +146,40 @@ RESET_STEP: dict[str, Any] = {
     "started_at": None,
     "finished_at": None,
 }
+# 11/27 사람이 실패한 단계부터 다시 시도 (`retry_step`). 앞 단계 결과는 그대로 두고 그 단계와
+# 뒤 단계만 되돌린다. 단계마다 3번까지. 다시 시도하면 부서에 새 멱등 키(:retryN)로 보낸다
+RETRY_MAX = 3
+RETRY_NOTE = "사람이 이 단계부터 다시 시도"
+# 다시 시도할 수 있는 단계: 실패 · 영상 거절/기한 지남(취소) · 앞 단계 결과가 없어 막힘
+RETRY_REJECTED = ("video_rejected",)
+RETRY_SKIPPED = ("no_insight", "no_carry")
+
+
+def retryable(step: dict[str, Any]) -> bool:
+    """사람이 [이 단계부터 다시]를 누를 수 있는 단계인가 (화면 판정과 같은 규칙)."""
+    status, code = step.get("status"), step.get("reason_code")
+    return (
+        status == "failed"
+        or (status == "rejected_by_human" and code in RETRY_REJECTED)
+        or (status == "skipped" and code in RETRY_SKIPPED)
+    )
+
+
+def step_key(rid: str, skill: str, step_id: str, row: dict[str, Any]) -> str:
+    """부서에 보내는 멱등 키. 다시 시도한 단계면 `:retryN` (같은 키면 예전 결과·결정이 돌아온다)."""
+    n = int(((row.get("steps") or {}).get(step_id) or {}).get("retry_count") or 0)
+    return f"{rid}:{skill}:{step_id}" + (f":retry{n}" if n else "")
+
+
+def downstream(plan: list[dict[str, Any]], step_id: str) -> list[str]:
+    """그 단계와 그 단계에 (이어서) 기대는 뒤 단계들 (계획 순서)."""
+    hit = {step_id}
+    for spec in plan:
+        if set(spec.get("after") or []) & hit:
+            hit.add(spec["step_id"])
+    return [s["step_id"] for s in plan if s["step_id"] in hit]
+
+
 Notifier = Callable[[str, str], None]
 Escalator = Callable[[str, str, str | None], None]
 ScopeCheck = Callable[[dict[str, Any], dict[str, Any]], bool]
@@ -551,7 +585,7 @@ class RequestRunner:
                     token="orchestrator",
                     path=["orchestrator"],
                     deadline=now() + (timedelta(seconds=timeout) if timeout else NO_LIMIT_DEADLINE),
-                    idempotency_key=f"{rid}:{spec['skill']}:{step_id}",
+                    idempotency_key=step_key(rid, spec["skill"], step_id, row),
                     **self._tenant_meta(),
                 ),
                 skill=spec["skill"],
@@ -1200,6 +1234,42 @@ class RequestRunner:
         if busy:
             return "busy"
         self._requests.replan(request_id, task=task.name, plan=request_tasks.plan_of(task), by=by)
+        self.start(request_id)
+        return "ok"
+
+    def retry_step(self, request_id: str, step_id: str, by: str | None = None) -> str:
+        """사람이 실패한 단계부터 다시 시도한다 (11/27).
+
+        돌려주는 값: ok · missing · not_failed · busy · stopped · limit.
+        그 단계와 뒤 단계만 시작 전으로 되돌린다. 앞 단계(완료·결과 번호·넘길 값)와 계획은
+        그대로라 보고서·제안·제작 기록을 다시 만들지 않는다. 승인이 필요한 단계는 이번에도 사람
+        승인을 기다리고, 부서에는 새 멱등 키(:retryN)로 보내 안전 관문에 다시 묻는다.
+        """
+        row = self._requests.get(request_id)
+        if row is None or step_id not in (row.get("steps") or {}):
+            return "missing"
+        if row.get("stopped_at"):
+            return "stopped"
+        step = row["steps"][step_id]
+        if not retryable(step):
+            return "not_failed"
+        busy = request_id in self._running or any(
+            s["status"] in ("running", "held", "waiting_async", "waiting_human")
+            for s in row["steps"].values()
+        )
+        if busy:
+            return "busy"
+        count = int(step.get("retry_count") or 0) + 1
+        if count > RETRY_MAX:
+            return "limit"
+        who = by or "사람"
+        for sid in downstream(row["plan"], step_id):
+            self._update(request_id, sid, **RESET_STEP, note=RETRY_NOTE if sid == step_id else "")
+        self._update(request_id, step_id, retry_count=count)
+        number = next(i for i, s in enumerate(row["plan"], 1) if s["step_id"] == step_id)
+        line = f"사람이 {number}단계를 다시 시도 ({who}, {count}/{RETRY_MAX})"
+        self._requests.note(request_id, line)
+        self._requests.set_status(request_id, "running", "실패한 단계부터 다시 시킨다")
         self.start(request_id)
         return "ok"
 

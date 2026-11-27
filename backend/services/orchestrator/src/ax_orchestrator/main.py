@@ -677,5 +677,27 @@ async def rerun_request(
     return {"data": {"ok": True}, "meta": {}}
 
 
+@app.post("/api/requests/{request_id}/steps/{step_id}/retry")
+async def retry_request_step(
+    request_id: str, step_id: str, who: str = Depends(require_human)
+) -> dict:
+    """11/27 실패·취소·막힌 단계부터 다시 시도한다. 앞 단계 결과와 계획은 그대로다."""
+    runner = state.manager.request_runner if state.manager else None
+    outcome = runner.retry_step(request_id, step_id, by=who) if runner else "missing"
+    if outcome == "missing":
+        raise HTTPException(404, "없는 의뢰나 단계")
+    if outcome == "not_failed":
+        raise HTTPException(422, "실패·취소·막힌 단계만 다시 시도할 수 있어요")
+    if outcome == "limit":
+        raise HTTPException(422, "이 단계는 다시 시도를 3번까지 했어요. 처음부터 다시 돌려 주세요")
+    if outcome == "busy":
+        raise HTTPException(409, "지금 진행 중이거나 기다리는 단계가 있어 다시 시도할 수 없음")
+    if outcome == "stopped":
+        raise HTTPException(
+            409, "삭제한 의뢰는 다시 돌릴 수 없어요. 의뢰문 수정으로 새로 접수해 주세요"
+        )
+    return {"data": {"ok": True}, "meta": {}}
+
+
 # 총괄 자신의 `/a2a`·`/.well-known/agent-card.json`. 위의 경로가 먼저 맞고 나머지만 여기로 온다.
 app.mount("/", build_a2a_app(lambda: state.manager, state.ensure_manager))

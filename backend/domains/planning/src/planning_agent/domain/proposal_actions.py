@@ -405,6 +405,10 @@ class ProposalMixin:
             out = {"outcome": "duplicate", "proposal_id": same.id}
             if video_for and same.video_plan is not None:
                 out["video_plan"] = same.video_plan.model_dump(mode="json")
+            elif video_for:  # 11/27 의뢰 단계 다시 시도: 제안은 있는데 제작안을 못 썼으면
+                # 새 제안을 만들지 않고 그 제안에 제작안만 쓴다
+                dup = ActionResult(changed=False, outcome="duplicate", output=out)
+                return await self._video_for_relay(dup)
             return ActionResult(changed=False, outcome="duplicate", output=out)
         gone = None if same is not None else recently_deleted(self.state, inp, frm, self.clock())
         if gone is not None:  # 사람이 최근 지운 제안: 일주일 동안 다시 만들지 않는다

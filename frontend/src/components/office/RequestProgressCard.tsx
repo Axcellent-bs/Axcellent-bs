@@ -30,6 +30,9 @@ import { DoneCard, ProgressCard } from "@/components/office/ChatCards";
 import { RequestCoverCell } from "@/components/marketing/CoverPicker";
 import { refreshWorkRequests, useWorkRequests } from "@/components/office/useWorkRequests";
 import { RequestActions } from "@/components/office/RequestActions";
+import { StepRetry } from "@/components/office/StepRetry";
+import { canRetryStep } from "@/lib/requestRetry";
+import { stepNoteText } from "@/lib/requestCards";
 import { InlinePlan, useExpand } from "@/components/office/InlineDoc";
 import { CheckLog, RequestRules } from "@/components/planning/PlanChecks";
 import type { VideoPlanView } from "@/lib/videoPlan";
@@ -540,6 +543,12 @@ export function RequestProgressCard({ requestId }: { requestId: string }) {
                       </span>
                     )}
                     {s.decide && failed[s.stepId] && <p role="alert" className="text-[13.5px] text-red-700">{failed[s.stepId]}</p>}
+                    {/* 11/27 실패·취소·막힌 단계: 이 단계부터 다시 (실패 이유는 위 회색 줄 s.muted) */}
+                    <StepRetry requestId={row.request_id} stepId={s.stepId} skill={s.skill} step={row.steps[s.stepId]}
+                      onDone={() => void refreshWorkRequests()} />
+                    {s.status === "rejected_by_human" && canRetryStep(row.steps[s.stepId]) && stepNoteText(row.steps[s.stepId]?.note) && (
+                      <p className="break-words text-[13.5px] text-ink-500">{stepNoteText(row.steps[s.stepId]?.note)}</p>
+                    )}
                   </div>
                 </li>
               );

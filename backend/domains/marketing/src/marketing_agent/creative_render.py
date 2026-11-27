@@ -1130,8 +1130,10 @@ async def request_video(
     # 11/26 거절(사람·기한 지남) 뒤 다시 요청하면 새 키로 묻는다. 같은 키면 관문이 예전 거절을
     # 그대로 돌려준다. 콘티·키프레임은 기록에 그대로 있어 다시 만들지 않는다
     # 11/26 기술 검사 확인 필요로 다시 만들 때(again)도 새 키
+    # 11/27 승인 뒤 만들기가 실패(failed)했거나 관문이 막은(blocked) 뒤 다시 요청해도 새 키:
+    # 같은 키면 관문이 예전 승인을 그대로 돌려줘 사람 승인 없이 다시 만든다(의뢰 단계 다시 시도)
     attempt = int(video.get("attempt") or 0) + (
-        1 if video.get("status") == "rejected" or again else 0
+        1 if video.get("status") in ("rejected", "failed", "blocked") or again else 0
     )
     key = f"{meta.context_id}:{VIDEO_ACTION}:{record_id}" + (f":retry{attempt}" if attempt else "")
     now = _now()

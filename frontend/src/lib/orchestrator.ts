@@ -72,6 +72,9 @@ export const orchestrator = {
   /** 사람 확인·승인 대기 중인 의뢰 단계를 승인하거나 거절한다. 승인하면 다음 단계로 이어진다 */
   decideRequestStep: (requestId: string, stepId: string, approved: boolean) =>
     post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/steps/${encodeURIComponent(stepId)}/decision`, { approved }, SAFETY_HUMAN_TOKEN),
+  /** 11/27 실패·취소·막힌 단계부터 다시 시도 (앞 단계 결과·계획 그대로, 승인 단계는 다시 승인) */
+  retryRequestStep: (requestId: string, stepId: string) =>
+    post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/steps/${encodeURIComponent(stepId)}/retry`, {}, SAFETY_HUMAN_TOKEN),
   /** 잘못 골랐으면 일을 바꿔 다시 돌린다. 이전 선택은 기록에 남는다 */
   rerunRequest: (requestId: string, task: string) =>
     post<{ ok: boolean }>(`/api/requests/${encodeURIComponent(requestId)}/rerun`, { task }, SAFETY_HUMAN_TOKEN),
