@@ -43,6 +43,11 @@ class Meta:
         self.kind = "ig"
         self.calls: list[tuple[str, dict[str, str]]] = []
         self.refresh: httpx.Response | None = None
+        self.business = False  # 비즈니스용 시스템 사용자 토큰
+        self.lifetime: int | None = None  # 코드 교환 응답의 expires_in
+        self.exchange: httpx.Response | None = None  # 코드 교환 응답을 통째로 바꾼다
+        self.assigned: httpx.Response | None = None
+        self.accounts: list[dict[str, Any]] = [{"id": IG_ID, "username": "nubitour_lab"}]
         self.pages: list[dict[str, Any]] = [
             {"id": "p1", "instagram_business_account": {"id": IG_ID, "username": "catbooks.lab"}}
         ]
@@ -55,7 +60,12 @@ class Meta:
         token = q.get("access_token") or q.get("fb_exchange_token")
         if where.endswith("/oauth/access_token") and "code" in q:
             assert q["client_secret"] == SECRET and q["client_id"] == "1000"
-            return httpx.Response(200, json={"access_token": SHORT, "token_type": "bearer"})
+            if self.exchange is not None:
+                return self.exchange
+            body: dict[str, Any] = {"access_token": SHORT, "token_type": "bearer"}
+            if self.lifetime:
+                body["expires_in"] = self.lifetime
+            return httpx.Response(200, json=body)
         if where == "graph.instagram.com/me":
             if self.kind != "ig":
                 return httpx.Response(400, json={"error": {"code": 190}})
@@ -63,7 +73,12 @@ class Meta:
         if where.endswith("/me") and "graph.facebook.com" in where:
             if self.kind != "fb":
                 return httpx.Response(400, json={"error": {"code": 190}})
+            if q.get("fields") == "client_business_id" and self.business:
+                return httpx.Response(200, json={"client_business_id": "900", "id": "su1"})
             return httpx.Response(200, json={"id": "fbuser1"})
+        if where.endswith("/me/assigned_instagram_accounts"):
+            assert q["access_token"] == SHORT
+            return self.assigned or httpx.Response(200, json={"data": self.accounts})
         if where == "graph.instagram.com/access_token":
             assert q["grant_type"] == "ig_exchange_token" and token == SHORT
             return httpx.Response(200, json={"access_token": LONG, "expires_in": 5184000})
@@ -205,8 +220,78 @@ def test_unknown_token_kind_stores_nothing(client: TestClient, people: Any, meta
     meta.kind = "neither"
     state = _start(client, people["a-1"])
     res = client.post(COMPLETE, json={"code": "c", "state": state}, headers=people["a-1"])
-    assert res.status_code == 502 and res.json()["error"]["code"] == "INSTAGRAM_FAILED"
+    assert res.status_code == 424 and res.json()["error"]["code"] == "INSTAGRAM_FAILED"
     assert SHORT not in res.text and get_secret(io.TOKEN_NAME, tenant="catbooks") == ""
+
+
+def test_business_token_is_kept_and_finds_the_assigned_account(
+    client: TestClient,
+    people: Any,
+    meta: Meta,  # noqa: F811
+) -> None:
+    meta.kind, meta.business = "fb", True
+    done = _connect(client, people["a-1"])
+    assert done["kind"] == "fb" and done["username"] == "nubitour_lab"
+    assert done["expires_at"] is None and done["auto_renew"] is False
+    assert done["needs_reconnect"] is False
+    info = instagram_link.load("catbooks")
+    assert info["business"] is True and info["user_id"] == IG_ID
+    assert instagram_link.api_of(info) == ("https://graph.facebook.com", io.DEFAULT_VERSION)
+    assert get_secret(io.TOKEN_NAME, tenant="catbooks") == SHORT  # 바꾸지 않고 그대로
+    assert "fb_exchange_token" not in [q.get("grant_type") for _, q in meta.calls]
+    assert not [w for w, _ in meta.calls if w.endswith("/me/accounts")]
+    before = len(meta.calls)
+    assert asyncio.run(io.refresh_due_once()) == {"catbooks": "skipped"}
+    assert len(meta.calls) == before
+
+
+def test_business_token_with_expiry_is_not_renewed_but_expires(
+    client: TestClient,
+    people: Any,
+    meta: Meta,  # noqa: F811
+) -> None:
+    meta.kind, meta.business, meta.lifetime = "fb", True, 5184000
+    done = _connect(client, people["a-1"])
+    assert datetime.fromisoformat(done["expires_at"]) > datetime.now(UTC) + timedelta(days=50)
+    before = len(meta.calls)
+    _expire_in(3)
+    assert asyncio.run(io.refresh_due_once()) == {"catbooks": "skipped"}
+    _expire_in(-1)
+    assert asyncio.run(io.refresh_due_once()) == {"catbooks": "expired"}
+    assert len(meta.calls) == before
+    assert client.get(CONNECTION, headers=people["a-1"]).json()["data"]["needs_reconnect"] is True
+
+
+def test_business_token_without_an_assigned_account_stores_nothing(
+    client: TestClient,
+    people: Any,
+    meta: Meta,  # noqa: F811
+) -> None:
+    meta.kind, meta.business, meta.accounts = "fb", True, []
+    state = _start(client, people["a-1"])
+    res = client.post(COMPLETE, json={"code": "c", "state": state}, headers=people["a-1"])
+    assert res.status_code == 409 and res.json()["error"]["code"] == "NO_INSTAGRAM_ACCOUNT"
+    assert get_secret(io.TOKEN_NAME, tenant="catbooks") == ""
+
+
+@pytest.mark.parametrize("step", ["exchange", "assigned"])
+def test_failed_step_says_which_one_with_meta_numbers_only(
+    client: TestClient,
+    people: Any,
+    meta: Meta,  # noqa: F811
+    step: str,
+) -> None:
+    meta.kind, meta.business = "fb", True
+    error = {"code": 100, "error_subcode": 36008, "message": f"bad {SECRET} {SHORT}"}
+    setattr(meta, step, httpx.Response(400, json={"error": error}))
+    state = _start(client, people["a-1"])
+    res = client.post(COMPLETE, json={"code": "c", "state": state}, headers=people["a-1"])
+    assert res.status_code == 424
+    message = res.json()["error"]["message"]
+    what = {"exchange": "토큰을", "assigned": "인스타 계정 목록을"}[step]
+    assert what in message and "Meta 오류 100, 하위 36008" in message
+    assert SECRET not in res.text and SHORT not in res.text
+    assert get_secret(io.TOKEN_NAME, tenant="catbooks") == ""
 
 
 def test_manual_user_id_that_differs_is_flagged(

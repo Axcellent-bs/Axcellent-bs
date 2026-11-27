@@ -23,8 +23,9 @@ test("인스타 로그인 연결 응답: 모양이 맞을 때만 읽고, 프로�
   });
   assert.deepEqual(got, {
     app_configured: true, connected: true, kind: "fb", username: "catbooks.lab", profile_url: "https://www.instagram.com/catbooks.lab/",
-    expires_at: "2027-01-22T00:00:00+00:00", refresh_error: null, needs_reconnect: false, user_id_mismatch: true, connected_by: "민지",
+    expires_at: "2027-01-22T00:00:00+00:00", auto_renew: true, refresh_error: null, needs_reconnect: false, user_id_mismatch: true, connected_by: "민지",
   });
+  assert.equal(readInstagramAccount({ connected: true, auto_renew: false })?.auto_renew, false);
   const odd = readInstagramAccount({ connected: true, kind: "x", profile_url: "javascript:alert(1)", needs_reconnect: "yes" });
   assert.equal(odd?.kind, null);
   assert.equal(odd?.profile_url, null);

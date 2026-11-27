@@ -273,7 +273,7 @@ export function SnsAccountsCard({ compact = false, onManage }: { compact?: boole
             <>
               <p className="text-xs text-ink-500">
                 로그인 연결 {igAcct?.connected ? `연결됨${igAcct.username ? ` · @${igAcct.username}` : ""}` : "연결 전"}
-                {igAcct?.connected && igAcct.expires_at ? ` · ${igAcct.expires_at.slice(0, 10)}까지(저절로 연장)` : ""}
+                {igAcct?.connected && igAcct.expires_at ? ` · ${igAcct.expires_at.slice(0, 10)}까지(${igAcct.auto_renew ? "저절로 연장" : "만료 전에 다시 연결해 주세요"})` : ""}
                 {igAcct?.connected && igAcct.profile_url && <> · <a href={igAcct.profile_url} target="_blank" rel="noreferrer" className="text-brand-700 underline">프로필</a></>}
               </p>
               {igAcct?.needs_reconnect && <p className="text-xs text-accent">토큰 연장에 실패했어요{igAcct.refresh_error ? ` (${igAcct.refresh_error})` : ""}. 다시 연결해 주세요</p>}

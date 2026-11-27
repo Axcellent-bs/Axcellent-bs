@@ -107,7 +107,7 @@ def api_of(info: dict[str, Any]) -> tuple[str, str]:
     """이 회사 토큰을 쓸 API (주소, 버전). 연결할 때 판정해 둔 값(`kind`)을 따른다.
 
     - `ig`: Instagram 로그인 토큰 → graph.instagram.com(버전 없이)
-    - `fb`: Facebook 사용자 토큰(통합 로그인) → graph.facebook.com/<버전>
+    - `fb`: 통합 로그인의 Facebook 사용자 토큰·비즈니스용 토큰 → graph.facebook.com/<버전>
     """
     if info.get("kind") == "fb":
         version = str(info.get("api_version") or "").strip("/")
