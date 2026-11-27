@@ -49,6 +49,12 @@ DEFAULT_SECONDS = DEFAULT_SCRIPT_SECONDS
 MAX_CHARACTER = 1500
 RULE_TITLE = 30  # 고정 규칙 대본 제목 길이(줄거리 첫 문장 앞부분)
 
+# 11/27 의뢰 대본: 기획 장면 시간이 정해져 있을 때만 지시문 끝에 붙는다 (scene_times는 데이터 칸)
+TIMES_RULE = (
+    "\n- 장면 시간은 데이터 블록 scene_times에 주어진 값 그대로다. 장면 수도 scene_times와 같게 "
+    "쓰고 시간을 새로 정하지 않는다.\n"
+)
+
 PROMPT = """너는 짧은 홍보 영상의 대본 작가다.
 데이터 블록의 줄거리(story)로 장면 수(scenes)만큼의 장면을 가진 대본을 ScriptRead로만 답한다.
 
@@ -236,8 +242,12 @@ async def write_script(
     character: dict[str, Any] | None,
     llm_factory: Callable[[], Any] | None,
     context_id: str | None = None,
+    times: list[tuple[float, float]] | None = None,
 ) -> CreativeScript:
-    """대본을 쓴다. 줄거리가 없으면 `no_story`. LLM이 없거나 실패하면 고정 규칙 대본."""
+    """대본을 쓴다. 줄거리가 없으면 `no_story`. LLM이 없거나 실패하면 고정 규칙 대본.
+
+    times(11/27 의뢰 대본): 장면 시간이 정해져 있으면 데이터 칸 `scene_times`로 주고 지시문에
+    "시간은 주어진 값 그대로"를 붙인다(시간은 부른 쪽이 코드로 다시 고정한다)."""
     story = clean_story(story)
     if not story:
         raise ScriptRefused("no_story", "줄거리를 적어 주세요")
@@ -254,8 +264,13 @@ async def write_script(
                 "look_en": _cut((character or {}).get("consistency_en"), MAX_CHARACTER) or "(없음)",
             },
         }
+        prompt = PROMPT
+        if times:
+            data["scene_times"] = [{"no": i, "start_s": a, "end_s": b}
+                                   for i, (a, b) in enumerate(times, start=1)]  # fmt: skip
+            prompt = PROMPT + TIMES_RULE
         try:
-            read = await llm.structured(PROMPT, ScriptRead, untrusted=data, context_id=context_id)
+            read = await llm.structured(prompt, ScriptRead, untrusted=data, context_id=context_id)
             if not isinstance(read, ScriptRead):
                 read = ScriptRead.model_validate(read)
             out = build_script(read, story, scenes, seconds)
