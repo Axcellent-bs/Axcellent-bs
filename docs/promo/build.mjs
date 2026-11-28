@@ -288,6 +288,17 @@ const bgNoscript = bgFiles.length ? `<noscript><style>${bgFiles.map((f) => `[dat
 const html = `<!doctype html>
 <html lang="${esc(C.site.lang)}" class="no-js">
 <head>
+  <!-- Google 태그 (axcellent.cloud YouTube 프로모션 전환 추적, 2026-11-28) -->
+  <script async src="https://www.googletagmanager.com/gtm.js?id=GTM-5GM4DLXD"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+  </script>
+  <!-- Event snippet for 페이지 조회 conversion page -->
+  <script>
+    gtag('event', 'conversion', {'send_to': 'AW-18596671054/HMlhCNKN-8AdEM7cyqNF'});
+  </script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${esc(C.site.title)}</title>
